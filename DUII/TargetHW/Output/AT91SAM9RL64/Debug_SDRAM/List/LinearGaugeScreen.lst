@@ -1,0 +1,754 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     02/Feb/2016  18:31:41 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\DUII\LinearGaugeScreen.cpp                       #
+#    Command line =  C:\DUII\DUII\LinearGaugeScreen.cpp -D DEBUG=1 -D         #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --eec++                              #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\Li #
+#                    nearGaugeScreen.lst                                      #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\Lin #
+#                    earGaugeScreen.o                                         #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\DUII\LinearGaugeScreen.cpp
+      1          /*********************************************************************
+      2          *                SEGGER Microcontroller GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 1996 - 2009  SEGGER Microcontroller GmbH & Co. KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          ** emWin V5.00 - Graphical user interface for embedded applications **
+     13          emWin is protected by international copyright laws.   Knowledge of the
+     14          source code may not be used to write a similar product.  This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : LinearGaugeScreen.cpp
+     19          Purpose     : Controlling screen for multiple linear gauges display
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          #include <stdio.h>
+     24          #include <stdlib.h>
+     25          #include "DUII.h"
+     26          #include "GUI.h"
+     27          #include "GeneralConfig.h"
+     28          #include "commondefs.h"
+     29          #include "ConfigScreens.h"
+     30          #include "LinearGaugeScreen.h"
+     31          #include "LinearGauge.hpp"
+     32          #include "RunningGauges.h"
+     33          #include "DataHandler.h"
+     34          #include "LEDHandler.h"
+     35          #include "Alarm.hpp"
+     36          #include "DualGaugeScreen.h"
+     37          
+     38          #ifdef __cplusplus
+     39          extern "C" {
+     40          #endif
+     41          
+     42          /*********************************************************************
+     43          *
+     44          *       External data and code
+     45          *
+     46          **********************************************************************
+     47          */
+     48          extern GUI_CONST_STORAGE GUI_BITMAP bmAnalogs;
+     49          extern GUI_CONST_STORAGE GUI_BITMAP bmDarkAsphalt;
+     50          extern char lockupSemaphore;
+     51          extern char inputEnabled[];		// Defined in DualGaugeScreen.cpp
+     52          
+     53          /*********************************************************************
+     54          *
+     55          *       Public code
+     56          *
+     57          **********************************************************************
+     58          */
+     59          LinearGauge *CreateLinearInputGauge(char input, WM_HWIN hParent, int hpos, int vpos);
+     60          
+     61          /*********************************************************************
+     62          *
+     63          *       Public variables
+     64          *
+     65          **********************************************************************
+     66          */
+     67          
+     68          #ifdef __cplusplus
+     69          }
+     70          #endif
+     71          
+     72          
+     73          /*********************************************************************
+     74          *
+     75          *       Local Prototypes
+     76          *
+     77          **********************************************************************
+     78          */
+     79          
+     80          /*********************************************************************
+     81          *
+     82          *       Local Valiables
+     83          *
+     84          **********************************************************************
+     85          */
+
+   \                                 In section .bss, align 4
+     86          static WM_HWIN hLinearGaugesScreen;
+   \                     hLinearGaugesScreen:
+   \   00000000                      DS8 4
+   \   00000004                      DS8 4
+   \   00000008                      DS8 4
+   \   0000000C                      DS8 4
+   \   00000010                      DS8 4
+   \   00000014                      DS8 4
+   \   00000018                      DS8 4
+   \   0000001C                      DS8 1
+     87          static WM_HTIMER hScreenTimer;
+     88          static LinearGauge *pAnalog0Gauge = 0;
+     89          static LinearGauge *pAnalog1Gauge = 0;
+     90          static LinearGauge *pAnalog2Gauge = 0;
+     91          static LinearGauge *pAnalog3Gauge = 0;
+     92          static bool firsttimethrough;
+     93          static GUI_MEMDEV_Handle memLinearGaugesScreen;
+     94          
+     95          
+
+   \                                 In section .text, align 4, keep-with-next
+     96          void _cbLinearGaugeCallback(WM_MESSAGE * pMsg)
+     97          {
+   \                     _cbLinearGaugeCallback:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+     98          	switch(pMsg->MsgId)
+   \   00000004   001090E5           LDR      R1,[R0, #+0]
+   \   00000008   0CD04DE2           SUB      SP,SP,#+12
+   \   0000000C   0B1051E2           SUBS     R1,R1,#+11
+   \   00000010   6E00000A           BEQ      ??_cbLinearGaugeCallback_0
+   \   00000014   041051E2           SUBS     R1,R1,#+4
+   \   00000018   0C00000A           BEQ      ??_cbLinearGaugeCallback_1
+   \   0000001C   411F51E2           SUBS     R1,R1,#+260
+   \   00000020   8A00001A           BNE      ??_cbLinearGaugeCallback_2
+     99          	{
+    100          	case WM_TIMER:
+    101          		if (pMsg->Data.v == hScreenTimer)
+   \   00000024   ........           LDR      R4,??DataTable4_1
+   \   00000028   0C0090E5           LDR      R0,[R0, #+12]
+   \   0000002C   042094E5           LDR      R2,[R4, #+4]
+   \   00000030   020050E1           CMP      R0,R2
+   \   00000034   8600001A           BNE      ??_cbLinearGaugeCallback_3
+    102          		{
+    103          			WM_RestartTimer(hScreenTimer, GAUGE_SCREEN_REFRESH_TIME);
+   \   00000038   1910A0E3           MOV      R1,#+25
+   \   0000003C   0200A0E1           MOV      R0,R2
+   \   00000040   ........           BL       WM_RestartTimer
+    104          			WM_InvalidateWindow(hLinearGaugesScreen);
+   \   00000044   000094E5           LDR      R0,[R4, #+0]
+   \   00000048   ........           BL       WM_InvalidateWindow
+   \   0000004C   800000EA           B        ??_cbLinearGaugeCallback_3
+    105          		}
+    106          		break;
+    107          
+    108          	case WM_PAINT:
+    109          		if (CS_IsVisible(MULTI_ANALOG_GAUGES) || firsttimethrough)
+   \                     ??_cbLinearGaugeCallback_1:
+   \   00000050   0400A0E3           MOV      R0,#+4
+   \   00000054   ........           BL       CS_IsVisible
+   \   00000058   000050E3           CMP      R0,#+0
+   \   0000005C   0300001A           BNE      ??_cbLinearGaugeCallback_4
+   \   00000060   ........           LDR      R0,??DataTable4_1
+   \   00000064   1C00D0E5           LDRB     R0,[R0, #+28]
+   \   00000068   000050E3           CMP      R0,#+0
+   \   0000006C   5200000A           BEQ      ??_cbLinearGaugeCallback_5
+    110          		{
+    111          			float value;
+    112          
+    113          			if (lockupSemaphore)			// If main has not run since our last paint - exit!
+   \                     ??_cbLinearGaugeCallback_4:
+   \   00000070   ........           LDR      R0,??DataTable4_2
+   \   00000074   0010D0E5           LDRB     R1,[R0, #+0]
+   \   00000078   000051E3           CMP      R1,#+0
+   \   0000007C   7400001A           BNE      ??_cbLinearGaugeCallback_3
+    114          				break;
+    115          			else lockupSemaphore = true;
+   \   00000080   0110A0E3           MOV      R1,#+1
+    116          			
+    117          			GUI_MEMDEV_Select(memLinearGaugesScreen);
+   \   00000084   ........           LDR      R4,??DataTable4_1
+   \   00000088   0010C0E5           STRB     R1,[R0, #+0]
+   \   0000008C   180094E5           LDR      R0,[R4, #+24]
+   \   00000090   ........           BL       GUI_MEMDEV_Select
+    118          
+    119          			GUI_Clear();
+   \   00000094   ........           BL       GUI_Clear
+    120          			GUI_SetTextMode(GUI_TEXTMODE_TRANS);
+   \   00000098   0200A0E3           MOV      R0,#+2
+   \   0000009C   ........           BL       GUI_SetTextMode
+    121          
+    122          			GUI_DrawBitmap(&bmDarkAsphalt, 0, 0);
+   \   000000A0   0020A0E3           MOV      R2,#+0
+   \   000000A4   0010A0E3           MOV      R1,#+0
+   \   000000A8   ........           LDR      R0,??DataTable4_3
+   \   000000AC   ........           BL       GUI_DrawBitmap
+    123          			GUI_DrawBitmap(&bmAnalogs, 0, 0);
+   \   000000B0   0020A0E3           MOV      R2,#+0
+   \   000000B4   0010A0E3           MOV      R1,#+0
+   \   000000B8   ........           LDR      R0,??DataTable4_4
+   \   000000BC   ........           BL       GUI_DrawBitmap
+    124          
+    125          			// Draw all 4 backgrounds
+    126          			pAnalog0Gauge->DrawBackground();
+   \   000000C0   080094E5           LDR      R0,[R4, #+8]
+   \   000000C4   ........           BL       _ZN11LinearGauge14DrawBackgroundEv
+    127          			pAnalog1Gauge->DrawBackground();
+   \   000000C8   0C0094E5           LDR      R0,[R4, #+12]
+   \   000000CC   ........           BL       _ZN11LinearGauge14DrawBackgroundEv
+    128          			pAnalog2Gauge->DrawBackground();
+   \   000000D0   100094E5           LDR      R0,[R4, #+16]
+   \   000000D4   ........           BL       _ZN11LinearGauge14DrawBackgroundEv
+    129          			pAnalog3Gauge->DrawBackground();
+   \   000000D8   140094E5           LDR      R0,[R4, #+20]
+   \   000000DC   ........           BL       _ZN11LinearGauge14DrawBackgroundEv
+    130          
+    131          			// Draw pointers
+    132          			if (inputEnabled[0])
+   \   000000E0   ........           LDR      R5,??DataTable4_5
+   \   000000E4   0000D5E5           LDRB     R0,[R5, #+0]
+   \   000000E8   000050E3           CMP      R0,#+0
+   \   000000EC   0400000A           BEQ      ??_cbLinearGaugeCallback_6
+    133          				value = GetValue(ANALOG_INPUT_0).fVal;
+   \   000000F0   3610A0E3           MOV      R1,#+54
+   \   000000F4   0D00A0E1           MOV      R0,SP
+   \   000000F8   ........           BL       GetValue
+   \   000000FC   00109DE5           LDR      R1,[SP, #+0]
+   \   00000100   000000EA           B        ??_cbLinearGaugeCallback_7
+    134          			else value = 0;
+   \                     ??_cbLinearGaugeCallback_6:
+   \   00000104   0010A0E3           MOV      R1,#+0
+    135          			pAnalog0Gauge->SetValue(value);
+   \                     ??_cbLinearGaugeCallback_7:
+   \   00000108   080094E5           LDR      R0,[R4, #+8]
+   \   0000010C   ........           BL       _ZN11LinearGauge8SetValueEf
+    136          
+    137          			if (inputEnabled[1])
+   \   00000110   0100D5E5           LDRB     R0,[R5, #+1]
+   \   00000114   000050E3           CMP      R0,#+0
+   \   00000118   0400000A           BEQ      ??_cbLinearGaugeCallback_8
+    138          				value = GetValue(ANALOG_INPUT_1).fVal;
+   \   0000011C   3710A0E3           MOV      R1,#+55
+   \   00000120   0D00A0E1           MOV      R0,SP
+   \   00000124   ........           BL       GetValue
+   \   00000128   00109DE5           LDR      R1,[SP, #+0]
+   \   0000012C   000000EA           B        ??_cbLinearGaugeCallback_9
+    139          			else value = 0;
+   \                     ??_cbLinearGaugeCallback_8:
+   \   00000130   0010A0E3           MOV      R1,#+0
+    140          			pAnalog1Gauge->SetValue(value);
+   \                     ??_cbLinearGaugeCallback_9:
+   \   00000134   0C0094E5           LDR      R0,[R4, #+12]
+   \   00000138   ........           BL       _ZN11LinearGauge8SetValueEf
+    141          
+    142          			if (inputEnabled[2])
+   \   0000013C   0200D5E5           LDRB     R0,[R5, #+2]
+   \   00000140   000050E3           CMP      R0,#+0
+   \   00000144   0400000A           BEQ      ??_cbLinearGaugeCallback_10
+    143          				value = GetValue(ANALOG_INPUT_2).fVal;
+   \   00000148   3810A0E3           MOV      R1,#+56
+   \   0000014C   0D00A0E1           MOV      R0,SP
+   \   00000150   ........           BL       GetValue
+   \   00000154   00109DE5           LDR      R1,[SP, #+0]
+   \   00000158   000000EA           B        ??_cbLinearGaugeCallback_11
+    144          			else value = 0;
+   \                     ??_cbLinearGaugeCallback_10:
+   \   0000015C   0010A0E3           MOV      R1,#+0
+    145          			pAnalog2Gauge->SetValue(value);
+   \                     ??_cbLinearGaugeCallback_11:
+   \   00000160   100094E5           LDR      R0,[R4, #+16]
+   \   00000164   ........           BL       _ZN11LinearGauge8SetValueEf
+    146          
+    147          			if (inputEnabled[3])
+   \   00000168   0300D5E5           LDRB     R0,[R5, #+3]
+   \   0000016C   000050E3           CMP      R0,#+0
+   \   00000170   0400000A           BEQ      ??_cbLinearGaugeCallback_12
+    148          				value = GetValue(ANALOG_INPUT_3).fVal;
+   \   00000174   3910A0E3           MOV      R1,#+57
+   \   00000178   0D00A0E1           MOV      R0,SP
+   \   0000017C   ........           BL       GetValue
+   \   00000180   00109DE5           LDR      R1,[SP, #+0]
+   \   00000184   000000EA           B        ??_cbLinearGaugeCallback_13
+    149          			else value = 0;
+   \                     ??_cbLinearGaugeCallback_12:
+   \   00000188   0010A0E3           MOV      R1,#+0
+    150          			pAnalog3Gauge->SetValue(value);
+   \                     ??_cbLinearGaugeCallback_13:
+   \   0000018C   140094E5           LDR      R0,[R4, #+20]
+   \   00000190   ........           BL       _ZN11LinearGauge8SetValueEf
+    151          
+    152          			firsttimethrough = false;
+   \   00000194   0000A0E3           MOV      R0,#+0
+   \   00000198   1C00C4E5           STRB     R0,[R4, #+28]
+    153          
+    154          			GUI_DrawBitmap(&bmthreewayarrow, 0, 229);
+   \   0000019C   E520A0E3           MOV      R2,#+229
+   \   000001A0   0010A0E3           MOV      R1,#+0
+   \   000001A4   ........           LDR      R0,??DataTable4_6
+   \   000001A8   ........           BL       GUI_DrawBitmap
+    155          
+    156          #ifdef	INCLUDE_RACE_HELP
+    157          			// If the help screen is still being displayed then show the appropriate help screen
+    158          			if (raceTimerActive)
+    159          			{
+    160          				CheckRaceHelpScreen(MULTI_ANALOG_GAUGES);
+    161          			}
+    162          #endif
+    163          
+    164          			CheckWarningPopups();
+   \   000001AC   ........           BL       CheckWarningPopups
+    165          
+    166          			GUI_MEMDEV_CopyToLCD(memLinearGaugesScreen);
+   \   000001B0   180094E5           LDR      R0,[R4, #+24]
+   \   000001B4   ........           BL       GUI_MEMDEV_CopyToLCD
+    167          			GUI_SelectLCD();
+   \   000001B8   ........           BL       GUI_SelectLCD
+    168          		}
+    169          		if (SlideOutVisible())
+   \                     ??_cbLinearGaugeCallback_5:
+   \   000001BC   ........           BL       SlideOutVisible
+   \   000001C0   000050E3           CMP      R0,#+0
+   \   000001C4   2200000A           BEQ      ??_cbLinearGaugeCallback_3
+    170          			DrawSignalStrength();
+   \   000001C8   ........           BL       DrawSignalStrength
+   \   000001CC   200000EA           B        ??_cbLinearGaugeCallback_3
+    171          		break;
+    172          
+    173          	case WM_DELETE:
+    174          		if (pAnalog0Gauge)
+   \                     ??_cbLinearGaugeCallback_0:
+   \   000001D0   ........           LDR      R4,??DataTable4_1
+   \   000001D4   080094E5           LDR      R0,[R4, #+8]
+   \   000001D8   000050E3           CMP      R0,#+0
+   \   000001DC   0300000A           BEQ      ??_cbLinearGaugeCallback_14
+    175          		{
+    176          			delete pAnalog0Gauge;
+   \   000001E0   ........           BL       _ZN11LinearGaugeD1Ev
+   \   000001E4   ........           BL       _ZdlPv
+    177          			pAnalog0Gauge = 0;
+   \   000001E8   0000A0E3           MOV      R0,#+0
+   \   000001EC   080084E5           STR      R0,[R4, #+8]
+    178          		}
+    179          		if (pAnalog1Gauge)
+   \                     ??_cbLinearGaugeCallback_14:
+   \   000001F0   0C0094E5           LDR      R0,[R4, #+12]
+   \   000001F4   000050E3           CMP      R0,#+0
+   \   000001F8   0300000A           BEQ      ??_cbLinearGaugeCallback_15
+    180          		{
+    181          			delete pAnalog1Gauge;
+   \   000001FC   ........           BL       _ZN11LinearGaugeD1Ev
+   \   00000200   ........           BL       _ZdlPv
+    182          			pAnalog1Gauge = 0;
+   \   00000204   0000A0E3           MOV      R0,#+0
+   \   00000208   0C0084E5           STR      R0,[R4, #+12]
+    183          		}
+    184          		if (pAnalog2Gauge)
+   \                     ??_cbLinearGaugeCallback_15:
+   \   0000020C   100094E5           LDR      R0,[R4, #+16]
+   \   00000210   000050E3           CMP      R0,#+0
+   \   00000214   0300000A           BEQ      ??_cbLinearGaugeCallback_16
+    185          		{
+    186          			delete pAnalog2Gauge;
+   \   00000218   ........           BL       _ZN11LinearGaugeD1Ev
+   \   0000021C   ........           BL       _ZdlPv
+    187          			pAnalog2Gauge = 0;
+   \   00000220   0000A0E3           MOV      R0,#+0
+   \   00000224   100084E5           STR      R0,[R4, #+16]
+    188          		}
+    189          		if (pAnalog3Gauge)
+   \                     ??_cbLinearGaugeCallback_16:
+   \   00000228   140094E5           LDR      R0,[R4, #+20]
+   \   0000022C   000050E3           CMP      R0,#+0
+   \   00000230   0300000A           BEQ      ??_cbLinearGaugeCallback_17
+    190          		{
+    191          			delete pAnalog3Gauge;
+   \   00000234   ........           BL       _ZN11LinearGaugeD1Ev
+   \   00000238   ........           BL       _ZdlPv
+    192          			pAnalog3Gauge = 0;
+   \   0000023C   0000A0E3           MOV      R0,#+0
+   \   00000240   140084E5           STR      R0,[R4, #+20]
+    193          		}
+    194          		GUI_MEMDEV_Delete(memLinearGaugesScreen);
+   \                     ??_cbLinearGaugeCallback_17:
+   \   00000244   180094E5           LDR      R0,[R4, #+24]
+   \   00000248   ........           BL       GUI_MEMDEV_Delete
+    195          		break;
+   \   0000024C   000000EA           B        ??_cbLinearGaugeCallback_3
+    196          
+    197          	default:
+    198          		  WM_DefaultProc(pMsg);
+   \                     ??_cbLinearGaugeCallback_2:
+   \   00000250   ........           BL       WM_DefaultProc
+    199          	};
+    200          }
+   \                     ??_cbLinearGaugeCallback_3:
+   \   00000254   0CD08DE2           ADD      SP,SP,#+12       ;; stack cleaning
+   \   00000258   3080BDE8           POP      {R4,R5,PC}       ;; return
+    201          
+    202          /*********************************************************************
+    203          *
+    204          *       Linear Gauge Screen
+    205          */
+    206          
+
+   \                                 In section .text, align 4, keep-with-next
+    207          WM_HWIN DisplayMultiAnalogGaugesScreen(WM_HWIN hParent)
+    208          {
+   \                     DisplayMultiAnalogGaugesScreen:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   14D04DE2           SUB      SP,SP,#+20
+   \   00000008   0040A0E1           MOV      R4,R0
+    209          	if (DetermineAnalogScreenSelection() <= 2)
+   \   0000000C   ........           BL       DetermineAnalogScreenSelection
+   \   00000010   030050E3           CMP      R0,#+3
+   \   00000014   020000AA           BGE      ??DisplayMultiAnalogGaugesScreen_0
+    210          	{
+    211          		return Display_DualGaugeScreen(hParent);
+   \   00000018   0400A0E1           MOV      R0,R4
+   \   0000001C   ........           BL       Display_DualGaugeScreen
+   \   00000020   390000EA           B        ??DisplayMultiAnalogGaugesScreen_1
+    212          	}
+    213          
+    214          	// Displaying LinearGauges - continue here with Linear Gauges creating
+    215          	firsttimethrough = true;
+   \                     ??DisplayMultiAnalogGaugesScreen_0:
+   \   00000024   ........           LDR      R5,??DataTable4_1
+   \   00000028   0100A0E3           MOV      R0,#+1
+   \   0000002C   1C00C5E5           STRB     R0,[R5, #+28]
+    216          	if ((hLinearGaugesScreen = WM_CreateWindowAsChild(0, 0, XSIZE_PHYS, YSIZE_PHYS, hParent, WM_CF_SHOW, _cbLinearGaugeCallback, 0)) <= 0)
+   \   00000030   0000A0E3           MOV      R0,#+0
+   \   00000034   0C008DE5           STR      R0,[SP, #+12]
+   \   00000038   ........           LDR      R0,??DataTable4_7
+   \   0000003C   00408DE5           STR      R4,[SP, #+0]
+   \   00000040   08008DE5           STR      R0,[SP, #+8]
+   \   00000044   0200A0E3           MOV      R0,#+2
+   \   00000048   04008DE5           STR      R0,[SP, #+4]
+   \   0000004C   443FA0E3           MOV      R3,#+272
+   \   00000050   782FA0E3           MOV      R2,#+480
+   \   00000054   0010A0E3           MOV      R1,#+0
+   \   00000058   0000A0E3           MOV      R0,#+0
+   \   0000005C   ........           BL       WM_CreateWindowAsChild
+   \   00000060   000085E5           STR      R0,[R5, #+0]
+   \   00000064   010050E3           CMP      R0,#+1
+   \   00000068   000000AA           BGE      ??DisplayMultiAnalogGaugesScreen_2
+    217          		SystemError();
+   \   0000006C   ........           BL       SystemError
+    218          
+    219          	pAnalog0Gauge = CreateLinearInputGauge(0, hLinearGaugesScreen, 5, 35);
+   \                     ??DisplayMultiAnalogGaugesScreen_2:
+   \   00000070   2330A0E3           MOV      R3,#+35
+   \   00000074   0520A0E3           MOV      R2,#+5
+   \   00000078   001095E5           LDR      R1,[R5, #+0]
+   \   0000007C   0000A0E3           MOV      R0,#+0
+   \   00000080   ........           BL       CreateLinearInputGauge
+   \   00000084   080085E5           STR      R0,[R5, #+8]
+    220          	pAnalog1Gauge = CreateLinearInputGauge(1, hLinearGaugesScreen, 245, 35);
+   \   00000088   2330A0E3           MOV      R3,#+35
+   \   0000008C   F520A0E3           MOV      R2,#+245
+   \   00000090   001095E5           LDR      R1,[R5, #+0]
+   \   00000094   0100A0E3           MOV      R0,#+1
+   \   00000098   ........           BL       CreateLinearInputGauge
+   \   0000009C   0C0085E5           STR      R0,[R5, #+12]
+    221          	pAnalog2Gauge = CreateLinearInputGauge(2, hLinearGaugesScreen, 5, 150);
+   \   000000A0   9630A0E3           MOV      R3,#+150
+   \   000000A4   0520A0E3           MOV      R2,#+5
+   \   000000A8   001095E5           LDR      R1,[R5, #+0]
+   \   000000AC   0200A0E3           MOV      R0,#+2
+   \   000000B0   ........           BL       CreateLinearInputGauge
+   \   000000B4   100085E5           STR      R0,[R5, #+16]
+    222          	pAnalog3Gauge = CreateLinearInputGauge(3, hLinearGaugesScreen, 245, 150);
+   \   000000B8   9630A0E3           MOV      R3,#+150
+   \   000000BC   F520A0E3           MOV      R2,#+245
+   \   000000C0   001095E5           LDR      R1,[R5, #+0]
+   \   000000C4   0300A0E3           MOV      R0,#+3
+   \   000000C8   ........           BL       CreateLinearInputGauge
+   \   000000CC   140085E5           STR      R0,[R5, #+20]
+    223          
+    224          	WM_InvalidateWindow(hLinearGaugesScreen);
+   \   000000D0   000095E5           LDR      R0,[R5, #+0]
+   \   000000D4   ........           BL       WM_InvalidateWindow
+    225          
+    226          	// create the memory area to prevent flicker
+    227          	memLinearGaugesScreen = GUI_MEMDEV_Create(0, 0, XSIZE_PHYS, YSIZE_PHYS);
+   \   000000D8   443FA0E3           MOV      R3,#+272
+   \   000000DC   782FA0E3           MOV      R2,#+480
+   \   000000E0   0010A0E3           MOV      R1,#+0
+   \   000000E4   0000A0E3           MOV      R0,#+0
+   \   000000E8   ........           BL       GUI_MEMDEV_Create
+   \   000000EC   180085E5           STR      R0,[R5, #+24]
+    228          
+    229          	hScreenTimer = WM_CreateTimer(hLinearGaugesScreen, 0, GAUGE_SCREEN_REFRESH_TIME, 0);
+   \   000000F0   0030A0E3           MOV      R3,#+0
+   \   000000F4   1920A0E3           MOV      R2,#+25
+   \   000000F8   0010A0E3           MOV      R1,#+0
+   \   000000FC   000095E5           LDR      R0,[R5, #+0]
+   \   00000100   ........           BL       WM_CreateTimer
+   \   00000104   040085E5           STR      R0,[R5, #+4]
+    230          
+    231          	return hLinearGaugesScreen;
+   \   00000108   000095E5           LDR      R0,[R5, #+0]
+   \                     ??DisplayMultiAnalogGaugesScreen_1:
+   \   0000010C   14D08DE2           ADD      SP,SP,#+20       ;; stack cleaning
+   \   00000110   3080BDE8           POP      {R4,R5,PC}       ;; return
+    232          }
+    233          
+    234          
+
+   \                                 In section .text, align 4, keep-with-next
+    235          LinearGauge *CreateLinearInputGauge(char input, WM_HWIN hParent, int hpos, int vpos)
+    236          {
+   \                     CreateLinearInputGauge:
+   \   00000000   F64F2DE9           PUSH     {R1,R2,R4-R11,LR}
+    237          	float upperLimit, lowerLimit, temp;
+    238          	char *pName, *pUnits;
+    239          	LinearGauge *pGauge;
+    240          
+    241          	upperLimit = vehicleData.analogInput[input].highValuePoint;
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   ........           LDR      R0,??DataTable4_8
+   \   0000000C   ........           LDR      R9,??DataTable4_5
+   \   00000010   046380E0           ADD      R6,R0,R4, LSL #+6
+   \   00000014   B08096E5           LDR      R8,[R6, #+176]
+    242          	lowerLimit = vehicleData.analogInput[input].lowValuePoint;
+   \   00000018   AC7096E5           LDR      R7,[R6, #+172]
+    243          	
+    244          	// handle inverse user values
+    245          	if (upperLimit < lowerLimit) {
+   \   0000001C   0800A0E1           MOV      R0,R8
+   \   00000020   0710A0E1           MOV      R1,R7
+   \   00000024   ........           BL       __aeabi_cfcmple
+    246          		temp = upperLimit;
+    247          		upperLimit = lowerLimit;
+   \   00000028   0780A031           MOVCC    R8,R7
+    248          		lowerLimit = temp;
+   \   0000002C   0070A031           MOVCC    R7,R0
+    249          	}
+    250          	
+    251          	if ((upperLimit == 0.0) && (lowerLimit == 0.0))
+   \   00000030   0800A0E1           MOV      R0,R8
+   \   00000034   0010A0E3           MOV      R1,#+0
+   \   00000038   ........           BL       __aeabi_cfcmpeq
+   \   0000003C   0700A001           MOVEQ    R0,R7
+   \   00000040   ........           BLEQ     __aeabi_cfcmpeq
+    252          	{
+    253          		upperLimit = 100.0;
+    254          		lowerLimit = 0.0;
+    255          	}
+    256          	temp = (upperLimit - lowerLimit) * 0.1;
+    257          
+    258          	if ((inputEnabled[input] = vehicleData.analogInput[input].enabled))
+   \   00000044   9300D6E5           LDRB     R0,[R6, #+147]
+   \   00000048   4084A003           MOVEQ    R8,#+1073741824
+   \   0000004C   B2878803           ORREQ    R8,R8,#0x2C80000
+   \   00000050   0900C4E7           STRB     R0,[R4, +R9]
+   \   00000054   000050E3           CMP      R0,#+0
+   \   00000058   34D04DE2           SUB      SP,SP,#+52
+   \   0000005C   0350A0E1           MOV      R5,R3
+    259          	{
+    260          		pName = vehicleData.analogInput[input].Name;
+   \   00000060   78A08612           ADDNE    R10,R6,#+120
+    261          		pUnits = vehicleData.analogInput[input].Units;
+   \   00000064   89B08612           ADDNE    R11,R6,#+137
+    262          	}
+    263          	else
+    264          	{
+    265          		pName = "Disabled";
+   \   00000068   ........           ADREQ    R10,`?<Constant "Disabled">`
+    266          		pUnits = "";
+   \   0000006C   ........           ADREQ    R11,??DataTable4  ;; ""
+    267          	}
+    268          
+    269          	if ((pGauge = new LinearGauge(hpos, vpos, 230, 110, lowerLimit, upperLimit,
+    270          		//vehicleData.analogInput[input].lowerAlarmTriggerComparison == BELOW ? 1 : 0, vehicleData.analogInput[input].lowerAlarmTriggerLevel,
+    271          		//vehicleData.analogInput[input].lowerAlarmTriggerComparison == ABOVE ? 1 : 0, vehicleData.analogInput[input].lowerAlarmTriggerLevel,
+    272          		vehicleData.analogInput[input].lowerAlarmTriggerComparison == OFF ? 0 : 1, vehicleData.analogInput[input].lowerAlarmTriggerLevel,
+    273          		vehicleData.analogInput[input].upperAlarmTriggerComparison == OFF ? 0 : 1, vehicleData.analogInput[input].upperAlarmTriggerLevel,
+    274          		pName, pUnits, 0, hParent, (0 != vehicleData.analogInput[input].enabled))) <= 0)
+   \   00000070   4800A0E3           MOV      R0,#+72
+   \   00000074   ........           BL       _Znwj
+   \   00000078   000050E3           CMP      R0,#+0
+   \   0000007C   2100000A           BEQ      ??CreateLinearInputGauge_0
+   \   00000080   9310D6E5           LDRB     R1,[R6, #+147]
+   \   00000084   9420D6E5           LDRB     R2,[R6, #+148]
+   \   00000088   000051E3           CMP      R1,#+0
+   \   0000008C   0130A013           MOVNE    R3,#+1
+   \   00000090   0030A003           MOVEQ    R3,#+0
+   \   00000094   9510D6E5           LDRB     R1,[R6, #+149]
+   \   00000098   2C308DE5           STR      R3,[SP, #+44]
+   \   0000009C   34309DE5           LDR      R3,[SP, #+52]
+   \   000000A0   20B08DE5           STR      R11,[SP, #+32]
+   \   000000A4   28308DE5           STR      R3,[SP, #+40]
+   \   000000A8   0030A0E3           MOV      R3,#+0
+   \   000000AC   24308DE5           STR      R3,[SP, #+36]
+   \   000000B0   1CA08DE5           STR      R10,[SP, #+28]
+   \   000000B4   000051E3           CMP      R1,#+0
+   \   000000B8   9C3096E5           LDR      R3,[R6, #+156]
+   \   000000BC   0110A013           MOVNE    R1,#+1
+   \   000000C0   18308DE5           STR      R3,[SP, #+24]
+   \   000000C4   14108DE5           STR      R1,[SP, #+20]
+   \   000000C8   981096E5           LDR      R1,[R6, #+152]
+   \   000000CC   000052E3           CMP      R2,#+0
+   \   000000D0   10108DE5           STR      R1,[SP, #+16]
+   \   000000D4   0120A013           MOVNE    R2,#+1
+   \   000000D8   6E10A0E3           MOV      R1,#+110
+   \   000000DC   0C208DE5           STR      R2,[SP, #+12]
+   \   000000E0   00108DE5           STR      R1,[SP, #+0]
+   \   000000E4   08808DE5           STR      R8,[SP, #+8]
+   \   000000E8   04708DE5           STR      R7,[SP, #+4]
+   \   000000EC   E630A0E3           MOV      R3,#+230
+   \   000000F0   0520A0E1           MOV      R2,R5
+   \   000000F4   38109DE5           LDR      R1,[SP, #+56]
+   \   000000F8   ........           BL       _ZN11LinearGaugeC1EiiiiffififPcS0_ilb
+   \   000000FC   0050B0E1           MOVS     R5,R0
+   \   00000100   0200001A           BNE      ??CreateLinearInputGauge_1
+   \   00000104   000000EA           B        ??CreateLinearInputGauge_2
+   \                     ??CreateLinearInputGauge_0:
+   \   00000108   0050A0E3           MOV      R5,#+0
+    275          		SystemError();
+   \                     ??CreateLinearInputGauge_2:
+   \   0000010C   ........           BL       SystemError
+    276          
+    277          	if (!inputEnabled[input])
+   \                     ??CreateLinearInputGauge_1:
+   \   00000110   0900D4E7           LDRB     R0,[R4, +R9]
+   \   00000114   000050E3           CMP      R0,#+0
+   \   00000118   0200001A           BNE      ??CreateLinearInputGauge_3
+    278          		pGauge->SetValue(0.0);
+   \   0000011C   0010A0E3           MOV      R1,#+0
+   \   00000120   0500A0E1           MOV      R0,R5
+   \   00000124   ........           BL       _ZN11LinearGauge8SetValueEf
+    279          
+    280          	return pGauge;
+   \                     ??CreateLinearInputGauge_3:
+   \   00000128   0500A0E1           MOV      R0,R5
+   \   0000012C   3CD08DE2           ADD      SP,SP,#+60
+   \   00000130   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    281          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4:
+   \   00000000   00000000           DC8      "",0x0,0x0,0x0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_1:
+   \   00000000   ........           DC32     hLinearGaugesScreen
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_2:
+   \   00000000   ........           DC32     lockupSemaphore
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_3:
+   \   00000000   ........           DC32     bmDarkAsphalt
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_4:
+   \   00000000   ........           DC32     bmAnalogs
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_5:
+   \   00000000   ........           DC32     inputEnabled
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_6:
+   \   00000000   ........           DC32     bmthreewayarrow
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_7:
+   \   00000000   ........           DC32     _cbLinearGaugeCallback
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_8:
+   \   00000000   ........           DC32     vehicleData
+
+   \                                 In section .rodata, align 1, keep-with-next
+   \                     `?<Constant "">`:
+   \   00000000                      ; Initializer data, 1 bytes
+   \   00000000   00                 DC8 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Disabled">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   44697361626C       DC8 68, 105, 115, 97, 98, 108, 101, 100, 0, 0
+   \              65640000    
+   \   0000000A   0000               DC8 0, 0
+    282          
+    283          /*************************** End of file ****************************/
+    284          
+
+   Maximum stack usage in bytes:
+
+     Function                       .cstack
+     --------                       -------
+     CreateLinearInputGauge             96
+     DisplayMultiAnalogGaugesScreen     32
+     _cbLinearGaugeCallback             24
+
+
+   Section sizes:
+
+     Function/Label                 Bytes
+     --------------                 -----
+     hLinearGaugesScreen              29
+     hScreenTimer
+     pAnalog0Gauge
+     pAnalog1Gauge
+     pAnalog2Gauge
+     pAnalog3Gauge
+     memLinearGaugesScreen
+     firsttimethrough
+     _cbLinearGaugeCallback          604
+     DisplayMultiAnalogGaugesScreen  276
+     CreateLinearInputGauge          308
+     ??DataTable4                      4
+     ??DataTable4_1                    4
+     ??DataTable4_2                    4
+     ??DataTable4_3                    4
+     ??DataTable4_4                    4
+     ??DataTable4_5                    4
+     ??DataTable4_6                    4
+     ??DataTable4_7                    4
+     ??DataTable4_8                    4
+     ?<Constant "">                    1
+     ?<Constant "Disabled">           12
+
+ 
+    29 bytes in section .bss
+     1 byte  in section .rodata
+ 1 236 bytes in section .text
+ 
+ 1 236 bytes of CODE  memory
+     1 byte  of CONST memory
+    29 bytes of DATA  memory
+
+Errors: none
+Warnings: none

@@ -1,0 +1,725 @@
+C51 COMPILER V9.51   FORMATGPS                                                             11/30/2014 18:01:39 PAGE 1   
+
+
+C51 COMPILER V9.51, COMPILATION OF MODULE FORMATGPS
+OBJECT MODULE PLACED IN formatgps.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE formatgps.c OPTIMIZE(9,SIZE) BROWSE MDU_F120 INCDIR(..\..\C51\INC\;..\Commo
+                    -nFiles\) DB DEFINE(DISPLAY,EXTCLK6,NODEBUG,PACKMEM)
+
+line level    source
+
+   1          // Part of displayunit.c
+   2          // 8/3/2004
+   3          // Author: GAStephens
+   4          //
+   5          // formats and uploads the contents of the dataflash
+   6          // part of traqmate.c
+   7          
+   8          #include <display.h>
+   9          #include <math.h>
+  10          
+  11          void dodate(int *, int *, int *, int);
+  12          
+  13          // gps is a structure with all the relevant gps data
+  14          // msec is the tenth of second number
+  15          // textline is a buffer large enough to hold the expected formatted string
+  16          // linenum is 0 if all data is required or 1,2,3 for respective 20 char lines
+  17          //
+  18          void formatgps (gpstype *gps, int msec, char *textline, u08 linenum) {
+  19   1              xdata float lat, lon;
+  20   1              float tempfloat;
+  21   1      
+  22   1              lat = (float) gps->lat * (180.0 / 2147483647.0);
+  23   1              lon = (float) gps->lon * (180.0 / 2147483647.0);
+  24   1      
+  25   1              if (linenum < 2)
+  26   1                      formattime(gps->time, gps->weeks, LONGDANDT, textline);
+  27   1      
+  28   1              if (linenum == 0) textline += strlen(textline);
+  29   1              if (linenum == 0 || linenum == 2) {
+  30   2      
+  31   2                      // location - MUST BE BROKEN INTO 2 SPRINTFS
+  32   2                      sprintf(textline, "%3.3f,%3.3f", lat, lon);
+  33   2                      textline += strlen(textline);
+  34   2      
+  35   2                      // do altitude in proper units
+  36   2                      if (scratch.calibrate.usersettings & 0x01)      // english
+  37   2                              sprintf(textline, ",%d", (s16)(((long) gps->alt * 39L)/12L));
+  38   2                      else    // metric
+  39   2                              sprintf(textline, ",%d", (s16) gps->alt);                       
+  40   2              }
+  41   1              if (linenum == 0) textline += strlen(textline);
+  42   1              if (linenum == 0 || linenum == 3) {
+  43   2                      s16 eastvel, northvel, vertvel;
+  44   2                      u16 speed;
+  45   2                      u16 heading;
+  46   2                      xdata char temptype;
+  47   2      
+  48   2                      // unpack the velocities
+  49   2                      eastvel = (s16) ((((u16) (gps->velpack[0] & 0xE0)) << 3) | (u16) gps->velpack[1]);
+  50   2                      // sign extend
+  51   2                      if (eastvel & 0x0400) eastvel = (u16) eastvel | 0xF800;
+  52   2      
+  53   2                      northvel = (s16) ((((u16) (gps->velpack[0] & 0x1C)) << 6) | (u16) gps->velpack[2]);
+  54   2                      if (northvel & 0x0400) northvel = (u16) northvel | 0xF800;
+C51 COMPILER V9.51   FORMATGPS                                                             11/30/2014 18:01:39 PAGE 2   
+
+  55   2      
+  56   2                      vertvel = (s16) ((((u16) (gps->velpack[0] & 0x03)) << 8) | (u16) gps->velpack[3]);
+  57   2                      // sign extend
+  58   2                      if (vertvel & 0x0200) vertvel = (u16) vertvel | 0xFC00;
+  59   2      
+  60   2                      // do not write heading if we are not moving
+  61   2                      if (eastvel != 0 || northvel != 0) {
+  62   3                              // compute heading = vector sum of east/west vel and north/south vel (due east is 0)
+  63   3                              heading = compute_heading(eastvel, northvel);
+  64   3      
+  65   3                              // convert from trig coordinate to compass heading
+  66   3                              heading = (360 - (heading + 270) % 360) % 360;
+  67   3      
+  68   3                              // heading
+  69   3                              sprintf(textline, "H %03d, ", heading);
+  70   3                      }
+  71   2                      else { // no heading
+  72   3                              // heading
+  73   3                              sprintf(textline, "H ---, ", heading);
+  74   3                      } // else
+  75   2      
+  76   2                      textline += strlen(textline);
+  77   2      
+  78   2                      // calculate speed in meters/sec plus fudge factor
+  79   2                      tempfloat = GPSVELSCALE * sqrt((float) ((double) eastvel * (double) eastvel + (double) northvel * (doubl
+             -e) northvel));
+  80   2      
+  81   2                      if (scratch.calibrate.usersettings & 0x01) {  // english
+  82   3                              // convert to miles / hour
+  83   3                              speed = (u16) (tempfloat * (39.0/12.0/5280.0*60.0*60.0));
+  84   3      
+  85   3                              // temperature
+  86   3                              temptype = 'F';
+  87   3                      } // if
+  88   2                      else { // metric
+  89   3                              // convert to km / hour
+  90   3                              speed = (u16) (tempfloat * (3600.0 / 1000.0));
+  91   3      
+  92   3                              // temperature
+  93   3                              temptype = 'C';                 
+  94   3                      } // else
+  95   2                                                      
+  96   2                      // velocities
+  97   2                      sprintf(textline, "V %02d, ", speed);
+  98   2              
+  99   2                      textline += strlen(textline);
+ 100   2      
+ 101   2                      if (su_hw >= 200) {             // only do this if we are connected to 3 axis SU2
+ 102   3                              tempfloat = (float) (u08) gps->temp - (float) (scratch.calibrate.zzero >> 4);
+ 103   3                              if (tempfloat < 0.0) {
+ 104   4                                      tempfloat = tempfloat / ((float) (scratch.calibrate.zzero >> 4) - (float) (scratch.calibrate.zminusg >
+             -> 4));
+ 105   4                              } // if
+ 106   3                              else  {
+ 107   4                                      tempfloat = tempfloat / ((float) (scratch.calibrate.zplusg >> 4) - (float) (scratch.calibrate.zzero >>
+             - 4));
+ 108   4                              } // else
+ 109   3                              sprintf(textline, "Z%+1.1f", tempfloat);
+ 110   3                      } // if
+ 111   2                      else {                                  // original 2 axis SU1
+ 112   3                              tempfloat = dotemp(gps->temp, temptype);
+ 113   3                              sprintf(textline, "T %2.0f%c", tempfloat, temptype);
+C51 COMPILER V9.51   FORMATGPS                                                             11/30/2014 18:01:39 PAGE 3   
+
+ 114   3                      } // else
+ 115   2                      
+ 116   2                      textline += strlen(textline);
+ 117   2      
+ 118   2                      // number of satellites
+ 119   2                      sprintf(textline, "%2d ", (int) gpslock);
+ 120   2              }
+ 121   1      } // formatgps
+*** WARNING C280 IN LINE 18 OF formatgps.c: 'msec': unreferenced local variable
+ 122          
+ 123          // gps is a structure with all the relevant gps data
+ 124          //
+ 125          void writerpm (gpstype *gps) {
+ 126   1              float tempfloat;
+ 127   1              u16 rpm, period;
+ 128   1              xdata s16 eastvel, northvel, vertvel;
+ 129   1              xdata char tempstring[21];
+ 130   1              xdata char warning;
+ 131   1      
+ 132   1              // get period
+ 133   1              period = ((u16) allinputs[5]) << 8 | allinputs[6];
+ 134   1      
+ 135   1              // check for valid data
+ 136   1              if (period == 0)
+ 137   1                      rpm = 0;
+ 138   1              else {
+ 139   2                      u16 cyl;
+ 140   2      
+ 141   2                      // figure out rpm
+ 142   2                      // hz
+ 143   2                      tempfloat = (float) FREQ_SAMPLE_RATE / (float) period;
+ 144   2      
+ 145   2                      // rpm
+ 146   2                      if (0 == (cyl = currentcar.cylandweight & 0x0F)) // kart
+ 147   2                              rpm = (u16) (tempfloat * 60 * 4);
+ 148   2                      else {
+ 149   3                              if (15 == cyl) cyl = 16;
+ 150   3                              rpm = (u16) (tempfloat * (60 * 2 / (cyl)));
+ 151   3                      } // else
+ 152   2              } // else
+ 153   1      
+ 154   1      //      Write_Screen(rpmbckgnd, (warning = (rpm > currentcar.revwarning)? '~' : '-'));
+ 155   1      
+ 156   1              warning = (rpm > currentcar.revwarning)? '~' : '-';
+ 157   1              if (warning != '~')
+ 158   1                      Clear_Screen();         
+ 159   1              else
+ 160   1                      Full_Screen((u08) 0xFF);
+ 161   1      
+ 162   1              // put up a line bar
+ 163   1              Write_Icon(0, 0, NUMBER_OF_COLUMNS, 8, &(menubar[0]), warning);
+ 164   1      
+ 165   1              // write menu centered name
+ 166   1              Write_Text(0, 22, "Tach & Speedo", warning);
+ 167   1              // write undertitles
+ 168   1              Write_Text(3, 22, "RPM", warning);
+ 169   1              if (scratch.calibrate.usersettings & 0x01) // english
+ 170   1                      Write_Text(3, 93, "MPH", warning);
+ 171   1              else // metric
+ 172   1                      Write_Text(3, 93, "KPH", warning);
+ 173   1      
+ 174   1              if (0 == iocollect)             // no connect
+C51 COMPILER V9.51   FORMATGPS                                                             11/30/2014 18:01:39 PAGE 4   
+
+ 175   1                      Write_Big_Text(1, 2, " N/C", warning);
+ 176   1              else {
+ 177   2                      // put rpm numbers on display
+ 178   2                      sprintf(tempstring, "%5u", rpm);
+ 179   2                      Write_Big_Text(1, 2, tempstring, warning);
+ 180   2              } // else
+ 181   1      
+ 182   1      #ifdef DEMOBOX
+                      if (rpm < 900)
+                              rpm = 0;
+                      else
+                              rpm = (rpm-900) / 120;
+                      sprintf(tempstring, "%3d", rpm);
+                      // put speed on display
+                      Write_Big_Text(1, 83, tempstring, warning);
+              #else
+ 191   1              if (gpslock >= GPS_GOOD) {
+ 192   2                      u16 speed;
+ 193   2      
+ 194   2                      // decode velocities
+ 195   2                      unpack_velocities (&(gps->velpack[0]), &eastvel, &northvel, &vertvel);
+ 196   2              
+ 197   2                      // calculate speed in meters/sec plus fudge factor
+ 198   2      //              tempfloat = GPSVELSCALE * sqrt((float) eastvel * (float) eastvel + (float) northvel * (float) northvel
+             -);
+ 199   2                      tempfloat = GPSVELSCALE * sqrt((float) ((double) eastvel * (double) eastvel + (double) northvel * (doubl
+             -e) northvel));
+ 200   2              
+ 201   2                      if (scratch.calibrate.usersettings & 0x01) // english
+ 202   2                              // convert to miles / hour
+ 203   2                              speed = (u16) (tempfloat * (39.0/12.0/5280.0*60.0*60.0));
+ 204   2                      else // metric
+ 205   2                              // convert to km / hour
+ 206   2                              speed = (u16) (tempfloat * (3600.0 / 1000.0));
+ 207   2      
+ 208   2                      sprintf(tempstring, "%3d", speed);
+ 209   2                      // put speed on display
+ 210   2                      Write_Big_Text(1, 83, tempstring, warning);
+ 211   2              }
+ 212   1              else
+ 213   1                      Write_Big_Text(1, 70, "NoGPS", warning);        
+ 214   1      #endif  
+ 215   1      } // writerpm
+ 216          
+ 217          // writes the status of analog and digital inputs on screen
+ 218          //
+ 219          void writeinputs (void) {
+ 220   1              xdata char tempstring[21];
+ 221   1              xdata float tempfloat;
+ 222   1              xdata s08 j;
+ 223   1              u16 rpm, period;
+ 224   1              
+ 225   1              for (j=0; j<4; j++) {
+ 226   2                      tempfloat = (float) analogscaling[j].maxscale * (float) (allinputs[4-j]) / (float) (VOLTFULLSCALE);
+ 227   2                      sprintf(tempstring, "A%d %4.2fV ", (int) j, tempfloat);
+ 228   2                      Write_Text(1+j/2, (j & 0x01)? 67: 6, tempstring, '-');
+ 229   2              } // for
+ 230   1      
+ 231   1              // hardware checkout mode - show all digitals if d0 and d1 = 0
+ 232   1              if (!(allinputs[0] & ~0x03)) {
+ 233   2                      tempstring[0] = 'D';
+ 234   2                      tempstring[1] = ':';
+C51 COMPILER V9.51   FORMATGPS                                                             11/30/2014 18:01:39 PAGE 5   
+
+ 235   2                      tempstring[2] = ' ';
+ 236   2                      // check each bit
+ 237   2                      for (j = 7; j >= 0; j--)
+ 238   2                              tempstring[10-j] = (((allinputs[0] >> j) & 0x01)? '1' : '0');
+ 239   2                      tempstring[11] = '\0';
+ 240   2                      Write_Text(3, 1, tempstring, '-');
+ 241   2              } // if
+ 242   1              else {
+ 243   2                      // normal mode - just show D4 and D5
+ 244   2                      sprintf(tempstring, "D4: %d D5: %d", (int)((allinputs[0] & 0x10)? 1:0), (int)((allinputs[0] & 0x20)? 1:0
+             -));
+ 245   2                      Write_Text(3, 1, tempstring, '-');
+ 246   2              } // else
+ 247   1      
+ 248   1              // get period
+ 249   1              period = ((u16) allinputs[5]) << 8 | allinputs[6];
+ 250   1      
+ 251   1              // check for valid data
+ 252   1              if (period == 0)
+ 253   1                      rpm = 0;
+ 254   1              else {
+ 255   2                      u16 cyl;
+ 256   2      
+ 257   2                      // figure out rpm
+ 258   2                      // hz
+ 259   2                      tempfloat = (float) FREQ_SAMPLE_RATE / (float) period;
+ 260   2      
+ 261   2                      // rpm
+ 262   2                      if (0 == (cyl = currentcar.cylandweight & 0x0F)) // kart
+ 263   2                              rpm = (u16) (tempfloat * 60 * 4);
+ 264   2                      else {
+ 265   3                              if (15 == cyl) cyl = 16;
+ 266   3                              rpm = (u16) (tempfloat * (60 * 2 / (cyl)));
+ 267   3                      } // else
+ 268   2              } // else
+ 269   1      
+ 270   1              sprintf(tempstring, "R:%5u", rpm);
+ 271   1              Write_Text(3, 75, tempstring, '-');
+ 272   1              
+ 273   1      } // writeinputs
+ 274          
+ 275          // writes the status of a particular analog or the digital inputs on screen
+ 276          //
+ 277          void formatgauges (tmstatetype state) {
+ 278   1              xdata char tempstring[24];
+ 279   1              xdata float tempfloat;
+ 280   1              xdata u08 temp;
+ 281   1      
+ 282   1              if (GAUGED4 == state || GAUGED5 == state) {
+ 283   2                      u08 j = state - GAUGED4;
+ 284   2                      char *nameptr;
+ 285   2      
+ 286   2                      Clear_Screen();
+ 287   2      
+ 288   2                      // put up a line bar
+ 289   2                      Write_Icon(0, 0, NUMBER_OF_COLUMNS, 8, &(menubar[0]), '-');
+ 290   2      
+ 291   2                      digitalscaling[j].pointname[11] = '\0';
+ 292   2      
+ 293   2                      temp = 6*(20-strlen(digitalscaling[j].pointname))/2;
+ 294   2                      // write menu centered name
+ 295   2                      Write_Text(0, temp, digitalscaling[j].pointname, '-');
+C51 COMPILER V9.51   FORMATGPS                                                             11/30/2014 18:01:39 PAGE 6   
+
+ 296   2      
+ 297   2                      // create message
+ 298   2                      if (GAUGED4 == state)
+ 299   2                              if (allinputs[0] & 0x10)
+ 300   2                                      nameptr = digitalscaling[0].onname;
+ 301   2                              else
+ 302   2                                      nameptr = digitalscaling[0].offname; 
+ 303   2                      else
+ 304   2                              if (allinputs[0] & 0x20)
+ 305   2                                      nameptr = digitalscaling[1].onname;
+ 306   2                              else
+ 307   2                                      nameptr = digitalscaling[1].offname; 
+ 308   2      
+ 309   2                      // put value on display
+ 310   2                      Write_Big_Text(2, ((13-strlen(nameptr))*9)/2, nameptr, '-');
+ 311   2      
+ 312   2              } // if
+ 313   1              else { // analogs
+ 314   2                      u08 j = state - GAUGEA0;
+ 315   2                      u08 warning;
+ 316   2      
+ 317   2                      // snap values to rails
+ 318   2                      if (allinputs[4-j] < analogscaling[j].lowreading)
+ 319   2                              tempfloat = 0.0;
+ 320   2                      else if (allinputs[4-j] > analogscaling[j].highreading)
+ 321   2                              tempfloat = 1.0;
+ 322   2      //              else if (analogscaling[4-j].highreading == analogscaling[4-j].lowreading)       // check for divide by zero
+ 323   2      //                      tempfloat = 0.0;
+ 324   2                      else // scale as percent of usable range
+ 325   2                              tempfloat = (float) (allinputs[4-j] - analogscaling[j].lowreading) /
+ 326   2                                      (float) (analogscaling[j].highreading - analogscaling[j].lowreading);
+ 327   2      
+ 328   2                      // scale as actual units to be measured
+ 329   2                      tempfloat = tempfloat * (analogscaling[j].highval - analogscaling[j].lowval) + analogscaling[j].lowval;
+ 330   2              
+ 331   2                      // check for alarm condition
+ 332   2                      switch (analogscaling[j].alarmdirection  ) {
+ 333   3                              case 1:
+ 334   3                                      warning = (tempfloat > analogscaling[j].alarmval)? '~' : '-';
+ 335   3                                      break;
+ 336   3                              case 0:
+ 337   3                                      warning = (tempfloat == analogscaling[j].alarmval)? '~' : '-';
+ 338   3                                      break;
+ 339   3                              case -1:
+ 340   3                                      warning = (tempfloat < analogscaling[j].alarmval)? '~' : '-';
+ 341   3                                      break;
+ 342   3                      } // switch
+ 343   2              
+ 344   2                      if (warning != '~')
+ 345   2                              Clear_Screen();         
+ 346   2                      else
+ 347   2                              Full_Screen((u08) 0xFF);
+ 348   2      
+ 349   2                      // put up a line bar
+ 350   2                      Write_Icon(0, 0, NUMBER_OF_COLUMNS, 8, &(menubar[0]), warning);
+ 351   2      
+ 352   2                      analogscaling[j].pointname[11] = '\0';  
+ 353   2                      temp = 6*(20-strlen(analogscaling[j].pointname))/2;
+ 354   2                      // write menu centered name
+ 355   2                      Write_Text(0, temp, analogscaling[j].pointname, warning);
+ 356   2              
+ 357   2                      // create message
+C51 COMPILER V9.51   FORMATGPS                                                             11/30/2014 18:01:39 PAGE 7   
+
+ 358   2                      if (FLOATABS(tempfloat) > 10.0) // use one decimal place
+ 359   2                              sprintf(tempstring, "%4.1f %s ", tempfloat, analogscaling[j].unitname); 
+ 360   2                      else // use two decimal places
+ 361   2                              sprintf(tempstring, "%4.2f %s ", tempfloat, analogscaling[j].unitname); 
+ 362   2              
+ 363   2                      // truncate
+ 364   2                      tempstring[12] = '\0';
+ 365   2                      // put value on display
+ 366   2                      Write_Big_Text(2, ((13-strlen(tempstring))*9)/2, tempstring, warning);
+ 367   2      
+ 368   2              } // else
+ 369   1      } // formatgauges
+ 370          
+ 371          // gps is a structure with all the relevant gps data
+ 372          // textline is a buffer large enough to hold the expected formatted string
+ 373          //
+ 374          void writecompass (gpstype *gps) {
+ 375   1              float tempfloat;
+ 376   1              xdata u16 speed;
+ 377   1              xdata s16 eastvel, northvel, vertvel;
+ 378   1              xdata u16 heading;
+ 379   1              xdata char tempstring[21];
+ 380   1      
+ 381   1              // decode velocities
+ 382   1              unpack_velocities (&(gps->velpack[0]), &eastvel, &northvel, &vertvel);
+ 383   1      
+ 384   1              // do not write heading if we are not moving
+ 385   1              if (eastvel != 0 || northvel != 0) {
+ 386   2                      // compute heading = vector sum of east/west vel and north/south vel (due east is 0)
+ 387   2                      heading = compute_heading(eastvel, northvel);
+ 388   2      
+ 389   2                      // convert from trig coordinate to compass heading
+ 390   2                      heading = (360 - (heading + 270) % 360) % 360;
+ 391   2      
+ 392   2                      // figure out our quadrant
+ 393   2                      if (heading > 327 || heading < 23 )
+ 394   2                              sprintf(tempstring, "N ");
+ 395   2                      else if (heading < 68 )
+ 396   2                              sprintf(tempstring, "NE");
+ 397   2                      else if (heading > 295 )
+ 398   2                              sprintf(tempstring, "NW");
+ 399   2                      else if (heading < 113 )
+ 400   2                              sprintf(tempstring, "E ");
+ 401   2                      else if (heading > 247 )
+ 402   2                              sprintf(tempstring, "W ");
+ 403   2                      else if (heading < 158 )
+ 404   2                              sprintf(tempstring, "SE");
+ 405   2                      else if (heading > 202 )
+ 406   2                              sprintf(tempstring, "SW");
+ 407   2                      else
+ 408   2                              sprintf(tempstring, "S ");
+ 409   2      
+ 410   2                      // put compass direction on display
+ 411   2                      Write_Big_Text(1, 2, tempstring, '-');
+ 412   2              } // if
+ 413   1      
+ 414   1              // get the time to display
+ 415   1              formattime(gps->time, gps->weeks, SHORTTIME, tempstring);
+ 416   1      
+ 417   1              // put time on display
+ 418   1              Write_Big_Text(1, 34, tempstring, '-');
+ 419   1      
+C51 COMPILER V9.51   FORMATGPS                                                             11/30/2014 18:01:39 PAGE 8   
+
+ 420   1              // calculate speed in meters/sec plus fudge factor
+ 421   1              tempfloat = GPSVELSCALE * sqrt((float) ((double) eastvel * (double) eastvel + (double) northvel * (double
+             -) northvel));
+ 422   1      
+ 423   1              if (scratch.calibrate.usersettings & 0x01) // english
+ 424   1                      // convert to miles / hour
+ 425   1      //              speed = (u16) (tempfloat * (39.0/12.0/5280.0*60.0*60.0));
+ 426   1                      speed = (u16) (0.5 + (tempfloat * 2.21591));
+ 427   1              else // metric
+ 428   1                      // convert to km / hour
+ 429   1                      speed = (u16) (tempfloat * (3600.0 / 1000.0));
+ 430   1      
+ 431   1              sprintf(tempstring, "%3d", speed);
+ 432   1      
+ 433   1              // put speed on display
+ 434   1              Write_Big_Text(1, 92, tempstring, '-');
+ 435   1      
+ 436   1              // temperature
+ 437   1      //      temperature = dotemp(gps->temp, 'F');
+ 438   1      //      sprintf(textline, "%3.1f", temperature);
+ 439   1      
+ 440   1      } // writecompass
+ 441          
+ 442          #ifdef GMETER_ENABLED
+              // writes graph of g forces on screen
+              //
+              // these define must match up with the gmeter background screen
+              // text
+              #define LEFTCOL         1
+              #define LEFTROW         11
+              #define RIGHTCOL        98
+              #define RIGHTROW        11
+              #define BRAKECOL        29
+              #define BRAKEROW        0
+              #define ACCELCOL        69
+              #define ACCELROW        22
+              // graphs
+              #define LEFTSTART       54
+              #define LEFTEND         27
+              #define RIGHTSTART      67
+              #define RIGHTEND        94
+              #define BRAKESTART      15
+              #define BRAKEEND        1
+              #define ACCELSTART      17
+              #define ACCELEND        31
+              
+              void writegmeter (BOOL init, float xg, float yg) {
+                      static xdata float accel, brake, left, right;
+                      xdata float scale = 2.0;                // full scale deflection of graph
+                      xdata int g;
+                      xdata char tempstring[6];
+              
+                      if (init) {
+                              Reset_Top_Line();
+                              Write_Screen(gmeterbckgnd);
+                              accel = brake = left = right = 0.0;
+                      } // if
+                      else {
+                              if (xg < 0.0) {
+                                      accel = MIN(accel, xg);
+              
+                                      // scale the g's
+C51 COMPILER V9.51   FORMATGPS                                                             11/30/2014 18:01:39 PAGE 9   
+
+                                      g = (int) (-xg/scale * (float) (ACCELEND - ACCELSTART + 1));
+              
+                                      // draw the lower half
+                                      Draw_Rect(LEFTSTART+2, ACCELSTART, RIGHTSTART-2, ACCELSTART+g, '-');    // dark
+                                      Draw_Rect(LEFTSTART+2, ACCELSTART+g+1, RIGHTSTART-2, ACCELEND, '~');    // light
+                                      // clear the upper half
+                                      Draw_Rect(LEFTSTART+2, BRAKEEND, RIGHTSTART-2, BRAKESTART, '~');        // light
+              
+                                      // write the max accel numbers
+                                      g = (int) (ABS(accel) * 100);
+                                      // write the hundredths
+                                      Write_Icon(ACCELCOL+18, ACCELROW, 6, 10, &(meddigits[g%10][0][0]), '-');
+                                      g /= 10;
+                                      // write the tenths
+                                      Write_Icon(ACCELCOL+10, ACCELROW, 6, 10, &(meddigits[g%10][0][0]), '-');
+                                      g /= 10;
+                                      // write the integer
+                                      Write_Icon(ACCELCOL, ACCELROW, 6, 10, &(meddigits[g][0][0]), '-');
+                              } // if
+                              else {
+                                      brake = MAX(brake, xg);
+              
+                                      // scale the g's
+                                      g = (int) (xg/scale * (float) (BRAKESTART - BRAKEEND + 1));
+              
+                                      // draw the upper half
+                                      Draw_Rect(LEFTSTART+2, BRAKESTART-g, RIGHTSTART-2, BRAKESTART, '-');    // dark
+                                      Draw_Rect(LEFTSTART+2, BRAKEEND, RIGHTSTART-2, BRAKESTART-g-1, '~');    // light
+                                      // clear the lower half
+                                      Draw_Rect(LEFTSTART+2, ACCELSTART, RIGHTSTART-2, ACCELEND, '~');        // light
+              
+                                      // write the max brake numbers
+                                      g = (int) (ABS(brake) * 100);
+                                      // write the hundredths
+                                      Write_Icon(BRAKECOL+18, BRAKEROW, 6, 10, &(meddigits[g%10][0][0]), '-');
+                                      g /= 10;
+                                      // write the tenths
+                                      Write_Icon(BRAKECOL+10, BRAKEROW, 6, 10, &(meddigits[g%10][0][0]), '-');
+                                      g /= 10;
+                                      // write the integer
+                                      Write_Icon(BRAKECOL, BRAKEROW, 6, 10, &(meddigits[g][0][0]), '-');
+              
+                              } // else
+                              if (yg < 0.0) {
+                                      left = MIN(left, yg);
+              
+                                      // scale the g's
+                                      g = (int) (-yg/scale * (float) (LEFTSTART - LEFTEND + 1));
+              
+                                      // draw the left half
+                                      Draw_Rect(LEFTSTART-g, BRAKESTART-3, LEFTSTART, ACCELSTART+2, '-');     // dark
+                                      Draw_Rect(LEFTEND, BRAKESTART-3, LEFTSTART-g-1, ACCELSTART+2, '~');     // light
+                                      // clear the right half
+                                      Draw_Rect(RIGHTSTART, BRAKESTART-3, RIGHTEND, ACCELSTART+2, '~');       // light
+              
+                                      // write the max left numbers
+                                      // write the integer
+                                      Write_Icon(LEFTCOL, LEFTROW, 6, 10, &(meddigits[(int) left][0][0]), '-');
+                                      // write the fraction
+                                      sprintf(tempstring, "%02f", -left - floor(-left));
+                                      Write_Med_Text((u08) (LEFTCOL+10), (u08) LEFTROW, tempstring, '-');
+                              } // if
+C51 COMPILER V9.51   FORMATGPS                                                             11/30/2014 18:01:39 PAGE 10  
+
+                              else {
+                                      right = MAX(right, yg);
+              
+                                      // scale the g's
+                                      g = (int) (yg/scale * (float) (RIGHTEND - RIGHTSTART + 1));
+              
+                                      // draw the right half
+                                      Draw_Rect(RIGHTSTART, BRAKESTART-3, RIGHTSTART+g, ACCELSTART+2, '-');   // dark
+                                      Draw_Rect(RIGHTSTART+g+1, BRAKESTART-3, RIGHTEND, ACCELSTART+2, '~');   // light
+                                      // clear the left half
+                                      Draw_Rect(LEFTEND, BRAKESTART-3, LEFTSTART, ACCELSTART+2, '~'); // light
+              
+                                      // write the max right numbers
+                                      // write the integer
+                                      Write_Icon(RIGHTCOL, RIGHTROW, 6, 10, &(meddigits[(int) right][0][0]), '-');
+                                      // write the fraction
+                                      sprintf(tempstring, "%02f", right - floor(right));
+                                      Write_Med_Text((u08) (RIGHTCOL+10), (u08) RIGHTROW, tempstring, '-');
+                              } // else
+                      } // else
+              } // writegmeter
+              #endif
+ 565          
+ 566          // time and weeks are gps format
+ 567          // textline is a buffer large enough to hold the expected formatted string
+ 568          //
+ 569          void formattime (u32 time, u16 weeks, timeforms whattodo, char *textline) {
+ 570   1              xdata int day, mon, dow;
+ 571   1              xdata int year, days;
+ 572   1              xdata int hour, min, sec;
+ 573   1              xdata u32 secs;
+ 574   1      
+ 575   1      #define MAXTIME         (7L*24L*60L*60L*1000L)          // 604,800,000 maximum time value
+ 576   1      
+ 577   1              if (0 == weeks)         // bad GPS time
+ 578   1                      day = mon = year = hour = min = sec = 0;
+ 579   1              else {
+ 580   2                      // if timecode is programmed, use it
+ 581   2                      if (0xFF != (u08) scratch.calibrate.timecode) {
+ 582   3                              s32 newtime;
+ 583   3      
+ 584   3                              // add on offset in milliseconds
+ 585   3                              newtime = (s32) time +
+ 586   3                                              ((s32) scratch.calibrate.timecode * (60L * 60L * 1000L));
+ 587   3      
+ 588   3                              // handle week boundaries
+ 589   3                              if (newtime < 0) {              // moved into last week
+ 590   4                                      weeks--;
+ 591   4                                      newtime += MAXTIME;
+ 592   4                              }
+ 593   3                              else if (newtime > MAXTIME) { // moved into next week
+ 594   4                                      weeks++;
+ 595   4                                      newtime -= MAXTIME;
+ 596   4                              }
+ 597   3                              time = (u32) newtime;
+ 598   3                      } // if
+ 599   2              
+ 600   2                      // get seconds since Sunday midnight
+ 601   2                      secs = time / 1000;
+ 602   2                      dow = (secs / 60 / 60 / 24);
+ 603   2                      hour = (secs / 3600) % 24;
+ 604   2                      min = (secs / 60) % 60;
+C51 COMPILER V9.51   FORMATGPS                                                             11/30/2014 18:01:39 PAGE 11  
+
+ 605   2                      sec = secs % 60;
+ 606   2      
+ 607   2                      // 8030 = number days from GPS start Jan 6, 1980 to Jan 1, 2002
+ 608   2                      days = (weeks * 7) + dow - 8030; // days since Jan 1, 2002
+ 609   2      
+ 610   2                      dodate (&day, &mon, &year, days);
+ 611   2              } // else
+ 612   1      
+ 613   1              switch (whattodo) {
+ 614   2                      case SHORTDANDT:
+ 615   2                              // date
+ 616   2                              sprintf(textline, "%02d/%02d", mon, day);
+ 617   2                              // time
+ 618   2                              sprintf(textline + strlen(textline), " %02d:%02d:%02d", hour, min, sec);
+ 619   2                              break;
+ 620   2                      case LONGDANDT:
+ 621   2                              // date
+ 622   2                              sprintf(textline, "%04d-%02d-%02d", year, mon, day);
+ 623   2                              // time
+ 624   2                              sprintf(textline + strlen(textline), " %02d:%02d:%02d", hour, min, sec);
+ 625   2                              break;
+ 626   2                      case SHORTTIME:
+ 627   2                              // time
+ 628   2                              sprintf(textline, "%02d:%02d", hour, min);
+ 629   2                              break;
+ 630   2              } // switch
+ 631   1      } // formattime
+ 632          
+ 633          // returns C or F calculated degrees from recorded value
+ 634          float dotemp(s08 scaledtemp, char corf) {
+ 635   1              xdata float temperature;
+ 636   1      
+ 637   1              temperature = (float) scaledtemp;
+ 638   1              if (corf == 'F' || corf == 'f')
+ 639   1                      temperature = temperature / 2.0 * 9.0 / 5.0 + 32.0;     // in fahrenheit
+ 640   1              else
+ 641   1                      temperature = temperature / 2.0;        // in celcius
+ 642   1              
+ 643   1              return (temperature);
+ 644   1      }
+ 645          
+ 646          // day 1 = Jan 1, 2002
+ 647          // returns day of month, month (jan = 1), and year
+ 648          
+ 649          void dodate(int *day, int *mon, int *year, int days) {
+ 650   1      
+ 651   1              xdata u08 calendar[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+ 652   1      
+ 653   1              *year = 2002;   
+ 654   1              while (days > 365 ) {
+ 655   2                      // fix leap year
+ 656   2                      if (!(*year%4) && days == 366) break;
+ 657   2                      days -= ((*year % 4)? 365 : 366);
+ 658   2                      ++*year;
+ 659   2              }
+ 660   1      
+ 661   1              if (!(*year%4)) calendar[1] = 29;               // fix leap year
+ 662   1      
+ 663   1              *mon = 0;
+ 664   1              while (days > calendar[*mon]) {
+ 665   2                      days -= calendar[*mon];
+ 666   2                      ++*mon;
+C51 COMPILER V9.51   FORMATGPS                                                             11/30/2014 18:01:39 PAGE 12  
+
+ 667   2              }
+ 668   1              ++*mon;
+ 669   1      
+ 670   1              *day = days;
+ 671   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   4241    ----
+   CONSTANT SIZE    =    249    ----
+   XDATA SIZE       =   ----     159
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      76
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  1 WARNING(S),  0 ERROR(S)

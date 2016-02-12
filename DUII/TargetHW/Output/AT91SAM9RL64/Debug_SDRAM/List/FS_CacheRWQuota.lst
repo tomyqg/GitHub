@@ -1,0 +1,1351 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     14/Jul/2015  19:00:14 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\FS_CacheRWQuota.c                    #
+#    Command line =  C:\DUII\TargetHW\FS\FS_CacheRWQuota.c -D DEBUG=1 -D      #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\FS #
+#                    _CacheRWQuota.lst                                        #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\FS_ #
+#                    CacheRWQuota.o                                           #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\FS_CacheRWQuota.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : FS_CacheRWQuota.c
+     19          Purpose     : Logical Block Layer, Cache module
+     20                        Cache Strategy:
+     21                          Read / write cache, caching all sectors equally.
+     22                        Limitations:
+     23                          None.
+     24                          This cache module can be used on any device with any
+     25                          file system.
+     26          ---------------------------END-OF-HEADER------------------------------
+     27          */
+     28          
+     29          /*********************************************************************
+     30          *
+     31          *       #include Section
+     32          *
+     33          **********************************************************************
+     34          */
+     35          
+     36          #include "FS_ConfDefaults.h"        /* FS Configuration */
+     37          #include "FS_Int.h"
+     38          
+     39          #if FS_SUPPORT_CACHE
+     40          
+     41          /*********************************************************************
+     42          *
+     43          *       Defines, configurable
+     44          *
+     45          **********************************************************************
+     46          */
+     47          
+     48          /*********************************************************************
+     49          *
+     50          *       Defines, fixed
+     51          *
+     52          **********************************************************************
+     53          */
+     54          
+     55          #define SECTOR_INDEX_INVALID   0xFFFFFFFFUL
+     56          
+     57          #if FS_DEBUG_LEVEL >= FS_DEBUG_LEVEL_LOG_ALL
+     58          
+     59          #define TYPE2NAME(Type)        _aDesc[Type].s
+     60          
+     61          typedef struct {
+     62            int Type;
+     63            const char *s;
+     64          } TYPE_DESC;
+     65          
+     66          static const TYPE_DESC _aDesc[] = {
+     67            { FS_SECTOR_TYPE_DATA, "DATA" },
+     68            { FS_SECTOR_TYPE_DIR,  "DIR " },
+     69            { FS_SECTOR_TYPE_MAN,  "MAN " },
+     70          };
+     71          #endif
+     72          
+     73          
+     74          /*********************************************************************
+     75          *
+     76          *       Types
+     77          *
+     78          **********************************************************************
+     79          */
+     80          
+     81          /* Block info. One instance per block.
+     82             Every cache block can cache a single sector.
+     83             It starts with CACHE_BLOCK_INFO_RW_QUOTA, followed by the cached data. */
+     84          typedef struct {
+     85            U32     SectorNo;
+     86            unsigned   IsDirty;
+     87          } CACHE_BLOCK_INFO_RW_QUOTA;
+     88          
+     89          /* Cache data. Once instance per cache.
+     90             Size needs to be a multiple of 4 */
+     91          typedef struct {
+     92            U32        NumSectors;
+     93            U32        SectorSize;
+     94            U8         aCacheMode[FS_SECTOR_TYPE_COUNT];
+     95            U32        aNumSectorsReq[FS_SECTOR_TYPE_COUNT];
+     96            U32        aNumSectorsAct[FS_SECTOR_TYPE_COUNT];
+     97            U32        aHashStart[FS_SECTOR_TYPE_COUNT];
+     98            U32        NumBytesCache;
+     99          } CACHE_DATA_RW_QUOTA;
+    100          
+    101          /*********************************************************************
+    102          *
+    103          *       Static code
+    104          *
+    105          **********************************************************************
+    106          */
+    107          
+    108          /*********************************************************************
+    109          *
+    110          *       _GetHashCode
+    111          *
+    112          *  Description:
+    113          *    Calculates hashcode, based on sector number and type
+    114          *
+    115          *  Return value
+    116          *    0xFFFFFFFF    no hashcodes (invalid, because this type is not cached)
+    117          *    else          hashcode
+    118          */
+    119          static U32 _GetHashCode(CACHE_DATA_RW_QUOTA * pCacheData, U32 SectorNo, U8 SectorType) {
+    120            U32 NumSectors;
+    121            NumSectors = pCacheData->aNumSectorsAct[SectorType];
+    122            if (NumSectors == 0) {
+    123              return 0xFFFFFFFFUL;
+    124            }
+    125            return (SectorNo % NumSectors) + pCacheData->aHashStart[SectorType];
+    126          }
+    127          
+    128          
+    129          /*********************************************************************
+    130          *
+    131          *       _InvalidateCache
+    132          *
+    133          *  Description:
+    134          *    Invalidates all data in cache
+    135          *
+    136          *  Notes
+    137          *    (1)   The cache needs to be clean; it may not contain dirty sectors
+    138          */
+    139          static void _InvalidateCache(CACHE_DATA_RW_QUOTA * pCacheData) {
+    140            U32             i;
+    141            U32             NumSectors;
+    142            CACHE_BLOCK_INFO_RW_QUOTA * pBlockInfo;
+    143            U32             SectorSize;
+    144          
+    145            NumSectors = pCacheData->NumSectors;
+    146            SectorSize = pCacheData->SectorSize;
+    147            pBlockInfo = (CACHE_BLOCK_INFO_RW_QUOTA *)(pCacheData + 1);
+    148            /* Init Cache entries */
+    149            for (i = 0; i < NumSectors; i++) {
+    150              pBlockInfo->SectorNo = SECTOR_INDEX_INVALID;
+    151              pBlockInfo->IsDirty  = 0;
+    152              pBlockInfo = (CACHE_BLOCK_INFO_RW_QUOTA*)(((U8*)(pBlockInfo + 1)) + SectorSize);
+    153            }
+    154          }
+    155          
+    156          
+    157          /*********************************************************************
+    158          *
+    159          *       _ComputeNumSectors
+    160          *
+    161          */
+    162          static U32 _ComputeNumSectors(FS_DEVICE * pDevice, CACHE_DATA_RW_QUOTA * pCacheData) {
+    163            U32 NumSectors;
+    164            U16 SectorSize;
+    165            U32 NumBytes;
+    166          
+    167            if (pCacheData->SectorSize) {
+    168              return pCacheData->NumSectors;
+    169            }
+    170            NumBytes   = pCacheData->NumBytesCache;
+    171            SectorSize = FS_GetSectorSize(pDevice);
+    172            if ((SectorSize == 0) || (NumBytes < sizeof(CACHE_DATA_RW_QUOTA))) {
+    173              return 0;
+    174            }
+    175            /* Compute number of sectors in cache */
+    176            NumSectors = (NumBytes - sizeof(CACHE_DATA_RW_QUOTA)) / (sizeof(CACHE_BLOCK_INFO_RW_QUOTA) + SectorSize);
+    177            if (NumSectors > 0) {
+    178              pCacheData->NumSectors    = NumSectors;
+    179              pCacheData->SectorSize    = SectorSize;
+    180              _InvalidateCache(pCacheData);
+    181            }
+    182            return NumSectors;
+    183          }
+    184          
+    185          
+    186          /*********************************************************************
+    187          *
+    188          *       _CacheRWQuota_ReadFromCache
+    189          *
+    190          *  Description:
+    191          *    Read sector from cache if possible
+    192          */
+    193          static void _UpdateHashAreas(CACHE_DATA_RW_QUOTA * pCacheData) {
+    194            U32 SectorPos;
+    195            U32 SectorPosNext;
+    196            U32 ReqSize;
+    197            int    i;
+    198          
+    199            SectorPos = 0;
+    200            for (i = 0; i < FS_SECTOR_TYPE_COUNT; i++) {
+    201              pCacheData->aHashStart[i] = SectorPos;
+    202              ReqSize = pCacheData->aNumSectorsReq[i];
+    203              if (i == FS_SECTOR_TYPE_COUNT - 1) {
+    204                ReqSize = 0xFFFF;                      /* For last type, use the rest of the avail. memory */
+    205              }
+    206              SectorPosNext = SectorPos + ReqSize;
+    207              if (SectorPosNext > pCacheData->NumSectors) {
+    208                SectorPosNext = pCacheData->NumSectors;
+    209              }
+    210              pCacheData->aNumSectorsAct[i] = SectorPosNext - SectorPos;
+    211              SectorPos = SectorPosNext;
+    212            }
+    213          }
+    214          
+    215          
+    216          
+    217          /*********************************************************************
+    218          *
+    219          *       Static code (callbacks)
+    220          *
+    221          **********************************************************************
+    222          */
+    223          
+    224          /*********************************************************************
+    225          *
+    226          *       _CacheRWQuota_ReadFromCache
+    227          *
+    228          *  Description:
+    229          *    Read sector from cache if possible
+    230          *
+    231          *  Return value
+    232          *    1    Sector not found
+    233          *    0    Sector found
+    234          */
+
+   \                                 In section .text, align 4, keep-with-next
+    235          static char _CacheRWQuota_ReadFromCache(FS_DEVICE * pDevice, U32 SectorNo,       void * pData, U8 SectorType) {
+   \                     _CacheRWQuota_ReadFromCache:
+   \   00000000   F0432DE9           PUSH     {R4-R9,LR}
+    236            U32             Off;
+    237            CACHE_DATA_RW_QUOTA       * pCacheData;
+    238            CACHE_BLOCK_INFO_RW_QUOTA * pBlockInfo;
+    239            U32             SectorSize;
+    240            U32             HashCode;
+    241          
+    242            FS_USE_PARA(SectorType);
+    243            pCacheData  = (CACHE_DATA_RW_QUOTA *)pDevice->Data.pCacheData;
+   \   00000004   0C7090E5           LDR      R7,[R0, #+12]
+   \   00000008   0140A0E1           MOV      R4,R1
+    244            if (_ComputeNumSectors(pDevice, pCacheData) == 0) {
+   \   0000000C   041097E5           LDR      R1,[R7, #+4]
+   \   00000010   04D04DE2           SUB      SP,SP,#+4
+   \   00000014   000051E3           CMP      R1,#+0
+   \   00000018   0250A0E1           MOV      R5,R2
+   \   0000001C   0360A0E1           MOV      R6,R3
+   \   00000020   00009715           LDRNE    R0,[R7, #+0]
+   \   00000024   1800001A           BNE      ??_CacheRWQuota_ReadFromCache_0
+   \   00000028   308097E5           LDR      R8,[R7, #+48]
+   \   0000002C   ........           BL       FS_GetSectorSize
+   \   00000030   0090B0E1           MOVS     R9,R0
+   \   00000034   2E00000A           BEQ      ??_CacheRWQuota_ReadFromCache_1
+   \   00000038   340058E3           CMP      R8,#+52
+   \   0000003C   2C00003A           BCC      ??_CacheRWQuota_ReadFromCache_1
+   \   00000040   340048E2           SUB      R0,R8,#+52
+   \   00000044   081089E2           ADD      R1,R9,#+8
+   \   00000048   ........           BL       __aeabi_uidiv
+   \   0000004C   000050E3           CMP      R0,#+0
+   \   00000050   0D00000A           BEQ      ??_CacheRWQuota_ReadFromCache_0
+   \   00000054   000087E5           STR      R0,[R7, #+0]
+   \   00000058   049087E5           STR      R9,[R7, #+4]
+   \   0000005C   001097E5           LDR      R1,[R7, #+0]
+   \   00000060   343087E2           ADD      R3,R7,#+52
+   \   00000064   000051E3           CMP      R1,#+0
+   \   00000068   0700000A           BEQ      ??_CacheRWQuota_ReadFromCache_0
+   \   0000006C   00C0E0E3           MVN      R12,#+0
+   \                     ??_CacheRWQuota_ReadFromCache_2:
+   \   00000070   00C083E5           STR      R12,[R3, #+0]
+   \   00000074   00E0A0E3           MOV      LR,#+0
+   \   00000078   04E083E5           STR      LR,[R3, #+4]
+   \   0000007C   033089E0           ADD      R3,R9,R3
+   \   00000080   083083E2           ADD      R3,R3,#+8
+   \   00000084   011051E2           SUBS     R1,R1,#+1
+   \   00000088   F8FFFF1A           BNE      ??_CacheRWQuota_ReadFromCache_2
+   \                     ??_CacheRWQuota_ReadFromCache_0:
+   \   0000008C   000050E3           CMP      R0,#+0
+   \   00000090   1700000A           BEQ      ??_CacheRWQuota_ReadFromCache_1
+    245              return 1;                          /* Device is not available */
+    246            }
+    247            SectorSize  = pCacheData->SectorSize;
+   \   00000094   066187E0           ADD      R6,R7,R6, LSL #+2
+   \   00000098   181096E5           LDR      R1,[R6, #+24]
+   \   0000009C   048097E5           LDR      R8,[R7, #+4]
+    248            HashCode    = _GetHashCode(pCacheData, SectorNo, SectorType);
+   \   000000A0   000051E3           CMP      R1,#+0
+   \   000000A4   0400000A           BEQ      ??_CacheRWQuota_ReadFromCache_3
+   \   000000A8   0400A0E1           MOV      R0,R4
+   \   000000AC   ........           BL       __aeabi_uidivmod
+   \   000000B0   240096E5           LDR      R0,[R6, #+36]
+   \   000000B4   010080E0           ADD      R0,R0,R1
+   \   000000B8   000000EA           B        ??_CacheRWQuota_ReadFromCache_4
+   \                     ??_CacheRWQuota_ReadFromCache_3:
+   \   000000BC   0000E0E3           MVN      R0,#+0
+    249            if (HashCode == 0xFFFFFFFFUL) {
+   \                     ??_CacheRWQuota_ReadFromCache_4:
+   \   000000C0   010070E3           CMN      R0,#+1
+   \   000000C4   0A00000A           BEQ      ??_CacheRWQuota_ReadFromCache_1
+    250              return 1;                         /* Sector not found */
+    251            }
+    252            Off         = HashCode * (sizeof(CACHE_BLOCK_INFO_RW_QUOTA) + SectorSize);
+    253            pBlockInfo  = (CACHE_BLOCK_INFO_RW_QUOTA *) (((U8 *)(pCacheData + 1)) + Off);
+   \   000000C8   081088E2           ADD      R1,R8,#+8
+   \   000000CC   917020E0           MLA      R0,R1,R0,R7
+    254            if (pBlockInfo->SectorNo == SectorNo) {
+   \   000000D0   3410B0E5           LDR      R1,[R0, #+52]!
+   \   000000D4   040051E1           CMP      R1,R4
+   \   000000D8   0500001A           BNE      ??_CacheRWQuota_ReadFromCache_1
+    255              FS_MEMCPY(pData, pBlockInfo + 1, SectorSize);
+   \   000000DC   081080E2           ADD      R1,R0,#+8
+   \   000000E0   0820A0E1           MOV      R2,R8
+   \   000000E4   0500A0E1           MOV      R0,R5
+   \   000000E8   ........           BL       FS_memcpy
+    256              return 0;                         /* Sector found */
+   \   000000EC   0000A0E3           MOV      R0,#+0
+   \   000000F0   000000EA           B        ??_CacheRWQuota_ReadFromCache_5
+    257            }
+    258            return 1;                         /* Sector not found */
+   \                     ??_CacheRWQuota_ReadFromCache_1:
+   \   000000F4   0100A0E3           MOV      R0,#+1
+   \                     ??_CacheRWQuota_ReadFromCache_5:
+   \   000000F8   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   000000FC   F083BDE8           POP      {R4-R9,PC}       ;; return
+    259          }
+    260          
+    261          /*********************************************************************
+    262          *
+    263          *       _WriteIntoCache
+    264          *
+    265          *  Description:
+    266          *    Writes a sector in cache.
+    267          */
+    268          static void _WriteIntoCache(CACHE_BLOCK_INFO_RW_QUOTA  * pBlockInfo, U32 SectorNo, const void * pData, U32 SectorSize) {
+    269            pBlockInfo->SectorNo = SectorNo;
+    270            FS_MEMCPY(pBlockInfo + 1, pData, SectorSize);
+    271          }
+    272          
+    273          /*********************************************************************
+    274          *
+    275          *       _RemoveFromCache
+    276          *
+    277          *  Description:
+    278          *    Make sure that this sector is not in cache.
+    279          *    This functions does not write dirty data; even dirty entries can be removed
+    280          *
+    281          *  Notes
+    282          *    (1) What for ?
+    283          *        This can be useful (and import as well to maintain cache coherency).
+    284          *        The function is called whenever clusters (data or directory) are freed.
+    285          */
+    286          static void _RemoveFromCache(FS_DEVICE * pDevice, U32 FirstSector, U32 NumSectors) {
+    287            U32 HashCode;
+    288            CACHE_BLOCK_INFO_RW_QUOTA * pBlockInfo;
+    289            CACHE_DATA_RW_QUOTA       * pCacheData;
+    290            U32             Off;
+    291            U32             SectorNo;
+    292            U32             NumSectorsInCache;
+    293            U32             HashOff;
+    294            U32             HashBase;
+    295            U32             iType;
+    296            U32             iSector;
+    297          
+    298            pCacheData    = (CACHE_DATA_RW_QUOTA *)pDevice->Data.pCacheData;
+    299            //
+    300            // Iterate over types
+    301            //
+    302            for (iType = 0; iType < 2; iType++) {     // Only data and dir caches
+    303              NumSectorsInCache = pCacheData->aNumSectorsAct[iType];
+    304              if (NumSectorsInCache) {
+    305                HashOff  = pCacheData->aHashStart[iType];
+    306                HashBase = FirstSector % NumSectorsInCache;
+    307                for (iSector = 0; iSector < NumSectors; iSector++) {
+    308                  SectorNo = FirstSector + iSector;
+    309                  HashCode = HashBase + HashOff;
+    310                  if (++HashBase == NumSectorsInCache) {
+    311                    HashBase = 0;
+    312                  }
+    313                  Off = HashCode * (sizeof(CACHE_BLOCK_INFO_RW_QUOTA) + pCacheData->SectorSize);
+    314                  pBlockInfo = (CACHE_BLOCK_INFO_RW_QUOTA *)((U8 *)(pCacheData + 1) + Off);
+    315                  if (pBlockInfo->SectorNo == SectorNo) {
+    316                    FS_DEBUG_LOG((FS_MTYPE_CACHE, "Removing sector 0x%8x from data cache. Device: %s:%d", pBlockInfo->SectorNo, pDevice->pType->pfGetName(pDevice->Data.Unit), pDevice->Data.Unit));
+    317                    pBlockInfo->SectorNo = SECTOR_INDEX_INVALID;
+    318                    pBlockInfo->IsDirty = 0;
+    319                  }
+    320                }
+    321              }
+    322            }
+    323          }
+    324          
+    325          /*********************************************************************
+    326          *
+    327          *       _CacheRWQuota_UpdateCache
+    328          *
+    329          *  Description:
+    330          *    Updates a sector in cache.
+    331          *    Called after a READ operation to update the cache.
+    332          *    This means that the sector can not be in the cache.
+    333          *
+    334          *  Return value
+    335          *    0    Not in write cache, the physical write operation still needs to be performed (Since this cache is a pure read-cache).
+    336          */
+
+   \                                 In section .text, align 4, keep-with-next
+    337          static char _CacheRWQuota_UpdateCache(FS_DEVICE * pDevice, U32 SectorNo, const void * pData, U8 SectorType) {
+   \                     _CacheRWQuota_UpdateCache:
+   \   00000000   F0472DE9           PUSH     {R4-R10,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    338            U32             Off;
+    339            CACHE_DATA_RW_QUOTA       * pCacheData;
+    340            CACHE_BLOCK_INFO_RW_QUOTA * pBlockInfo;
+    341            U32             SectorSize;
+    342            int                CacheMode;
+    343          
+    344            pCacheData  = (CACHE_DATA_RW_QUOTA *)pDevice->Data.pCacheData;
+   \   00000008   0C7094E5           LDR      R7,[R4, #+12]
+   \   0000000C   08D04DE2           SUB      SP,SP,#+8
+    345            if (_ComputeNumSectors(pDevice, pCacheData) == 0) {
+   \   00000010   040097E5           LDR      R0,[R7, #+4]
+   \   00000014   0150A0E1           MOV      R5,R1
+   \   00000018   000050E3           CMP      R0,#+0
+   \   0000001C   0260A0E1           MOV      R6,R2
+   \   00000020   0380A0E1           MOV      R8,R3
+   \   00000024   00009715           LDRNE    R0,[R7, #+0]
+   \   00000028   1900001A           BNE      ??_CacheRWQuota_UpdateCache_0
+   \   0000002C   309097E5           LDR      R9,[R7, #+48]
+   \   00000030   0400A0E1           MOV      R0,R4
+   \   00000034   ........           BL       FS_GetSectorSize
+   \   00000038   00A0B0E1           MOVS     R10,R0
+   \   0000003C   1600000A           BEQ      ??_CacheRWQuota_UpdateCache_1
+   \   00000040   340059E3           CMP      R9,#+52
+   \   00000044   1400003A           BCC      ??_CacheRWQuota_UpdateCache_1
+   \   00000048   340049E2           SUB      R0,R9,#+52
+   \   0000004C   08108AE2           ADD      R1,R10,#+8
+   \   00000050   ........           BL       __aeabi_uidiv
+   \   00000054   000050E3           CMP      R0,#+0
+   \   00000058   0D00000A           BEQ      ??_CacheRWQuota_UpdateCache_0
+   \   0000005C   000087E5           STR      R0,[R7, #+0]
+   \   00000060   04A087E5           STR      R10,[R7, #+4]
+   \   00000064   001097E5           LDR      R1,[R7, #+0]
+   \   00000068   343087E2           ADD      R3,R7,#+52
+   \   0000006C   000051E3           CMP      R1,#+0
+   \   00000070   0700000A           BEQ      ??_CacheRWQuota_UpdateCache_0
+   \   00000074   00C0E0E3           MVN      R12,#+0
+   \                     ??_CacheRWQuota_UpdateCache_2:
+   \   00000078   00C083E5           STR      R12,[R3, #+0]
+   \   0000007C   00E0A0E3           MOV      LR,#+0
+   \   00000080   04E083E5           STR      LR,[R3, #+4]
+   \   00000084   03308AE0           ADD      R3,R10,R3
+   \   00000088   083083E2           ADD      R3,R3,#+8
+   \   0000008C   011051E2           SUBS     R1,R1,#+1
+   \   00000090   F8FFFF1A           BNE      ??_CacheRWQuota_UpdateCache_2
+   \                     ??_CacheRWQuota_UpdateCache_0:
+   \   00000094   000050E3           CMP      R0,#+0
+   \   00000098   0200001A           BNE      ??_CacheRWQuota_UpdateCache_3
+    346              return 0;                          /* Device is not available */
+   \                     ??_CacheRWQuota_UpdateCache_1:
+   \   0000009C   0000A0E3           MOV      R0,#+0
+   \   000000A0   08D08DE2           ADD      SP,SP,#+8
+   \   000000A4   F087BDE8           POP      {R4-R10,PC}      ;; return
+    347            }
+    348            CacheMode   = pCacheData->aCacheMode[SectorType];
+    349            if (CacheMode & FS_CACHE_MODE_R) {           /* Read cache is on for this type of sector */
+   \                     ??_CacheRWQuota_UpdateCache_3:
+   \   000000A8   070088E0           ADD      R0,R8,R7
+   \   000000AC   0800D0E5           LDRB     R0,[R0, #+8]
+   \   000000B0   010010E3           TST      R0,#0x1
+   \   000000B4   F8FFFF0A           BEQ      ??_CacheRWQuota_UpdateCache_1
+    350              U32             HashCode;
+    351          
+    352              SectorSize  = pCacheData->SectorSize;
+    353              HashCode    = _GetHashCode(pCacheData, SectorNo, SectorType);
+   \   000000B8   088187E0           ADD      R8,R7,R8, LSL #+2
+   \   000000BC   181098E5           LDR      R1,[R8, #+24]
+   \   000000C0   049097E5           LDR      R9,[R7, #+4]
+   \   000000C4   000051E3           CMP      R1,#+0
+   \   000000C8   0400000A           BEQ      ??_CacheRWQuota_UpdateCache_4
+   \   000000CC   0500A0E1           MOV      R0,R5
+   \   000000D0   ........           BL       __aeabi_uidivmod
+   \   000000D4   240098E5           LDR      R0,[R8, #+36]
+   \   000000D8   010080E0           ADD      R0,R0,R1
+   \   000000DC   000000EA           B        ??_CacheRWQuota_UpdateCache_5
+   \                     ??_CacheRWQuota_UpdateCache_4:
+   \   000000E0   0000E0E3           MVN      R0,#+0
+    354              if (HashCode == 0xFFFFFFFFUL) {
+   \                     ??_CacheRWQuota_UpdateCache_5:
+   \   000000E4   010070E3           CMN      R0,#+1
+   \   000000E8   EBFFFF0A           BEQ      ??_CacheRWQuota_UpdateCache_1
+    355                return 0;                         /* Sector not found */
+    356              }
+    357              Off         = HashCode * (sizeof(CACHE_BLOCK_INFO_RW_QUOTA) + SectorSize);
+    358              pBlockInfo  = (CACHE_BLOCK_INFO_RW_QUOTA *) (((U8 *)(pCacheData + 1)) + Off);
+   \   000000EC   081089E2           ADD      R1,R9,#+8
+   \   000000F0   917020E0           MLA      R0,R1,R0,R7
+   \   000000F4   347080E2           ADD      R7,R0,#+52
+    359              /* If we replace an other, dirty sector, we need to write it out */
+    360              if ((pBlockInfo->SectorNo != SectorNo) && (pBlockInfo->IsDirty)) {
+   \   000000F8   001097E5           LDR      R1,[R7, #+0]
+   \   000000FC   050051E1           CMP      R1,R5
+   \   00000100   04009715           LDRNE    R0,[R7, #+4]
+   \   00000104   00005013           CMPNE    R0,#+0
+   \   00000108   0700000A           BEQ      ??_CacheRWQuota_UpdateCache_6
+    361                if ((pDevice->pType->pfWrite)(pDevice->Data.Unit, pBlockInfo->SectorNo, pBlockInfo + 1, 1, 0)) {
+   \   0000010C   0000A0E3           MOV      R0,#+0
+   \   00000110   00008DE5           STR      R0,[SP, #+0]
+   \   00000114   00C094E5           LDR      R12,[R4, #+0]
+   \   00000118   0130A0E3           MOV      R3,#+1
+   \   0000011C   082087E2           ADD      R2,R7,#+8
+   \   00000120   0400D4E5           LDRB     R0,[R4, #+4]
+   \   00000124   0CC09CE5           LDR      R12,[R12, #+12]
+   \   00000128   3CFF2FE1           BLX      R12
+    362                  FS_DEBUG_ERROROUT((FS_MTYPE_CACHE, "Failure when cleaning cache"));   /* FATAL error ! */
+    363                }
+    364                FS_DEBUG_LOG((FS_MTYPE_CACHE, "Cleaning %s:%d: Sector: 0x%8x (%s)", pDevice->pType->pfGetName(pDevice->Data.Unit), pDevice->Data.Unit, pBlockInfo->SectorNo, TYPE2NAME(SectorType)));
+    365              }
+    366              _WriteIntoCache(pBlockInfo, SectorNo, pData, SectorSize);
+   \                     ??_CacheRWQuota_UpdateCache_6:
+   \   0000012C   005087E5           STR      R5,[R7, #+0]
+   \   00000130   0920A0E1           MOV      R2,R9
+   \   00000134   0610A0E1           MOV      R1,R6
+   \   00000138   080087E2           ADD      R0,R7,#+8
+   \   0000013C   ........           BL       FS_memcpy
+    367              pBlockInfo->IsDirty = 0;
+   \   00000140   0000A0E3           MOV      R0,#+0
+   \   00000144   040087E5           STR      R0,[R7, #+4]
+   \   00000148   D3FFFFEA           B        ??_CacheRWQuota_UpdateCache_1
+    368            }
+    369            return 0;
+    370          }
+    371          
+    372          
+    373          /*********************************************************************
+    374          *
+    375          *       _CacheRWQuota_WriteCache
+    376          *
+    377          *  Description:
+    378          *    Writes a sector into cache.
+    379          *
+    380          *  Return value
+    381          *    0    Not  in write cache, the physical write operation still needs to be performed.
+    382          *    1    Data in write cache, the physical write operation does not need to be performed.
+    383          */
+
+   \                                 In section .text, align 4, keep-with-next
+    384          static char _CacheRWQuota_WriteCache(FS_DEVICE * pDevice, U32 SectorNo, const void * pData, U8 SectorType) {
+   \                     _CacheRWQuota_WriteCache:
+   \   00000000   F0472DE9           PUSH     {R4-R10,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    385            U32             Off;
+    386            CACHE_DATA_RW_QUOTA       * pCacheData;
+    387            CACHE_BLOCK_INFO_RW_QUOTA * pBlockInfo;
+    388            U32             SectorSize;
+    389            U32             HashCode;
+    390            int                CacheMode;
+    391            char               WriteRequired;
+    392          
+    393            pCacheData    = (CACHE_DATA_RW_QUOTA *)pDevice->Data.pCacheData;
+   \   00000008   0C9094E5           LDR      R9,[R4, #+12]
+   \   0000000C   08D04DE2           SUB      SP,SP,#+8
+    394            if (_ComputeNumSectors(pDevice, pCacheData) == 0) {
+   \   00000010   040099E5           LDR      R0,[R9, #+4]
+   \   00000014   0150A0E1           MOV      R5,R1
+   \   00000018   000050E3           CMP      R0,#+0
+   \   0000001C   0260A0E1           MOV      R6,R2
+   \   00000020   03A0A0E1           MOV      R10,R3
+   \   00000024   00009915           LDRNE    R0,[R9, #+0]
+   \   00000028   1900001A           BNE      ??_CacheRWQuota_WriteCache_0
+   \   0000002C   307099E5           LDR      R7,[R9, #+48]
+   \   00000030   0400A0E1           MOV      R0,R4
+   \   00000034   ........           BL       FS_GetSectorSize
+   \   00000038   0080B0E1           MOVS     R8,R0
+   \   0000003C   4800000A           BEQ      ??_CacheRWQuota_WriteCache_1
+   \   00000040   340057E3           CMP      R7,#+52
+   \   00000044   4600003A           BCC      ??_CacheRWQuota_WriteCache_1
+   \   00000048   340047E2           SUB      R0,R7,#+52
+   \   0000004C   081088E2           ADD      R1,R8,#+8
+   \   00000050   ........           BL       __aeabi_uidiv
+   \   00000054   000050E3           CMP      R0,#+0
+   \   00000058   0D00000A           BEQ      ??_CacheRWQuota_WriteCache_0
+   \   0000005C   000089E5           STR      R0,[R9, #+0]
+   \   00000060   048089E5           STR      R8,[R9, #+4]
+   \   00000064   001099E5           LDR      R1,[R9, #+0]
+   \   00000068   343089E2           ADD      R3,R9,#+52
+   \   0000006C   000051E3           CMP      R1,#+0
+   \   00000070   0700000A           BEQ      ??_CacheRWQuota_WriteCache_0
+   \   00000074   00C0E0E3           MVN      R12,#+0
+   \                     ??_CacheRWQuota_WriteCache_2:
+   \   00000078   00C083E5           STR      R12,[R3, #+0]
+   \   0000007C   00E0A0E3           MOV      LR,#+0
+   \   00000080   04E083E5           STR      LR,[R3, #+4]
+   \   00000084   033088E0           ADD      R3,R8,R3
+   \   00000088   083083E2           ADD      R3,R3,#+8
+   \   0000008C   011051E2           SUBS     R1,R1,#+1
+   \   00000090   F8FFFF1A           BNE      ??_CacheRWQuota_WriteCache_2
+   \                     ??_CacheRWQuota_WriteCache_0:
+   \   00000094   000050E3           CMP      R0,#+0
+   \   00000098   3100000A           BEQ      ??_CacheRWQuota_WriteCache_1
+    395              return 0;                          /* Device is not available */
+    396            }
+    397            SectorSize    = pCacheData->SectorSize;
+    398            CacheMode     = pCacheData->aCacheMode[SectorType];
+   \   0000009C   09008AE0           ADD      R0,R10,R9
+    399            HashCode    = _GetHashCode(pCacheData, SectorNo, SectorType);
+   \   000000A0   0AA189E0           ADD      R10,R9,R10, LSL #+2
+   \   000000A4   18109AE5           LDR      R1,[R10, #+24]
+   \   000000A8   047099E5           LDR      R7,[R9, #+4]
+   \   000000AC   0880D0E5           LDRB     R8,[R0, #+8]
+   \   000000B0   000051E3           CMP      R1,#+0
+   \   000000B4   0400000A           BEQ      ??_CacheRWQuota_WriteCache_3
+   \   000000B8   0500A0E1           MOV      R0,R5
+   \   000000BC   ........           BL       __aeabi_uidivmod
+   \   000000C0   24009AE5           LDR      R0,[R10, #+36]
+   \   000000C4   010080E0           ADD      R0,R0,R1
+   \   000000C8   000000EA           B        ??_CacheRWQuota_WriteCache_4
+   \                     ??_CacheRWQuota_WriteCache_3:
+   \   000000CC   0000E0E3           MVN      R0,#+0
+    400            if (HashCode == 0xFFFFFFFFUL) {
+   \                     ??_CacheRWQuota_WriteCache_4:
+   \   000000D0   010070E3           CMN      R0,#+1
+   \   000000D4   2200000A           BEQ      ??_CacheRWQuota_WriteCache_1
+    401              return 0;                         /* Sector not found */
+    402            }
+    403            Off         = HashCode * (sizeof(CACHE_BLOCK_INFO_RW_QUOTA) + SectorSize);
+    404            pBlockInfo    = (CACHE_BLOCK_INFO_RW_QUOTA *) (((U8 *)(pCacheData + 1)) + Off);
+   \   000000D8   081087E2           ADD      R1,R7,#+8
+   \   000000DC   919020E0           MLA      R0,R1,R0,R9
+    405            WriteRequired = 0;
+    406            if (CacheMode & FS_CACHE_MODE_W) {              /* Write cache on for this type of sector ? */
+   \   000000E0   020018E3           TST      R8,#0x2
+   \   000000E4   349080E2           ADD      R9,R0,#+52
+   \   000000E8   1900000A           BEQ      ??_CacheRWQuota_WriteCache_5
+    407              WriteRequired = 1;
+    408            } else if (pBlockInfo->SectorNo == SectorNo) {  /* Sector already in cache ? */
+    409              WriteRequired = 1;                            /* Update required ! */
+    410            }
+    411            if (WriteRequired) {
+    412              /* If we replace an other, dirty sector, we need to write it out */
+    413              if ((pBlockInfo->IsDirty) && (pBlockInfo->SectorNo != SectorNo)) {
+   \                     ??_CacheRWQuota_WriteCache_6:
+   \   000000EC   040099E5           LDR      R0,[R9, #+4]
+   \   000000F0   000050E3           CMP      R0,#+0
+   \   000000F4   0B00000A           BEQ      ??_CacheRWQuota_WriteCache_7
+   \   000000F8   001099E5           LDR      R1,[R9, #+0]
+   \   000000FC   050051E1           CMP      R1,R5
+   \   00000100   0700000A           BEQ      ??_CacheRWQuota_WriteCache_8
+    414                if ((pDevice->pType->pfWrite)(pDevice->Data.Unit, pBlockInfo->SectorNo, pBlockInfo + 1, 1, 0)) {
+   \   00000104   0000A0E3           MOV      R0,#+0
+   \   00000108   00008DE5           STR      R0,[SP, #+0]
+   \   0000010C   00C094E5           LDR      R12,[R4, #+0]
+   \   00000110   0130A0E3           MOV      R3,#+1
+   \   00000114   082089E2           ADD      R2,R9,#+8
+   \   00000118   0400D4E5           LDRB     R0,[R4, #+4]
+   \   0000011C   0CC09CE5           LDR      R12,[R12, #+12]
+   \   00000120   3CFF2FE1           BLX      R12
+    415                  FS_DEBUG_ERROROUT((FS_MTYPE_CACHE, "Failure when cleaning cache"));   /* FATAL error ! */
+    416                }
+    417                FS_DEBUG_LOG((FS_MTYPE_CACHE, "Cleaning %s:%d: Sector: 0x%8x (%s)", pDevice->pType->pfGetName(pDevice->Data.Unit), pDevice->Data.Unit, pBlockInfo->SectorNo, TYPE2NAME(SectorType)));
+    418              }
+    419              pBlockInfo->IsDirty = 0;
+   \                     ??_CacheRWQuota_WriteCache_8:
+   \   00000124   0000A0E3           MOV      R0,#+0
+   \                     ??_CacheRWQuota_WriteCache_7:
+   \   00000128   040089E5           STR      R0,[R9, #+4]
+    420              _WriteIntoCache(pBlockInfo, SectorNo, pData, SectorSize);
+   \   0000012C   005089E5           STR      R5,[R9, #+0]
+   \   00000130   0720A0E1           MOV      R2,R7
+   \   00000134   0610A0E1           MOV      R1,R6
+   \   00000138   080089E2           ADD      R0,R9,#+8
+   \   0000013C   ........           BL       FS_memcpy
+    421            }
+    422            if (CacheMode & FS_CACHE_MODE_D) {              /* Delayed write allowed cache on for this type of sector ? */
+   \                     ??_CacheRWQuota_WriteCache_9:
+   \   00000140   040018E3           TST      R8,#0x4
+   \   00000144   0600000A           BEQ      ??_CacheRWQuota_WriteCache_1
+    423              pBlockInfo->IsDirty = 1;
+   \   00000148   0100A0E3           MOV      R0,#+1
+   \   0000014C   040089E5           STR      R0,[R9, #+4]
+    424              return 1;                                     /* Write is delayed (data in cache) and does not need to be performed */
+   \   00000150   040000EA           B        ??_CacheRWQuota_WriteCache_10
+    425            } else {
+   \                     ??_CacheRWQuota_WriteCache_5:
+   \   00000154   000099E5           LDR      R0,[R9, #+0]
+   \   00000158   050050E1           CMP      R0,R5
+   \   0000015C   F7FFFF1A           BNE      ??_CacheRWQuota_WriteCache_9
+   \   00000160   E1FFFFEA           B        ??_CacheRWQuota_WriteCache_6
+    426              return 0;                                     /* Write still needs to be performed. */
+   \                     ??_CacheRWQuota_WriteCache_1:
+   \   00000164   0000A0E3           MOV      R0,#+0
+   \                     ??_CacheRWQuota_WriteCache_10:
+   \   00000168   08D08DE2           ADD      SP,SP,#+8        ;; stack cleaning
+   \   0000016C   F087BDE8           POP      {R4-R10,PC}      ;; return
+    427            }
+    428          }
+    429          
+    430          /*********************************************************************
+    431          *
+    432          *       _CacheRWQuota_InvalidateCache
+    433          *
+    434          *  Description:
+    435          *    Invalidates all data in cache
+    436          *
+    437          *  Notes
+    438          *    (1)   The cache needs to be clean; it may not contain dirty sectors
+    439          */
+
+   \                                 In section .text, align 4, keep-with-next
+    440          static void _CacheRWQuota_InvalidateCache(void * p) {
+   \                     _CacheRWQuota_InvalidateCache:
+   \   00000000   00402DE9           PUSH     {LR}
+    441            CACHE_DATA_RW_QUOTA *       pCacheData;
+    442          
+    443            pCacheData = (CACHE_DATA_RW_QUOTA *)p;
+    444            _InvalidateCache(pCacheData);
+   \   00000004   001090E5           LDR      R1,[R0, #+0]
+   \   00000008   042090E5           LDR      R2,[R0, #+4]
+   \   0000000C   343080E2           ADD      R3,R0,#+52
+   \   00000010   00C0A0E3           MOV      R12,#+0
+   \   00000014   000051E3           CMP      R1,#+0
+   \   00000018   0600000A           BEQ      ??_CacheRWQuota_InvalidateCache_0
+   \   0000001C   0CE0E0E1           MVN      LR,R12
+   \                     ??_CacheRWQuota_InvalidateCache_1:
+   \   00000020   00E083E5           STR      LR,[R3, #+0]
+   \   00000024   04C083E5           STR      R12,[R3, #+4]
+   \   00000028   033082E0           ADD      R3,R2,R3
+   \   0000002C   083083E2           ADD      R3,R3,#+8
+   \   00000030   011051E2           SUBS     R1,R1,#+1
+   \   00000034   F9FFFF1A           BNE      ??_CacheRWQuota_InvalidateCache_1
+    445            pCacheData->NumSectors = 0;
+   \                     ??_CacheRWQuota_InvalidateCache_0:
+   \   00000038   00C080E5           STR      R12,[R0, #+0]
+    446            pCacheData->SectorSize = 0;
+   \   0000003C   04C080E5           STR      R12,[R0, #+4]
+    447          }
+   \   00000040   0080BDE8           POP      {PC}             ;; return
+    448          
+    449          
+    450          /*********************************************************************
+    451          *
+    452          *       _Clean
+    453          *
+    454          *  Description:
+    455          *    Writes out all dirty sectors from cache.
+    456          *
+    457          *  Return value:
+    458          *    0
+    459          */
+    460          static int _Clean(FS_DEVICE * pDevice) {
+    461            U32             i;
+    462            U32             NumSectors;
+    463            CACHE_DATA_RW_QUOTA *       pCacheData;
+    464            CACHE_BLOCK_INFO_RW_QUOTA * pBlockInfo;
+    465            U32             SectorSize;
+    466            U32             SizeOfCacheBlock;
+    467          
+    468            pCacheData = (CACHE_DATA_RW_QUOTA *)pDevice->Data.pCacheData;
+    469            NumSectors = pCacheData->NumSectors;
+    470            SectorSize = pCacheData->SectorSize;
+    471            SizeOfCacheBlock = sizeof(CACHE_BLOCK_INFO_RW_QUOTA) + SectorSize;
+    472            for (i = 0; i < NumSectors; i++) {
+    473              pBlockInfo = (CACHE_BLOCK_INFO_RW_QUOTA *) (((U8 *)(pCacheData + 1)) + (i * SizeOfCacheBlock));
+    474          
+    475              if (pBlockInfo->IsDirty) {
+    476                FS_DEBUG_LOG((FS_MTYPE_CACHE, "Cleaning %s:%d: Sector: 0x%8x", pDevice->pType->pfGetName(pDevice->Data.Unit), pDevice->Data.Unit, pBlockInfo->SectorNo));
+    477                if ((pDevice->pType->pfWrite)(pDevice->Data.Unit, pBlockInfo->SectorNo, pBlockInfo + 1, 1, 0)) {
+    478                  FS_DEBUG_ERROROUT((FS_MTYPE_CACHE, "Failure when cleaning cache"));   /* FATAL error ! */
+    479                }
+    480                pBlockInfo->IsDirty = 0;
+    481              }
+    482            }
+    483            return 0;
+    484          }
+    485          
+    486          
+    487          
+    488          /*********************************************************************
+    489          *
+    490          *       _SetMode
+    491          *
+    492          *  Description:
+    493          *    Sets the mode for the give type of sectors.
+    494          */
+
+   \                                 In section .text, align 4, keep-with-next
+    495          static void _SetMode(FS_DEVICE * pDevice, CACHE_MODE * pCacheMode) {
+   \                     _SetMode:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    496            int i;
+    497            CACHE_DATA_RW_QUOTA * pCacheData;
+    498          
+    499            pCacheData = (CACHE_DATA_RW_QUOTA *)pDevice->Data.pCacheData;
+   \   00000008   0C6094E5           LDR      R6,[R4, #+12]
+   \   0000000C   0CD04DE2           SUB      SP,SP,#+12
+   \   00000010   04608DE5           STR      R6,[SP, #+4]
+    500            _Clean(pDevice);
+   \   00000014   007096E5           LDR      R7,[R6, #+0]
+   \   00000018   040096E5           LDR      R0,[R6, #+4]
+   \   0000001C   0150A0E1           MOV      R5,R1
+   \   00000020   088080E2           ADD      R8,R0,#+8
+   \   00000024   0090A0E3           MOV      R9,#+0
+   \   00000028   00A0A0E3           MOV      R10,#+0
+   \   0000002C   000057E3           CMP      R7,#+0
+   \   00000030   1B00001A           BNE      ??_SetMode_0
+    501            _InvalidateCache(pCacheData);
+   \                     ??_SetMode_1:
+   \   00000034   04009DE5           LDR      R0,[SP, #+4]
+   \   00000038   04109DE5           LDR      R1,[SP, #+4]
+   \   0000003C   000090E5           LDR      R0,[R0, #+0]
+   \   00000040   04209DE5           LDR      R2,[SP, #+4]
+   \   00000044   041091E5           LDR      R1,[R1, #+4]
+   \   00000048   342082E2           ADD      R2,R2,#+52
+   \   0000004C   000050E3           CMP      R0,#+0
+   \   00000050   0700000A           BEQ      ??_SetMode_2
+   \   00000054   0930E0E1           MVN      R3,R9
+   \                     ??_SetMode_3:
+   \   00000058   003082E5           STR      R3,[R2, #+0]
+   \   0000005C   049082E5           STR      R9,[R2, #+4]
+   \   00000060   022081E0           ADD      R2,R1,R2
+   \   00000064   082082E2           ADD      R2,R2,#+8
+   \   00000068   010050E2           SUBS     R0,R0,#+1
+   \   0000006C   F9FFFF1A           BNE      ??_SetMode_3
+    502            for (i = 0; i < FS_SECTOR_TYPE_COUNT; i++) {
+   \   00000070   0000A0E3           MOV      R0,#+0
+   \                     ??_SetMode_2:
+   \   00000074   04109DE5           LDR      R1,[SP, #+4]
+   \   00000078   0120A0E3           MOV      R2,#+1
+    503              int TypeMask;
+    504              TypeMask = 1 << i;
+    505              if (TypeMask & pCacheMode->TypeMask) {
+   \                     ??_SetMode_4:
+   \   0000007C   003095E5           LDR      R3,[R5, #+0]
+   \   00000080   120013E1           TST      R3,R2, LSL R0
+    506                pCacheData->aCacheMode[i] = pCacheMode->ModeMask;
+   \   00000084   04309515           LDRNE    R3,[R5, #+4]
+    507              }
+    508            }
+   \   00000088   010080E2           ADD      R0,R0,#+1
+   \   0000008C   0830C115           STRBNE   R3,[R1, #+8]
+   \   00000090   011081E2           ADD      R1,R1,#+1
+   \   00000094   030050E3           CMP      R0,#+3
+   \   00000098   F7FFFFBA           BLT      ??_SetMode_4
+    509          }
+   \   0000009C   0CD08DE2           ADD      SP,SP,#+12       ;; stack cleaning
+   \   000000A0   F08FBDE8           POP      {R4-R11,PC}      ;; return
+   \                     ??_SetMode_0:
+   \   000000A4   986A20E0           MLA      R0,R8,R10,R6
+   \   000000A8   34B080E2           ADD      R11,R0,#+52
+   \   000000AC   04009BE5           LDR      R0,[R11, #+4]
+   \   000000B0   000050E3           CMP      R0,#+0
+   \   000000B4   0800000A           BEQ      ??_SetMode_5
+   \   000000B8   00908DE5           STR      R9,[SP, #+0]
+   \   000000BC   00C094E5           LDR      R12,[R4, #+0]
+   \   000000C0   0130A0E3           MOV      R3,#+1
+   \   000000C4   08208BE2           ADD      R2,R11,#+8
+   \   000000C8   00109BE5           LDR      R1,[R11, #+0]
+   \   000000CC   0400D4E5           LDRB     R0,[R4, #+4]
+   \   000000D0   0CC09CE5           LDR      R12,[R12, #+12]
+   \   000000D4   3CFF2FE1           BLX      R12
+   \   000000D8   04908BE5           STR      R9,[R11, #+4]
+   \                     ??_SetMode_5:
+   \   000000DC   01A08AE2           ADD      R10,R10,#+1
+   \   000000E0   07005AE1           CMP      R10,R7
+   \   000000E4   EEFFFF3A           BCC      ??_SetMode_0
+   \   000000E8   D1FFFFEA           B        ??_SetMode_1
+    510          
+    511          
+    512          /*********************************************************************
+    513          *
+    514          *       _SetQuota
+    515          *
+    516          *  Description:
+    517          *    Sets the quota for the give type of sectors.
+    518          */
+
+   \                                 In section .text, align 4, keep-with-next
+    519          static void _SetQuota(FS_DEVICE * pDevice, CACHE_QUOTA *pQuota) {
+   \                     _SetQuota:
+   \   00000000   704F2DE9           PUSH     {R4-R6,R8-R11,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    520            int i;
+    521            CACHE_DATA_RW_QUOTA * pCacheData;
+    522          
+    523            pCacheData = (CACHE_DATA_RW_QUOTA *)pDevice->Data.pCacheData;
+   \   00000008   0C6094E5           LDR      R6,[R4, #+12]
+   \   0000000C   0150A0E1           MOV      R5,R1
+    524            _Clean(pDevice);
+   \   00000010   041096E5           LDR      R1,[R6, #+4]
+   \   00000014   008096E5           LDR      R8,[R6, #+0]
+   \   00000018   08D04DE2           SUB      SP,SP,#+8
+   \   0000001C   081081E2           ADD      R1,R1,#+8
+   \   00000020   04108DE5           STR      R1,[SP, #+4]
+   \   00000024   0090A0E3           MOV      R9,#+0
+   \   00000028   00A0A0E3           MOV      R10,#+0
+   \   0000002C   000058E3           CMP      R8,#+0
+   \   00000030   2B00001A           BNE      ??_SetQuota_0
+    525            _InvalidateCache(pCacheData);
+   \                     ??_SetQuota_1:
+   \   00000034   000096E5           LDR      R0,[R6, #+0]
+   \   00000038   041096E5           LDR      R1,[R6, #+4]
+   \   0000003C   342086E2           ADD      R2,R6,#+52
+   \   00000040   000050E3           CMP      R0,#+0
+   \   00000044   0700000A           BEQ      ??_SetQuota_2
+   \   00000048   0930E0E1           MVN      R3,R9
+   \                     ??_SetQuota_3:
+   \   0000004C   003082E5           STR      R3,[R2, #+0]
+   \   00000050   049082E5           STR      R9,[R2, #+4]
+   \   00000054   022081E0           ADD      R2,R1,R2
+   \   00000058   082082E2           ADD      R2,R2,#+8
+   \   0000005C   010050E2           SUBS     R0,R0,#+1
+   \   00000060   F9FFFF1A           BNE      ??_SetQuota_3
+    526            for (i = 0; i < FS_SECTOR_TYPE_COUNT; i++) {
+   \   00000064   0000A0E3           MOV      R0,#+0
+   \                     ??_SetQuota_2:
+   \   00000068   0610A0E1           MOV      R1,R6
+   \   0000006C   0120A0E3           MOV      R2,#+1
+    527              int TypeMask;
+    528              TypeMask = 1 << i;
+    529              if (TypeMask & pQuota->TypeMask) {
+   \                     ??_SetQuota_4:
+   \   00000070   003095E5           LDR      R3,[R5, #+0]
+   \   00000074   120013E1           TST      R3,R2, LSL R0
+    530                pCacheData->aNumSectorsReq[i] = pQuota->NumSectors;
+   \   00000078   04309515           LDRNE    R3,[R5, #+4]
+    531              }
+    532            }
+   \   0000007C   010080E2           ADD      R0,R0,#+1
+   \   00000080   0C308115           STRNE    R3,[R1, #+12]
+   \   00000084   041081E2           ADD      R1,R1,#+4
+   \   00000088   030050E3           CMP      R0,#+3
+   \   0000008C   F7FFFFBA           BLT      ??_SetQuota_4
+    533            _UpdateHashAreas(pCacheData);
+   \   00000090   FF20A0E3           MOV      R2,#+255
+   \   00000094   0000A0E3           MOV      R0,#+0
+   \   00000098   0610A0E1           MOV      R1,R6
+   \   0000009C   FF2C82E3           ORR      R2,R2,#0xFF00
+   \                     ??_SetQuota_5:
+   \   000000A0   249081E5           STR      R9,[R1, #+36]
+   \   000000A4   0C3091E5           LDR      R3,[R1, #+12]
+   \   000000A8   020050E3           CMP      R0,#+2
+   \   000000AC   0230A001           MOVEQ    R3,R2
+   \   000000B0   00C096E5           LDR      R12,[R6, #+0]
+   \   000000B4   093083E0           ADD      R3,R3,R9
+   \   000000B8   03005CE1           CMP      R12,R3
+   \   000000BC   0C30A031           MOVCC    R3,R12
+   \   000000C0   09C043E0           SUB      R12,R3,R9
+   \   000000C4   18C081E5           STR      R12,[R1, #+24]
+   \   000000C8   010080E2           ADD      R0,R0,#+1
+   \   000000CC   0390A0E1           MOV      R9,R3
+   \   000000D0   041081E2           ADD      R1,R1,#+4
+   \   000000D4   030050E3           CMP      R0,#+3
+   \   000000D8   F0FFFFBA           BLT      ??_SetQuota_5
+    534          }
+   \   000000DC   08D08DE2           ADD      SP,SP,#+8        ;; stack cleaning
+   \   000000E0   708FBDE8           POP      {R4-R6,R8-R11,PC}  ;; return
+   \                     ??_SetQuota_0:
+   \   000000E4   04009DE5           LDR      R0,[SP, #+4]
+   \   000000E8   906A21E0           MLA      R1,R0,R10,R6
+   \   000000EC   34B081E2           ADD      R11,R1,#+52
+   \   000000F0   04009BE5           LDR      R0,[R11, #+4]
+   \   000000F4   000050E3           CMP      R0,#+0
+   \   000000F8   0800000A           BEQ      ??_SetQuota_6
+   \   000000FC   00908DE5           STR      R9,[SP, #+0]
+   \   00000100   00C094E5           LDR      R12,[R4, #+0]
+   \   00000104   0130A0E3           MOV      R3,#+1
+   \   00000108   08208BE2           ADD      R2,R11,#+8
+   \   0000010C   00109BE5           LDR      R1,[R11, #+0]
+   \   00000110   0400D4E5           LDRB     R0,[R4, #+4]
+   \   00000114   0CC09CE5           LDR      R12,[R12, #+12]
+   \   00000118   3CFF2FE1           BLX      R12
+   \   0000011C   04908BE5           STR      R9,[R11, #+4]
+   \                     ??_SetQuota_6:
+   \   00000120   01A08AE2           ADD      R10,R10,#+1
+   \   00000124   08005AE1           CMP      R10,R8
+   \   00000128   EDFFFF3A           BCC      ??_SetQuota_0
+   \   0000012C   C0FFFFEA           B        ??_SetQuota_1
+    535          
+    536          /*********************************************************************
+    537          *
+    538          *       _CacheRWQuota_Command
+    539          *
+    540          *  Description:
+    541          *    Execute commands on the cache
+    542          *
+    543          *  Return value:
+    544          *    Unsupported command:    -1
+    545          *    Supported commands:     <0: Error. Precise value depends on command
+    546          */
+
+   \                                 In section .text, align 4, keep-with-next
+    547          static int _CacheRWQuota_Command(FS_DEVICE * pDevice, int Cmd, void * p) {
+   \                     _CacheRWQuota_Command:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+    548            int r;
+    549          
+    550            r  = -1;
+    551            switch (Cmd) {
+   \   00000004   701041E2           SUB      R1,R1,#+112
+   \   00000008   0060A0E1           MOV      R6,R0
+   \   0000000C   5C1D41E2           SUB      R1,R1,#+5888
+   \   00000010   04D04DE2           SUB      SP,SP,#+4
+   \   00000014   0000E0E3           MVN      R0,#+0
+   \   00000018   040051E3           CMP      R1,#+4
+   \   0000001C   01F18F90           ADDLS    PC,PC,R1, LSL #+2
+   \                     ??_CacheRWQuota_Command_0:
+   \   00000020   3200008A           BHI      ??_CacheRWQuota_Command_1
+   \   00000024   450000EA           B        ??_CacheRWQuota_Command_2
+   \   00000028   270000EA           B        ??_CacheRWQuota_Command_3
+   \   0000002C   470000EA           B        ??_CacheRWQuota_Command_4
+   \   00000030   000000EA           B        ??_CacheRWQuota_Command_5
+   \   00000034   490000EA           B        ??_CacheRWQuota_Command_6
+    552            case FS_CMD_CACHE_FREE_SECTORS:
+    553              {
+    554                CACHE_FREE * pCacheFree;
+    555                pCacheFree = (CACHE_FREE *)p;
+    556                _RemoveFromCache(pDevice, pCacheFree->FirstSector, pCacheFree->NumSectors);
+   \                     ??_CacheRWQuota_Command_5:
+   \   00000038   0C6096E5           LDR      R6,[R6, #+12]
+   \   0000003C   044092E5           LDR      R4,[R2, #+4]
+   \   00000040   005092E5           LDR      R5,[R2, #+0]
+   \   00000044   0670A0E1           MOV      R7,R6
+   \   00000048   0280A0E3           MOV      R8,#+2
+   \   0000004C   00B0A0E3           MOV      R11,#+0
+   \                     ??_CacheRWQuota_Command_7:
+   \   00000050   189097E5           LDR      R9,[R7, #+24]
+   \   00000054   000059E3           CMP      R9,#+0
+   \   00000058   1700000A           BEQ      ??_CacheRWQuota_Command_8
+   \   0000005C   0500A0E1           MOV      R0,R5
+   \   00000060   0910A0E1           MOV      R1,R9
+   \   00000064   ........           BL       __aeabi_uidivmod
+   \   00000068   24A097E5           LDR      R10,[R7, #+36]
+   \   0000006C   0000A0E3           MOV      R0,#+0
+   \   00000070   000054E3           CMP      R4,#+0
+   \   00000074   1000000A           BEQ      ??_CacheRWQuota_Command_8
+   \   00000078   0520A0E1           MOV      R2,R5
+   \                     ??_CacheRWQuota_Command_9:
+   \   0000007C   04E096E5           LDR      LR,[R6, #+4]
+   \   00000080   01C08AE0           ADD      R12,R10,R1
+   \   00000084   08E08EE2           ADD      LR,LR,#+8
+   \   00000088   9E6C2CE0           MLA      R12,LR,R12,R6
+   \   0000008C   011081E2           ADD      R1,R1,#+1
+   \   00000090   090051E1           CMP      R1,R9
+   \   00000094   34E0BCE5           LDR      LR,[R12, #+52]!
+   \   00000098   0010A003           MOVEQ    R1,#+0
+   \   0000009C   02005EE1           CMP      LR,R2
+   \   000000A0   0B30E001           MVNEQ    R3,R11
+   \   000000A4   00308C05           STREQ    R3,[R12, #+0]
+   \   000000A8   04B08C05           STREQ    R11,[R12, #+4]
+   \   000000AC   010080E2           ADD      R0,R0,#+1
+   \   000000B0   012082E2           ADD      R2,R2,#+1
+   \   000000B4   040050E1           CMP      R0,R4
+   \   000000B8   EFFFFF3A           BCC      ??_CacheRWQuota_Command_9
+   \                     ??_CacheRWQuota_Command_8:
+   \   000000BC   047087E2           ADD      R7,R7,#+4
+   \   000000C0   018058E2           SUBS     R8,R8,#+1
+   \   000000C4   0800000A           BEQ      ??_CacheRWQuota_Command_10
+   \   000000C8   E0FFFFEA           B        ??_CacheRWQuota_Command_7
+    557                r = 0;
+    558              }
+    559              break;
+    560            case FS_CMD_CACHE_CLEAN:
+    561              r = _Clean(pDevice);
+   \                     ??_CacheRWQuota_Command_3:
+   \   000000CC   0C4096E5           LDR      R4,[R6, #+12]
+   \   000000D0   005094E5           LDR      R5,[R4, #+0]
+   \   000000D4   040094E5           LDR      R0,[R4, #+4]
+   \   000000D8   00B0A0E3           MOV      R11,#+0
+   \   000000DC   087080E2           ADD      R7,R0,#+8
+   \   000000E0   0080A0E3           MOV      R8,#+0
+   \   000000E4   000055E3           CMP      R5,#+0
+   \   000000E8   0200001A           BNE      ??_CacheRWQuota_Command_11
+   \                     ??_CacheRWQuota_Command_10:
+   \   000000EC   0000A0E3           MOV      R0,#+0
+    562              break;
+    563            case FS_CMD_CACHE_SET_MODE:
+    564              _SetMode(pDevice, (CACHE_MODE *)p);
+    565              r = 0;
+    566              break;
+    567            case FS_CMD_CACHE_SET_QUOTA:
+    568              _SetQuota(pDevice, (CACHE_QUOTA *)p);
+    569              r = 0;
+    570              break;
+    571            case FS_CMD_CACHE_INVALIDATE:
+    572              _CacheRWQuota_InvalidateCache(p);
+    573              r = 0;
+    574              break;
+    575            }
+    576            return r;
+   \                     ??_CacheRWQuota_Command_1:
+   \   000000F0   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   000000F4   F08FBDE8           POP      {R4-R11,PC}      ;; return
+   \                     ??_CacheRWQuota_Command_11:
+   \   000000F8   974820E0           MLA      R0,R7,R8,R4
+   \   000000FC   349080E2           ADD      R9,R0,#+52
+   \   00000100   040099E5           LDR      R0,[R9, #+4]
+   \   00000104   000050E3           CMP      R0,#+0
+   \   00000108   0800000A           BEQ      ??_CacheRWQuota_Command_12
+   \   0000010C   00B08DE5           STR      R11,[SP, #+0]
+   \   00000110   00C096E5           LDR      R12,[R6, #+0]
+   \   00000114   0130A0E3           MOV      R3,#+1
+   \   00000118   082089E2           ADD      R2,R9,#+8
+   \   0000011C   001099E5           LDR      R1,[R9, #+0]
+   \   00000120   0400D6E5           LDRB     R0,[R6, #+4]
+   \   00000124   0CC09CE5           LDR      R12,[R12, #+12]
+   \   00000128   3CFF2FE1           BLX      R12
+   \   0000012C   04B089E5           STR      R11,[R9, #+4]
+   \                     ??_CacheRWQuota_Command_12:
+   \   00000130   018088E2           ADD      R8,R8,#+1
+   \   00000134   050058E1           CMP      R8,R5
+   \   00000138   EEFFFF3A           BCC      ??_CacheRWQuota_Command_11
+   \   0000013C   EAFFFFEA           B        ??_CacheRWQuota_Command_10
+   \                     ??_CacheRWQuota_Command_2:
+   \   00000140   0210A0E1           MOV      R1,R2
+   \   00000144   0600A0E1           MOV      R0,R6
+   \   00000148   ........           BL       _SetMode
+   \   0000014C   E6FFFFEA           B        ??_CacheRWQuota_Command_10
+   \                     ??_CacheRWQuota_Command_4:
+   \   00000150   0210A0E1           MOV      R1,R2
+   \   00000154   0600A0E1           MOV      R0,R6
+   \   00000158   ........           BL       _SetQuota
+   \   0000015C   E2FFFFEA           B        ??_CacheRWQuota_Command_10
+   \                     ??_CacheRWQuota_Command_6:
+   \   00000160   000092E5           LDR      R0,[R2, #+0]
+   \   00000164   00B0A0E3           MOV      R11,#+0
+   \   00000168   041092E5           LDR      R1,[R2, #+4]
+   \   0000016C   343082E2           ADD      R3,R2,#+52
+   \   00000170   000050E3           CMP      R0,#+0
+   \   00000174   0BC0E0E1           MVN      R12,R11
+   \   00000178   0500000A           BEQ      ??_CacheRWQuota_Command_13
+   \                     ??_CacheRWQuota_Command_14:
+   \   0000017C   00C083E5           STR      R12,[R3, #+0]
+   \   00000180   04B083E5           STR      R11,[R3, #+4]
+   \   00000184   033081E0           ADD      R3,R1,R3
+   \   00000188   083083E2           ADD      R3,R3,#+8
+   \   0000018C   010050E2           SUBS     R0,R0,#+1
+   \   00000190   F9FFFF1A           BNE      ??_CacheRWQuota_Command_14
+   \                     ??_CacheRWQuota_Command_13:
+   \   00000194   00B082E5           STR      R11,[R2, #+0]
+   \   00000198   04B082E5           STR      R11,[R2, #+4]
+   \   0000019C   D2FFFFEA           B        ??_CacheRWQuota_Command_10
+    577          }
+    578          
+    579          /*********************************************************************
+    580          *
+    581          *       _CacheRW_QUOTA_API
+    582          *
+    583          */
+
+   \                                 In section .text, align 4, keep-with-next
+    584          static const FS_CACHE_API _CacheRW_QUOTA_API = {
+   \                     _CacheRW_QUOTA_API:
+   \   00000000                      ; Initializer data, 20 bytes
+   \   00000000   ............       DC32 _CacheRWQuota_ReadFromCache, _CacheRWQuota_UpdateCache, _CacheRWQuota_InvalidateCache, _CacheRWQuota_Command, _CacheRWQuota_WriteCache
+   \              ............
+   \              ............
+   \              ....        
+    585            _CacheRWQuota_ReadFromCache,
+    586            _CacheRWQuota_UpdateCache,
+    587            _CacheRWQuota_InvalidateCache,
+    588            _CacheRWQuota_Command,
+    589            _CacheRWQuota_WriteCache
+    590          };
+    591          
+    592          /*********************************************************************
+    593          *
+    594          *       FS_CacheRWQuota_Init
+    595          *
+    596          *  Description:
+    597          *    Initializes the cache
+    598          *
+    599          *  Return value
+    600          *     Returns the number of cache blocks (Number of sectors that can be cached)
+    601          */
+
+   \                                 In section .text, align 4, keep-with-next
+    602          U32 FS_CacheRWQuota_Init(FS_DEVICE * pDevice, void * pData, I32 NumBytes) {
+   \                     FS_CacheRWQuota_Init:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   0050A0E1           MOV      R5,R0
+   \   00000008   0140A0E1           MOV      R4,R1
+   \   0000000C   04D04DE2           SUB      SP,SP,#+4
+   \   00000010   0270A0E1           MOV      R7,R2
+    603            FS_DEVICE_DATA      * pDevData;
+    604            CACHE_DATA_RW_QUOTA * pCacheData;
+    605            U8                  * pData8;
+    606            U32                   NumSectors;
+    607          
+    608            NumSectors = 0;
+    609            pDevData   = &pDevice->Data;
+   \   00000014   046085E2           ADD      R6,R5,#+4
+    610            pData8     = (U8 *)pData;
+    611            //
+    612            // Align pointer to a 32bit boundary
+    613            //
+    614            if ((U32)pData8 & 3) {
+   \   00000018   030014E3           TST      R4,#0x3
+   \   0000001C   0500000A           BEQ      ??FS_CacheRWQuota_Init_0
+    615              NumBytes  -= (4 - (((U32)pData8) & 3));
+   \   00000020   030004E2           AND      R0,R4,#0x3
+   \   00000024   071080E0           ADD      R1,R0,R7
+    616              pData8    += (4 - (((U32)pData8) & 3));
+   \   00000028   000060E2           RSB      R0,R0,#+0
+   \   0000002C   040080E0           ADD      R0,R0,R4
+   \   00000030   047041E2           SUB      R7,R1,#+4
+   \   00000034   044080E2           ADD      R4,R0,#+4
+    617            }
+    618            //
+    619            // If less memory is available as we need to hold the
+    620            // management structure, we leave everything as it is.
+    621            // A cache module is then not attached to the device.
+    622            //
+    623            if ((U32)NumBytes < sizeof(CACHE_DATA_RW_QUOTA)) {
+   \                     ??FS_CacheRWQuota_Init_0:
+   \   00000038   340057E3           CMP      R7,#+52
+   \   0000003C   2400003A           BCC      ??FS_CacheRWQuota_Init_1
+    624              return 0;
+    625            }
+    626            pCacheData = (CACHE_DATA_RW_QUOTA *)pData8;
+    627            FS_MEMSET(pCacheData, 0, sizeof(CACHE_DATA_RW_QUOTA));
+   \   00000040   3410A0E3           MOV      R1,#+52
+   \   00000044   0400A0E1           MOV      R0,R4
+   \   00000048   ........           BL       __aeabi_memclr
+    628            pDevData->pCacheAPI       = &_CacheRW_QUOTA_API;
+   \   0000004C   ........           ADR      R0,_CacheRW_QUOTA_API
+   \   00000050   040086E5           STR      R0,[R6, #+4]
+    629            pDevData->pCacheData      = pCacheData;
+   \   00000054   084086E5           STR      R4,[R6, #+8]
+    630            pCacheData->NumBytesCache = NumBytes;
+   \   00000058   307084E5           STR      R7,[R4, #+48]
+    631            NumSectors = _ComputeNumSectors(pDevice, pCacheData);
+   \   0000005C   040094E5           LDR      R0,[R4, #+4]
+   \   00000060   000050E3           CMP      R0,#+0
+   \   00000064   00009415           LDRNE    R0,[R4, #+0]
+   \   00000068   1A00001A           BNE      ??FS_CacheRWQuota_Init_2
+   \   0000006C   0500A0E1           MOV      R0,R5
+   \   00000070   ........           BL       FS_GetSectorSize
+   \   00000074   0050B0E1           MOVS     R5,R0
+   \   00000078   1500000A           BEQ      ??FS_CacheRWQuota_Init_1
+   \   0000007C   340057E3           CMP      R7,#+52
+   \   00000080   1300003A           BCC      ??FS_CacheRWQuota_Init_1
+   \   00000084   340047E2           SUB      R0,R7,#+52
+   \   00000088   081085E2           ADD      R1,R5,#+8
+   \   0000008C   ........           BL       __aeabi_uidiv
+   \   00000090   000050E3           CMP      R0,#+0
+   \   00000094   0F00000A           BEQ      ??FS_CacheRWQuota_Init_2
+   \   00000098   000084E5           STR      R0,[R4, #+0]
+   \   0000009C   045084E5           STR      R5,[R4, #+4]
+   \   000000A0   001094E5           LDR      R1,[R4, #+0]
+   \   000000A4   343084E2           ADD      R3,R4,#+52
+   \   000000A8   000051E3           CMP      R1,#+0
+   \   000000AC   0900000A           BEQ      ??FS_CacheRWQuota_Init_2
+   \   000000B0   00C0E0E3           MVN      R12,#+0
+   \                     ??FS_CacheRWQuota_Init_3:
+   \   000000B4   00C083E5           STR      R12,[R3, #+0]
+   \   000000B8   00E0A0E3           MOV      LR,#+0
+   \   000000BC   04E083E5           STR      LR,[R3, #+4]
+   \   000000C0   033085E0           ADD      R3,R5,R3
+   \   000000C4   083083E2           ADD      R3,R3,#+8
+   \   000000C8   011051E2           SUBS     R1,R1,#+1
+   \   000000CC   F8FFFF1A           BNE      ??FS_CacheRWQuota_Init_3
+   \   000000D0   000000EA           B        ??FS_CacheRWQuota_Init_2
+   \                     ??FS_CacheRWQuota_Init_1:
+   \   000000D4   0000A0E3           MOV      R0,#+0
+    632            return NumSectors;
+   \                     ??FS_CacheRWQuota_Init_2:
+   \   000000D8   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   000000DC   F080BDE8           POP      {R4-R7,PC}       ;; return
+    633          }
+    634          #else
+    635          
+    636          void CacheRWQuota_c(void);
+    637          void CacheRWQuota_c(void){}
+    638          
+    639          #endif /* FS_SUPPORT_CACHE */
+    640          
+    641          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function                      .cstack
+     --------                      -------
+     FS_CacheRWQuota_Init              24
+     _CacheRWQuota_Command             40
+     _CacheRWQuota_InvalidateCache      4
+     _CacheRWQuota_ReadFromCache       32
+     _CacheRWQuota_UpdateCache         40
+     _CacheRWQuota_WriteCache          40
+     _SetMode                          48
+     _SetQuota                         48
+
+
+   Section sizes:
+
+     Function/Label                Bytes
+     --------------                -----
+     _CacheRWQuota_ReadFromCache    256
+     _CacheRWQuota_UpdateCache      332
+     _CacheRWQuota_WriteCache       368
+     _CacheRWQuota_InvalidateCache   68
+     _SetMode                       236
+     _SetQuota                      304
+     _CacheRWQuota_Command          416
+     _CacheRW_QUOTA_API              20
+     FS_CacheRWQuota_Init           224
+
+ 
+ 2 224 bytes in section .text
+ 
+ 2 224 bytes of CODE memory
+
+Errors: none
+Warnings: none

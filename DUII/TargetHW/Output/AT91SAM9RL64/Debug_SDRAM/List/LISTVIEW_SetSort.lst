@@ -1,0 +1,1378 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     14/Jul/2015  19:01:29 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\GUI\LISTVIEW_SetSort.c                  #
+#    Command line =  C:\DUII\TargetHW\GUI\LISTVIEW_SetSort.c -D DEBUG=1 -D    #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\LI #
+#                    STVIEW_SetSort.lst                                       #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\LIS #
+#                    TVIEW_SetSort.o                                          #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\GUI\LISTVIEW_SetSort.c
+      1          /*********************************************************************
+      2          *                SEGGER Microcontroller GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 1996 - 2010  SEGGER Microcontroller GmbH & Co. KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          ** emWin V5.06 - Graphical user interface for embedded applications **
+     13          emWin is protected by international copyright laws.   Knowledge of the
+     14          source code may not be used to write a similar product.  This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : LISTVIEW_SetSort.c
+     19          Purpose     : Implementation of LISTVIEW_SetSort
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          #include <string.h>
+     24          #include "LISTVIEW_Private.h"
+     25          // KMC
+     26          #include "Utilities.h"
+     27          
+     28          #if GUI_WINSUPPORT
+     29          
+     30          /*********************************************************************
+     31          *
+     32          *       Types
+     33          *
+     34          **********************************************************************
+     35          */
+     36          typedef struct {
+     37            LISTVIEW_Obj  * pObj;
+     38            LISTVIEW_SORT * pSort;
+     39            SORT_TYPE     * paSortArray;
+     40          } SORT_OBJECT;
+     41          
+     42          /*********************************************************************
+     43          *
+     44          *       Static routines
+     45          *
+     46          **********************************************************************
+     47          */
+     48          /*********************************************************************
+     49          *
+     50          *       _Free
+     51          *
+     52          * Purpose:
+     53          *   Frees the memory used by the attached LISTVIEW_SORT object.
+     54          *
+     55          * Parameter:
+     56          *   hObj - Handle of LISTVIEW_SORT object
+     57          */
+
+   \                                 In section .text, align 4, keep-with-next
+     58          static void _Free(WM_HMEM hObj) {
+   \                     _Free:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+     59            LISTVIEW_SORT * pSort;
+     60            pSort = (LISTVIEW_SORT *)GUI_LOCK_H(hObj);
+   \   00000008   ........           BL       GUI_ALLOC_LockH
+     61            GUI_ALLOC_Free(pSort->hSortArray);
+   \   0000000C   000090E5           LDR      R0,[R0, #+0]
+   \   00000010   ........           BL       GUI_ALLOC_Free
+     62            GUI_UNLOCK_H(pSort);
+   \   00000014   ........           BL       GUI_ALLOC_UnlockH
+     63            GUI_ALLOC_Free(hObj);
+   \   00000018   0400A0E1           MOV      R0,R4
+   \   0000001C   1040BDE8           POP      {R4,LR}
+   \   00000020   ........           B        GUI_ALLOC_Free   ;; tailcall
+     64          }
+     65          
+     66          /*********************************************************************
+     67          *
+     68          *       _GetSelUnsorted
+     69          */
+     70          static int _GetSelUnsorted(LISTVIEW_Obj * pObj) {
+     71            int r;
+     72            if ((LISTVIEW__GetSel(pObj) >= 0) && (pObj->hSort)) {
+     73              LISTVIEW_SORT * pSort;
+     74              pSort = (LISTVIEW_SORT *)GUI_LOCK_H(pObj->hSort);
+     75              if (!pSort->SortArrayNumItems) {
+     76                r = LISTVIEW__GetSel(pObj);
+     77              } else {
+     78                SORT_TYPE * paSortArray;
+     79                paSortArray = (SORT_TYPE *)GUI_LOCK_H(pSort->hSortArray);
+     80                r = *(paSortArray + LISTVIEW__GetSel(pObj));
+     81                GUI_UNLOCK_H(paSortArray);
+     82              }
+     83              GUI_UNLOCK_H(pSort);
+     84            } else {
+     85              r = LISTVIEW__GetSel(pObj);
+     86            }
+     87            return r;
+     88          }
+     89          
+     90          /*********************************************************************
+     91          *
+     92          *       _SetSelUnsorted
+     93          */
+     94          static void _SetSelUnsorted(LISTVIEW_Handle hObj, int Sel) {
+     95            LISTVIEW_Obj * pObj;
+     96            WM_HMEM hSort;
+     97            int i, NumItems;
+     98            pObj = LISTVIEW_LOCK_H(hObj);
+     99            hSort = pObj->hSort;
+    100            GUI_UNLOCK_H(pObj);
+    101            if (hSort) {
+    102              LISTVIEW_SORT * pSort;
+    103              SORT_TYPE * paSortArray;
+    104              pSort = (LISTVIEW_SORT *)GUI_LOCK_H(hSort);
+    105              NumItems = pSort->SortArrayNumItems;
+    106              paSortArray = (SORT_TYPE *)GUI_LOCK_H(pSort->hSortArray);
+    107              for (i = 0; i < NumItems; i++) {
+    108                if (*(paSortArray + i) == Sel) {
+    109                  LISTVIEW__SetSel(hObj, i);
+    110                  break;
+    111                }
+    112              }
+    113              GUI_UNLOCK_H(paSortArray);
+    114              GUI_UNLOCK_H(pSort);
+    115            } else {
+    116              LISTVIEW__SetSel(hObj, Sel);
+    117            }
+    118          }
+    119          
+    120          /*********************************************************************
+    121          *
+    122          *       _Compare
+    123          */
+
+   \                                 In section .text, align 4, keep-with-next
+    124          static int _Compare(unsigned lb, unsigned ub, SORT_OBJECT * pSortObject) {
+   \                     _Compare:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   0240A0E1           MOV      R4,R2
+    125            char * p0, * p1;
+    126            LISTVIEW_ROW * pRow0, * pRow1;
+    127            LISTVIEW_CELL * pCell0, * pCell1;
+    128            LISTVIEW_COLUMN * pColumn;
+    129            SORT_TYPE i0, i1;
+    130            int Result = 0;
+    131            i0 = *(pSortObject->paSortArray + lb);
+    132            i1 = *(pSortObject->paSortArray + ub);
+   \   00000008   082094E5           LDR      R2,[R4, #+8]
+   \   0000000C   04D04DE2           SUB      SP,SP,#+4
+   \   00000010   811082E0           ADD      R1,R2,R1, LSL #+1
+   \   00000014   B060D1E1           LDRH     R6,[R1, #+0]
+    133            pRow0   = (LISTVIEW_ROW  *)GUI_ARRAY_GetpItemLocked(pSortObject->pObj->RowArray,  i0);
+   \   00000018   800082E0           ADD      R0,R2,R0, LSL #+1
+   \   0000001C   B010D0E1           LDRH     R1,[R0, #+0]
+   \   00000020   000094E5           LDR      R0,[R4, #+0]
+   \   00000024   0050A0E3           MOV      R5,#+0
+   \   00000028   380090E5           LDR      R0,[R0, #+56]
+   \   0000002C   ........           BL       GUI_ARRAY_GetpItemLocked
+    134            pCell0  = (LISTVIEW_CELL *)GUI_ARRAY_GetpItemLocked(pRow0->CellArray, pSortObject->pObj->SortIndex);
+   \   00000030   001094E5           LDR      R1,[R4, #+0]
+   \   00000034   000090E5           LDR      R0,[R0, #+0]
+   \   00000038   741091E5           LDR      R1,[R1, #+116]
+   \   0000003C   ........           BL       GUI_ARRAY_GetpItemLocked
+   \   00000040   0070A0E1           MOV      R7,R0
+    135            GUI_UNLOCK_H(pRow0);
+   \   00000044   ........           BL       GUI_ALLOC_UnlockH
+    136            if (pCell0) {
+   \   00000048   000057E3           CMP      R7,#+0
+   \   0000004C   1E00000A           BEQ      ??_Compare_0
+    137              p0 = pCell0->acText;
+   \   00000050   047087E2           ADD      R7,R7,#+4
+    138              GUI_UNLOCK_H(pCell0);
+   \   00000054   ........           BL       GUI_ALLOC_UnlockH
+    139              pRow1   = (LISTVIEW_ROW  *)GUI_ARRAY_GetpItemLocked(pSortObject->pObj->RowArray,  i1);
+   \   00000058   000094E5           LDR      R0,[R4, #+0]
+   \   0000005C   0610A0E1           MOV      R1,R6
+   \   00000060   380090E5           LDR      R0,[R0, #+56]
+   \   00000064   ........           BL       GUI_ARRAY_GetpItemLocked
+    140              pCell1  = (LISTVIEW_CELL *)GUI_ARRAY_GetpItemLocked(pRow1->CellArray, pSortObject->pObj->SortIndex);
+   \   00000068   001094E5           LDR      R1,[R4, #+0]
+   \   0000006C   000090E5           LDR      R0,[R0, #+0]
+   \   00000070   741091E5           LDR      R1,[R1, #+116]
+   \   00000074   ........           BL       GUI_ARRAY_GetpItemLocked
+   \   00000078   0060A0E1           MOV      R6,R0
+    141              GUI_UNLOCK_H(pRow1);
+   \   0000007C   ........           BL       GUI_ALLOC_UnlockH
+    142              if (pCell1) {
+   \   00000080   000056E3           CMP      R6,#+0
+   \   00000084   1000000A           BEQ      ??_Compare_0
+    143                p1 = pCell1->acText;
+    144                GUI_UNLOCK_H(pCell1);
+   \   00000088   ........           BL       GUI_ALLOC_UnlockH
+    145                pColumn = (LISTVIEW_COLUMN *)GUI_ARRAY_GetpItemLocked(pSortObject->pObj->ColumnArray, pSortObject->pObj->SortIndex);
+   \   0000008C   000094E5           LDR      R0,[R4, #+0]
+   \   00000090   741090E5           LDR      R1,[R0, #+116]
+   \   00000094   3C0090E5           LDR      R0,[R0, #+60]
+   \   00000098   ........           BL       GUI_ARRAY_GetpItemLocked
+   \   0000009C   0020B0E1           MOVS     R2,R0
+    146                if (pColumn) {
+   \   000000A0   0900000A           BEQ      ??_Compare_0
+    147                  Result = pColumn->fpCompare(p0, p1);
+   \   000000A4   041086E2           ADD      R1,R6,#+4
+   \   000000A8   0700A0E1           MOV      R0,R7
+   \   000000AC   042092E5           LDR      R2,[R2, #+4]
+   \   000000B0   32FF2FE1           BLX      R2
+   \   000000B4   0050A0E1           MOV      R5,R0
+    148                  GUI_UNLOCK_H(pColumn);
+   \   000000B8   ........           BL       GUI_ALLOC_UnlockH
+    149                  if (pSortObject->pSort->Reverse) {
+   \   000000BC   040094E5           LDR      R0,[R4, #+4]
+   \   000000C0   1000D0E5           LDRB     R0,[R0, #+16]
+   \   000000C4   000050E3           CMP      R0,#+0
+    150                    Result *= -1;
+   \   000000C8   00506512           RSBNE    R5,R5,#+0
+    151                  }
+    152                } else {
+    153                  Result = 0;
+    154                }
+    155              }
+    156            }
+    157            return Result;
+   \                     ??_Compare_0:
+   \   000000CC   0500A0E1           MOV      R0,R5
+   \   000000D0   04D08DE2           ADD      SP,SP,#+4
+   \   000000D4   F080BDE8           POP      {R4-R7,PC}       ;; return
+    158          }
+    159          
+    160          /*********************************************************************
+    161          *
+    162          *       _Swap
+    163          */
+    164          static void _Swap(unsigned lb, unsigned ub, SORT_OBJECT * pSortObject) {
+    165            int Temp;
+    166            Temp = *(pSortObject->paSortArray + lb);
+    167            *(pSortObject->paSortArray + lb) = *(pSortObject->paSortArray + ub);
+    168            *(pSortObject->paSortArray + ub) = Temp;
+    169          }
+    170          
+    171          /*********************************************************************
+    172          *
+    173          *       _BubbleSort
+    174          *
+    175          * Purpose:
+    176          *   Bubble sort algorithm.
+    177          */
+    178          static void _BubbleSort(unsigned lb, unsigned ub, SORT_OBJECT * pSortObject) {
+    179            int Swapped;
+    180            do {
+    181              unsigned i;
+    182              Swapped = 0;
+    183              for (i = ub; i > lb; i--) {
+    184                if (_Compare(i - 1, i, pSortObject) > 0) {
+    185                  _Swap(i - 1, i, pSortObject);
+    186                  Swapped = 1;
+    187                }
+    188              }
+    189            } while (Swapped);
+    190          }
+    191          
+    192          /*********************************************************************
+    193          *
+    194          *       _Reverse
+    195          *
+    196          * Purpose:
+    197          *   Reverse the current sorting order
+    198          */
+    199          static void _Reverse(SORT_OBJECT * pSortObject) {
+    200            int i, NumItems;
+    201            NumItems = pSortObject->pSort->SortArrayNumItems;
+    202            for (i = 0; i < NumItems / 2; i++) {
+    203              int Temp;
+    204              Temp                                           = *(pSortObject->paSortArray + i);
+    205              *(pSortObject->paSortArray + i)                = *(pSortObject->paSortArray + NumItems - i - 1);
+    206              *(pSortObject->paSortArray + NumItems - i - 1) = Temp;
+    207            }
+    208          }
+    209          
+    210          /*********************************************************************
+    211          *
+    212          *       _Sort
+    213          *
+    214          * Purpose:
+    215          *   Sorts the contents of the LISTVIEW by using the qsort algorithm.
+    216          *   The compare function is called for each compare operation with valid
+    217          *   pointers to cell data of the specified column.
+    218          */
+
+   \                                 In section .text, align 4, keep-with-next
+    219          static int _Sort(LISTVIEW_Handle hObj) {
+   \                     _Sort:
+   \   00000000   F0472DE9           PUSH     {R4-R10,LR}
+   \   00000004   10D04DE2           SUB      SP,SP,#+16
+   \   00000008   0040A0E1           MOV      R4,R0
+    220            WM_HMEM hSortArray;
+    221            SORT_OBJECT SortObject;
+    222            int NumItems, NumItemsReq, i, Sel;
+    223            SortObject.pObj = LISTVIEW_LOCK_H(hObj); /* +1 */
+   \   0000000C   ........           BL       GUI_ALLOC_LockH
+   \   00000010   00008DE5           STR      R0,[SP, #+0]
+    224            if (((SortObject.pObj->IsPresorted) && (SortObject.pObj->IsSorted)) || (SortObject.pObj->hSort == 0)) {
+   \   00000014   A900D0E5           LDRB     R0,[R0, #+169]
+   \   00000018   000050E3           CMP      R0,#+0
+   \   0000001C   0300000A           BEQ      ??_Sort_0
+   \   00000020   00009DE5           LDR      R0,[SP, #+0]
+   \   00000024   A800D0E5           LDRB     R0,[R0, #+168]
+   \   00000028   000050E3           CMP      R0,#+0
+   \   0000002C   0300001A           BNE      ??_Sort_1
+   \                     ??_Sort_0:
+   \   00000030   00009DE5           LDR      R0,[SP, #+0]
+   \   00000034   A40090E5           LDR      R0,[R0, #+164]
+   \   00000038   000050E3           CMP      R0,#+0
+   \   0000003C   0300001A           BNE      ??_Sort_2
+    225              GUI_UNLOCK_H(SortObject.pObj);
+   \                     ??_Sort_1:
+   \   00000040   ........           BL       GUI_ALLOC_UnlockH
+   \   00000044   0010A0E3           MOV      R1,#+0
+   \   00000048   00108DE5           STR      R1,[SP, #+0]
+    226              return 0;
+   \   0000004C   E60000EA           B        ??_Sort_3
+    227            }
+    228            SortObject.pSort = (LISTVIEW_SORT *)GUI_LOCK_H(SortObject.pObj->hSort); /* +1 */
+   \                     ??_Sort_2:
+   \   00000050   ........           BL       GUI_ALLOC_LockH
+   \   00000054   04008DE5           STR      R0,[SP, #+4]
+    229            NumItemsReq = GUI_ARRAY_GetNumItems(SortObject.pObj->RowArray);
+   \   00000058   00009DE5           LDR      R0,[SP, #+0]
+   \   0000005C   380090E5           LDR      R0,[R0, #+56]
+   \   00000060   ........           BL       GUI_ARRAY_GetNumItems
+   \   00000064   0070A0E1           MOV      R7,R0
+    230            NumItems    = SortObject.pSort->SortArrayNumItems;
+   \   00000068   04009DE5           LDR      R0,[SP, #+4]
+    231            Sel = _GetSelUnsorted(SortObject.pObj);
+   \   0000006C   00509DE5           LDR      R5,[SP, #+0]
+   \   00000070   B480D0E1           LDRH     R8,[R0, #+4]
+   \   00000074   0500A0E1           MOV      R0,R5
+   \   00000078   ........           BL       LISTVIEW__GetSel
+   \   0000007C   000050E3           CMP      R0,#+0
+   \   00000080   1400004A           BMI      ??_Sort_4
+   \   00000084   A40095E5           LDR      R0,[R5, #+164]
+   \   00000088   000050E3           CMP      R0,#+0
+   \   0000008C   1100000A           BEQ      ??_Sort_4
+   \   00000090   ........           BL       GUI_ALLOC_LockH
+   \   00000094   B410D0E1           LDRH     R1,[R0, #+4]
+   \   00000098   000051E3           CMP      R1,#+0
+   \   0000009C   0800000A           BEQ      ??_Sort_5
+   \   000000A0   000090E5           LDR      R0,[R0, #+0]
+   \   000000A4   ........           BL       GUI_ALLOC_LockH
+   \   000000A8   0060A0E1           MOV      R6,R0
+   \   000000AC   0500A0E1           MOV      R0,R5
+   \   000000B0   ........           BL       LISTVIEW__GetSel
+   \   000000B4   800086E0           ADD      R0,R6,R0, LSL #+1
+   \   000000B8   B050D0E1           LDRH     R5,[R0, #+0]
+   \   000000BC   ........           BL       GUI_ALLOC_UnlockH
+   \   000000C0   020000EA           B        ??_Sort_6
+   \                     ??_Sort_5:
+   \   000000C4   0500A0E1           MOV      R0,R5
+   \   000000C8   ........           BL       LISTVIEW__GetSel
+   \   000000CC   0050A0E1           MOV      R5,R0
+   \                     ??_Sort_6:
+   \   000000D0   ........           BL       GUI_ALLOC_UnlockH
+   \   000000D4   020000EA           B        ??_Sort_7
+   \                     ??_Sort_4:
+   \   000000D8   0500A0E1           MOV      R0,R5
+   \   000000DC   ........           BL       LISTVIEW__GetSel
+   \   000000E0   0050A0E1           MOV      R5,R0
+    232            /* Adjust number of items in sort array */
+    233            if (NumItems != NumItemsReq) {
+   \                     ??_Sort_7:
+   \   000000E4   070058E1           CMP      R8,R7
+   \   000000E8   1900000A           BEQ      ??_Sort_8
+    234              hSortArray = SortObject.pSort->hSortArray;
+   \   000000EC   04009DE5           LDR      R0,[SP, #+4]
+   \   000000F0   009090E5           LDR      R9,[R0, #+0]
+    235              GUI_UNLOCK_H(SortObject.pObj); /* -1 */
+   \   000000F4   ........           BL       GUI_ALLOC_UnlockH
+   \   000000F8   0060A0E3           MOV      R6,#+0
+   \   000000FC   00608DE5           STR      R6,[SP, #+0]
+    236              GUI_UNLOCK_H(SortObject.pSort); /* -1 */
+   \   00000100   ........           BL       GUI_ALLOC_UnlockH
+   \   00000104   04608DE5           STR      R6,[SP, #+4]
+    237              if (!hSortArray) {
+   \   00000108   8700A0E1           LSL      R0,R7,#+1
+   \   0000010C   000059E3           CMP      R9,#+0
+   \   00000110   0100001A           BNE      ??_Sort_9
+    238                hSortArray = GUI_ALLOC_AllocZero(sizeof(SORT_TYPE) * NumItemsReq);
+   \   00000114   ........           BL       GUI_ALLOC_AllocZero
+   \   00000118   020000EA           B        ??_Sort_10
+    239              } else {
+    240                hSortArray = GUI_ALLOC_Realloc(hSortArray, sizeof(SORT_TYPE) * NumItemsReq);
+   \                     ??_Sort_9:
+   \   0000011C   0010A0E1           MOV      R1,R0
+   \   00000120   0900A0E1           MOV      R0,R9
+   \   00000124   ........           BL       GUI_ALLOC_Realloc
+   \                     ??_Sort_10:
+   \   00000128   0060A0E1           MOV      R6,R0
+    241              }
+    242              if (!hSortArray) {
+   \   0000012C   000056E3           CMP      R6,#+0
+    243                return 1;
+   \   00000130   0100A003           MOVEQ    R0,#+1
+   \   00000134   AD00000A           BEQ      ??_Sort_11
+    244              }
+    245              SortObject.pObj = LISTVIEW_LOCK_H(hObj); /* +1 */
+   \   00000138   0400A0E1           MOV      R0,R4
+   \   0000013C   ........           BL       GUI_ALLOC_LockH
+   \   00000140   00008DE5           STR      R0,[SP, #+0]
+    246              SortObject.pSort = (LISTVIEW_SORT *)GUI_LOCK_H(SortObject.pObj->hSort); /* +1 */
+   \   00000144   A40090E5           LDR      R0,[R0, #+164]
+   \   00000148   ........           BL       GUI_ALLOC_LockH
+   \   0000014C   04008DE5           STR      R0,[SP, #+4]
+    247              SortObject.pSort->hSortArray = hSortArray;
+   \   00000150   006080E5           STR      R6,[R0, #+0]
+    248            }
+    249            SortObject.paSortArray = (SORT_TYPE *)GUI_LOCK_H(SortObject.pSort->hSortArray); /* +1 */
+   \                     ??_Sort_8:
+   \   00000154   04009DE5           LDR      R0,[SP, #+4]
+   \   00000158   000090E5           LDR      R0,[R0, #+0]
+   \   0000015C   ........           BL       GUI_ALLOC_LockH
+   \   00000160   08008DE5           STR      R0,[SP, #+8]
+    250            if (SortObject.pObj->IsPresorted) {
+   \   00000164   00009DE5           LDR      R0,[SP, #+0]
+   \   00000168   A900D0E5           LDRB     R0,[R0, #+169]
+   \   0000016C   000050E3           CMP      R0,#+0
+   \   00000170   1300000A           BEQ      ??_Sort_12
+    251              /* Add new indices */
+    252              if (NumItems < NumItemsReq) {
+   \   00000174   070058E1           CMP      R8,R7
+   \   00000178   230000AA           BGE      ??_Sort_13
+    253                SortObject.pObj->ReverseSort = 0; /* Reverse sort only allowed if listview is presorted and no rows are added */
+   \   0000017C   00009DE5           LDR      R0,[SP, #+0]
+   \   00000180   0010A0E3           MOV      R1,#+0
+   \   00000184   AA10C0E5           STRB     R1,[R0, #+170]
+    254                for (i = NumItems; i < NumItemsReq; i++) {
+   \   00000188   08009DE5           LDR      R0,[SP, #+8]
+   \   0000018C   081047E0           SUB      R1,R7,R8
+   \   00000190   880080E0           ADD      R0,R0,R8, LSL #+1
+   \   00000194   010011E3           TST      R1,#0x1
+    255                  *(SortObject.paSortArray + i) = i;
+   \   00000198   B280C010           STRHNE   R8,[R0], #+2
+   \   0000019C   01808812           ADDNE    R8,R8,#+1
+   \   000001A0   A110B0E1           LSRS     R1,R1,#+1
+   \   000001A4   1800000A           BEQ      ??_Sort_13
+   \                     ??_Sort_14:
+   \   000001A8   B280C0E0           STRH     R8,[R0], #+2
+   \   000001AC   012088E2           ADD      R2,R8,#+1
+   \   000001B0   B220C0E0           STRH     R2,[R0], #+2
+    256                }
+   \   000001B4   018082E2           ADD      R8,R2,#+1
+   \   000001B8   011051E2           SUBS     R1,R1,#+1
+   \   000001BC   F9FFFF1A           BNE      ??_Sort_14
+   \   000001C0   110000EA           B        ??_Sort_13
+    257              }
+    258            } else {
+    259              SortObject.pObj->ReverseSort = 0; /* Reverse sort only allowed if listview is presorted */
+   \                     ??_Sort_12:
+   \   000001C4   00009DE5           LDR      R0,[SP, #+0]
+   \   000001C8   0060A0E3           MOV      R6,#+0
+   \   000001CC   AA60C0E5           STRB     R6,[R0, #+170]
+    260              /* Fill with indices if not presorted */
+    261              for (i = 0; i < NumItemsReq; i++) {
+   \   000001D0   0080A0E3           MOV      R8,#+0
+   \   000001D4   010057E3           CMP      R7,#+1
+   \   000001D8   0B0000BA           BLT      ??_Sort_13
+   \   000001DC   08009DE5           LDR      R0,[SP, #+8]
+   \   000001E0   010017E3           TST      R7,#0x1
+    262                *(SortObject.paSortArray + i) = i;
+   \   000001E4   B260C010           STRHNE   R6,[R0], #+2
+   \   000001E8   0180A013           MOVNE    R8,#+1
+   \   000001EC   A710B0E1           LSRS     R1,R7,#+1
+   \   000001F0   0500000A           BEQ      ??_Sort_13
+   \                     ??_Sort_15:
+   \   000001F4   B280C0E0           STRH     R8,[R0], #+2
+   \   000001F8   012088E2           ADD      R2,R8,#+1
+   \   000001FC   B220C0E0           STRH     R2,[R0], #+2
+    263              }
+   \   00000200   018082E2           ADD      R8,R2,#+1
+   \   00000204   011051E2           SUBS     R1,R1,#+1
+   \   00000208   F9FFFF1A           BNE      ??_Sort_15
+    264            }
+    265            SortObject.pSort->SortArrayNumItems = NumItemsReq;
+   \                     ??_Sort_13:
+   \   0000020C   04009DE5           LDR      R0,[SP, #+4]
+    266            /* Sort only if more than one item is available */
+    267            if (NumItemsReq > 1) {
+   \   00000210   0060A0E3           MOV      R6,#+0
+   \   00000214   B470C0E1           STRH     R7,[R0, #+4]
+   \   00000218   020057E3           CMP      R7,#+2
+   \   0000021C   610000BA           BLT      ??_Sort_16
+    268              if (SortObject.pObj->ReverseSort) {
+   \   00000220   00109DE5           LDR      R1,[SP, #+0]
+   \   00000224   AA10D1E5           LDRB     R1,[R1, #+170]
+   \   00000228   000051E3           CMP      R1,#+0
+   \   0000022C   3600000A           BEQ      ??_Sort_17
+    269                _Reverse(&SortObject);
+   \   00000230   B420D0E1           LDRH     R2,[R0, #+4]
+   \   00000234   0000A0E3           MOV      R0,#+0
+   \   00000238   A21F82E0           ADD      R1,R2,R2, LSR #+31
+   \   0000023C   C130A0E1           ASR      R3,R1,#+1
+   \   00000240   010053E3           CMP      R3,#+1
+   \   00000244   230000BA           BLT      ??_Sort_18
+   \   00000248   08109DE5           LDR      R1,[SP, #+8]
+   \   0000024C   013043E2           SUB      R3,R3,#+1
+   \   00000250   822081E0           ADD      R2,R1,R2, LSL #+1
+   \   00000254   B080D1E1           LDRH     R8,[R1, #+0]
+   \   00000258   B2E052E1           LDRH     LR,[R2, #-2]
+   \   0000025C   04C042E2           SUB      R12,R2,#+4
+   \   00000260   010013E3           TST      R3,#0x1
+   \   00000264   0400000A           BEQ      ??_Sort_19
+   \   00000268   B2E0C1E0           STRH     LR,[R1], #+2
+   \   0000026C   B280CCE1           STRH     R8,[R12, #+2]
+   \   00000270   0100A0E3           MOV      R0,#+1
+   \   00000274   B080D1E1           LDRH     R8,[R1, #+0]
+   \   00000278   B0E0DCE1           LDRH     LR,[R12, #+0]
+   \                     ??_Sort_19:
+   \   0000027C   80C0A0E1           LSL      R12,R0,#+1
+   \   00000280   00C06CE2           RSB      R12,R12,#+0
+   \   00000284   02C08CE0           ADD      R12,R12,R2
+   \   00000288   06C04CE2           SUB      R12,R12,#+6
+   \   0000028C   A330B0E1           LSRS     R3,R3,#+1
+   \   00000290   0B00000A           BEQ      ??_Sort_20
+   \                     ??_Sort_21:
+   \   00000294   B2E0C1E0           STRH     LR,[R1], #+2
+   \   00000298   B480CCE1           STRH     R8,[R12, #+4]
+   \   0000029C   B290DCE1           LDRH     R9,[R12, #+2]
+   \   000002A0   B070D1E1           LDRH     R7,[R1, #+0]
+   \   000002A4   013043E2           SUB      R3,R3,#+1
+   \   000002A8   B290C1E0           STRH     R9,[R1], #+2
+   \   000002AC   B270CCE1           STRH     R7,[R12, #+2]
+   \   000002B0   020080E2           ADD      R0,R0,#+2
+   \   000002B4   B080D1E1           LDRH     R8,[R1, #+0]
+   \   000002B8   B4E05CE0           LDRH     LR,[R12], #-4
+   \   000002BC   000053E3           CMP      R3,#+0
+   \   000002C0   F3FFFF1A           BNE      ??_Sort_21
+   \                     ??_Sort_20:
+   \   000002C4   8000A0E1           LSL      R0,R0,#+1
+   \   000002C8   000060E2           RSB      R0,R0,#+0
+   \   000002CC   020080E0           ADD      R0,R0,R2
+   \   000002D0   B0E0C1E1           STRH     LR,[R1, #+0]
+   \   000002D4   B28060E1           STRH     R8,[R0, #-2]!
+    270              } else {
+    271                _BubbleSort(0, NumItemsReq - 1, &SortObject);
+    272              }
+    273              _SetSelUnsorted(hObj, Sel);
+   \                     ??_Sort_18:
+   \   000002D8   0400A0E1           MOV      R0,R4
+   \   000002DC   ........           BL       GUI_ALLOC_LockH
+   \   000002E0   A47090E5           LDR      R7,[R0, #+164]
+   \   000002E4   ........           BL       GUI_ALLOC_UnlockH
+   \   000002E8   000057E3           CMP      R7,#+0
+   \   000002EC   2A00000A           BEQ      ??_Sort_22
+   \   000002F0   0700A0E1           MOV      R0,R7
+   \   000002F4   ........           BL       GUI_ALLOC_LockH
+   \   000002F8   B470D0E1           LDRH     R7,[R0, #+4]
+   \   000002FC   000090E5           LDR      R0,[R0, #+0]
+   \   00000300   ........           BL       GUI_ALLOC_LockH
+   \   00000304   0010A0E3           MOV      R1,#+0
+   \   00000308   190000EA           B        ??_Sort_23
+   \                     ??_Sort_17:
+   \   0000030C   017047E2           SUB      R7,R7,#+1
+   \                     ??_Sort_24:
+   \   00000310   00A0A0E3           MOV      R10,#+0
+   \   00000314   0710B0E1           MOVS     R1,R7
+   \   00000318   EEFFFF0A           BEQ      ??_Sort_18
+   \   0000031C   8180A0E1           LSL      R8,R1,#+1
+   \                     ??_Sort_25:
+   \   00000320   019041E2           SUB      R9,R1,#+1
+   \   00000324   0D20A0E1           MOV      R2,SP
+   \   00000328   0900A0E1           MOV      R0,R9
+   \   0000032C   ........           BL       _Compare
+   \   00000330   010050E3           CMP      R0,#+1
+   \   00000334   060000BA           BLT      ??_Sort_26
+   \   00000338   08009DE5           LDR      R0,[SP, #+8]
+   \   0000033C   001088E0           ADD      R1,R8,R0
+   \   00000340   B03098E1           LDRH     R3,[R8, +R0]
+   \   00000344   B22051E1           LDRH     R2,[R1, #-2]
+   \   00000348   01A0A0E3           MOV      R10,#+1
+   \   0000034C   B23041E1           STRH     R3,[R1, #-2]
+   \   00000350   B02088E1           STRH     R2,[R8, +R0]
+   \                     ??_Sort_26:
+   \   00000354   0910A0E1           MOV      R1,R9
+   \   00000358   028048E2           SUB      R8,R8,#+2
+   \   0000035C   000051E3           CMP      R1,#+0
+   \   00000360   EEFFFF1A           BNE      ??_Sort_25
+   \   00000364   00005AE3           CMP      R10,#+0
+   \   00000368   E8FFFF1A           BNE      ??_Sort_24
+   \   0000036C   D9FFFFEA           B        ??_Sort_18
+    274            }
+   \                     ??_Sort_27:
+   \   00000370   011081E2           ADD      R1,R1,#+1
+   \                     ??_Sort_23:
+   \   00000374   070051E1           CMP      R1,R7
+   \   00000378   040000AA           BGE      ??_Sort_28
+   \   0000037C   B220D0E0           LDRH     R2,[R0], #+2
+   \   00000380   050052E1           CMP      R2,R5
+   \   00000384   F9FFFF1A           BNE      ??_Sort_27
+   \   00000388   0400A0E1           MOV      R0,R4
+   \   0000038C   ........           BL       LISTVIEW__SetSel
+   \                     ??_Sort_28:
+   \   00000390   ........           BL       GUI_ALLOC_UnlockH
+   \   00000394   ........           BL       GUI_ALLOC_UnlockH
+   \   00000398   020000EA           B        ??_Sort_16
+   \                     ??_Sort_22:
+   \   0000039C   0510A0E1           MOV      R1,R5
+   \   000003A0   0400A0E1           MOV      R0,R4
+   \   000003A4   ........           BL       LISTVIEW__SetSel
+    275            SortObject.pObj->IsPresorted = 1;
+   \                     ??_Sort_16:
+   \   000003A8   00109DE5           LDR      R1,[SP, #+0]
+   \   000003AC   0100A0E3           MOV      R0,#+1
+   \   000003B0   A900C1E5           STRB     R0,[R1, #+169]
+    276            SortObject.pObj->IsSorted    = 1;
+   \   000003B4   00109DE5           LDR      R1,[SP, #+0]
+   \   000003B8   A800C1E5           STRB     R0,[R1, #+168]
+    277            HEADER_SetDirIndicator(SortObject.pObj->hHeader, SortObject.pObj->SortIndex, SortObject.pSort->Reverse);
+   \   000003BC   04009DE5           LDR      R0,[SP, #+4]
+   \   000003C0   1020D0E5           LDRB     R2,[R0, #+16]
+   \   000003C4   00009DE5           LDR      R0,[SP, #+0]
+   \   000003C8   741090E5           LDR      R1,[R0, #+116]
+   \   000003CC   340090E5           LDR      R0,[R0, #+52]
+   \   000003D0   ........           BL       HEADER_SetDirIndicator
+    278            GUI_UNLOCK_H(SortObject.paSortArray);
+   \   000003D4   ........           BL       GUI_ALLOC_UnlockH
+   \   000003D8   08608DE5           STR      R6,[SP, #+8]
+    279            GUI_UNLOCK_H(SortObject.pObj);
+   \   000003DC   ........           BL       GUI_ALLOC_UnlockH
+   \   000003E0   00608DE5           STR      R6,[SP, #+0]
+    280            GUI_UNLOCK_H(SortObject.pSort);
+   \   000003E4   ........           BL       GUI_ALLOC_UnlockH
+   \   000003E8   04608DE5           STR      R6,[SP, #+4]
+    281            return 0;
+   \                     ??_Sort_3:
+   \   000003EC   0000A0E3           MOV      R0,#+0
+   \                     ??_Sort_11:
+   \   000003F0   10D08DE2           ADD      SP,SP,#+16       ;; stack cleaning
+   \   000003F4   F087BDE8           POP      {R4-R10,PC}      ;; return
+    282          }
+    283          
+    284          /*********************************************************************
+    285          *
+    286          *       _CreateSortObject
+    287          */
+    288          static void _CreateSortObject(LISTVIEW_Handle hObj) {
+    289            WM_HMEM hSort;
+    290            LISTVIEW_Obj  * pObj;
+    291            LISTVIEW_SORT * pSort;
+    292            pObj = LISTVIEW_LOCK_H(hObj); /* +1 */
+    293            hSort = pObj->hSort;
+    294            GUI_UNLOCK_H(pObj); /* -1 */
+    295            if (!hSort) {
+    296              hSort = GUI_ALLOC_AllocZero(sizeof(LISTVIEW_SORT));
+    297              if (!hSort) {
+    298                return;
+    299              }
+    300            }
+    301            pObj = LISTVIEW_LOCK_H(hObj);
+    302            pObj->hSort = hSort;
+    303            pSort = (LISTVIEW_SORT *)GUI_LOCK_H(pObj->hSort);
+    304            pObj->SortIndex      = -1;
+    305            pSort->fpFree        = _Free;
+    306            pSort->fpSort        = _Sort;
+    307            GUI_UNLOCK_H(pSort);
+    308            GUI_UNLOCK_H(pObj);
+    309          }
+    310          
+    311          /*********************************************************************
+    312          *
+    313          *       Public routines
+    314          *
+    315          **********************************************************************
+    316          */
+    317          /*********************************************************************
+    318          *
+    319          *       LISTVIEW_CompareText
+    320          */
+
+   \                                 In section .text, align 4, keep-with-next
+    321          int LISTVIEW_CompareText(const void * p0, const void * p1) {
+   \                     LISTVIEW_CompareText:
+   \   00000000   0120A0E1           MOV      R2,R1
+    322          // KMC - use case insensitive compare instead  return strcmp((const char *)p1, (const char *)p0);
+    323            return kmc_stricmp((const char *)p1, (const char *)p0);
+   \   00000004   0010A0E1           MOV      R1,R0
+   \   00000008   0200A0E1           MOV      R0,R2
+   \   0000000C   ........           B        kmc_stricmp      ;; tailcall
+    324          }
+    325          
+    326          /*********************************************************************
+    327          *
+    328          *       LISTVIEW_CompareDec
+    329          */
+
+   \                                 In section .text, align 4, keep-with-next
+    330          int LISTVIEW_CompareDec(const void * p0, const void * p1) {
+   \                     LISTVIEW_CompareDec:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   \   00000004   10D04DE2           SUB      SP,SP,#+16
+    331            int v[2] = {0}, i, d;
+   \   00000008   0D20A0E1           MOV      R2,SP
+   \   0000000C   0030A0E3           MOV      R3,#+0
+   \   00000010   00C0A0E3           MOV      R12,#+0
+   \   00000014   0810A2E8           STM      R2!,{R3,R12}
+    332            const char * ps[2];
+    333            char c;
+    334            ps[0] = (const char *)p0;
+   \   00000018   08008DE5           STR      R0,[SP, #+8]
+    335            ps[1] = (const char *)p1;
+   \   0000001C   0C108DE5           STR      R1,[SP, #+12]
+    336            for (i = 0; i < 2; i++) {
+   \   00000020   08008DE2           ADD      R0,SP,#+8
+   \   00000024   0D10A0E1           MOV      R1,SP
+   \   00000028   0220A0E3           MOV      R2,#+2
+   \   0000002C   0A30A0E3           MOV      R3,#+10
+    337              int Neg = 0;
+    338              if (*ps[i] == '-') {
+   \                     ??LISTVIEW_CompareDec_0:
+   \   00000030   00E090E5           LDR      LR,[R0, #+0]
+   \   00000034   00C0A0E3           MOV      R12,#+0
+   \   00000038   0040DEE5           LDRB     R4,[LR, #+0]
+   \   0000003C   2D0054E3           CMP      R4,#+45
+   \   00000040   0600001A           BNE      ??LISTVIEW_CompareDec_1
+    339                Neg = 1;
+    340                ps[i]++;
+   \   00000044   01E08EE2           ADD      LR,LR,#+1
+   \   00000048   01C0A0E3           MOV      R12,#+1
+   \   0000004C   00E080E5           STR      LR,[R0, #+0]
+   \   00000050   020000EA           B        ??LISTVIEW_CompareDec_1
+    341              }
+    342              while ((c = *ps[i]++) != 0) {
+    343                d = c - '0';
+    344                if ((d < 0) || (d > 9)) {
+    345                  break;
+    346                }
+    347                v[i] *= 10;
+    348                v[i] += d;
+   \                     ??LISTVIEW_CompareDec_2:
+   \   00000054   004091E5           LDR      R4,[R1, #+0]
+   \   00000058   93E42EE0           MLA      LR,R3,R4,LR
+   \   0000005C   00E081E5           STR      LR,[R1, #+0]
+   \                     ??LISTVIEW_CompareDec_1:
+   \   00000060   00E090E5           LDR      LR,[R0, #+0]
+   \   00000064   0140DEE4           LDRB     R4,[LR], #+1
+   \   00000068   00E080E5           STR      LR,[R0, #+0]
+   \   0000006C   000054E3           CMP      R4,#+0
+   \   00000070   0200000A           BEQ      ??LISTVIEW_CompareDec_3
+   \   00000074   30E044E2           SUB      LR,R4,#+48
+   \   00000078   0A005EE3           CMP      LR,#+10
+   \   0000007C   F4FFFF3A           BCC      ??LISTVIEW_CompareDec_2
+    349              }
+    350              if (Neg) {
+   \                     ??LISTVIEW_CompareDec_3:
+   \   00000080   00005CE3           CMP      R12,#+0
+    351                v[i] *= -1;
+   \   00000084   00C09115           LDRNE    R12,[R1, #+0]
+    352              }
+    353            }
+   \   00000088   040080E2           ADD      R0,R0,#+4
+   \   0000008C   00C06C12           RSBNE    R12,R12,#+0
+   \   00000090   00C08115           STRNE    R12,[R1, #+0]
+   \   00000094   041081E2           ADD      R1,R1,#+4
+   \   00000098   012052E2           SUBS     R2,R2,#+1
+   \   0000009C   E3FFFF1A           BNE      ??LISTVIEW_CompareDec_0
+   \   000000A0   04009DE5           LDR      R0,[SP, #+4]
+   \   000000A4   00109DE5           LDR      R1,[SP, #+0]
+   \   000000A8   010050E1           CMP      R0,R1
+    354            if (v[0] > v[1]) {
+    355              return -1;
+   \   000000AC   0000E0B3           MVNLT    R0,#+0
+   \   000000B0   020000BA           BLT      ??LISTVIEW_CompareDec_4
+    356            } else if (v[0] < v[1]) {
+   \   000000B4   000051E1           CMP      R1,R0
+    357              return 1;
+   \   000000B8   0100A0B3           MOVLT    R0,#+1
+    358            }
+    359            return 0;
+   \   000000BC   0000A0A3           MOVGE    R0,#+0
+   \                     ??LISTVIEW_CompareDec_4:
+   \   000000C0   10D08DE2           ADD      SP,SP,#+16       ;; stack cleaning
+   \   000000C4   1080BDE8           POP      {R4,PC}          ;; return
+    360          }
+    361          
+    362          /*********************************************************************
+    363          *
+    364          *       LISTVIEW_GetSelUnsorted
+    365          *
+    366          * Purpose:
+    367          *   If sorting is disabled, the behaviour is the same as LISTVIEW_GetSel().
+    368          *   It returns the 'visible' selection index.
+    369          *   If sorting is enabled, the function returns the 'unselected' index of
+    370          *   the selected row.
+    371          */
+
+   \                                 In section .text, align 4, keep-with-next
+    372          int LISTVIEW_GetSelUnsorted(LISTVIEW_Handle hObj) {
+   \                     LISTVIEW_GetSelUnsorted:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0040B0E1           MOVS     R4,R0
+    373            int r = -1;
+   \   0000000C   0050E0E3           MVN      R5,#+0
+    374            if (hObj) {
+   \   00000010   2200000A           BEQ      ??LISTVIEW_GetSelUnsorted_0
+    375              LISTVIEW_Obj * pObj;
+    376              WM_LOCK();
+   \   00000014   ........           BL       GUI_Lock
+    377              _Sort(hObj);
+   \   00000018   0400A0E1           MOV      R0,R4
+   \   0000001C   ........           BL       _Sort
+    378              pObj = LISTVIEW_LOCK_H(hObj);
+    379              r = _GetSelUnsorted(pObj);
+   \   00000020   0400A0E1           MOV      R0,R4
+   \   00000024   ........           BL       GUI_ALLOC_LockH
+   \   00000028   0040A0E1           MOV      R4,R0
+   \   0000002C   ........           BL       LISTVIEW__GetSel
+   \   00000030   000050E3           CMP      R0,#+0
+   \   00000034   1400004A           BMI      ??LISTVIEW_GetSelUnsorted_1
+   \   00000038   A40094E5           LDR      R0,[R4, #+164]
+   \   0000003C   000050E3           CMP      R0,#+0
+   \   00000040   1100000A           BEQ      ??LISTVIEW_GetSelUnsorted_1
+   \   00000044   ........           BL       GUI_ALLOC_LockH
+   \   00000048   B410D0E1           LDRH     R1,[R0, #+4]
+   \   0000004C   000051E3           CMP      R1,#+0
+   \   00000050   0800000A           BEQ      ??LISTVIEW_GetSelUnsorted_2
+   \   00000054   000090E5           LDR      R0,[R0, #+0]
+   \   00000058   ........           BL       GUI_ALLOC_LockH
+   \   0000005C   0050A0E1           MOV      R5,R0
+   \   00000060   0400A0E1           MOV      R0,R4
+   \   00000064   ........           BL       LISTVIEW__GetSel
+   \   00000068   800085E0           ADD      R0,R5,R0, LSL #+1
+   \   0000006C   B050D0E1           LDRH     R5,[R0, #+0]
+   \   00000070   ........           BL       GUI_ALLOC_UnlockH
+   \   00000074   020000EA           B        ??LISTVIEW_GetSelUnsorted_3
+   \                     ??LISTVIEW_GetSelUnsorted_2:
+   \   00000078   0400A0E1           MOV      R0,R4
+   \   0000007C   ........           BL       LISTVIEW__GetSel
+   \   00000080   0050A0E1           MOV      R5,R0
+   \                     ??LISTVIEW_GetSelUnsorted_3:
+   \   00000084   ........           BL       GUI_ALLOC_UnlockH
+   \   00000088   020000EA           B        ??LISTVIEW_GetSelUnsorted_4
+   \                     ??LISTVIEW_GetSelUnsorted_1:
+   \   0000008C   0400A0E1           MOV      R0,R4
+   \   00000090   ........           BL       LISTVIEW__GetSel
+   \   00000094   0050A0E1           MOV      R5,R0
+    380              GUI_UNLOCK_H(pObj);
+   \                     ??LISTVIEW_GetSelUnsorted_4:
+   \   00000098   ........           BL       GUI_ALLOC_UnlockH
+    381              WM_UNLOCK();
+   \   0000009C   ........           BL       GUI_Unlock
+    382            }
+    383            return r;
+   \                     ??LISTVIEW_GetSelUnsorted_0:
+   \   000000A0   0500A0E1           MOV      R0,R5
+   \   000000A4   04D08DE2           ADD      SP,SP,#+4
+   \   000000A8   3080BDE8           POP      {R4,R5,PC}       ;; return
+    384          }
+    385          
+    386          /*********************************************************************
+    387          *
+    388          *       LISTVIEW_SetSelUnsorted
+    389          *
+    390          * Purpose:
+    391          *   If sorting is disabled, the behaviour is the same as LISTVIEW_SetSel().
+    392          *   It sets the 'visible' selection index.
+    393          *   If sorting is enabled, the function sets the 'unselected' index of the selected
+    394          *   the selected row.
+    395          */
+
+   \                                 In section .text, align 4, keep-with-next
+    396          void LISTVIEW_SetSelUnsorted(LISTVIEW_Handle hObj, int Sel) {
+   \                     LISTVIEW_SetSelUnsorted:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   0150A0E1           MOV      R5,R1
+    397            if (hObj) {
+   \   0000000C   000054E3           CMP      R4,#+0
+   \   00000010   1E00000A           BEQ      ??LISTVIEW_SetSelUnsorted_0
+    398              WM_LOCK();
+   \   00000014   ........           BL       GUI_Lock
+    399              _Sort(hObj);
+   \   00000018   0400A0E1           MOV      R0,R4
+   \   0000001C   ........           BL       _Sort
+    400              _SetSelUnsorted(hObj, Sel);
+   \   00000020   0400A0E1           MOV      R0,R4
+   \   00000024   ........           BL       GUI_ALLOC_LockH
+   \   00000028   A46090E5           LDR      R6,[R0, #+164]
+   \   0000002C   ........           BL       GUI_ALLOC_UnlockH
+   \   00000030   000056E3           CMP      R6,#+0
+   \   00000034   1100000A           BEQ      ??LISTVIEW_SetSelUnsorted_1
+   \   00000038   0600A0E1           MOV      R0,R6
+   \   0000003C   ........           BL       GUI_ALLOC_LockH
+   \   00000040   B460D0E1           LDRH     R6,[R0, #+4]
+   \   00000044   000090E5           LDR      R0,[R0, #+0]
+   \   00000048   ........           BL       GUI_ALLOC_LockH
+   \   0000004C   0010A0E3           MOV      R1,#+0
+   \   00000050   000000EA           B        ??LISTVIEW_SetSelUnsorted_2
+   \                     ??LISTVIEW_SetSelUnsorted_3:
+   \   00000054   011081E2           ADD      R1,R1,#+1
+   \                     ??LISTVIEW_SetSelUnsorted_2:
+   \   00000058   060051E1           CMP      R1,R6
+   \   0000005C   040000AA           BGE      ??LISTVIEW_SetSelUnsorted_4
+   \   00000060   B220D0E0           LDRH     R2,[R0], #+2
+   \   00000064   050052E1           CMP      R2,R5
+   \   00000068   F9FFFF1A           BNE      ??LISTVIEW_SetSelUnsorted_3
+   \   0000006C   0400A0E1           MOV      R0,R4
+   \   00000070   ........           BL       LISTVIEW__SetSel
+   \                     ??LISTVIEW_SetSelUnsorted_4:
+   \   00000074   ........           BL       GUI_ALLOC_UnlockH
+   \   00000078   ........           BL       GUI_ALLOC_UnlockH
+   \   0000007C   020000EA           B        ??LISTVIEW_SetSelUnsorted_5
+   \                     ??LISTVIEW_SetSelUnsorted_1:
+   \   00000080   0510A0E1           MOV      R1,R5
+   \   00000084   0400A0E1           MOV      R0,R4
+   \   00000088   ........           BL       LISTVIEW__SetSel
+    401              WM_UNLOCK();
+   \                     ??LISTVIEW_SetSelUnsorted_5:
+   \   0000008C   ........           BL       GUI_Unlock
+    402            }
+    403          }
+   \                     ??LISTVIEW_SetSelUnsorted_0:
+   \   00000090   7080BDE8           POP      {R4-R6,PC}       ;; return
+    404          
+    405          /*********************************************************************
+    406          *
+    407          *       LISTVIEW_SetCompareFunc
+    408          *
+    409          * Purpose:
+    410          *   Sets the compare function for the given column, which is called by
+    411          *   the sorting algorithm if sorting is enabled.
+    412          */
+
+   \                                 In section .text, align 4, keep-with-next
+    413          void LISTVIEW_SetCompareFunc(LISTVIEW_Handle hObj, unsigned Column, int (* fpCompare)(const void * p0, const void * p1)) {
+   \                     LISTVIEW_SetCompareFunc:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0260A0E1           MOV      R6,R2
+    414            int NumColumns;
+    415            LISTVIEW_Obj    * pObj;
+    416            LISTVIEW_COLUMN * pColumn;
+    417            if (hObj) {
+   \   00000014   000054E3           CMP      R4,#+0
+   \   00000018   0E00000A           BEQ      ??LISTVIEW_SetCompareFunc_0
+    418              WM_LOCK();
+   \   0000001C   ........           BL       GUI_Lock
+    419              pObj = LISTVIEW_LOCK_H(hObj);
+   \   00000020   0400A0E1           MOV      R0,R4
+   \   00000024   ........           BL       GUI_ALLOC_LockH
+   \   00000028   0070A0E1           MOV      R7,R0
+    420              NumColumns = LISTVIEW_GetNumColumns(hObj);
+    421              if ((int)Column <= NumColumns) {
+   \   0000002C   0400A0E1           MOV      R0,R4
+   \   00000030   ........           BL       LISTVIEW_GetNumColumns
+   \   00000034   050050E1           CMP      R0,R5
+   \   00000038   040000BA           BLT      ??LISTVIEW_SetCompareFunc_1
+    422                pColumn = (LISTVIEW_COLUMN *)GUI_ARRAY_GetpItemLocked(pObj->ColumnArray, Column);
+    423                pColumn->fpCompare = fpCompare;
+   \   0000003C   0510A0E1           MOV      R1,R5
+   \   00000040   3C0097E5           LDR      R0,[R7, #+60]
+   \   00000044   ........           BL       GUI_ARRAY_GetpItemLocked
+   \   00000048   046080E5           STR      R6,[R0, #+4]
+    424                GUI_UNLOCK_H(pColumn);
+   \   0000004C   ........           BL       GUI_ALLOC_UnlockH
+    425              }
+    426              GUI_UNLOCK_H(pObj);
+   \                     ??LISTVIEW_SetCompareFunc_1:
+   \   00000050   ........           BL       GUI_ALLOC_UnlockH
+    427              WM_UNLOCK();
+   \   00000054   ........           BL       GUI_Unlock
+    428            }
+    429          }
+   \                     ??LISTVIEW_SetCompareFunc_0:
+   \   00000058   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   0000005C   F080BDE8           POP      {R4-R7,PC}       ;; return
+    430          
+    431          /*********************************************************************
+    432          *
+    433          *       LISTVIEW_DisableSort
+    434          *
+    435          * Purpose:
+    436          *   Disables sorting for the given listview object.
+    437          */
+
+   \                                 In section .text, align 4, keep-with-next
+    438          void LISTVIEW_DisableSort(LISTVIEW_Handle hObj) {
+   \                     LISTVIEW_DisableSort:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0040B0E1           MOVS     R4,R0
+    439            if (hObj) {
+   \   0000000C   3A00000A           BEQ      ??LISTVIEW_DisableSort_0
+    440              LISTVIEW_Obj * pObj;
+    441              WM_LOCK();
+   \   00000010   ........           BL       GUI_Lock
+    442              pObj = LISTVIEW_LOCK_H(hObj);
+   \   00000014   0400A0E1           MOV      R0,R4
+   \   00000018   ........           BL       GUI_ALLOC_LockH
+   \   0000001C   0050A0E1           MOV      R5,R0
+    443              if (pObj->hSort) {
+   \   00000020   A40095E5           LDR      R0,[R5, #+164]
+   \   00000024   000050E3           CMP      R0,#+0
+   \   00000028   3100000A           BEQ      ??LISTVIEW_DisableSort_1
+    444                int Sel = _GetSelUnsorted(pObj);
+   \   0000002C   0500A0E1           MOV      R0,R5
+   \   00000030   ........           BL       LISTVIEW__GetSel
+   \   00000034   000050E3           CMP      R0,#+0
+   \   00000038   1400004A           BMI      ??LISTVIEW_DisableSort_2
+   \   0000003C   A40095E5           LDR      R0,[R5, #+164]
+   \   00000040   000050E3           CMP      R0,#+0
+   \   00000044   1100000A           BEQ      ??LISTVIEW_DisableSort_2
+   \   00000048   ........           BL       GUI_ALLOC_LockH
+   \   0000004C   B410D0E1           LDRH     R1,[R0, #+4]
+   \   00000050   000051E3           CMP      R1,#+0
+   \   00000054   0800000A           BEQ      ??LISTVIEW_DisableSort_3
+   \   00000058   000090E5           LDR      R0,[R0, #+0]
+   \   0000005C   ........           BL       GUI_ALLOC_LockH
+   \   00000060   0060A0E1           MOV      R6,R0
+   \   00000064   0500A0E1           MOV      R0,R5
+   \   00000068   ........           BL       LISTVIEW__GetSel
+   \   0000006C   800086E0           ADD      R0,R6,R0, LSL #+1
+   \   00000070   B060D0E1           LDRH     R6,[R0, #+0]
+   \   00000074   ........           BL       GUI_ALLOC_UnlockH
+   \   00000078   020000EA           B        ??LISTVIEW_DisableSort_4
+   \                     ??LISTVIEW_DisableSort_3:
+   \   0000007C   0500A0E1           MOV      R0,R5
+   \   00000080   ........           BL       LISTVIEW__GetSel
+   \   00000084   0060A0E1           MOV      R6,R0
+   \                     ??LISTVIEW_DisableSort_4:
+   \   00000088   ........           BL       GUI_ALLOC_UnlockH
+   \   0000008C   020000EA           B        ??LISTVIEW_DisableSort_5
+   \                     ??LISTVIEW_DisableSort_2:
+   \   00000090   0500A0E1           MOV      R0,R5
+   \   00000094   ........           BL       LISTVIEW__GetSel
+   \   00000098   0060A0E1           MOV      R6,R0
+    445                _Free(pObj->hSort);
+   \                     ??LISTVIEW_DisableSort_5:
+   \   0000009C   A47095E5           LDR      R7,[R5, #+164]
+   \   000000A0   0700A0E1           MOV      R0,R7
+   \   000000A4   ........           BL       GUI_ALLOC_LockH
+   \   000000A8   000090E5           LDR      R0,[R0, #+0]
+   \   000000AC   ........           BL       GUI_ALLOC_Free
+   \   000000B0   ........           BL       GUI_ALLOC_UnlockH
+   \   000000B4   0700A0E1           MOV      R0,R7
+   \   000000B8   ........           BL       GUI_ALLOC_Free
+    446                pObj->hSort       = 0;
+   \   000000BC   0000A0E3           MOV      R0,#+0
+   \   000000C0   A40085E5           STR      R0,[R5, #+164]
+    447                pObj->SortIndex   = -1;
+   \   000000C4   0010E0E1           MVN      R1,R0
+   \   000000C8   741085E5           STR      R1,[R5, #+116]
+    448                pObj->IsPresorted = 0;
+   \   000000CC   A900C5E5           STRB     R0,[R5, #+169]
+    449                pObj->IsSorted    = 0;
+   \   000000D0   A800C5E5           STRB     R0,[R5, #+168]
+    450                HEADER_SetDirIndicator(pObj->hHeader, -1, 0);
+   \   000000D4   0020A0E3           MOV      R2,#+0
+   \   000000D8   340095E5           LDR      R0,[R5, #+52]
+   \   000000DC   ........           BL       HEADER_SetDirIndicator
+    451                LISTVIEW_SetSel(hObj, Sel);
+   \   000000E0   0610A0E1           MOV      R1,R6
+   \   000000E4   0400A0E1           MOV      R0,R4
+   \   000000E8   ........           BL       LISTVIEW_SetSel
+    452                LISTVIEW__InvalidateInsideArea(hObj);
+   \   000000EC   0400A0E1           MOV      R0,R4
+   \   000000F0   ........           BL       LISTVIEW__InvalidateInsideArea
+    453              }
+    454              GUI_UNLOCK_H(pObj);
+   \                     ??LISTVIEW_DisableSort_1:
+   \   000000F4   ........           BL       GUI_ALLOC_UnlockH
+    455              WM_UNLOCK();
+   \   000000F8   ........           BL       GUI_Unlock
+    456            }
+    457          }
+   \                     ??LISTVIEW_DisableSort_0:
+   \   000000FC   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000100   F080BDE8           POP      {R4-R7,PC}       ;; return
+    458          
+    459          /*********************************************************************
+    460          *
+    461          *       LISTVIEW_EnableSort
+    462          *
+    463          * Purpose:
+    464          *   Enables sorting for the given listview object.
+    465          */
+
+   \                                 In section .text, align 4, keep-with-next
+    466          void LISTVIEW_EnableSort(LISTVIEW_Handle hObj) {
+   \                     LISTVIEW_EnableSort:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0040B0E1           MOVS     R4,R0
+    467            if (hObj) {
+   \   0000000C   1F00000A           BEQ      ??LISTVIEW_EnableSort_0
+    468              WM_HMEM hSort;
+    469              LISTVIEW_Obj * pObj;
+    470              WM_LOCK();
+   \   00000010   ........           BL       GUI_Lock
+    471              pObj = LISTVIEW_LOCK_H(hObj);
+    472              hSort = pObj->hSort;
+   \   00000014   0400A0E1           MOV      R0,R4
+   \   00000018   ........           BL       GUI_ALLOC_LockH
+   \   0000001C   A45090E5           LDR      R5,[R0, #+164]
+    473              GUI_UNLOCK_H(pObj);
+   \   00000020   ........           BL       GUI_ALLOC_UnlockH
+    474              if (!hSort) {
+   \   00000024   000055E3           CMP      R5,#+0
+   \   00000028   1700001A           BNE      ??LISTVIEW_EnableSort_1
+    475                _CreateSortObject(hObj);
+   \   0000002C   0400A0E1           MOV      R0,R4
+   \   00000030   ........           BL       GUI_ALLOC_LockH
+   \   00000034   A45090E5           LDR      R5,[R0, #+164]
+   \   00000038   ........           BL       GUI_ALLOC_UnlockH
+   \   0000003C   000055E3           CMP      R5,#+0
+   \   00000040   0300001A           BNE      ??LISTVIEW_EnableSort_2
+   \   00000044   1400A0E3           MOV      R0,#+20
+   \   00000048   ........           BL       GUI_ALLOC_AllocZero
+   \   0000004C   0050B0E1           MOVS     R5,R0
+   \   00000050   0D00000A           BEQ      ??LISTVIEW_EnableSort_1
+   \                     ??LISTVIEW_EnableSort_2:
+   \   00000054   0400A0E1           MOV      R0,R4
+   \   00000058   ........           BL       GUI_ALLOC_LockH
+   \   0000005C   0040A0E1           MOV      R4,R0
+   \   00000060   A45084E5           STR      R5,[R4, #+164]
+   \   00000064   0500A0E1           MOV      R0,R5
+   \   00000068   ........           BL       GUI_ALLOC_LockH
+   \   0000006C   0010E0E3           MVN      R1,#+0
+   \   00000070   741084E5           STR      R1,[R4, #+116]
+   \   00000074   ........           LDR      R1,??DataTable2
+   \   00000078   0C1080E5           STR      R1,[R0, #+12]
+   \   0000007C   ........           LDR      R1,??DataTable2_1
+   \   00000080   081080E5           STR      R1,[R0, #+8]
+   \   00000084   ........           BL       GUI_ALLOC_UnlockH
+   \   00000088   ........           BL       GUI_ALLOC_UnlockH
+    476              }
+    477              WM_UNLOCK();
+   \                     ??LISTVIEW_EnableSort_1:
+   \   0000008C   ........           BL       GUI_Unlock
+    478            }
+    479          }
+   \                     ??LISTVIEW_EnableSort_0:
+   \   00000090   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000094   3080BDE8           POP      {R4,R5,PC}       ;; return
+    480          
+    481          /*********************************************************************
+    482          *
+    483          *       LISTVIEW_SetSort
+    484          *
+    485          * Purpose:
+    486          *   Enables sorting for the given listview object. The function returns,
+    487          *   if the object is 0, the column index is >= number of columns or if
+    488          *   no compare function has been set for the desired column
+    489          *
+    490          * Return value:
+    491          *   0 if succeed
+    492          *   1 if not succeed
+    493          */
+
+   \                                 In section .text, align 4, keep-with-next
+    494          unsigned LISTVIEW_SetSort(LISTVIEW_Handle hObj, unsigned Column, unsigned Reverse) {
+   \                     LISTVIEW_SetSort:
+   \   00000000   F0472DE9           PUSH     {R4-R10,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   0150A0E1           MOV      R5,R1
+   \   0000000C   0260A0E1           MOV      R6,R2
+    495            LISTVIEW_Obj    * pObj;
+    496            LISTVIEW_SORT   * pSort;
+    497            LISTVIEW_COLUMN * pColumn;
+    498            unsigned NumColumns, Error = 0;
+   \   00000010   0070A0E3           MOV      R7,#+0
+    499            int (* fpCompare)(const void * p0, const void * p1);
+    500          
+    501            if (!hObj) {
+   \   00000014   000054E3           CMP      R4,#+0
+   \   00000018   0100001A           BNE      ??LISTVIEW_SetSort_0
+    502              return 1;
+   \                     ??LISTVIEW_SetSort_1:
+   \   0000001C   0100A0E3           MOV      R0,#+1
+   \   00000020   F087BDE8           POP      {R4-R10,PC}
+    503            }
+    504            NumColumns = LISTVIEW_GetNumColumns(hObj);
+    505            if (Column >= NumColumns) {
+   \                     ??LISTVIEW_SetSort_0:
+   \   00000024   ........           BL       LISTVIEW_GetNumColumns
+   \   00000028   000055E1           CMP      R5,R0
+   \   0000002C   FAFFFF2A           BCS      ??LISTVIEW_SetSort_1
+    506              return 1;
+    507            }
+    508            WM_LOCK();
+   \   00000030   ........           BL       GUI_Lock
+    509            pObj = LISTVIEW_LOCK_H(hObj);
+   \   00000034   0400A0E1           MOV      R0,R4
+   \   00000038   ........           BL       GUI_ALLOC_LockH
+    510            pColumn = (LISTVIEW_COLUMN *)GUI_ARRAY_GetpItemLocked(pObj->ColumnArray, Column);
+   \   0000003C   0510A0E1           MOV      R1,R5
+   \   00000040   3C0090E5           LDR      R0,[R0, #+60]
+   \   00000044   ........           BL       GUI_ARRAY_GetpItemLocked
+   \   00000048   0080A0E1           MOV      R8,R0
+    511            GUI_UNLOCK_H(pObj);
+   \   0000004C   ........           BL       GUI_ALLOC_UnlockH
+    512            fpCompare = pColumn->fpCompare;
+   \   00000050   048098E5           LDR      R8,[R8, #+4]
+    513            GUI_UNLOCK_H(pColumn); /* -1 */
+   \   00000054   ........           BL       GUI_ALLOC_UnlockH
+    514            if (fpCompare) {
+   \   00000058   000058E3           CMP      R8,#+0
+   \   0000005C   2800000A           BEQ      ??LISTVIEW_SetSort_2
+    515              _CreateSortObject(hObj);
+   \   00000060   0400A0E1           MOV      R0,R4
+   \   00000064   ........           BL       GUI_ALLOC_LockH
+   \   00000068   A4A090E5           LDR      R10,[R0, #+164]
+   \   0000006C   ........           BL       GUI_ALLOC_UnlockH
+   \   00000070   00005AE3           CMP      R10,#+0
+   \   00000074   0300001A           BNE      ??LISTVIEW_SetSort_3
+   \   00000078   1400A0E3           MOV      R0,#+20
+   \   0000007C   ........           BL       GUI_ALLOC_AllocZero
+   \   00000080   00A0B0E1           MOVS     R10,R0
+   \   00000084   0D00000A           BEQ      ??LISTVIEW_SetSort_4
+   \                     ??LISTVIEW_SetSort_3:
+   \   00000088   0400A0E1           MOV      R0,R4
+   \   0000008C   ........           BL       GUI_ALLOC_LockH
+   \   00000090   0090A0E1           MOV      R9,R0
+   \   00000094   A4A089E5           STR      R10,[R9, #+164]
+   \   00000098   0A00A0E1           MOV      R0,R10
+   \   0000009C   ........           BL       GUI_ALLOC_LockH
+   \   000000A0   0710E0E1           MVN      R1,R7
+   \   000000A4   741089E5           STR      R1,[R9, #+116]
+   \   000000A8   ........           LDR      R1,??DataTable2
+   \   000000AC   0C1080E5           STR      R1,[R0, #+12]
+   \   000000B0   ........           LDR      R1,??DataTable2_1
+   \   000000B4   081080E5           STR      R1,[R0, #+8]
+   \   000000B8   ........           BL       GUI_ALLOC_UnlockH
+   \   000000BC   ........           BL       GUI_ALLOC_UnlockH
+    516              pObj = LISTVIEW_LOCK_H(hObj); /* +1 */
+   \                     ??LISTVIEW_SetSort_4:
+   \   000000C0   0400A0E1           MOV      R0,R4
+   \   000000C4   ........           BL       GUI_ALLOC_LockH
+   \   000000C8   0090A0E1           MOV      R9,R0
+    517              pSort = (LISTVIEW_SORT *)GUI_LOCK_H(pObj->hSort); /* +1 */
+   \   000000CC   A40099E5           LDR      R0,[R9, #+164]
+   \   000000D0   ........           BL       GUI_ALLOC_LockH
+    518              if (pSort) {
+   \   000000D4   000050E3           CMP      R0,#+0
+   \   000000D8   0500000A           BEQ      ??LISTVIEW_SetSort_5
+    519                pObj->SortIndex = Column;
+   \   000000DC   745089E5           STR      R5,[R9, #+116]
+    520                pSort->Reverse  = Reverse;
+   \   000000E0   1060C0E5           STRB     R6,[R0, #+16]
+    521                pObj->IsSorted  = 0;
+   \   000000E4   A870C9E5           STRB     R7,[R9, #+168]
+    522                LISTVIEW__InvalidateInsideArea(hObj);
+   \   000000E8   0400A0E1           MOV      R0,R4
+   \   000000EC   ........           BL       LISTVIEW__InvalidateInsideArea
+   \   000000F0   000000EA           B        ??LISTVIEW_SetSort_6
+    523              } else {
+    524                Error = 1;
+   \                     ??LISTVIEW_SetSort_5:
+   \   000000F4   0170A0E3           MOV      R7,#+1
+    525              }
+    526              GUI_UNLOCK_H(pSort); /* -1 */
+   \                     ??LISTVIEW_SetSort_6:
+   \   000000F8   ........           BL       GUI_ALLOC_UnlockH
+    527              GUI_UNLOCK_H(pObj); /* -1 */
+   \   000000FC   ........           BL       GUI_ALLOC_UnlockH
+   \   00000100   000000EA           B        ??LISTVIEW_SetSort_7
+    528            } else {
+    529              Error = 1;
+   \                     ??LISTVIEW_SetSort_2:
+   \   00000104   0170A0E3           MOV      R7,#+1
+    530            }
+    531            WM_UNLOCK();
+   \                     ??LISTVIEW_SetSort_7:
+   \   00000108   ........           BL       GUI_Unlock
+    532            return Error;
+   \   0000010C   0700A0E1           MOV      R0,R7
+   \   00000110   F087BDE8           POP      {R4-R10,PC}      ;; return
+    533          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable2:
+   \   00000000   ........           DC32     _Free
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable2_1:
+   \   00000000   ........           DC32     _Sort
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant {0}>`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   00000000           DC32 0
+   \   00000004   00000000           DC8 0, 0, 0, 0
+    534          
+    535          #else                            /* Avoid problems with empty object modules */
+    536            void LISTVIEW_SetSort_C(void);
+    537            void LISTVIEW_SetSort_C(void) {}
+    538          #endif
+    539          
+    540          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function                .cstack
+     --------                -------
+     LISTVIEW_CompareDec         24
+     LISTVIEW_CompareText         8
+     LISTVIEW_DisableSort        24
+     LISTVIEW_EnableSort         16
+     LISTVIEW_GetSelUnsorted     16
+     LISTVIEW_SetCompareFunc     24
+     LISTVIEW_SetSelUnsorted     16
+     LISTVIEW_SetSort            32
+     _Compare                    24
+     _Free                        8
+     _Sort                       48
+
+
+   Section sizes:
+
+     Function/Label          Bytes
+     --------------          -----
+     _Free                     36
+     _Compare                 216
+     _Sort                   1016
+     LISTVIEW_CompareText      16
+     LISTVIEW_CompareDec      200
+     LISTVIEW_GetSelUnsorted  172
+     LISTVIEW_SetSelUnsorted  148
+     LISTVIEW_SetCompareFunc   96
+     LISTVIEW_DisableSort     260
+     LISTVIEW_EnableSort      152
+     LISTVIEW_SetSort         276
+     ??DataTable2               4
+     ??DataTable2_1             4
+     ?<Constant {0}>            8
+
+ 
+     8 bytes in section .rodata
+ 2 596 bytes in section .text
+ 
+ 2 596 bytes of CODE  memory
+     8 bytes of CONST memory
+
+Errors: none
+Warnings: none

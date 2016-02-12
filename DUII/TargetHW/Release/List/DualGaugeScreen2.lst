@@ -1,0 +1,504 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.1.52143/W32 for ARM     15/Feb/2013  13:37:36 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\DUII\DualGaugeScreen2.cpp                        #
+#    Command line =  C:\DUII\DUII\DualGaugeScreen2.cpp -D DEBUG=1 -D          #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -lCN                 #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files\IAR Systems\Embedded Workbench         #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    C:\DUII\TargetHW\Sounds\ -I \DUII\DUII\ --cpu_mode arm   #
+#                    -Ohs --eec++ --no_static_destruction                     #
+#    List file    =  C:\DUII\TargetHW\Release\List\DualGaugeScreen2.lst       #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\DualGaugeScreen2.o          #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\DUII\DualGaugeScreen2.cpp
+      1          
+      2          /*********************************************************************
+      3          *                SEGGER Microcontroller GmbH & Co. KG                *
+      4          *        Solutions for real time microcontroller applications        *
+      5          **********************************************************************
+      6          *                                                                    *
+      7          *        (c) 1996 - 2009  SEGGER Microcontroller GmbH & Co. KG       *
+      8          *                                                                    *
+      9          *        Internet: www.segger.com    Support:  support@segger.com    *
+     10          *                                                                    *
+     11          **********************************************************************
+     12          
+     13          ** emWin V5.00 - Graphical user interface for embedded applications **
+     14          emWin is protected by international copyright laws.   Knowledge of the
+     15          source code may not be used to write a similar product.  This file may
+     16          only be used in accordance with a license and should not be re-
+     17          distributed in any way. We appreciate your understanding and fairness.
+     18          ----------------------------------------------------------------------
+     19          File        : MainTask.C
+     20          Purpose     : Main program, called from after main after initialisation
+     21          ---------------------------END-OF-HEADER------------------------------
+     22          */
+     23          
+     24          #include <stdio.h>
+     25          #include <stdlib.h>
+     26          #include "DUII.h"
+     27          #include "GUI.h"
+     28          #include "GeneralConfig.h"
+     29          #include "commondefs.h"
+     30          #include "ConfigScreens.h"
+     31          #include "DualGaugeScreen2.h"
+     32          #include "gauge.hpp"
+     33          #include "RunningGauges.h"
+     34          #include "DataHandler.h"
+     35          #include "LEDHandler.h"
+     36          
+     37          #ifdef __cplusplus
+     38          extern "C" {
+     39          #endif
+     40          
+     41          /*********************************************************************
+     42          *
+     43          *       External data and code
+     44          *
+     45          **********************************************************************
+     46          */
+     47          extern GUI_CONST_STORAGE GUI_BITMAP bmAnalog23;
+     48          extern Gauge *CreateAnalogInputGauge(char input, Alarm **pAlarm, WM_HWIN hParent, int hpos);
+     49          extern char inputEnabled[];
+     50          extern char lockupSemaphore;
+     51          
+     52          #ifdef __cplusplus
+     53          }
+     54          #endif
+     55          
+     56          /*********************************************************************
+     57          *
+     58          *       Public code
+     59          *
+     60          **********************************************************************
+     61          */
+     62          
+     63          /*********************************************************************
+     64          *
+     65          *       Local Prototypes
+     66          *
+     67          **********************************************************************
+     68          */
+     69          
+     70          /*********************************************************************
+     71          *
+     72          *       Local Valiables
+     73          *
+     74          **********************************************************************
+     75          */
+
+   \                                 In section .bss, align 4
+     76          static WM_HWIN hDualGaugeScreen2;
+   \                     hDualGaugeScreen2:
+   \   00000000                      DS8 4
+   \   00000004                      DS8 4
+     77          static WM_HTIMER hScreenTimer;
+     78          Gauge *pAnalog2Gauge = 0;
+   \                     pAnalog2Gauge:
+   \   00000008                      DS8 4
+     79          Gauge *pAnalog3Gauge = 0;
+   \                     pAnalog3Gauge:
+   \   0000000C                      DS8 4
+   \   00000010                      DS8 4
+   \   00000014                      DS8 4
+   \   00000018                      DS8 4
+   \   0000001C                      DS8 1
+     80          static bool firsttimethrough;
+     81          static Alarm *pAnalog2Red = 0;
+     82          static Alarm *pAnalog3Red = 0;
+     83          static GUI_MEMDEV_Handle memDualGaugeScreen;
+     84          
+
+   \                                 In section .text, align 4, keep-with-next
+     85          void _cbDualGauge2Callback(WM_MESSAGE * pMsg)
+     86          {
+   \                     _Z21_cbDualGauge2CallbackP10WM_MESSAGE:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+     87          	switch(pMsg->MsgId)
+   \   00000004   001090E5           LDR      R1,[R0, #+0]
+   \   00000008   0CD04DE2           SUB      SP,SP,#+12
+   \   0000000C   0B1051E2           SUBS     R1,R1,#+11
+   \   00000010   5300000A           BEQ      ??_cbDualGauge2Callback_0
+   \   00000014   041051E2           SUBS     R1,R1,#+4
+   \   00000018   0C00000A           BEQ      ??_cbDualGauge2Callback_1
+   \   0000001C   411F51E2           SUBS     R1,R1,#+260
+   \   00000020   7700001A           BNE      ??_cbDualGauge2Callback_2
+     88          	{
+     89          	case WM_TIMER:
+     90          		if (pMsg->Data.v == hScreenTimer)
+   \   00000024   ........           LDR      R4,??DataTable1
+   \   00000028   0C0090E5           LDR      R0,[R0, #+12]
+   \   0000002C   042094E5           LDR      R2,[R4, #+4]
+   \   00000030   020050E1           CMP      R0,R2
+   \   00000034   7300001A           BNE      ??_cbDualGauge2Callback_3
+     91          		{
+     92          			WM_RestartTimer(hScreenTimer, GAUGE_SCREEN_REFRESH_TIME);
+   \   00000038   1910A0E3           MOV      R1,#+25
+   \   0000003C   0200A0E1           MOV      R0,R2
+   \   00000040   ........           BL       WM_RestartTimer
+     93          			WM_InvalidateWindow(hDualGaugeScreen2);
+   \   00000044   000094E5           LDR      R0,[R4, #+0]
+   \   00000048   ........           BL       WM_InvalidateWindow
+   \   0000004C   6D0000EA           B        ??_cbDualGauge2Callback_3
+     94          		}
+     95          		break;
+     96          
+     97          	case WM_PAINT:
+     98          		if (CS_IsVisible(DUAL_GAUGES2) || firsttimethrough)
+   \                     ??_cbDualGauge2Callback_1:
+   \   00000050   0300A0E3           MOV      R0,#+3
+   \   00000054   ........           BL       CS_IsVisible
+   \   00000058   000050E3           CMP      R0,#+0
+   \   0000005C   0300001A           BNE      ??_cbDualGauge2Callback_4
+   \   00000060   ........           LDR      R0,??DataTable1
+   \   00000064   1C00D0E5           LDRB     R0,[R0, #+28]
+   \   00000068   000050E3           CMP      R0,#+0
+   \   0000006C   3700000A           BEQ      ??_cbDualGauge2Callback_5
+     99          		{
+    100          			GUI_MEMDEV_Handle mControl;
+    101          
+    102          			if (lockupSemaphore)			// If main has not run since our last paint - exit!
+   \                     ??_cbDualGauge2Callback_4:
+   \   00000070   ........           LDR      R0,??DataTable1_1
+   \   00000074   0010D0E5           LDRB     R1,[R0, #+0]
+   \   00000078   000051E3           CMP      R1,#+0
+   \   0000007C   6100001A           BNE      ??_cbDualGauge2Callback_3
+    103          				break;
+    104          			else lockupSemaphore = true;
+   \   00000080   0110A0E3           MOV      R1,#+1
+    105          			
+    106          			if (inputEnabled[2])
+   \   00000084   ........           LDR      R5,??DataTable1_2
+   \   00000088   0010C0E5           STRB     R1,[R0, #+0]
+   \   0000008C   0200D5E5           LDRB     R0,[R5, #+2]
+   \   00000090   ........           LDR      R4,??DataTable1
+   \   00000094   000050E3           CMP      R0,#+0
+   \   00000098   0500000A           BEQ      ??_cbDualGauge2Callback_6
+    107          				pAnalog2Gauge->SetValue(GetValue(ANALOG_INPUT_2).fVal);
+   \   0000009C   3410A0E3           MOV      R1,#+52
+   \   000000A0   0D00A0E1           MOV      R0,SP
+   \   000000A4   ........           BL       GetValue
+   \   000000A8   00109DE5           LDR      R1,[SP, #+0]
+   \   000000AC   080094E5           LDR      R0,[R4, #+8]
+   \   000000B0   ........           BL       _ZN5Gauge8SetValueEf
+    108          			if (inputEnabled[3])
+   \                     ??_cbDualGauge2Callback_6:
+   \   000000B4   0300D5E5           LDRB     R0,[R5, #+3]
+   \   000000B8   000050E3           CMP      R0,#+0
+   \   000000BC   0500000A           BEQ      ??_cbDualGauge2Callback_7
+    109          				pAnalog3Gauge->SetValue(GetValue(ANALOG_INPUT_3).fVal);
+   \   000000C0   3510A0E3           MOV      R1,#+53
+   \   000000C4   0D00A0E1           MOV      R0,SP
+   \   000000C8   ........           BL       GetValue
+   \   000000CC   00109DE5           LDR      R1,[SP, #+0]
+   \   000000D0   0C0094E5           LDR      R0,[R4, #+12]
+   \   000000D4   ........           BL       _ZN5Gauge8SetValueEf
+    110          
+    111          			GUI_MEMDEV_Select(memDualGaugeScreen);
+   \                     ??_cbDualGauge2Callback_7:
+   \   000000D8   180094E5           LDR      R0,[R4, #+24]
+   \   000000DC   ........           BL       GUI_MEMDEV_Select
+    112          
+    113          			firsttimethrough = false;
+   \   000000E0   0000A0E3           MOV      R0,#+0
+   \   000000E4   1C00C4E5           STRB     R0,[R4, #+28]
+    114          
+    115          			GUI_DrawBitmap(&bmAnalog23, 60, 0);
+   \   000000E8   0020A0E3           MOV      R2,#+0
+   \   000000EC   3C10A0E3           MOV      R1,#+60
+   \   000000F0   ........           LDR      R0,??DataTable1_3
+   \   000000F4   ........           BL       GUI_DrawBitmap
+    116          
+    117          			mControl = pAnalog2Gauge->DrawToMemArea();
+   \   000000F8   080094E5           LDR      R0,[R4, #+8]
+   \   000000FC   ........           BL       _ZN5Gauge13DrawToMemAreaEv
+   \   00000100   0050A0E1           MOV      R5,R0
+    118          			GUI_MEMDEV_Select(memDualGaugeScreen);
+   \   00000104   180094E5           LDR      R0,[R4, #+24]
+   \   00000108   ........           BL       GUI_MEMDEV_Select
+    119          			GUI_MEMDEV_Write(mControl);
+   \   0000010C   0500A0E1           MOV      R0,R5
+   \   00000110   ........           BL       GUI_MEMDEV_Write
+    120          
+    121          			mControl = pAnalog3Gauge->DrawToMemArea();
+   \   00000114   0C0094E5           LDR      R0,[R4, #+12]
+   \   00000118   ........           BL       _ZN5Gauge13DrawToMemAreaEv
+   \   0000011C   0050A0E1           MOV      R5,R0
+    122          			GUI_MEMDEV_Select(memDualGaugeScreen);
+   \   00000120   180094E5           LDR      R0,[R4, #+24]
+   \   00000124   ........           BL       GUI_MEMDEV_Select
+    123          			GUI_MEMDEV_Write(mControl);
+   \   00000128   0500A0E1           MOV      R0,R5
+   \   0000012C   ........           BL       GUI_MEMDEV_Write
+    124          
+    125          			GUI_DrawBitmap(&bmthreewayarrow, 0, 229);
+   \   00000130   E520A0E3           MOV      R2,#+229
+   \   00000134   0010A0E3           MOV      R1,#+0
+   \   00000138   ........           LDR      R0,??DataTable1_4
+   \   0000013C   ........           BL       GUI_DrawBitmap
+    126          			CheckWarningPopups();
+   \   00000140   ........           BL       CheckWarningPopups
+    127          			GUI_MEMDEV_CopyToLCD(memDualGaugeScreen);
+   \   00000144   180094E5           LDR      R0,[R4, #+24]
+   \   00000148   ........           BL       GUI_MEMDEV_CopyToLCD
+    128          
+    129          			GUI_SelectLCD();
+   \   0000014C   ........           BL       GUI_SelectLCD
+    130          		}
+    131          		if (SlideOutVisible())
+   \                     ??_cbDualGauge2Callback_5:
+   \   00000150   ........           BL       SlideOutVisible
+   \   00000154   000050E3           CMP      R0,#+0
+   \   00000158   2A00000A           BEQ      ??_cbDualGauge2Callback_3
+    132          			DrawSignalStrength();
+   \   0000015C   ........           BL       DrawSignalStrength
+   \   00000160   280000EA           B        ??_cbDualGauge2Callback_3
+    133          		break;
+    134          
+    135          	case WM_DELETE:
+    136          		if (pAnalog2Gauge)
+   \                     ??_cbDualGauge2Callback_0:
+   \   00000164   ........           LDR      R4,??DataTable1
+   \   00000168   080094E5           LDR      R0,[R4, #+8]
+   \   0000016C   000050E3           CMP      R0,#+0
+   \   00000170   0300000A           BEQ      ??_cbDualGauge2Callback_8
+    137          		{
+    138          			delete pAnalog2Gauge;
+   \   00000174   ........           BL       _ZN5GaugeD1Ev
+   \   00000178   ........           BL       _ZdlPv
+    139          			pAnalog2Gauge = 0;
+   \   0000017C   0000A0E3           MOV      R0,#+0
+   \   00000180   080084E5           STR      R0,[R4, #+8]
+    140          		}
+    141          		if (pAnalog3Gauge)
+   \                     ??_cbDualGauge2Callback_8:
+   \   00000184   0C0094E5           LDR      R0,[R4, #+12]
+   \   00000188   000050E3           CMP      R0,#+0
+   \   0000018C   0300000A           BEQ      ??_cbDualGauge2Callback_9
+    142          		{
+    143          			delete pAnalog3Gauge;
+   \   00000190   ........           BL       _ZN5GaugeD1Ev
+   \   00000194   ........           BL       _ZdlPv
+    144          			pAnalog3Gauge = 0;
+   \   00000198   0000A0E3           MOV      R0,#+0
+   \   0000019C   0C0084E5           STR      R0,[R4, #+12]
+    145          		}
+    146          		if (pAnalog2Red)
+   \                     ??_cbDualGauge2Callback_9:
+   \   000001A0   100094E5           LDR      R0,[R4, #+16]
+   \   000001A4   000050E3           CMP      R0,#+0
+   \   000001A8   0700000A           BEQ      ??_cbDualGauge2Callback_10
+    147          		{
+    148          			if (pAnalog2Red->Next)
+   \   000001AC   180090E5           LDR      R0,[R0, #+24]
+   \   000001B0   000050E3           CMP      R0,#+0
+   \   000001B4   0000000A           BEQ      ??_cbDualGauge2Callback_11
+    149          				delete pAnalog2Red->Next;
+   \   000001B8   ........           BL       _ZdlPv
+    150          			delete pAnalog2Red;
+   \                     ??_cbDualGauge2Callback_11:
+   \   000001BC   100094E5           LDR      R0,[R4, #+16]
+   \   000001C0   ........           BL       _ZdlPv
+    151          			pAnalog2Red = 0;
+   \   000001C4   0000A0E3           MOV      R0,#+0
+   \   000001C8   100084E5           STR      R0,[R4, #+16]
+    152          		}
+    153          		if (pAnalog3Red)
+   \                     ??_cbDualGauge2Callback_10:
+   \   000001CC   140094E5           LDR      R0,[R4, #+20]
+   \   000001D0   000050E3           CMP      R0,#+0
+   \   000001D4   0700000A           BEQ      ??_cbDualGauge2Callback_12
+    154          		{
+    155          			if (pAnalog3Red->Next)
+   \   000001D8   180090E5           LDR      R0,[R0, #+24]
+   \   000001DC   000050E3           CMP      R0,#+0
+   \   000001E0   0000000A           BEQ      ??_cbDualGauge2Callback_13
+    156          				delete pAnalog3Red->Next;
+   \   000001E4   ........           BL       _ZdlPv
+    157          			delete pAnalog3Red;
+   \                     ??_cbDualGauge2Callback_13:
+   \   000001E8   140094E5           LDR      R0,[R4, #+20]
+   \   000001EC   ........           BL       _ZdlPv
+    158          			pAnalog3Red = 0;
+   \   000001F0   0000A0E3           MOV      R0,#+0
+   \   000001F4   140084E5           STR      R0,[R4, #+20]
+    159          		}
+    160          		GUI_MEMDEV_Delete(memDualGaugeScreen);
+   \                     ??_cbDualGauge2Callback_12:
+   \   000001F8   180094E5           LDR      R0,[R4, #+24]
+   \   000001FC   ........           BL       GUI_MEMDEV_Delete
+    161          		break;
+   \   00000200   000000EA           B        ??_cbDualGauge2Callback_3
+    162          
+    163          	default:
+    164          		  WM_DefaultProc(pMsg);
+   \                     ??_cbDualGauge2Callback_2:
+   \   00000204   ........           BL       WM_DefaultProc
+    165          	};
+    166          }
+   \                     ??_cbDualGauge2Callback_3:
+   \   00000208   0CD08DE2           ADD      SP,SP,#+12       ;; stack cleaning
+   \   0000020C   3080BDE8           POP      {R4,R5,PC}       ;; return
+    167          
+    168          /*********************************************************************
+    169          *
+    170          *       Dual Gauge Screen
+    171          */
+    172          
+
+   \                                 In section .text, align 4, keep-with-next
+    173          WM_HWIN Display_DualGaugeScreen2(WM_HWIN hParent)
+    174          {
+   \                     Display_DualGaugeScreen2:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+    175          	firsttimethrough = true;
+   \   00000004   ........           LDR      R4,??DataTable1
+   \   00000008   0110A0E3           MOV      R1,#+1
+   \   0000000C   1C10C4E5           STRB     R1,[R4, #+28]
+   \   00000010   10D04DE2           SUB      SP,SP,#+16
+    176          	
+    177          	if ((hDualGaugeScreen2 = WM_CreateWindowAsChild(0, 0, XSIZE_PHYS, YSIZE_PHYS, hParent, WM_CF_SHOW, _cbDualGauge2Callback, 0)) <= 0)
+   \   00000014   0010A0E3           MOV      R1,#+0
+   \   00000018   0C108DE5           STR      R1,[SP, #+12]
+   \   0000001C   ........           LDR      R1,??DataTable1_5
+   \   00000020   00008DE5           STR      R0,[SP, #+0]
+   \   00000024   08108DE5           STR      R1,[SP, #+8]
+   \   00000028   0210A0E3           MOV      R1,#+2
+   \   0000002C   04108DE5           STR      R1,[SP, #+4]
+   \   00000030   443FA0E3           MOV      R3,#+272
+   \   00000034   782FA0E3           MOV      R2,#+480
+   \   00000038   0010A0E3           MOV      R1,#+0
+   \   0000003C   0000A0E3           MOV      R0,#+0
+   \   00000040   ........           BL       WM_CreateWindowAsChild
+   \   00000044   000084E5           STR      R0,[R4, #+0]
+   \   00000048   010050E3           CMP      R0,#+1
+   \   0000004C   000000AA           BGE      ??Display_DualGaugeScreen2_0
+    178          		SystemError();
+   \   00000050   ........           BL       SystemError
+    179          
+    180          	pAnalog2Gauge = CreateAnalogInputGauge(2, &pAnalog2Red, hDualGaugeScreen2, 5);
+   \                     ??Display_DualGaugeScreen2_0:
+   \   00000054   0530A0E3           MOV      R3,#+5
+   \   00000058   002094E5           LDR      R2,[R4, #+0]
+   \   0000005C   101084E2           ADD      R1,R4,#+16
+   \   00000060   0200A0E3           MOV      R0,#+2
+   \   00000064   ........           BL       CreateAnalogInputGauge
+   \   00000068   080084E5           STR      R0,[R4, #+8]
+    181          	pAnalog3Gauge = CreateAnalogInputGauge(3, &pAnalog3Red, hDualGaugeScreen2, 245);
+   \   0000006C   F530A0E3           MOV      R3,#+245
+   \   00000070   002094E5           LDR      R2,[R4, #+0]
+   \   00000074   141084E2           ADD      R1,R4,#+20
+   \   00000078   0300A0E3           MOV      R0,#+3
+   \   0000007C   ........           BL       CreateAnalogInputGauge
+   \   00000080   0C0084E5           STR      R0,[R4, #+12]
+    182          
+    183          	WM_InvalidateWindow(hDualGaugeScreen2);
+   \   00000084   000094E5           LDR      R0,[R4, #+0]
+   \   00000088   ........           BL       WM_InvalidateWindow
+    184          
+    185          	// create the memory area to prevent flicker
+    186          	memDualGaugeScreen = GUI_MEMDEV_Create(0, 0, XSIZE_PHYS, YSIZE_PHYS);
+   \   0000008C   443FA0E3           MOV      R3,#+272
+   \   00000090   782FA0E3           MOV      R2,#+480
+   \   00000094   0010A0E3           MOV      R1,#+0
+   \   00000098   0000A0E3           MOV      R0,#+0
+   \   0000009C   ........           BL       GUI_MEMDEV_Create
+   \   000000A0   180084E5           STR      R0,[R4, #+24]
+    187          
+    188          	hScreenTimer = WM_CreateTimer(hDualGaugeScreen2, 0, GAUGE_SCREEN_REFRESH_TIME, 0);
+   \   000000A4   0030A0E3           MOV      R3,#+0
+   \   000000A8   1920A0E3           MOV      R2,#+25
+   \   000000AC   0010A0E3           MOV      R1,#+0
+   \   000000B0   000094E5           LDR      R0,[R4, #+0]
+   \   000000B4   ........           BL       WM_CreateTimer
+   \   000000B8   040084E5           STR      R0,[R4, #+4]
+    189          
+    190          	return hDualGaugeScreen2;
+   \   000000BC   000094E5           LDR      R0,[R4, #+0]
+   \   000000C0   10D08DE2           ADD      SP,SP,#+16
+   \   000000C4   1080BDE8           POP      {R4,PC}          ;; return
+    191          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1:
+   \   00000000   ........           DC32     hDualGaugeScreen2
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1_1:
+   \   00000000   ........           DC32     lockupSemaphore
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1_2:
+   \   00000000   ........           DC32     inputEnabled
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1_3:
+   \   00000000   ........           DC32     bmAnalog23
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1_4:
+   \   00000000   ........           DC32     bmthreewayarrow
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1_5:
+   \   00000000   ........           DC32     _Z21_cbDualGauge2CallbackP10WM_MESSAGE
+    192          
+    193          /*************************** End of file ****************************/
+    194          
+
+   Maximum stack usage in bytes:
+
+     Function                       .cstack
+     --------                       -------
+     Display_DualGaugeScreen2           24
+     _cbDualGauge2Callback(WM_MESSAGE *)
+                                        24
+
+
+   Section sizes:
+
+     Function/Label                 Bytes
+     --------------                 -----
+     hDualGaugeScreen2                29
+     hScreenTimer
+     pAnalog2Gauge
+     pAnalog3Gauge
+     pAnalog2Red
+     pAnalog3Red
+     memDualGaugeScreen
+     firsttimethrough
+     _cbDualGauge2Callback(WM_MESSAGE *)
+                                     528
+     Display_DualGaugeScreen2        200
+     ??DataTable1                      4
+     ??DataTable1_1                    4
+     ??DataTable1_2                    4
+     ??DataTable1_3                    4
+     ??DataTable1_4                    4
+     ??DataTable1_5                    4
+
+ 
+  29 bytes in section .bss
+ 752 bytes in section .text
+ 
+ 752 bytes of CODE memory
+  29 bytes of DATA memory
+
+Errors: none
+Warnings: none

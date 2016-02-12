@@ -1,0 +1,170 @@
+C51 COMPILER V8.02   CYGNALFLASH                                                           04/22/2007 00:08:14 PAGE 1   
+
+
+C51 COMPILER V8.02, COMPILATION OF MODULE CYGNALFLASH
+OBJECT MODULE PLACED IN cygnalflash.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE cygnalflash.c DB DF(SENSOR) DF(EXTCLK6) DF(NODEBUG) INCDIR(C:\Keil\C51\INC;
+                    -C:\Keil\Traqmate\132micro\CommonFiles;C:\Keil\Traqmate\132micro\SU) OT(8,SIZE) NOCO
+
+line level    source
+
+   1          //-----------------------------------------------------------------------------
+   2          // Includes
+   3          //-----------------------------------------------------------------------------
+   4          
+   5          #include <ctype.h>
+   6          #ifdef DISPLAY
+   9          #include <sensor.h>
+  10          #endif
+  11          
+  12          #ifdef DISPLAY
+ 129          #ifdef SENSOR
+ 130          // initializes the scratchpad
+ 131          // rewrite if:  SWREV or DATAREV not right
+ 132          //
+ 133          void InitSUScratchpad(void) {
+ 134   1              xdata BOOL reprogram = FALSE;
+ 135   1      
+ 136   1              ReadScratchpad(scratch.scratchbuff);
+ 137   1      
+ 138   1              if (scratch.calibrate.swrev != SWREV || scratch.calibrate.datarev != DATAREV) {
+ 139   2                      // update the values
+ 140   2                      scratch.calibrate.swrev = SWREV;
+ 141   2                      scratch.calibrate.datarev = DATAREV;
+ 142   2                      reprogram = TRUE;
+ 143   2              }
+ 144   1      
+ 145   1              if (scratch.calibrate.hwrev != HWREV || scratch.calibrate.model != MODELNUM) {
+ 146   2                      // update the values
+ 147   2                      scratch.calibrate.hwrev = HWREV;
+ 148   2                      scratch.calibrate.model = MODELNUM;
+ 149   2                      reprogram = TRUE;
+ 150   2              }
+ 151   1      
+ 152   1              // if username, phone, or note is unprogrammed, NULL it out
+ 153   1              if (!isprint(scratch.calibrate.owner[0]) && scratch.calibrate.owner[0] != '\0') {
+ 154   2                      scratch.calibrate.owner[0] = '\0';
+ 155   2                      reprogram = TRUE;
+ 156   2              } // if
+ 157   1              if (!isprint(scratch.calibrate.phone[0]) && scratch.calibrate.phone[0] != '\0') {
+ 158   2                      scratch.calibrate.phone[0] = '\0';
+ 159   2                      reprogram = TRUE;
+ 160   2              } // if
+ 161   1              if (!isprint(scratch.calibrate.note[0]) && scratch.calibrate.note[0] != '\0') {
+ 162   2                      scratch.calibrate.note[0] = '\0';
+ 163   2                      reprogram = TRUE;
+ 164   2              } // if
+ 165   1      
+ 166   1              if (reprogram) {
+ 167   2                      // write the software rev into the scratchpad
+ 168   2                      EraseScratchpad();
+ 169   2                      WriteScratchpad(scratch.scratchbuff, SCRATCHLEN);
+ 170   2              } // if
+ 171   1      } // InitSUScratchpad
+ 172          #endif
+C51 COMPILER V8.02   CYGNALFLASH                                                           04/22/2007 00:08:14 PAGE 2   
+
+ 173          
+ 174          // erase the scratchpad area of FLASH
+ 175          void EraseScratchpad() {
+ 176   1              unsigned char SFRPAGE_SAVE = SFRPAGE;                   // Save Current SFR page
+ 177   1              unsigned char xdata *idata pwrite;      // pointer to FLASH scratchpad, must be data or idata
+ 178   1              unsigned char EA_save;                          // saves the current state of the int enable bit
+ 179   1      
+ 180   1              SFRPAGE = LEGACY_PAGE;                          // set SFR page
+ 181   1      
+ 182   1              // initialize write/erase pointer to any location in the scratchpad
+ 183   1              pwrite = 0x0000;   
+ 184   1      
+ 185   1              EA_save = EA;                       // save interrupt status   
+ 186   1              EA = 0;                             // disable interrupts (precautionary)
+ 187   1         
+ 188   1              FLSCL |= 0x01;                      // enable FLASH writes/erases from user sw
+ 189   1      
+ 190   1              PSCTL = 0x07;                       // MOVX writes erase FLASH page
+ 191   1                                                                                      // (SFLE set directing FLASH 
+ 192   1                                                                                      // reads/writes/erases to scratchpad memory
+ 193   1      
+ 194   1              *pwrite = 0;                                            // initiate page erase
+ 195   1      
+ 196   1              PSCTL = 0;                                                      // MOVX writes target XRAM
+ 197   1                                                                                      // (SFLE is cleared)
+ 198   1              FLSCL &= ~0x01;                                         // disable FLASH writes/erases from user sw
+ 199   1      
+ 200   1              EA = EA_save;                       // re-enable interrupts
+ 201   1      
+ 202   1              SFRPAGE = SFRPAGE_SAVE;                         // Restore SFR page
+ 203   1      } // EraseScratchpad
+ 204          
+ 205          // Write a buffer to scratchpad area of FLASH
+ 206          void WriteScratchpad( unsigned char *buf, int buflen) {
+ 207   1              unsigned char SFRPAGE_SAVE = SFRPAGE;                   // Save Current SFR page
+ 208   1              unsigned char xdata *idata pwrite;      // pointer to FLASH scratchpad, must be data or idata
+ 209   1              unsigned char EA_save;                          // saves the current state of the int enable bit
+ 210   1              int i;
+ 211   1      
+ 212   1              SFRPAGE = LEGACY_PAGE;                          // set SFR page
+ 213   1      
+ 214   1              // initialize FLASH write pointer to the beginning of the scratchpad
+ 215   1              pwrite = 0x0000;                    
+ 216   1      
+ 217   1              EA_save = EA;                       // save interrupt status
+ 218   1              EA = 0;                             // disable interrupts (precautionary)
+ 219   1      
+ 220   1              FLSCL |= 0x01;                                          // enable FLASH writes/erases from user sw
+ 221   1      
+ 222   1              PSCTL = 0x05;                                           // turn on scratchpad and writes
+ 223   1              for (i=0; i<buflen; i++)                        // copy data into scratchpad
+ 224   1                      *pwrite++ = *buf++;
+ 225   1      
+ 226   1              PSCTL = 0x00;                                           // MOVX writes target XRAM
+ 227   1      
+ 228   1              FLSCL &= ~0x01;                                         // disable FLASH writes/erases from user sw
+ 229   1      
+ 230   1              EA = EA_save;                                           // re-enable interrupts
+ 231   1      
+ 232   1              SFRPAGE = SFRPAGE_SAVE;                         // Restore SFR page
+ 233   1      } // WriteScratchpad
+ 234          
+C51 COMPILER V8.02   CYGNALFLASH                                                           04/22/2007 00:08:14 PAGE 3   
+
+ 235          // Read a buffer from scratchpad area of FLASH
+ 236          void ReadScratchpad( unsigned char *buf) {
+ 237   1              unsigned char SFRPAGE_SAVE = SFRPAGE;   // Save Current SFR page
+ 238   1              unsigned char code *pread;                      // pointer to FLASH used for reads, must be code
+ 239   1              unsigned char EA_save;                          // saves the current state of the int enable bit
+ 240   1      
+ 241   1              int i;
+ 242   1      
+ 243   1              pread = 0x0000;                                         // point at scratchpad
+ 244   1      
+ 245   1              SFRPAGE = LEGACY_PAGE;                          // set SFR page
+ 246   1      
+ 247   1              EA_save = EA;                       // save interrupt status
+ 248   1              EA = 0;                             // disable interrupts (precautionary)
+ 249   1      
+ 250   1              PSCTL = 0x04;                                           // swap in scratchpad
+ 251   1      
+ 252   1              for (i=0; i<SCRATCHLEN; i++)            // copy data from scratchpad
+ 253   1                      *buf++ = *pread++;
+ 254   1      
+ 255   1              PSCTL = 0;                                                      // swap it out
+ 256   1      
+ 257   1              EA = EA_save;                                           // re-enable interrupts
+ 258   1      
+ 259   1              SFRPAGE = SFRPAGE_SAVE;                         // Restore SFR page
+ 260   1      } // ReadScratchpad
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    426    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----       1
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      15
+   IDATA SIZE       =   ----       4
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

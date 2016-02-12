@@ -1,0 +1,444 @@
+C51 COMPILER V9.51   SMBUS                                                                 01/05/2016 18:47:25 PAGE 1   
+
+
+C51 COMPILER V9.51, COMPILATION OF MODULE SMBUS
+OBJECT MODULE PLACED IN smbus.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE smbus.c OPTIMIZE(SIZE) BROWSE MDU_F120 INCDIR(..\..\C51\INC\;..\CommonFiles
+                    -\;..\SU\) DB OE DEFINE(SENSOR,EXTCLK6,NODEBUG,UBLOX,DISPLAYATTACHED) DEBUG OBJECTEXTEND
+
+line level    source
+
+   1          // Part of traqmate.c
+   2          // 3/30/2009
+   3          //
+   4          // Author: GAStephens
+   5          //
+   6          // These functions control the onboard SMB bus (I2C) serial communications bus in the SiLabs microcontroll
+             -er.
+   7          // These functions are only valid when used with the second generation Sensor Unit (SU2).
+   8          // 
+   9          #include <stdlib.h>
+  10          #include <sensor.h>
+  11          
+  12          //-----------------------------------------------------------------------------
+  13          // F12x_SMBus_Master_Multibyte.c
+  14          //-----------------------------------------------------------------------------
+  15          // Copyright 2006 Silicon Laboratories, Inc.
+  16          // http://www.silabs.com
+  17          //
+  18          // Program Description:
+  19          //
+  20          // C8051F12x SMBus interface in Master mode.
+  21          // - Interrupt-driven SMBus implementation
+  22          // - Only master states defined (no slave or arbitration)
+  23          // - multiple-byte SMBus data holders used for each transmit and receive
+  24          // - Timer3 used by SMBus for SMBSCL low timeout detection
+  25          // - SMBSCL frequency defined by <SMB_FREQUENCY> constant
+  26          // - ARBLOST support included
+  27          // - supports multiple-byte writes and multiple-byte reads
+  28          //
+  29          // How To Test:
+  30          //
+  31          // 1) Download code to a 'F12x device that is connected to a SMBus slave.
+  32          // 2) Run the code:
+  33          //                      a) The test will indicate proper communication with the slave by
+  34          //                              toggling the LED on and off each time a value is sent and
+  35          //                              received.
+  36          //                      b) The best method to view the proper functionality is to run to
+  37          //                              the indicated line of code in the TEST CODE section of main and
+  38          //                              view the smbusrxbuff and smbustxbuff variable arrays in the
+  39          //                              Watch Window.
+  40          //
+  41          //
+  42          // SMB0CN registers for reference
+  43          // BUSY                 BUSY
+  44          // ENSMB                ENABLE
+  45          // STA                  START FLAG
+  46          // STO                  STOP FLAG
+  47          // SI                   INTERRUPT PENDING FLAG
+  48          // AA                   ASSERT/ACKNOWLEDGE FLAG
+  49          // SMBFTE               FREE TIMER ENABLE
+  50          // SMBTOE               TIMEOUT ENABLE
+  51          //
+  52          //
+  53          
+C51 COMPILER V9.51   SMBUS                                                                 01/05/2016 18:47:25 PAGE 2   
+
+  54          //-----------------------------------------------------------------------------
+  55          // Global VARIABLES
+  56          //-----------------------------------------------------------------------------
+  57          bit SMB_BUSY;                          // Software flag to indicate when the
+  58                                                 // SMB_Read() or SMB_Write() functions
+  59                                                 // have claimed the SMBus
+  60          
+  61          bit SMB_RW;                            // Software flag to indicate the
+  62                                                 // direction of the current transfer
+  63          //-----------------------------------------------------------------------------
+  64          // Global CONSTANTS
+  65          //-----------------------------------------------------------------------------
+  66          #define  SMB_FREQUENCY  100000L                 // Target SMBSCL clock rate
+  67                                                                                          // This example supports between 10kHz and 100kHz
+  68          
+  69          #define  WRITE                  0x00                    // WRITE direction bit
+  70          #define  READ                   0x01                    // READ direction bit
+  71          
+  72          #define  SMB_BUS_ERROR  0x00                    // (all modes) BUS ERROR
+  73          
+  74          // master states
+  75          #define  SMB_START              0x08                    // (MT & MR) START transmitted
+  76          #define  SMB_RP_START   0x10                    // (MT & MR) repeated START
+  77          #define  SMB_MTADDACK   0x18                    // (MT) Slave address + W transmitted;
+  78                                                                                                  //       ACK received
+  79          #define  SMB_MTADDNAK   0x20                    // (MT) Slave address + W transmitted;
+  80                                                                                                  //       NAK received
+  81          #define  SMB_MTDBACK    0x28                    // (MT) data byte transmitted;
+  82                                                                                                  //       ACK rec'vd
+  83          #define  SMB_MTDBNAK    0x30                    // (MT) data byte transmitted;
+  84                                                                                                  //       NAK rec'vd
+  85          #define  SMB_MTARBLOST  0x38                    // (MT) arbitration lost
+  86          #define  SMB_MRADDACK   0x40                    // (MR) Slave address + R transmitted;
+  87                                                                                                  //       ACK received
+  88          #define  SMB_MRADDNAK   0x48                    // (MR) Slave address + R transmitted;
+  89                                                                                                  //       NAK received
+  90          #define  SMB_MRDBACK    0x50                    // (MR) data byte rec'vd;
+  91                                                                                                  //       ACK transmitted
+  92          #define  SMB_MRDBNAK    0x58                    // (MR) data byte rec'vd;
+  93                                                                                                  //       NAK transmitted
+  94          
+  95          // slave states
+  96          #define  SMB_SROADACK   0x60                    // (SR) SMB's own slave address + W
+  97                                                                                                  //    rec'vd; ACK transmitted
+  98          #define  SMB_SRGADACK   0x70                    // (SR) general call address rec'vd;
+  99                                                                                                  //    ACK transmitted
+ 100          #define  SMB_SRODBACK   0x80                    // (SR) data byte received under own
+ 101                                                                                                  //    slave address; ACK returned
+ 102          #define  SMB_SRODBNAK   0x88                    // (SR) data byte received under own
+ 103                                                                                                  //    slave address; NACK returned
+ 104          #define  SMB_SRGDBACK   0x90                    // (SR) data byte received under general
+ 105                                                                                                  //    call address; ACK returned
+ 106          #define  SMB_SRGDBNAK   0x98                    // (SR) data byte received under general
+ 107                                                                                                  //    call address; NACK returned
+ 108          #define  SMB_SRSTOP             0xA0                    // (SR) STOP or repeated START received
+ 109                                                                                                  //    while addressed as a slave
+ 110          #define  SMB_STOADACK   0xA8                    // (ST) SMB's own slave address + R
+ 111                                                                                                  //    rec'vd; ACK transmitted
+ 112          #define  SMB_STDBACK    0xB8                    // (ST) data byte transmitted; ACK
+ 113                                                                                                  //    rec'ed
+ 114          #define  SMB_STDBNAK    0xC0                    // (ST) data byte transmitted; NACK
+ 115                                                                                                  //    rec'ed
+C51 COMPILER V9.51   SMBUS                                                                 01/05/2016 18:47:25 PAGE 3   
+
+ 116          #define  SMB_STDBLAST   0xC8                    // (ST) last data byte transmitted
+ 117                                                                                                  //    (AA=0); ACK received
+ 118          #define  SMB_SCLHIGHTO  0xD0                    // (ST & SR) SCL clock high timer per
+ 119                                                                                                  //    SMB0CR timed out (FTE=1)
+ 120          #define  SMB_IDLE               0xF8                    // (all modes) Idle
+ 121          
+ 122          //-----------------------------------------------------------------------------
+ 123          // SMB_Init
+ 124          //-----------------------------------------------------------------------------
+ 125          //
+ 126          // Return Value : None
+ 127          // Parameters   : None
+ 128          //
+ 129          // The SMBus peripheral is configured as follows:
+ 130          // - SMBus enabled
+ 131          // - Assert Acknowledge low (AA bit = 1b)
+ 132          // - Free and SMBSCL low timeout detection enabled
+ 133          //
+ 134          void SMB_Init (void) {
+ 135   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 136   1      
+ 137   1              SFRPAGE = SMB0_PAGE;
+ 138   1      //      SMB0CN = 0x07;                                          // Assert Acknowledge low (AA bit = 1b)
+ 139   1                                                                                              // Enable SMBus Free timeout detect
+ 140   1                                                                                              // Enable SMBSCL low timeout detect
+ 141   1              SMB0CN = 0x44;                                          // Assert Acknowledge low (AA bit = 1b)
+ 142   1                                                                                              // Enable SMBus
+ 143   1                                                                                              // Disable SMBus Free timeout detect
+ 144   1      
+ 145   1              SMB0CR = 236;                                           // see SMB0CR documentation for derivation of this number
+ 146   1                                                                                      // 241 = 375 KHz does not work
+ 147   1                                                                                      // 235 = 294 KHz works ** CLEAN **
+ 148   1                                                                                      // 238 = 322 KHz works but not clean
+ 149   1                                                                                      // 240 = 344 KHz works but not clean
+ 150   1              
+ 151   1                                                                                      // NOTE: This is 400KHz from a 75MHz system clock rate
+ 152   1              SMB0CN |= 0x40;                                         // Enable SMBus
+ 153   1              SI = 0;                                                         // Clear interrupt pending flag
+ 154   1              EIE1 |= 0x02;                                           // Enable the SMBus interrupt
+ 155   1      
+ 156   1              SFRPAGE = SFRPAGE_SAVE;                         // Restore SFR page detector
+ 157   1      } // SMB_Init
+ 158          
+ 159          //-----------------------------------------------------------------------------
+ 160          // SMBus Interrupt Service Routine (ISR)
+ 161          //-----------------------------------------------------------------------------
+ 162          //
+ 163          // NOTE: This is implemented for variable length Master-Slave transmissions. The first byte in the
+ 164          // transmission is the number of bytes of the payload. For example:
+ 165          // 8,0,1,2,3,4,5,6,7 would be a valid tranmission. 8 = trans length followed by 8 data bytes.
+ 166          //
+ 167          // SMBus ISR state machine
+ 168          // - Master only implementation - no slave or arbitration states defined
+ 169          // - All incoming data is written to global array smbrxbuff
+ 170          // - All outgoing data is read from global array smbtxbuff
+ 171          //
+ 172          void SMB_ISR (void) interrupt 7 {
+ 173   1              bit FAIL = 0;                                                   // Used by the ISR to flag failed transfers
+ 174   1      
+ 175   1              // Status code for the SMBus (SMB0STA register)
+ 176   1              switch (SMB0STA) {
+ 177   2                      // Master Transmitter/Receiver: START condition transmitted.
+C51 COMPILER V9.51   SMBUS                                                                 01/05/2016 18:47:25 PAGE 4   
+
+ 178   2                      // Load SMB0DAT with slave device address.
+ 179   2                      case SMB_START:
+ 180   2                      // Master Transmitter/Receiver: repeated START condition transmitted.
+ 181   2                      // Load SMB0DAT with slave device address
+ 182   2                      case SMB_RP_START:
+ 183   2                              SMB0DAT = smbus.target;                 // Load address of the slave
+ 184   2                              smbus.data_ready = FALSE;               // clear semaphore
+ 185   2                              SMB0DAT &= 0xFE;                                // Clear the LSB of the address for the R/W bit
+ 186   2                              SMB0DAT |= SMB_RW;                              // Load R/W bit
+ 187   2                              STA = 0;                                                // Manually clear STA bit
+ 188   2      
+ 189   2                              smbus.rec_byte_counter = 0;             // Reset the counter
+ 190   2                              smbus.sent_byte_counter = 0;    // Reset the counter
+ 191   2                              break;
+ 192   2      
+ 193   2                      // Master Transmitter: Slave address + WRITE transmitted.  ACK received.
+ 194   2                      // For a READ: N/A
+ 195   2                      //
+ 196   2                      // For a WRITE: Send the first data byte to the slave.
+ 197   2                      // For a WRITE: Send all data.  After the last data byte, send the stop bit.
+ 198   2                      case SMB_MTADDACK:
+ 199   2                      case SMB_MTDBACK:
+ 200   2                              if (smbus.sent_byte_counter < smbus.txbytes) {
+ 201   3                                      // send data byte
+ 202   3                                      SMB0DAT = smbus.txbuff[smbus.sent_byte_counter];
+ 203   3                                      smbus.sent_byte_counter++;
+ 204   3                              } // if
+ 205   2                              else {
+ 206   3                                      STO = 1;                                        // Set STO to terminate transfer
+ 207   3                                      SMB_BUSY = 0;                           // And free SMBus interface
+ 208   3                              } // else
+ 209   2                              break;
+ 210   2      
+ 211   2                      // Master Transmitter: Slave address + WRITE transmitted.  NAK received.
+ 212   2                      case SMB_MTADDNAK:
+ 213   2                      // Master Transmitter: Data byte transmitted.  NAK received.
+ 214   2                      case SMB_MTDBNAK:
+ 215   2                              STA = 1;                                                // Restart transfer
+ 216   2                      // Master Receiver: Slave address + READ transmitted.  NAK received.
+ 217   2                      // Restart the transfer.
+ 218   2                      case SMB_MRADDNAK:
+ 219   2                              STA = 1;                                                // Restart transfer
+ 220   2                              break;
+ 221   2      
+ 222   2                      // Master Receiver: Data byte received.  ACK transmitted.
+ 223   2                      // For a READ: receive each byte from the slave.  if this is the last
+ 224   2                      //  byte, send a NAK and set the STOP bit.
+ 225   2                      case SMB_MRADDACK:
+ 226   2                      // Master Receiver: Data byte received.  ACK transmitted.
+ 227   2                      // For a READ: receive each byte from the slave.  if this is the last
+ 228   2                      //  byte, send a NAK and set the STOP bit.
+ 229   2                      // For a WRITE: N/A
+ 230   2                      case SMB_MRDBACK:
+ 231   2                              if (0 != smbus.rec_byte_counter) {                      // skip first byte = slave address                      
+ 232   3                                      smbus.rxbuff[smbus.rec_byte_counter-1] = SMB0DAT; // Store received byte and increment
+ 233   3                              } // if
+ 234   2                              smbus.rec_byte_counter++;
+ 235   2      
+ 236   2                              if (smbus.rec_byte_counter < smbus.rxbytes)
+ 237   2                                      AA = 1;                                         // Send ACK to indicate byte received
+ 238   2                              else
+ 239   2                                      AA = 0;                                         // Send NAK to indicate one more byte in this transfer
+C51 COMPILER V9.51   SMBUS                                                                 01/05/2016 18:47:25 PAGE 5   
+
+ 240   2                              break;
+ 241   2      
+ 242   2                      // Master Receiver: Data byte received.  NAK transmitted.
+ 243   2                      // For a READ: Read operation has completed.  Read data register and send STOP.
+ 244   2                      case SMB_MRDBNAK:
+ 245   2                              smbus.rxbuff[smbus.rec_byte_counter-1] = SMB0DAT; // Store received byte
+ 246   2                              smbus.rec_byte_counter++;
+ 247   2                              smbus.data_ready = TRUE;
+ 248   2                              STO = 1;
+ 249   2                              SMB_BUSY = 0;
+ 250   2                              AA = 1;                                                 // Set AA for next transfer
+ 251   2                              break;
+ 252   2      
+ 253   2                      // Master Transmitter: Arbitration lost.
+ 254   2                      case SMB_MTARBLOST:
+ 255   2                              FAIL = 1;                                               // Indicate failed transfer and handle at end of ISR
+ 256   2                              break;
+ 257   2      
+ 258   2                      // Slave Receiver: Slave address + WRITE received.  ACK transmitted.
+ 259   2                      // Fall through.
+ 260   2                      case SMB_SROADACK:
+ 261   2                      // Slave Receiver: General call address received.  ACK transmitted.
+ 262   2                      case SMB_SRGADACK:
+ 263   2                              smbus.data_ready = FALSE;                       // clear semaphore
+ 264   2                              smbus.sent_byte_counter = 0;        // Reinitialize the data counters
+ 265   2                              smbus.rec_byte_counter = 0;
+ 266   2                              break;
+ 267   2      
+ 268   2                      // Slave Receiver: Data byte received after addressed by general
+ 269   2                      // call address + WRITE.
+ 270   2                      // ACK transmitted.  Fall through.
+ 271   2                      case SMB_SRGDBACK:
+ 272   2                      // Slave Receiver: Data byte received after addressed by own slave address + WRITE.
+ 273   2                      // ACK transmitted.
+ 274   2                      // Receive each byte from the master.
+ 275   2                      case SMB_SRODBACK:
+ 276   2                              if (0 == smbus.rec_byte_counter) {      // first byte is number of characters in transmission
+ 277   3                                      smbus.rxbytes = SMB0DAT;
+ 278   3                                      smbus.data_ready = FALSE;
+ 279   3                              } // if
+ 280   2                              else
+ 281   2                                      smbus.rxbuff[smbus.rec_byte_counter-1] = SMB0DAT; // Store received byte
+ 282   2                              smbus.rec_byte_counter++;
+ 283   2                              
+ 284   2                              if (smbus.rec_byte_counter > smbus.rxbytes) {
+ 285   3                                      smbus.data_ready = TRUE;        // Buffer full so indicate received
+ 286   3                                      smbus.rec_byte_counter = 0;     // set for next time
+ 287   3                              } // if
+ 288   2                              AA = 1;                                                 // Send ACK to indicate byte received
+ 289   2                              break;
+ 290   2      
+ 291   2                      // Slave Receiver: Data byte received while addressed as slave.
+ 292   2                      // NAK transmitted. Should not occur since AA will not be cleared
+ 293   2                      // as slave.  Fall through to next state.
+ 294   2                      case SMB_SRODBNAK:
+ 295   2                      // Slave Receiver: Data byte received while addressed by general call.
+ 296   2                      // NAK transmitted.
+ 297   2                      // Should not occur since AA will not be cleared as slave.
+ 298   2                      case SMB_SRGDBNAK:
+ 299   2                              AA = 1;
+ 300   2                              break;
+ 301   2      
+C51 COMPILER V9.51   SMBUS                                                                 01/05/2016 18:47:25 PAGE 6   
+
+ 302   2                      // Slave Receiver: STOP or repeated START received while addressed as slave.
+ 303   2                      case SMB_SRSTOP:
+ 304   2                              break;
+ 305   2      
+ 306   2                      // Slave Transmitter: Own slave address + READ received.  ACK transmitted.
+ 307   2                      // Load SMB0DAT with data to be output.
+ 308   2                      case SMB_STOADACK:
+ 309   2                      // Slave Transmitter: Data byte transmitted.  ACK received.
+ 310   2                      // Send each requested byte to the master.
+ 311   2                      case SMB_STDBACK:
+ 312   2                              SMB0DAT = smbus.txbuff[smbus.sent_byte_counter++];
+ 313   2      //                      if (smbus.sent_byte_counter <= smbus.txbytes)
+ 314   2                                      // send data byte
+ 315   2      //                              SMB0DAT = smbus.txbuff[smbus.sent_byte_counter++];
+ 316   2                              break;
+ 317   2      
+ 318   2                      // Slave Transmitter: Data byte transmitted.  NACK received.
+ 319   2                      // Resend the previous byte.
+ 320   2                      case SMB_STDBNAK:
+ 321   2                              SMB0DAT = smbus.txbuff[smbus.sent_byte_counter-1];
+ 322   2                              break;
+ 323   2      
+ 324   2                      // Slave Transmitter: Last data byte transmitted.  ACK received.
+ 325   2                      // No action necessary.
+ 326   2                      case SMB_STDBLAST:
+ 327   2                              break;
+ 328   2                       
+ 329   2                      // All other status codes invalid.  Reset communication.
+ 330   2                      default:
+ 331   2                              FAIL = 1;
+ 332   2                              break;
+ 333   2              } // switch
+ 334   1      
+ 335   1              if (FAIL) {                                                             // If the transfer failed,
+ 336   2                      SMB0CN &= ~0x40;                                        // Reset communication
+ 337   2                      SMB0CN |= 0x40;
+ 338   2                      STA = 0;
+ 339   2                      STO = 0;
+ 340   2                      AA = 0;
+ 341   2      
+ 342   2                      SMB_BUSY = 0;                                           // Free SMBus
+ 343   2                      FAIL = 0;
+ 344   2              } // if
+ 345   1      
+ 346   1              SI = 0;                                                                 // Clear interrupt flag
+ 347   1      } // SMB_ISR
+ 348          
+ 349          //-----------------------------------------------------------------------------
+ 350          // SMB_Write
+ 351          //-----------------------------------------------------------------------------
+ 352          //
+ 353          // Return Value : None
+ 354          // Parameters   : None
+ 355          //
+ 356          // Writes a single byte to the slave with address specified by the <TARGET>
+ 357          // variable.
+ 358          // Calling sequence:
+ 359          // 1) Write target slave address to the <TARGET> variable
+ 360          // 2) Write outgoing data to the <smbustxbuff> array
+ 361          // 3) Call SMB_Write()
+ 362          //
+ 363          void SMB_Write(void) {
+C51 COMPILER V9.51   SMBUS                                                                 01/05/2016 18:47:25 PAGE 7   
+
+ 364   1              u08 SFRPAGE_SAVE = SFRPAGE;             // Save Current SFR page
+ 365   1      
+ 366   1              SFRPAGE = SMB0_PAGE;
+ 367   1              
+ 368   1              ENSMB = 1;                                              // Enable the bus
+ 369   1              while (SMB_BUSY);                               // Wait for SMBus to be free
+ 370   1              SMB_BUSY = 1;                                   // Claim SMBus (set to busy)
+ 371   1              SMB_RW = 0;                                             // Mark this transfer as a WRITE
+ 372   1              SMB0ADR = smbus.target;                 // Set the address of unit to write to
+ 373   1              STA = 1;                                                // Start transfer
+ 374   1      
+ 375   1              SFRPAGE = SFRPAGE_SAVE;                 // Restore SFR page detector
+ 376   1      } // SMB_Write
+ 377          
+ 378          //-----------------------------------------------------------------------------
+ 379          // SMB_Read
+ 380          //-----------------------------------------------------------------------------
+ 381          //
+ 382          // Return Value : None
+ 383          // Parameters   : None
+ 384          //
+ 385          // Reads a single byte from the slave with address specified by the <TARGET>
+ 386          // variable.
+ 387          // Calling sequence:
+ 388          // 1) Write target slave address to the <TARGET> variable
+ 389          // 2) Call SMB_Write()
+ 390          // 3) Read input data from <smbusrxbuff> array
+ 391          //
+ 392          void SMB_Read (void) {
+ 393   1              u08 SFRPAGE_SAVE = SFRPAGE;               // Save Current SFR page
+ 394   1      
+ 395   1              SFRPAGE = SMB0_PAGE;
+ 396   1      
+ 397   1              ENSMB = 1;                                              // Enable the bus
+ 398   1              while (SMB_BUSY);                               // wait for bus to be free.
+ 399   1              SMB_BUSY = 1;                                   // claim SMBus (set to busy)
+ 400   1              SMB_RW = 1;                                             // mark this transfer as a READ
+ 401   1              SMB0ADR = smbus.target;                 // Set the address of unit to read from
+ 402   1              STA = 1;                                                // start transfer
+ 403   1      
+ 404   1              while (SMB_BUSY);                               // wait for transfer to complete
+ 405   1      
+ 406   1              SFRPAGE = SFRPAGE_SAVE;                 // restore SFR page
+ 407   1      } // SMB_Read
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    554    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      2       1
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

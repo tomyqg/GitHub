@@ -1,0 +1,611 @@
+C51 COMPILER V8.01   TMTYPES                                                               02/02/2006 11:21:28 PAGE 1   
+
+
+C51 COMPILER V8.01, COMPILATION OF MODULE TMTYPES
+OBJECT MODULE PLACED IN tmtypes.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE tmtypes.h DB OE DF(DISPLAY) DF(EXTCLK6) DF(MEMBRANE) DF(NODEBUG) INCDIR(C:\
+                    -Keil\C51\INC;C:\Keil\Traqmate\132micro\CommonFiles;C:\Keil\Traqmate\132micro\DU) OT(8,SIZE)
+
+line level    source
+
+   1          #ifndef TMTYPE_H
+   2          #define TMTYPE_H
+   3          
+   4          // This is the data format revision number in the format 
+   5          #define DATAREV         6               // fourth release - with I/O
+   6          #define CURRENTYEAR     6               // 2006
+   7          
+   8          // compilation controls
+   9          #define PRINTDISPLAY
+  10          
+  11          // Part of sensorunit.c and displayunit.c, Traqmate product software.
+  12          // 11/10/2003
+  13          // Author: GAStephens
+  14          // Revised: 15 July 2004 - changed data storage format to handle user, config data
+  15          //                      15 January 2005 - changed data storage format for compression, laptimes, io data collection
+  16          //                      15 November 2005 - added io stuff
+  17          //
+  18          // This file contains the global definitions and function declarations.
+  19          //
+  20          // Flash memory map
+  21          //              N = number of memory pages, each 528 bytes in length, currently = 4096
+  22          //              S = number of data collection sessions allowed, currently = 21
+  23          //              D = number of pages of GPS and Accelerometer data starting at memory bottom
+  24          //              I = number of pages of i/o data collected starting at top of memory
+  25          //
+  26          // Page 0                               = Index Page, contains headers for all data collection sessions
+  27          // Page 1                               = User Page, contains information and names for drivers and cars
+  28          // Page 2                               = Track Page, contains information and names for tracks
+  29          // Page 3                               = IO Page, contains information and names for io points
+  30          // Page 4 to (4+D-1)    = Data Pages, format changes based on sampling rate
+  31          // Page (N-S-I) to (N-S)= I/O Data Pages, format changes based on which i/o points are enabled
+  32          // Page (N-S+1) to N    = Lap Time Pages, one for each session
+  33          //
+  34          // Note that D grows upward in memory and I grows downward. Must always check to ensure no collision.
+  35          
+  36          // universal data elements
+  37          typedef unsigned char u08;
+  38          typedef unsigned int u16;
+  39          typedef unsigned long u32;
+  40          typedef char s08;
+  41          typedef int s16;
+  42          typedef long s32;
+  43          
+  44          //-----------------------------------------------------------------------------
+  45          // 16-bit SFR Definitions for 'F02x
+  46          //-----------------------------------------------------------------------------
+  47          #include <stdio.h>
+  48          #include <string.h>
+  49          #include <boolean.h>
+  50          #include <c8051f120.h>
+  51          #include <dataflash.h>
+  52          #include <message.h>
+  53          #include <opcode.h>
+  54          
+C51 COMPILER V8.01   TMTYPES                                                               02/02/2006 11:21:28 PAGE 2   
+
+  55          sfr16 DP       = 0x82;                 // data pointer
+  56          sfr16 ADC0     = 0xbe;                 // ADC0 data
+  57          sfr16 ADC0GT   = 0xc4;                 // ADC0 greater than window
+  58          sfr16 ADC0LT   = 0xc6;                 // ADC0 less than window
+  59          sfr16 RCAP2    = 0xca;                 // Timer2 capture/reload
+  60          sfr16 RCAP3    = 0xca;                 // Timer3 capture/reload
+  61          sfr16 RCAP4    = 0xca;                 // Timer4 capture/reload
+  62          sfr16 TMR2     = 0xcc;                 // Timer2
+  63          sfr16 TMR3     = 0xcc;                 // Timer3
+  64          sfr16 TMR4     = 0xcc;                 // Timer4
+  65          sfr16 DAC0     = 0xd2;                 // DAC0 data
+  66          sfr16 DAC1     = 0xd2;                 // DAC1 data
+  67          sfr16 PCA0CP5  = 0xe1;                 // PCA0 Module 5 capture
+  68          sfr16 PCA0CP2  = 0xe9;                 // PCA0 Module 2 capture
+  69          sfr16 PCA0CP3  = 0xeb;                 // PCA0 Module 3 capture
+  70          sfr16 PCA0CP4  = 0xed;                 // PCA0 Module 4 capture
+  71          sfr16 PCA0     = 0xf9;                 // PCA0 counter
+  72          sfr16 PCA0CP0  = 0xfb;                 // PCA0 Module 0 capture
+  73          sfr16 PCA0CP1  = 0xfd;                 // PCA0 Module 1 capture
+  74          
+  75          //-----------------------------------------------------------------------------
+  76          // Software Downloading Definitions
+  77          //-----------------------------------------------------------------------------
+  78          
+  79          #define CODE_PAGE_SIZE          1024            // x132 microprocessor has 1024 byte flash pages
+  80          #define CODE_DOWNLOAD_SIZE      512                     // code is downloaded 512 bytes at a time
+  81          
+  82          #define BOOTSTRAP_ADDR  0xFE00                  // where bootstrap is located in code space
+  83          #define LAST_CODE_PAGE  0xFC00                  // address of start of last 1024 flash page
+  84          //-----------------------------------------------------------------------------
+  85          // Global CONSTANTS
+  86          //-----------------------------------------------------------------------------
+  87          #define GPS_PULSE_WID   10L                             // GPS pulse width in microseconds
+  88          
+  89          #define GPS_RATE                4                               // GPS reporting rate in Hertz
+  90          #define GPS_MS                  (1000/GPS_RATE) // number of ms between GPS reports
+  91          #define GPS_GOOD                3                               // must have 3 satellites to be "in coverage"
+  92          
+  93          #define SAMPLE_RATE     160                                     // THIS AFFECTS COMM TIMEOUT!!
+  94                                                                                          // ADC record rate in hz (must be 10x INT_DEC)
+  95          // data input definitions
+  96                                                                                          // upper two bits of digitals define the type of interface
+  97          #define TRAQDATALITE_ENABLED    0x01    // Bit 0 = GND, Bit 1 = HIGH
+  98          
+  99          // button debounce parameters
+ 100          #define DEBOUNCE_NORMAL_MSEC    60              // debounce value of normal buttons in msec
+ 101          #define DEBOUNCE_ONOFF_MSEC             2000    // 2 seconds
+ 102          #define DEBOUNCE_NORMAL         ((u16) ((long) DEBOUNCE_NORMAL_MSEC * (long) SAMPLE_RATE / 1000L))      // clock ticks
+             - to debounce for record mode
+ 103          #define DEBOUNCE_ONOFF          ((u16) ((long) DEBOUNCE_ONOFF_MSEC * (long) SAMPLE_RATE / 1000L))       // clock ticks t
+             -o debounce for turn off
+ 104          
+ 105          // tsip buffer sizes
+ 106          #define TSIPTXSIZE                      0x10    // max length of TSIP transmit packet
+ 107          #define TSIPRXSIZE                      80              // max length of TSIP receive packet (packet 8F-20)
+ 108          
+ 109          // ubx buffer sizes
+ 110          #define UBXTXSIZE                       64              // max length of UBX transmit packet
+ 111          #define UBXRXSIZE                       220             // max length of UBX receive packet NAV-SVINFO
+ 112          
+ 113          #ifdef TSIP
+              #define GPSRXSIZE               TSIPRXSIZE
+C51 COMPILER V8.01   TMTYPES                                                               02/02/2006 11:21:28 PAGE 3   
+
+              #define GPSTXSIZE               TSIPTXSIZE
+              #else
+ 117          #define GPSRXSIZE               UBXRXSIZE
+ 118          #define GPSTXSIZE               UBXTXSIZE
+ 119          #endif
+ 120          
+ 121          #define PCMSGBAUD               115200L                 // Baud rate to talk to PC through UART
+ 122          #define PCUSBMSGBAUD    230400L                 // Baud rate to talk to PC through USB
+ 123          #define DUMSGBAUD               230400L                 // Baud rate between SU and DU
+ 124          
+ 125          #define CRYSTALFREQ             24576000L                       // crystal frequency
+ 126          
+ 127          #ifdef EXTCLK1
+              #define SYSCLK                  (4L*22118400L)          // 22 MHz x 4
+              #endif
+ 130          #ifdef EXTCLK2
+              #define SYSCLK                  (5L*20000000L)          // 20 MHz crystal x 5 = 100 MHz
+              #endif
+ 133          #ifdef EXTCLK4
+              #define SYSCLK                  (CRYSTALFREQ)           // 24.576 Native clock speed
+              #endif
+ 136          #ifdef EXTCLK5
+              #define SYSCLK                  (2L*CRYSTALFREQ)        // 50 MHz
+              #endif
+ 139          #ifdef EXTCLK6
+ 140          #define SYSCLK                  (3L*CRYSTALFREQ)        // 75 MHz
+ 141          #endif
+ 142          #ifdef EXTCLK3
+              #define SYSCLK                  (4L*CRYSTALFREQ)        // 100 Mhz
+              #endif
+ 145          #ifdef INTCLK
+              #define SYSCLK                  (4L*24500000L)          // Internal Oscillator x 4
+              #endif
+ 148          
+ 149          // Dataflash constants
+ 150          #define MSGDATA                 530                             // max size data transmitted in a message
+ 151          #define MSGSIZE                 (MSGDATA + MSG_WRAPPER + 2)     // each packet is MSGSIZE bytes + wrapper + CRC
+ 152          #define NAMELEN                 16                              // length of text string for driver and track
+ 153          #define NUMSESSIONS             21                              // 528 / 19 = 26 sessions
+ 154          #define NUMDRIVERS              12                              // 12 individual drivers allowed
+ 155          #define NUMCARS                 12                              // 12 individual cars allowed
+ 156          #define NUMTRACKS               16                              // 16 tracks allowed
+ 157          #define IONAMELEN               12                              // length of text string for input name
+ 158          #define NUMDIGITALS             7                               // 7 digital inputs
+ 159          #define NUMANALOGS              4                               // 4 analog inputs
+ 160          #define NUMFREQS                2                               // 2 frequency inputs
+ 161          #define NUMINPUTBYTES   (1+NUMANALOGS+NUMFREQS)         // number of bytes needed to store the inputs
+ 162          
+ 163          // definitions for TraqData breakout box
+ 164          #define NUMTDDIGITALS   2                               // 2 digital inputs
+ 165          #define NUMTDANALOGS    NUMANALOGS              // 4 analog inputs
+ 166          #define NUMTDFREQS              1                               // 2 rpm only
+ 167          #define NUMTDINPUTBYTES (1+NUMTDANALOGS+1+NUMTDFREQS)   // number of bytes needed to store the inputs
+ 168          
+ 169          #define INDEXPAGE               0                               // session index segment
+ 170          #define USERPAGE                1                               // user data segment
+ 171          #define TRACKPAGE               2                               // track data segment
+ 172          #define IODEFPAGE               3                               // definitions for data inputs
+ 173          #define FIRSTDATAPAGE   4                               // first data segment
+ 174          
+ 175          #define MAX_PAGE_SIZE                           MAX_PAGE_32MBIT // change to 64 bit if using bigger part
+ 176          
+C51 COMPILER V8.01   TMTYPES                                                               02/02/2006 11:21:28 PAGE 4   
+
+ 177          // Dataflash buffer assignments
+ 178          #define IOBUFFER        1                                       // holds the i/o data
+ 179          #define GENBUFFER       2                                       // used for general dataflash read/writes
+ 180          
+ 181          //Cygnal 8051 SPI Definitions
+ 182          #define SPICFG_MODE_MASK                        0xC0
+ 183          #define SPICFG_BITCNT_MASK                      0x38
+ 184          #define SPICFG_FRMSIZ_MASK                      0x07
+ 185          #define SCRATCHLEN                                      128             // size of scratchpad in flash
+ 186          #define FLASHLEN                                        MAX_PAGE_SIZE           // size of a page in flash = 528
+ 187          #define NUMPORTS                                        2               // number of UARTS on MCU
+ 188          
+ 189          //#define SPI_CLOCK_DIVIDE                      (SYSCLK/12500000L/2)            // approx 9 - 12.5MHz
+ 190          #define SPI_CLOCK_DIVIDE                        4               // 10MHz when set to 100Mhz
+ 191          #define SPI_CONFIG_VALUE                        0x70    //  01110000
+ 192          
+ 193          // Voltage monitored by SU, displayed by DU
+ 194          #define POWER_THRESHOLD (4*750)                 // minimum ADC value to operate
+ 195                                                                                          // value range: aggressive 2400 - 3200 conservative
+ 196                                                                                          // 4V (min V) / 4.86V (scale) * 1024 * 4
+ 197          #ifdef DISPLAY
+ 198          #define NUMLAPPAGES             NUMSESSIONS             // in DU, each session has its own page of laptimes
+ 199          #else
+              #define NUMLAPPAGES             0                               // no laps recorded in SU
+              #endif
+ 202          #define LAPPAGESTART    (numpages - NUMLAPPAGES)        // first lap storage page
+ 203          #define LASTDATAPAGE    (LAPPAGESTART - 1)      // last place to write data
+ 204          #define LASTLAPPAGE             (numpages - 1)          // last place to write laps
+ 205          #define NUMLAPS                 (MAX_PAGE_SIZE/4)       // number of laps stored per session
+ 206          #define IOPAGESTART             LASTDATAPAGE    // first place to store i/o data
+ 207                                                                                  
+ 208          #define OWNER_LEN                                       20              // number of characters in owner name
+ 209          #define PHONE_LEN                                       20              // number of characters in owner phone number
+ 210          #define NOTE_LEN                                        40              // number of characters in owner note
+ 211          
+ 212          //-----------------------------------------------------------------------------
+ 213          // Global VARIABLES
+ 214          //-----------------------------------------------------------------------------
+ 215          
+ 216          // send a message to PC for display on screen
+ 217          #define PRINTPC1(FORMAT, ARG1) do { sprintf(com[msgrouting[PC]].txbuff+DATA_START, FORMAT, ARG1); \
+ 218          SendMessage(msgrouting[0], (u08) PC, (u08) WRITE_TEXT, 1+strlen(com[msgrouting[PC]].txbuff+DATA_START)); }
+             - while (0)
+ 219          #define PRINTPC2(FORMAT, ARG1, ARG2) do { sprintf(com[msgrouting[PC]].txbuff+DATA_START, FORMAT, ARG1, ARG
+             -2); \
+ 220          SendMessage(msgrouting[0], (u08) PC, (u08) WRITE_TEXT, 1+strlen(com[msgrouting[PC]].txbuff+DATA_START)); }
+             - while (0)
+ 221          // send a message to display unit
+ 222          #define PRINTDU1(LINENUM, FORMAT, ARG1) do { *(com[msgrouting[PC]].txbuff+DATA_START) = LINENUM; \
+ 223          sprintf(com[msgrouting[msgptr[PC]]].txbuff+DATA_START+1, FORMAT, ARG1); \
+ 224          SendMessage(msgrouting[0], (u08) DISPLAY_UNIT, (u08) WRITE_DISPLAY_TEXT, 2+strlen(com[msgrouting[PC]].txbu
+             -ff+DATA_START+1)); } while (0)
+ 225          // no formatting, just the text ma'am
+ 226          #define PRINTPC0(TEXT) PRINTPC1("%s",TEXT)
+ 227          #define PRINTDU0(TEXT) PRINTDU("%s",TEXT)
+ 228          
+ 229          // Useful Macros
+ 230          #define MIN(x,y) (((x)<(y))?(x):(y))
+ 231          #define MAX(x,y) (((x)>(y))? (x):(y))
+ 232          #define ABS(a) ((a >= 0)? (a) : -(a))
+ 233          #define AVG(q,r) (((q)+(r))/2)
+ 234          #define HI(x) ((P##x) |= (1<<(B##x)))
+C51 COMPILER V8.01   TMTYPES                                                               02/02/2006 11:21:28 PAGE 5   
+
+ 235          #define LO(x) ((P##x) &= ~(1<<(B##x)))
+ 236          #define XOR(x) ((P##x) ^= (1<<(B##x)))
+ 237          #define ISHI(x) ((P##x) & (1<<(B##x)))
+ 238          #define ISLO(x) (!(ISHI(x)))
+ 239          #define tohex(c) (c<10? (c+'0'):(c+'A'-10))
+ 240          #define DELAY_MS(x) do {xdata long zzz; for (zzz=((SYSCLK/CRYSTALFREQ*150L) * x); zzz>0; zzz--); } while(0
+             -)
+ 241          #define SWAP16(x) ( (((x) >> 8) & 0x00FF) | (((x) << 8) & 0xFF00) )
+ 242          #define SWAP32(x) ( (((x) >> 24) & 0x000000FF) | (((x) >> 8) & 0x0000FF00) | \
+ 243                                              (((x) << 8) & 0x00FF0000) | (((x) << 24) & 0xFF000000) )
+ 244          #define PDF_RST P7                                              // DataFlash chip reset
+ 245          #define BDF_RST 2
+ 246          #define PDF_WP  P7                                              // DataFlash chip write protect
+ 247          #define BDF_WP  0
+ 248          #define PDF_CS1 P7                                              // DataFlash 1 chip select
+ 249          #define BDF_CS1 1
+ 250          #ifdef DISPLAY
+ 251          #define PDF_CS2 P7                                              // DataFlash 2 chip select
+ 252          #define BDF_CS2 3
+ 253          #endif
+ 254          
+ 255          //types of com ports
+ 256          typedef enum {
+ 257                  MESSAGING,
+ 258                  TSIPGPS,
+ 259                  UBXGPS,
+ 260                  ASCII
+ 261          } comusagetype;
+ 262          
+ 263          typedef enum {
+ 264                  OPEN,
+ 265                  CLOSE
+ 266          } comaction;
+ 267          
+ 268          typedef struct {
+ 269                  u08 port;                                               // port number
+ 270                  comusagetype use;                               // what port is used for
+ 271                  u16 txbytes;                                    // number of bytes left to xmit on port
+ 272                  u08 *rxptr;                                             // NULL when no rx'd msg, else point to rx'd msg
+ 273                  u08 *txptr;                                             // points to current byte in output buffer
+ 274                  char parity;                                    // which parity is in use
+ 275                  u08 rxidx;                                              // index to rx buffer
+ 276                  u08 *txbuff;                                    // pointer to transmit buffer
+ 277                  u08 *rxbuff;                                    // pointer to double receive buffer
+ 278          } comporthandle;
+ 279          
+ 280          typedef struct {
+ 281                          u32 time;                                       // 4 in milliseconds since midnight on Sunday
+ 282                          u16 weeks;                                      // 2 gps number of weeks, week 0 started Jan 6, 1980
+ 283          
+ 284                          s32 lat;                                        // 4 divide by 2^31 and multiply by 180 for degrees
+ 285                          s32 lon;                                        // 4
+ 286          
+ 287                          s16 alt;                                        // 2 altitude in meter (- = below sea level)
+ 288                          u08 velpack[4];                         // 4 byte 0: 7-5 upper 3 bits of signed east-west
+ 289                                                                                  //           4-2 upper 3 bits of signed north-south
+ 290                                                                                  //           1-0 upper 2 bits of signed alt
+ 291                                                                                  //   byte 1: east-west velocity (met/10msec) east +, west -
+ 292                                                                                  //   byte 2: north-south velocity met/10msec. north + south -
+ 293                                                                                  //   byte 3: vertical velocity met/10msec up + down -
+ 294                          s08 temp;                                       // 1 -128 to 128 (half degrees celcius)
+ 295          } gpstype;                                                      // total 21
+C51 COMPILER V8.01   TMTYPES                                                               02/02/2006 11:21:28 PAGE 6   
+
+ 296          
+ 297          // use these structures to access the individual sample groups within a flash page
+ 298          typedef u08 acceltype[3];
+ 299          
+ 300          typedef struct {                        // ***** DO NOT CHANGE STRUCTURE. CODE DEPENDENT!! *****
+ 301                  gpstype gps;                                                    // 21
+ 302                  acceltype accel[10];                                    // 3*10 = 30
+ 303                                                                                                  // byte 0: bit 7-4 upper nibble of x, bit 3-0 upper nibble of y,
+ 304                                                                                                  // byte 1: lower nibble of x, byte 2: lower nibble of y
+ 305          } samptype10;                                                           // 51 total bytes
+ 306          typedef struct {                        // ***** DO NOT CHANGE STRUCTURE. CODE DEPENDENT!! *****
+ 307                  gpstype gps;                                                    // 21
+ 308                  acceltype accel[5];                                             // 3*5 = 15
+ 309                                                                                                  // byte 0: bit 7-4 upper nibble of x, bit 3-0 upper nibble of y,
+ 310                                                                                                  // byte 1: lower nibble of x, byte 2: lower nibble of y
+ 311          } samptype5;                                                            // 36 total bytes
+ 312          
+ 313          #define SAMP10S_PER_PAGE                        (FLASHLEN / sizeof(samptype10)) // 10 number of sample groups (gps&10) per stor
+             -age page
+ 314          #define SAMP5S_PER_PAGE                         (FLASHLEN / sizeof(samptype5))  // 14 number of sample groups (gps&5) per storag
+             -e page
+ 315          
+ 316          // information about a data acquisition session
+ 317          typedef struct {
+ 318                  u16 startseg;           // 2 which flash page the session starts on
+ 319                  u16 endseg;                     // 2 which flash page the session ends on
+ 320                  u32 starttime;          // 4 in milliseconds since midnight on Sunday
+ 321                  u16 startweeks;         // 2 gps number of weeks, week 0 started Jan 6, 1980
+ 322                  u32 endtime;            // 4 in milliseconds since midnight on Sunday
+ 323                  u16 endweeks;           // 2 gps number of weeks, week 0 started Jan 6, 1980
+ 324                  u08 modesample;         // 1 upper nibble is collection mode
+ 325                                                          //   0 = lapping
+ 326                                                          //   1 = autocross
+ 327                                                          //   2 = quarter mile
+ 328                                                          //   3 = eighth mile
+ 329                                                          //   4 = rally
+ 330                                                          //   5 = drive
+ 331                                                          //   lower nibble is sampling rate, mix of accel & i/o and gps rates
+ 332                                                          //   0 = 10 ACC & 1 GPS per second (samptype10)
+ 333                                                          //       1 = 10 ACC & 2 GPS per second (samptype5)
+ 334                                                          //       2 = 20 ACC & 2 GPS per second (samptype10)
+ 335                                                          //   3 = 20 ACC & 4 GPS per second (samptype5)
+ 336                                                          //       4 = 40 ACC & 4 GPS per second (samptype10)
+ 337                  u08 iodata;                     // 1 which i/o data points are turned on/off
+ 338                                                          //   bit 7 = 16bit Freq, 6 = all digitals, 5 = Anlg3, 4 = Anlg2
+ 339                                                          //   bit 3 = Anlg1, 2 = Anlg0, 1 = Freq1, 0 = Freq0
+ 340                  u16 iostartseg;         // 2 flash page where this session's io starts and goes backwards
+ 341                  u16 ioendseg;           // 2 flash page where this session's io ends (endseg < startseg)
+ 342                  u08 driver;                     // 1 index into driver table
+ 343                  u08 car;                        // 1 index into car table
+ 344                  u08 track;                      // 1 index into track table
+ 345          } sessiontype;                  // 25 total
+ 346          
+ 347          typedef struct {
+ 348                  u16 cylandweight;                                               // 2 upper 12 bits = weight in pounds/2, lower 4 bits = divider*2, 1 to 16
+ 349                  u16 revwarning;                                                 // 2 1 to 32000 = caution zone
+ 350                  u16 revlimit;                                                   // 2 1 to 32000 = maximum rev   
+ 351          } cartype;                                                                      // 6 total
+ 352          
+ 353          // setup data downloaded from Traqview
+ 354          typedef struct {                        // ***** DO NOT CHANGE STRUCTURE. CODE DEPENDENT!! *****
+ 355                  u08 selecteddriver;                                             // 1 driver selected via menu or traqview
+C51 COMPILER V8.01   TMTYPES                                                               02/02/2006 11:21:28 PAGE 7   
+
+ 356                  u08 selectedtrack;                                              // 1 track selected via menu or traqview
+ 357                  u08 selectedcar;                                                // 1 car selected via menu or traqview
+ 358                  u08 modesample;                                                 // 1 current configuration for sampling rate and collection mode
+ 359                                                                                                  // 1 upper nibble is collection mode
+ 360                                                                                                                  //   0 = lapping
+ 361                                                                                                                  //   1 = autocross
+ 362                                                                                                                  //   2 = quarter mile
+ 363                                                                                                                  //   3 = eighth mile
+ 364                                                                                                                  //   4 = rally
+ 365                                                                                                                  //   5 = drive
+ 366                                                                                                                  //   lower nibble is sampling rate, mix of accel & i/o and gps rates
+ 367                                                                                                                  //   0 = 10 ACC & 1 GPS per second (samptype10)
+ 368                                                                                                                  //       1 = 10 ACC & 2 GPS per second (samptype5)
+ 369                                                                                                                  //       2 = 20 ACC & 2 GPS per second (samptype10)
+ 370                                                                                                                  //   3 = 20 ACC & 4 GPS per second (samptype5)
+ 371                                                                                                                  //       4 = 40 ACC & 4 GPS per second (samptype10)
+ 372                  u08 iodata;                                                             // 1 which i/o data points are turned on/off
+ 373                                                                                                  //   bit 7 = 16bit tach, bit 6 = all digitals, 5 = Anlg3, 4 = Anlg2
+ 374                                                                                                  //   bit 3 = Anlg1, 2 = Anlg0, 1 = Freq1, 0 = Freq0
+ 375                  u08 drivername[NUMDRIVERS][NAMELEN];    // 192 = 16*12 string of driver name (null term if < 16 char)
+ 376                  struct {
+ 377                          u08 name[NAMELEN];                                      // 16 string of car name (null term if < 16 char)
+ 378                          cartype carspecs;                                       // 6
+ 379                  } car[NUMCARS];                                                 // 264 = 22*12
+ 380          } usertype;                                                                     // 462 TOTAL
+ 381          
+ 382          typedef struct {                        // ***** DO NOT CHANGE STRUCTURE. CODE DEPENDENT!! *****        
+ 383                  struct {
+ 384                          u08 pointname[IONAMELEN];                       // 12 name of this data input
+ 385                          u08 unitname[IONAMELEN];                        // 12 units that describe value of this input
+ 386                          u08 maxscale;                                           // 1 5, 10, 20
+ 387                          float lowval;                                           // 4 value represented at low end of sensor range
+ 388                          float highval;                                          // 4 value represented at high end of sensor range
+ 389                          float alarmval;                                         // 4 value that if exceeded in the alarmdirection, triggers alarm
+ 390                          s08 alarmdirection;                                     // 1 -1 = less than, 0 = equal to, +1 = greater than
+ 391                          u08 lowreading;                                         // 1 voltage reading at low end of sensor range
+ 392                          u08 highreading;                                        // 1 voltage reading at high end of sensor range
+ 393                  } analogs[NUMANALOGS];                                  // 32x4 = 128
+ 394                  struct {
+ 395                          u08 pointname[IONAMELEN];                       // 12 name of this data input
+ 396                          u08 onname[IONAMELEN];                          // 12 name of the digital '1' condition
+ 397                          u08 offname[IONAMELEN];                         // 12 name of the digital '0' condition
+ 398                  } digitals[NUMDIGITALS];                                // 36x7 = 252
+ 399                  struct {
+ 400                          u16 rpmwarning;                                         // 2 caution zone
+ 401                          u16 rpmlimit;                                           // 2 maximum rpm
+ 402                          u08 divider;                                            // 1 freq divided by this number to give rpm
+ 403                  } frequency[NUMFREQS];                                  // 5x2 = 10
+ 404          } iotype;                                                                       // 390 total
+ 405          
+ 406          typedef struct {
+ 407                  struct {
+ 408                          u08 name[NAMELEN];                                      // 16 string of track name (null term if < 16 char)
+ 409                          s32 startlat;                                           // 4 divide by 2^31 and multiply by 180 for degrees
+ 410                          s32 startlon;                                           // 4
+ 411                          s16 startalt;                                           // 2 altitude in meter (- = below sea level)
+ 412                          u16 starthead;                                          // 2 heading in integer degrees of start position
+ 413                  } track[NUMTRACKS];                                             // 448 = 28 * 16
+ 414          } tracktype;                                                            // 448 TOTAL
+ 415          
+ 416          typedef u32 laplisttype[NUMLAPS];
+ 417          
+C51 COMPILER V8.01   TMTYPES                                                               02/02/2006 11:21:28 PAGE 8   
+
+ 418          // session headers
+ 419          typedef struct {                        // ***** DO NOT CHANGE STRUCTURE. CODE DEPENDENT!! *****
+ 420                  sessiontype session[NUMSESSIONS];       // 19 * 26
+ 421          } indextype;                                    // indextype grand total 494 bytes
+ 422          
+ 423          typedef union {                 // ***** DO NOT CHANGE STRUCTURE. CODE DEPENDENT!! *****
+ 424                  indextype index;                                                                        // easy access to index (page 0)
+ 425                  usertype user;                                                                          // easy access to driver and car names & data (page 1)
+ 426                  tracktype circuit;                                                                      // easy access to track names & data (page 2)
+ 427                  iotype io;                                                                                      // easy access to io names & scaling info (page 3)
+ 428                  samptype10 secsamp10[SAMP10S_PER_PAGE];                         // easy access to data 10 accel/gps (pages 4 - LASTSESSIONPAGE
+             -)
+ 429                  samptype5 secsamp5[SAMP5S_PER_PAGE];                            // easy access to data 5 accel/gps (pages 4 - LASTSESSIONPAGE)
+ 430                  u08 sampbuff10[SAMP10S_PER_PAGE][sizeof (samptype10)];  // bytewise access into structure
+ 431                  u08 sampbuff5[SAMP5S_PER_PAGE][sizeof (samptype5)];     // bytewise access into structure
+ 432                  laplisttype laps;                                                                               // easy access to lap times
+ 433                  u08 bigbuff[MAX_PAGE_SIZE];                                                     // to establish overall buffer size
+ 434          } flashpagetype;
+ 435          
+ 436          // this is the format for the Cygnal microprocessor scratchpad flash memory
+ 437          typedef struct {                        // ***** DO NOT CHANGE STRUCTURE. CODE DEPENDENT!! *****
+ 438                  char owner[OWNER_LEN];          // 20 name of Traqmate owner (entered by Traqview for security)
+ 439                  char phone[PHONE_LEN];          // 20 contact number for owner, entered by Traqview
+ 440                  char note[NOTE_LEN];            // 40 address or anything the user wants to put here, entered by Traqview
+ 441                  s08 timecode;                           // 1 hours +/- from GMT for display, entered by Traqview, changed by program
+ 442                  u08 model;                                      // 1 model number, entered by Factory Cal
+ 443                  u08 hwrev;                                      // 1 hardware revision * 100 (237 = 2.37), entered by Factory Cal
+ 444                  u32 serno;                                      // 4 serial number, entered by Factory Cal
+ 445                  u08 week;                                       // 1 week of year of manufacture, entered by Factory Cal
+ 446                  u08 year;                                       // 1 year of manufacture, entered by Factory Cal
+ 447                  u16 xzero;                                      // 2 zero offset value for x, entered by Factory Cal
+ 448                  u16 yzero;                                      // 2 zero offset value for y, entered by Factory Cal
+ 449                  u16 xminusg;                            // 2 max deflection negative at 1 G, entered by Factory Cal
+ 450                  u16 xplusg;                                     // 2 max deflection positive at 1 G, entered by Factory Cal
+ 451                  u16 yminusg;                            // 2 max deflection negative at 1 G, entered by Factory Cal
+ 452                  u16 yplusg;                                     // 2 max deflection positive at 1 G, entered by Factory Cal
+ 453                  u16 calx;                                       // 2 zero offset value for PWM, entered by Factory Cal
+ 454                  u16 caly;                                       // 2 zero offset value for PWM, entered by Factory Cal
+ 455                  u16 swrev;                                      // 2 software version * 100 (xxx.yy) 65535 = 655.35, entered by SW
+ 456                  u16 datarev;                            // 2 data format version, entered by SW
+ 457                  u08 contrast;                           // 1 LCD contrast setting, initial entered by Factory Cal, changed by program
+ 458                  u08 hwconfig;                           // 1 bit 7-3: reserved, all entered by Factory Cal
+ 459                                                                          //       bit 2 - 0 if 2 dataflash chips installed
+ 460                                                                          //       bit 1 - 0 if 7 switches installed
+ 461                                                                          //       bit 0 - 0 if bling LEDs are installed
+ 462          } caltype;                                              // 111 total out of 128
+ 463          
+ 464          typedef union {                         // ***** DO NOT CHANGE STRUCTURE. CODE DEPENDENT!! *****
+ 465                  caltype calibrate;
+ 466                  u08 scratchbuff[SCRATCHLEN];
+ 467          } scratchpadtype;
+ 468          
+ 469          // Su and DU Modes
+ 470          // NOTE: SOME CODE DEPENDS ON ORDER OF THESE ITEMS
+ 471          typedef enum {
+ 472                  WAITING,                // idle state
+ 473                  TIMING,                 // recording - timing started
+ 474                  DRIVE,                  // recording point to point drive
+ 475                  DRAGRACE,               // recording at a dragstrip
+ 476                  AUTOCROSS,              // recording at an autocross
+ 477                  LAPS,                   // recording - lap timing selected
+ 478                  QUARTERMILE,    // recording 1/4 mile performance test
+C51 COMPILER V8.01   TMTYPES                                                               02/02/2006 11:21:28 PAGE 9   
+
+ 479                  EIGHTHMILE,             // recording 1/8 mile performance test
+ 480                  GPSREC,                 // recording GPS information screen
+ 481                  GPSRPM,                 // recording RPM screen
+ 482                  RALLY,                  // recording point to point rally with stages
+ 483                  WAITSTART,              // recording - waiting to cross start/finish
+ 484                  GMETER,                 // non-recording g-force graph
+ 485                  GPSINFO,                // non-recording gps information screen
+ 486                  COMPASS,                // non-recording digital compass
+ 487                  REVIEW,                 // reviewing lap times
+ 488          
+ 489                                                  // standalone sensor unit modes
+ 490                  WAIT5_COLLECT = 0xE0,   // waiting for 5 seconds or another button press
+ 491                  COLLECTING,             // collecting and storing data
+ 492                  WAIT5_ERASE,    // waiting for 5 seconds or another button press
+ 493                  ERASING,                // erasing memory
+ 494          
+ 495                                                  // software download modes
+ 496                  START_DOWNLOAD = 0xF0,  // causes SU or DU to clear flash and wait for software download packets
+ 497                  DOWNLOAD_COMPLETE,              // causes SU or DU to verify sw received and ACK or NAK
+ 498                                                                  // after ACKing this mode change, SU or DU should wait for SW_DOWNLOAD command
+ 499                  CANCEL_DOWNLOAD                 // cancels sw download and resume normal operation
+ 500          
+ 501          } tmstatetype;
+ 502          
+ 503          #if defined (SENSOR) && !defined (DISPLAYATTACHED)
+              #define RECORDING(x) ((x) == COLLECTING)
+              #define MONITORING(x) ((x) == COLLECTING)
+              #else
+ 507          #define RECORDING(x) ((x) >= TIMING && (x) <= WAITSTART)
+ 508          #define MONITORING(x) ((x) >= TIMING && (x) <= COMPASS)
+ 509          #endif
+ 510          
+ 511          #define OCCUPIED(x) (MONITORING(x) || (ERASING == (x)))
+ 512          
+ 513          //-----------------------------------------------------------------------------
+ 514          // Function PROTOTYPES
+ 515          //-----------------------------------------------------------------------------
+ 516          
+ 517          void SYSCLK_Init (void);
+ 518          void PPS_Init (void);
+ 519          void UART_Init (comporthandle *, u32 );
+ 520          void XmitUART(comporthandle *, u16 );
+ 521          BOOL ComPort(comporthandle *, comaction );
+ 522          void Timer3_Init (u16);
+ 523          void Timer3_ISR (void);
+ 524          
+ 525          void SPIO_Init (void);
+ 526          void XRAM_Init(void);
+ 527          void DataFlash_Init(u16 *, u16 *);
+ 528          void DataFlash_Erase_Page(u16);
+ 529          void DataFlash_Erase_Block(u16);
+ 530          u08 DataFlash_Read_Status(void);
+ 531          void DataFlash_Page_Write_Erase(int, int , char *, int );
+ 532          void DataFlash_Page_Read(int , char *, int );
+ 533          void DataFlash_Erase_Range( u16, u16, BOOL);
+ 534          void DataFlash_Buffer_Write(int, int, u16, char *);
+ 535          void DataFlash_Buffer_to_Page_Write_Erase(int, int );
+ 536          void DataFlash_Buffer_Clear(int, int );
+ 537          BOOL DataFlash_Page_Erased(int , int );
+ 538          unsigned char xferSPI (unsigned char);
+ 539          
+ 540          void EraseScratchpad( void );
+C51 COMPILER V8.01   TMTYPES                                                               02/02/2006 11:21:28 PAGE 10  
+
+ 541          void WriteScratchpad( unsigned char *, int );
+ 542          void ReadScratchpad( unsigned char *);
+ 543          BOOL InitDUScratchpad(BOOL );
+ 544          void InitSUScratchpad(void);
+ 545          
+ 546          u08 Start_Session(u16 *, u16 *);
+ 547          void End_Session(u08 , u16, u16 );
+ 548          void Erase_Session(u08 );
+ 549          void Session_Data(u08 , sessiontype *);
+ 550          void Repair_Sessions( void );
+ 551          u08 Session_Usage(u16 *);
+ 552          void Init_Tables( void );
+ 553          
+ 554          void SaveDownload(u08 *, u08 *);
+ 555          void CopytoCodeSpace(u16);
+ 556          
+ 557          unsigned int crc16(u08 *, u16);
+ 558          
+ 559          #endif
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   ----    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

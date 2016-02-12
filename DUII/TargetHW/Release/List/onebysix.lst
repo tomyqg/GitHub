@@ -1,0 +1,2234 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V5.41.0.51741/W32 for ARM     04/Jun/2010  16:32:01 #
+# Copyright (C) 1999-2009 IAR Systems AB.                                     #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\DUII\onebysix.c                                  #
+#    Command line =  C:\DUII\DUII\onebysix.c -D DEBUG=1 -D SDRAM_TARGET=1 -D  #
+#                    USB_IS_HIGH_SPEED -lCN C:\DUII\TargetHW\Release\List\    #
+#                    -o C:\DUII\TargetHW\Release\Obj\ --endian=little         #
+#                    --cpu=ARM926EJ-S -e --require_prototypes --fpu=None      #
+#                    --dlib_config "C:\Program Files\IAR Systems\Embedded     #
+#                    Workbench 5.4\arm\INC\DLib_Config_Normal.h" -I           #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I "C:\Program Files\IAR Systems\Embedded    #
+#                    Workbench 5.4\arm\INC\" --cpu_mode arm -Ohs              #
+#    List file    =  C:\DUII\TargetHW\Release\List\onebysix.lst               #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\onebysix.o                  #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\DUII\onebysix.c
+      1          /*********************************************************************
+      2          *                SEGGER Microcontroller GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 1996 - 2009  SEGGER Microcontroller GmbH & Co. KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          ** emWin V5.00 - Graphical user interface for embedded applications **
+     13          emWin is protected by international copyright laws.   Knowledge of the
+     14          source code may not be used to write a similar product.  This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : MainTask.C
+     19          Purpose     : Main program, called from after main after initialisation
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          #include <stdio.h>
+     23          #include <stdlib.h>
+     24          #include "DUII.h"
+     25          #include "GUI.h"
+     26          #include "commondefs.h"
+     27          #include "DIALOG.h"
+     28          #include "onebysix.h"
+     29          #include "GeneralConfig.h"
+     30          #include "GaugeScreen.h"
+     31          
+     32          int screen_scrolling;
+     33          
+     34          /*********************************************************************
+     35          *
+     36          *       External data and code
+     37          *
+     38          **********************************************************************
+     39          */
+     40          // Note that the button bitmaps must be encoded for the appropriate color
+     41          // conversion selected in LCDConf.c
+     42          extern GUI_CONST_STORAGE GUI_BITMAP bmtestbutton_pressed;
+     43          extern GUI_CONST_STORAGE GUI_BITMAP bmtestbutton;
+     44          extern GUI_CONST_STORAGE GUI_BITMAP bmBoxsterButton;
+     45          extern GUI_CONST_STORAGE GUI_BITMAP bmscrollarrow;
+     46          extern GUI_CONST_STORAGE GUI_BITMAP bmscrollarrow2;
+     47          extern GUI_CONST_STORAGE GUI_BITMAP bmfourwayarrow;
+     48          
+     49          //extern int ShowDialog(const char *sTitle, const char *sText, int, int);
+     50          
+     51          /*********************************************************************
+     52          *
+     53          *       Public code
+     54          *
+     55          **********************************************************************
+     56          */
+     57          
+     58          /*********************************************************************
+     59          *
+     60          *       Local Prototypes
+     61          *
+     62          **********************************************************************
+     63          */
+     64          void MoveRight(void);
+     65          void MoveLeft(void);
+     66          
+     67          /*********************************************************************
+     68          *
+     69          *       Local Variables
+     70          *
+     71          **********************************************************************
+     72          */
+     73          static WM_HWIN hWnd;
+     74          static int current_screen;
+     75          void StartAutoLand(int numscreens);
+     76          void ProcessAutoLand(void);
+     77          static int _OwnerDraw(const WIDGET_ITEM_DRAW_INFO * pDrawItemInfo);
+     78          
+     79          
+     80          #define	NOT_MOVING	0
+     81          #define	MOVING_IN_X	1
+     82          #define	MOVING_IN_Y	2
+     83          
+     84          
+
+   \                                 In section .bss, align 4
+     85          int buttoncount;
+   \                     buttoncount:
+   \   00000000                      DS8 4
+     86          static int y_origin = 0;
+     87          //static int x_origin = 0;
+     88          static int x_start = 0;
+     89          static int previous_touch_state;
+     90          static int y_increment = 0;
+     91          static int y_target = 0;
+     92          //static int glb_results;
+     93          static int KMCDialogSemaphone = 0;
+     94          static int pressingbutton_semaphore = 0;
+     95          static int current_movement = NOT_MOVING;
+     96          
+
+   \                                 In section .text, align 4, keep-with-next
+     97          static void _cbMainCallback(WM_MESSAGE * pMsg) {
+   \                     _cbMainCallback:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+     98          	int NCode, Id;
+     99          //	int results;
+    100          
+    101          	switch(pMsg->MsgId)
+   \   00000008   000094E5           LDR      R0,[R4, #+0]
+   \   0000000C   0F0050E2           SUBS     R0,R0,#+15
+   \   00000010   0200000A           BEQ      ??_cbMainCallback_1
+   \   00000014   170050E2           SUBS     R0,R0,#+23
+   \   00000018   5800000A           BEQ      ??_cbMainCallback_2
+   \   0000001C   910000EA           B        ??_cbMainCallback_3
+    102          	{
+    103          //	case WM_CREATE:
+    104          //		break;
+    105          
+    106          	case WM_PAINT:
+    107          		/* Paint the background window */
+    108          		GUI_SetBkColor(GUI_BLACK);
+   \                     ??_cbMainCallback_1:
+   \   00000020   0000A0E3           MOV      R0,#+0
+   \   00000024   ........           BL       GUI_SetBkColor
+    109          		GUI_Clear();		// Does not appear to be necessary (keep an eye out for problems)
+   \   00000028   ........           BL       GUI_Clear
+    110          		GUI_SetColor(GUI_WHITE);
+   \   0000002C   FF04E0E3           MVN      R0,#-16777216
+   \   00000030   ........           BL       GUI_SetColor
+    111          		GUI_SetFont(&GUI_Font24_ASCII);
+   \   00000034   ........           LDR      R0,??DataTable5  ;; GUI_Font24_ASCII
+   \   00000038   ........           BL       GUI_SetFont
+    112          
+    113          	// Display navigation arrows
+    114          		GUI_DrawBitmap(&bmfourwayarrow, 3, 238);
+   \   0000003C   ........           LDR      R4,??DataTable5_1  ;; bmfourwayarrow
+   \   00000040   EE20A0E3           MOV      R2,#+238
+   \   00000044   0310A0E3           MOV      R1,#+3
+   \   00000048   0400A0E1           MOV      R0,R4
+   \   0000004C   ........           BL       GUI_DrawBitmap
+    115          		GUI_DrawBitmap(&bmfourwayarrow, 3, 238 + YSIZE_PHYS);
+   \   00000050   FE20A0E3           MOV      R2,#+254
+   \   00000054   402F82E3           ORR      R2,R2,#0x100
+   \   00000058   0310A0E3           MOV      R1,#+3
+   \   0000005C   0400A0E1           MOV      R0,R4
+   \   00000060   ........           BL       GUI_DrawBitmap
+    116          		GUI_DrawBitmap(&bmfourwayarrow, 3, 238 + YSIZE_PHYS*2);
+   \   00000064   0E20A0E3           MOV      R2,#+14
+   \   00000068   C02F82E3           ORR      R2,R2,#0x300
+   \   0000006C   0310A0E3           MOV      R1,#+3
+   \   00000070   0400A0E1           MOV      R0,R4
+   \   00000074   ........           BL       GUI_DrawBitmap
+    117          		GUI_DrawBitmap(&bmfourwayarrow, 3, 238 + YSIZE_PHYS*3);
+   \   00000078   1E20A0E3           MOV      R2,#+30
+   \   0000007C   402E82E3           ORR      R2,R2,#0x400
+   \   00000080   0310A0E3           MOV      R1,#+3
+   \   00000084   0400A0E1           MOV      R0,R4
+   \   00000088   ........           BL       GUI_DrawBitmap
+    118          		GUI_DrawBitmap(&bmfourwayarrow, 3, 238 + YSIZE_PHYS*4);
+   \   0000008C   2E20A0E3           MOV      R2,#+46
+   \   00000090   502E82E3           ORR      R2,R2,#0x500
+   \   00000094   0310A0E3           MOV      R1,#+3
+   \   00000098   0400A0E1           MOV      R0,R4
+   \   0000009C   ........           BL       GUI_DrawBitmap
+    119          		GUI_DrawBitmap(&bmfourwayarrow, 3, 238 + YSIZE_PHYS*5);
+   \   000000A0   3E20A0E3           MOV      R2,#+62
+   \   000000A4   602E82E3           ORR      R2,R2,#0x600
+   \   000000A8   0310A0E3           MOV      R1,#+3
+   \   000000AC   0400A0E1           MOV      R0,R4
+   \   000000B0   ........           BL       GUI_DrawBitmap
+    120          		GUI_DrawBitmap(&bmfourwayarrow, 3, 238 + YSIZE_PHYS*6);
+   \   000000B4   4E20A0E3           MOV      R2,#+78
+   \   000000B8   702E82E3           ORR      R2,R2,#0x700
+   \   000000BC   0310A0E3           MOV      R1,#+3
+   \   000000C0   0400A0E1           MOV      R0,R4
+   \   000000C4   ........           BL       GUI_DrawBitmap
+    121          		GUI_DrawBitmap(&bmfourwayarrow, 3, 238 + YSIZE_PHYS*7);
+   \   000000C8   5E20A0E3           MOV      R2,#+94
+   \   000000CC   802E82E3           ORR      R2,R2,#0x800
+   \   000000D0   0310A0E3           MOV      R1,#+3
+   \   000000D4   0400A0E1           MOV      R0,R4
+   \   000000D8   ........           BL       GUI_DrawBitmap
+    122          //
+    123          	// Display Screen Titles
+    124          		GUI_DispStringHCenterAt("Mode Selection", XSIZE_PHYS/2, 10);
+   \   000000DC   ........           LDR      R4,??DataTable6  ;; `?<Constant "Mode Selection">`
+   \   000000E0   0A20A0E3           MOV      R2,#+10
+   \   000000E4   F010A0E3           MOV      R1,#+240
+   \   000000E8   0400A0E1           MOV      R0,R4
+   \   000000EC   ........           BL       GUI_DispStringHCenterAt
+    125          		GUI_DispStringHCenterAt("Driver Selection", XSIZE_PHYS/2, YSIZE_PHYS + 10);
+   \   000000F0   1A20A0E3           MOV      R2,#+26
+   \   000000F4   402F82E3           ORR      R2,R2,#0x100
+   \   000000F8   F010A0E3           MOV      R1,#+240
+   \   000000FC   100084E2           ADD      R0,R4,#+16
+   \   00000100   ........           BL       GUI_DispStringHCenterAt
+    126          		GUI_DispStringHCenterAt("Vehicle Selection", XSIZE_PHYS/2, YSIZE_PHYS*2 + 10);
+   \   00000104   2A20A0E3           MOV      R2,#+42
+   \   00000108   802F82E3           ORR      R2,R2,#0x200
+   \   0000010C   F010A0E3           MOV      R1,#+240
+   \   00000110   240084E2           ADD      R0,R4,#+36
+   \   00000114   ........           BL       GUI_DispStringHCenterAt
+    127          		GUI_DispStringHCenterAt("Storage", XSIZE_PHYS/2, YSIZE_PHYS*3 + 10);
+   \   00000118   3A20A0E3           MOV      R2,#+58
+   \   0000011C   C02F82E3           ORR      R2,R2,#0x300
+   \   00000120   F010A0E3           MOV      R1,#+240
+   \   00000124   380084E2           ADD      R0,R4,#+56
+   \   00000128   ........           BL       GUI_DispStringHCenterAt
+    128          		GUI_DispStringHCenterAt("Tracks", XSIZE_PHYS/2, YSIZE_PHYS*4 + 10);
+   \   0000012C   4A20A0E3           MOV      R2,#+74
+   \   00000130   402E82E3           ORR      R2,R2,#0x400
+   \   00000134   F010A0E3           MOV      R1,#+240
+   \   00000138   400084E2           ADD      R0,R4,#+64
+   \   0000013C   ........           BL       GUI_DispStringHCenterAt
+    129          		GUI_DispStringHCenterAt("Configure Inputs", XSIZE_PHYS/2, YSIZE_PHYS*5 + 10);
+   \   00000140   5A20A0E3           MOV      R2,#+90
+   \   00000144   502E82E3           ORR      R2,R2,#0x500
+   \   00000148   F010A0E3           MOV      R1,#+240
+   \   0000014C   480084E2           ADD      R0,R4,#+72
+   \   00000150   ........           BL       GUI_DispStringHCenterAt
+    130          		GUI_DispStringHCenterAt("System Setup", XSIZE_PHYS/2, YSIZE_PHYS*6 + 10);
+   \   00000154   6A20A0E3           MOV      R2,#+106
+   \   00000158   602E82E3           ORR      R2,R2,#0x600
+   \   0000015C   F010A0E3           MOV      R1,#+240
+   \   00000160   5C0084E2           ADD      R0,R4,#+92
+   \   00000164   ........           BL       GUI_DispStringHCenterAt
+    131          
+    132          	// Repeat of first screen in last position
+    133          		GUI_DispStringHCenterAt("Mode Selection", XSIZE_PHYS/2, YSIZE_PHYS*7 + 10);
+   \   00000168   0400A0E1           MOV      R0,R4
+   \   0000016C   1040BDE8           POP      {R4,LR}
+   \   00000170   7A20A0E3           MOV      R2,#+122
+   \   00000174   702E82E3           ORR      R2,R2,#0x700
+   \   00000178   F010A0E3           MOV      R1,#+240
+   \   0000017C   ........           B        GUI_DispStringHCenterAt  ;; tailcall
+    134          		break;
+    135          
+    136          	case WM_NOTIFY_PARENT:
+    137                Id    = WM_GetId(pMsg->hWinSrc);      // Id of widget
+   \                     ??_cbMainCallback_2:
+   \   00000180   080094E5           LDR      R0,[R4, #+8]
+   \   00000184   ........           BL       WM_GetId
+    138                NCode = pMsg->Data.v;                 // Notification code
+    139          	  switch(NCode)
+   \   00000188   0C1094E5           LDR      R1,[R4, #+12]
+   \   0000018C   011051E2           SUBS     R1,R1,#+1
+   \   00000190   0700000A           BEQ      ??_cbMainCallback_4
+   \   00000194   031051E2           SUBS     R1,R1,#+3
+   \   00000198   3400001A           BNE      ??_cbMainCallback_5
+    140          	  {
+    141          	  case WM_NOTIFICATION_SEL_CHANGED:
+    142          		  LISTWHEEL_SetSel(pMsg->hWinSrc, LISTWHEEL_GetPos(pMsg->hWinSrc));
+   \   0000019C   080094E5           LDR      R0,[R4, #+8]
+   \   000001A0   ........           BL       LISTWHEEL_GetPos
+   \   000001A4   0010A0E1           MOV      R1,R0
+   \   000001A8   080094E5           LDR      R0,[R4, #+8]
+   \   000001AC   1040BDE8           POP      {R4,LR}
+   \   000001B0   ........           B        LISTWHEEL_SetSel  ;; tailcall
+    143          		  break;
+    144          
+    145          		//case WM_NOTIFICATION_RELEASED:
+    146          		//	switch (Id)
+    147          		//	{
+    148          			//	case GUI_ID_LISTWHEEL0:
+    149          			//	case GUI_ID_LISTWHEEL1:
+    150          			//	case GUI_ID_LISTWHEEL2:
+    151          			//		LISTWHEEL_SetSel(pMsg->hWinSrc, LISTWHEEL_GetPos(pMsg->hWinSrc));
+    152          			//		break;
+    153          			//}
+    154          			//break;
+    155          
+    156          		case WM_NOTIFICATION_CLICKED:
+    157          			pressingbutton_semaphore = 1;
+   \                     ??_cbMainCallback_4:
+   \   000001B4   ........           LDR      R1,??DataTable6_1  ;; screen_scrolling
+   \   000001B8   0120A0E3           MOV      R2,#+1
+    158          			if (current_movement)
+   \   000001BC   283091E5           LDR      R3,[R1, #+40]
+   \   000001C0   242081E5           STR      R2,[R1, #+36]
+   \   000001C4   000053E3           CMP      R3,#+0
+   \   000001C8   1400000A           BEQ      ??_cbMainCallback_6
+    159          				StartAutoLand(7);
+   \   000001CC   020053E3           CMP      R3,#+2
+   \   000001D0   1200001A           BNE      ??_cbMainCallback_6
+   \   000001D4   0C3091E5           LDR      R3,[R1, #+12]
+   \   000001D8   ........           LDR      R12,??DataTable6_2  ;; 0x78787879
+   \   000001DC   93ECCCE0           SMULL    LR,R12,R3,R12
+   \   000001E0   44EFA0E3           MOV      LR,#+272
+   \   000001E4   CCC3B0E1           ASRS     R12,R12,#+7
+   \   000001E8   01C08C42           ADDMI    R12,R12,#+1
+   \   000001EC   9E0C04E0           MUL      R4,LR,R12
+   \   000001F0   043043E0           SUB      R3,R3,R4
+   \   000001F4   890053E3           CMP      R3,#+137
+   \   000001F8   050000BA           BLT      ??_cbMainCallback_7
+   \   000001FC   0530A0E3           MOV      R3,#+5
+   \   00000200   183081E5           STR      R3,[R1, #+24]
+   \   00000204   01308CE2           ADD      R3,R12,#+1
+   \   00000208   9E0303E0           MUL      R3,LR,R3
+   \   0000020C   1C3081E5           STR      R3,[R1, #+28]
+   \   00000210   020000EA           B        ??_cbMainCallback_6
+   \                     ??_cbMainCallback_7:
+   \   00000214   0430E0E3           MVN      R3,#+4
+   \   00000218   183081E5           STR      R3,[R1, #+24]
+   \   0000021C   1C4081E5           STR      R4,[R1, #+28]
+    160          
+    161          		  switch (Id) {
+   \                     ??_cbMainCallback_6:
+   \   00000220   010040E2           SUB      R0,R0,#+1
+   \   00000224   800E40E2           SUB      R0,R0,#+2048
+   \   00000228   060050E3           CMP      R0,#+6
+   \   0000022C   00F18F90           ADDLS    PC,PC,R0, LSL #+2
+   \                     ??_cbMainCallback_0:
+   \   00000230   0E00008A           BHI      ??_cbMainCallback_5
+   \   00000234   0D0000EA           B        ??_cbMainCallback_5
+   \   00000238   0C0000EA           B        ??_cbMainCallback_5
+   \   0000023C   0B0000EA           B        ??_cbMainCallback_5
+   \   00000240   0A0000EA           B        ??_cbMainCallback_5
+   \   00000244   090000EA           B        ??_cbMainCallback_5
+   \   00000248   080000EA           B        ??_cbMainCallback_5
+   \   0000024C   FFFFFFEA           B        ??_cbMainCallback_8
+    162          			case GUI_ID_USER + 1:
+    163          //				BUTTON_SetBitmap(pMsg->hWinSrc, BUTTON_BI_PRESSED, &bmtestbutton_pressed);
+    164          //				GUI_SetOrg(0, y_origin = YSIZE_PHYS);
+    165          				break;
+    166          
+    167          			case GUI_ID_USER + 2:
+    168          //				GUI_SetOrg(0, y_origin = YSIZE_PHYS*2);
+    169          				break;
+    170          
+    171          			case GUI_ID_USER + 3:
+    172          //				GUI_SetOrg(0, y_origin = YSIZE_PHYS*3);
+    173          				break;
+    174          
+    175          			case GUI_ID_USER + 4:
+    176          //				GUI_SetOrg(0, y_origin = YSIZE_PHYS*4);
+    177          				break;
+    178          
+    179          			case GUI_ID_USER + 5:
+    180          //				GUI_SetOrg(0, y_origin = YSIZE_PHYS*5);
+    181          				break;
+    182          
+    183          			case GUI_ID_USER + 6:
+    184          //				GUI_SetOrg(0, y_origin = YSIZE_PHYS*6);
+    185          				break;
+    186          
+    187          			case GUI_ID_USER + 7:
+    188          				if (!KMCDialogSemaphone)
+   \                     ??_cbMainCallback_8:
+   \   00000250   200091E5           LDR      R0,[R1, #+32]
+   \   00000254   000050E3           CMP      R0,#+0
+   \   00000258   0400001A           BNE      ??_cbMainCallback_5
+    189          				{
+    190          					KMCDialogSemaphone = 1;
+   \   0000025C   202081E5           STR      R2,[R1, #+32]
+    191          
+    192          //					results = ShowDialog("KMC TEST", "Continue", 0, y_origin);
+    193          //					if (results == 1)		// 1 == YES but I'm not including DU_2.h yet (keeping test case simple)
+    194          //						glb_results = 1;
+    195          //					else glb_results = 2;
+    196          
+    197          					KMCDialogSemaphone = 0;
+   \   00000260   200081E5           STR      R0,[R1, #+32]
+   \   00000264   1080BDE8           POP      {R4,PC}
+    198          				}
+    199          				break;
+    200          		  };
+    201          	  };
+    202          	  break;
+    203          
+    204          	default:
+    205          		  WM_DefaultProc(pMsg);
+   \                     ??_cbMainCallback_3:
+   \   00000268   0400A0E1           MOV      R0,R4
+   \   0000026C   ........           BL       WM_DefaultProc
+    206          	};
+    207          }
+   \                     ??_cbMainCallback_5:
+   \   00000270   1080BDE8           POP      {R4,PC}          ;; return
+    208          
+
+   \                                 In section .text, align 4, keep-with-next
+    209          void StartAutoLand(int numscreens)
+    210          {
+    211          	if (current_movement == MOVING_IN_Y)
+   \                     StartAutoLand:
+   \   00000000   ........           LDR      R0,??DataTable6_1  ;; screen_scrolling
+   \   00000004   281090E5           LDR      R1,[R0, #+40]
+   \   00000008   020051E3           CMP      R1,#+2
+   \   0000000C   1200001A           BNE      ??StartAutoLand_0
+    212          	{
+    213          		int remainder;
+    214          
+    215          		remainder = y_origin % YSIZE_PHYS;
+    216          		if (remainder > YSIZE_PHYS/2)
+   \   00000010   0C1090E5           LDR      R1,[R0, #+12]
+   \   00000014   ........           LDR      R2,??DataTable6_2  ;; 0x78787879
+   \   00000018   9132C2E0           SMULL    R3,R2,R1,R2
+   \   0000001C   443FA0E3           MOV      R3,#+272
+   \   00000020   C223B0E1           ASRS     R2,R2,#+7
+   \   00000024   01208242           ADDMI    R2,R2,#+1
+   \   00000028   93020CE0           MUL      R12,R3,R2
+   \   0000002C   0C1041E0           SUB      R1,R1,R12
+   \   00000030   890051E3           CMP      R1,#+137
+   \   00000034   050000BA           BLT      ??StartAutoLand_1
+    217          		{
+    218          			y_increment = 5;
+   \   00000038   0510A0E3           MOV      R1,#+5
+   \   0000003C   181080E5           STR      R1,[R0, #+24]
+    219          			y_target = ((y_origin/YSIZE_PHYS) + 1) * YSIZE_PHYS;
+   \   00000040   011082E2           ADD      R1,R2,#+1
+   \   00000044   930101E0           MUL      R1,R3,R1
+   \   00000048   1C1080E5           STR      R1,[R0, #+28]
+   \   0000004C   1EFF2FE1           BX       LR
+    220          		}
+    221          		else
+    222          		{
+    223          			y_increment = -5;
+   \                     ??StartAutoLand_1:
+   \   00000050   0410E0E3           MVN      R1,#+4
+   \   00000054   181080E5           STR      R1,[R0, #+24]
+    224          			y_target = (y_origin/YSIZE_PHYS) * YSIZE_PHYS;
+   \   00000058   1CC080E5           STR      R12,[R0, #+28]
+    225          		}
+    226          	}
+    227          }
+   \                     ??StartAutoLand_0:
+   \   0000005C   1EFF2FE1           BX       LR               ;; return
+    228          
+
+   \                                 In section .text, align 4, keep-with-next
+    229          void MoveRight(void)
+    230          {
+    231          	Display_GaugeScreen(hWnd, current_screen);
+   \                     MoveRight:
+   \   00000000   ........           LDR      R0,??DataTable6_1  ;; screen_scrolling
+   \   00000004   081090E5           LDR      R1,[R0, #+8]
+   \   00000008   040090E5           LDR      R0,[R0, #+4]
+   \   0000000C   ........           B        Display_GaugeScreen  ;; tailcall
+    232          }
+    233          
+
+   \                                 In section .text, align 4, keep-with-next
+    234          void MoveLeft(void)
+    235          {
+    236          	Display_GeneralConfig(hWnd);
+   \                     MoveLeft:
+   \   00000000   ........           LDR      R0,??DataTable6_1  ;; screen_scrolling
+   \   00000004   040090E5           LDR      R0,[R0, #+4]
+   \   00000008   ........           B        Display_GeneralConfig  ;; tailcall
+    237          }
+    238          
+
+   \                                 In section .text, align 4, keep-with-next
+    239          void ProcessScreenMovement(int numscreens)
+    240          {
+   \                     ProcessScreenMovement:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   0CD04DE2           SUB      SP,SP,#+12
+   \   00000008   0040A0E1           MOV      R4,R0
+    241          	GUI_PID_STATE TouchState;
+    242          //	int xPhys;
+    243          	int x, y;
+    244          	static int lastx, lasty;
+    245          
+    246          	GUI_TOUCH_GetState(&TouchState);  /* Get the touch position in pixel */
+   \   0000000C   0D00A0E1           MOV      R0,SP
+   \   00000010   ........           BL       GUI_TOUCH_GetState
+    247          
+    248          	if (TouchState.Pressed)			// If touch pressed
+   \   00000014   0800DDE5           LDRB     R0,[SP, #+8]
+   \   00000018   ........           LDR      R5,??DataTable6_1  ;; screen_scrolling
+   \   0000001C   000050E3           CMP      R0,#+0
+   \   00000020   4800000A           BEQ      ??ProcessScreenMovement_0
+    249          	{
+    250          		if (pressingbutton_semaphore == 1)
+   \   00000024   240095E5           LDR      R0,[R5, #+36]
+   \   00000028   010050E3           CMP      R0,#+1
+   \   0000002C   0200001A           BNE      ??ProcessScreenMovement_1
+    251          		{
+    252          			ProcessAutoLand();
+   \                     ??ProcessScreenMovement_2:
+   \   00000030   ........           BL       ProcessAutoLand
+    253          			return;			// Wait for it to be released
+   \   00000034   0CD08DE2           ADD      SP,SP,#+12       ;; stack cleaning
+   \   00000038   F080BDE8           POP      {R4-R7,PC}       ;; return
+    254          		}
+    255          //		xPhys = GUI_TOUCH_GetxPhys();     /* Get the A/D mesurement result in x */
+    256          #if 0
+    257          		/* Display the new position */
+    258          		GUI_SetColor(GUI_RED);
+    259          		GUI_SetFont(&GUI_Font32_ASCII);
+    260          
+    261          		// WARNING - carriage returns WRAP to y=0 - we do not want this if we are displaying
+    262          		// on virtual screens
+    263          			for (j = 0; j < numscreens+1; j++)
+    264          			{
+    265          				GUI_DispStringAt("Position:", 10, 140 + (j * YSIZE_PHYS));
+    266          				GUI_DispString("x:");
+    267          				GUI_DispDec(x = TouchState.x,4);
+    268          				GUI_DispString(", y:");
+    269          				GUI_DispDec(y = TouchState.y,4);
+    270          			}
+    271          #else
+    272          		x = TouchState.x;
+   \                     ??ProcessScreenMovement_1:
+   \   0000003C   00609DE5           LDR      R6,[SP, #+0]
+    273          		y = TouchState.y;
+    274          #endif
+    275          
+    276          		// If any movement since last pass
+    277          		if ((x != lastx) || (y != lasty))
+   \   00000040   2C1095E5           LDR      R1,[R5, #+44]
+   \   00000044   04709DE5           LDR      R7,[SP, #+4]
+   \   00000048   010056E1           CMP      R6,R1
+   \   0000004C   30009505           LDREQ    R0,[R5, #+48]
+   \   00000050   00005701           CMPEQ    R7,R0
+   \   00000054   3600000A           BEQ      ??ProcessScreenMovement_3
+    278          		{
+    279          			// If this is a valid position (ie all positive coordinates)
+    280          			if ((x > 0) && (y > 0) && (lastx > 0) && (lasty > 0))
+   \   00000058   010056E3           CMP      R6,#+1
+   \   0000005C   010057A3           CMPGE    R7,#+1
+   \   00000060   010051A3           CMPGE    R1,#+1
+   \   00000064   300095A5           LDRGE    R0,[R5, #+48]
+   \   00000068   010050A3           CMPGE    R0,#+1
+   \   0000006C   300000BA           BLT      ??ProcessScreenMovement_3
+    281          			{
+    282          				if (current_movement == NOT_MOVING)
+   \   00000070   282095E5           LDR      R2,[R5, #+40]
+   \   00000074   000052E3           CMP      R2,#+0
+   \   00000078   0B00001A           BNE      ??ProcessScreenMovement_4
+    283          				{
+    284          					// See if we are moving more in the X or Y direction
+    285          					if (abs(lastx - x) > abs(lasty - y))
+   \   0000007C   072050E0           SUBS     R2,R0,R7
+   \   00000080   00206242           RSBMI    R2,R2,#+0
+   \   00000084   061051E0           SUBS     R1,R1,R6
+   \   00000088   00106142           RSBMI    R1,R1,#+0
+   \   0000008C   010052E1           CMP      R2,R1
+   \   00000090   030000AA           BGE      ??ProcessScreenMovement_5
+    286          					{
+    287          						current_movement = MOVING_IN_X;
+   \   00000094   0110A0E3           MOV      R1,#+1
+   \   00000098   281085E5           STR      R1,[R5, #+40]
+    288          						x_start = x;
+   \   0000009C   106085E5           STR      R6,[R5, #+16]
+   \   000000A0   010000EA           B        ??ProcessScreenMovement_4
+    289          					}
+    290          					else
+    291          					{
+    292          						current_movement = MOVING_IN_Y;
+   \                     ??ProcessScreenMovement_5:
+   \   000000A4   0210A0E3           MOV      R1,#+2
+   \   000000A8   281085E5           STR      R1,[R5, #+40]
+    293          					}
+    294          				}
+    295          
+    296          				if (current_movement == MOVING_IN_Y)
+   \                     ??ProcessScreenMovement_4:
+   \   000000AC   282095E5           LDR      R2,[R5, #+40]
+   \   000000B0   0C1095E5           LDR      R1,[R5, #+12]
+   \   000000B4   020052E3           CMP      R2,#+2
+   \   000000B8   0800001A           BNE      ??ProcessScreenMovement_6
+    297          				{
+    298          					y_origin += lasty - y;
+   \   000000BC   010080E0           ADD      R0,R0,R1
+   \   000000C0   071040E0           SUB      R1,R0,R7
+    299          					if (y_origin < 0)
+   \   000000C4   440FA0E3           MOV      R0,#+272
+   \   000000C8   900403E0           MUL      R3,R0,R4
+   \   000000CC   000051E3           CMP      R1,#+0
+    300          					{
+    301          						y_origin = YSIZE_PHYS*numscreens;	// Wrap back to end
+   \   000000D0   0310A041           MOVMI    R1,R3
+   \   000000D4   0100004A           BMI      ??ProcessScreenMovement_6
+    302          					}
+    303          					else if (y_origin > YSIZE_PHYS*numscreens)
+   \   000000D8   010053E1           CMP      R3,R1
+    304          					{
+    305          						y_origin = 0;			// Wrap back to beginning
+   \   000000DC   0010A0B3           MOVLT    R1,#+0
+   \                     ??ProcessScreenMovement_6:
+   \   000000E0   0C1085E5           STR      R1,[R5, #+12]
+    306          					}
+    307          				}
+    308          
+    309          				if (current_movement == MOVING_IN_X)
+   \   000000E4   010052E3           CMP      R2,#+1
+   \   000000E8   0F00001A           BNE      ??ProcessScreenMovement_7
+    310          				{
+    311          					if (abs(x - x_start) > 100)
+   \   000000EC   101095E5           LDR      R1,[R5, #+16]
+   \   000000F0   010056E0           SUBS     R0,R6,R1
+   \   000000F4   00006042           RSBMI    R0,R0,#+0
+   \   000000F8   650050E3           CMP      R0,#+101
+   \   000000FC   0C0000BA           BLT      ??ProcessScreenMovement_3
+    312          					{
+    313          						if (x < x_start)
+   \   00000100   040095E5           LDR      R0,[R5, #+4]
+   \   00000104   010056E1           CMP      R6,R1
+   \   00000108   010000AA           BGE      ??ProcessScreenMovement_8
+    314          							MoveLeft();
+   \   0000010C   ........           BL       Display_GeneralConfig
+   \   00000110   010000EA           B        ??ProcessScreenMovement_9
+    315          						else MoveRight();
+   \                     ??ProcessScreenMovement_8:
+   \   00000114   081095E5           LDR      R1,[R5, #+8]
+   \   00000118   ........           BL       Display_GaugeScreen
+    316          
+    317          						current_movement = NOT_MOVING;
+   \                     ??ProcessScreenMovement_9:
+   \   0000011C   0000A0E3           MOV      R0,#+0
+   \   00000120   280085E5           STR      R0,[R5, #+40]
+    318          						x_start = 0;
+   \   00000124   100085E5           STR      R0,[R5, #+16]
+   \   00000128   010000EA           B        ??ProcessScreenMovement_3
+    319          					}
+    320          				}
+    321          
+    322          				else 
+    323          					GUI_SetOrg(0, y_origin);
+   \                     ??ProcessScreenMovement_7:
+   \   0000012C   0000A0E3           MOV      R0,#+0
+   \   00000130   ........           BL       GUI_SetOrg
+    324          			}
+    325          		}
+    326          		lastx = x;
+    327          		lasty = y;
+    328          
+    329          		previous_touch_state = 1;
+   \                     ??ProcessScreenMovement_3:
+   \   00000134   0100A0E3           MOV      R0,#+1
+   \   00000138   2C6085E5           STR      R6,[R5, #+44]
+   \   0000013C   307085E5           STR      R7,[R5, #+48]
+   \   00000140   140085E5           STR      R0,[R5, #+20]
+   \   00000144   B9FFFFEA           B        ??ProcessScreenMovement_2
+    330          	}
+    331          
+    332          	// Else touch screen not pressed
+    333          	else
+    334          	{
+    335          		pressingbutton_semaphore = 0;	// clear semaphore
+    336          		if (previous_touch_state == 1)	// if were just touching
+   \                     ??ProcessScreenMovement_0:
+   \   00000148   141095E5           LDR      R1,[R5, #+20]
+   \   0000014C   240085E5           STR      R0,[R5, #+36]
+   \   00000150   010051E3           CMP      R1,#+1
+   \   00000154   B5FFFF1A           BNE      ??ProcessScreenMovement_2
+    337          		{
+    338          			previous_touch_state = 0;	// Calculate position for auto continue
+    339          			lastx = lasty = 0;
+    340          			if (current_movement == MOVING_IN_X)
+   \   00000158   281095E5           LDR      R1,[R5, #+40]
+   \   0000015C   140085E5           STR      R0,[R5, #+20]
+   \   00000160   010051E3           CMP      R1,#+1
+   \   00000164   300085E5           STR      R0,[R5, #+48]
+   \   00000168   2C0085E5           STR      R0,[R5, #+44]
+    341          				current_movement = NOT_MOVING;
+   \   0000016C   28008505           STREQ    R0,[R5, #+40]
+   \   00000170   AEFFFF0A           BEQ      ??ProcessScreenMovement_2
+    342          			else StartAutoLand(numscreens);
+   \   00000174   020051E3           CMP      R1,#+2
+   \   00000178   ACFFFF1A           BNE      ??ProcessScreenMovement_2
+   \   0000017C   0C1095E5           LDR      R1,[R5, #+12]
+   \   00000180   ........           LDR      R0,??DataTable6_2  ;; 0x78787879
+   \   00000184   9120C0E0           SMULL    R2,R0,R1,R0
+   \   00000188   C023B0E1           ASRS     R2,R0,#+7
+   \   0000018C   01208242           ADDMI    R2,R2,#+1
+   \   00000190   440FA0E3           MOV      R0,#+272
+   \   00000194   900203E0           MUL      R3,R0,R2
+   \   00000198   031041E0           SUB      R1,R1,R3
+   \   0000019C   890051E3           CMP      R1,#+137
+   \   000001A0   050000BA           BLT      ??ProcessScreenMovement_10
+   \   000001A4   0510A0E3           MOV      R1,#+5
+   \   000001A8   181085E5           STR      R1,[R5, #+24]
+   \   000001AC   011082E2           ADD      R1,R2,#+1
+   \   000001B0   900101E0           MUL      R1,R0,R1
+   \   000001B4   1C1085E5           STR      R1,[R5, #+28]
+   \   000001B8   9CFFFFEA           B        ??ProcessScreenMovement_2
+   \                     ??ProcessScreenMovement_10:
+   \   000001BC   0400E0E3           MVN      R0,#+4
+   \   000001C0   180085E5           STR      R0,[R5, #+24]
+   \   000001C4   1C3085E5           STR      R3,[R5, #+28]
+   \   000001C8   98FFFFEA           B        ??ProcessScreenMovement_2
+    343          		}
+    344          	}
+    345          
+    346          	ProcessAutoLand();
+    347          }
+    348          
+    349          
+
+   \                                 In section .text, align 4, keep-with-next
+    350          void ProcessAutoLand(void)
+    351          {
+   \                     ProcessAutoLand:
+   \   00000000   00402DE9           PUSH     {LR}
+    352          	// Check for and process auto movement
+    353          	if (y_increment)
+   \   00000004   ........           LDR      R0,??DataTable6_1  ;; screen_scrolling
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   181090E5           LDR      R1,[R0, #+24]
+   \   00000010   000051E3           CMP      R1,#+0
+   \   00000014   1B00000A           BEQ      ??ProcessAutoLand_0
+    354          	{
+    355          		y_origin += y_increment;
+   \   00000018   0C2090E5           LDR      R2,[R0, #+12]
+    356          		if (abs(y_origin - y_target) < abs(y_increment))
+   \   0000001C   1C3090E5           LDR      R3,[R0, #+28]
+   \   00000020   022081E0           ADD      R2,R1,R2
+   \   00000024   0C2080E5           STR      R2,[R0, #+12]
+   \   00000028   032052E0           SUBS     R2,R2,R3
+   \   0000002C   00206242           RSBMI    R2,R2,#+0
+   \   00000030   000051E3           CMP      R1,#+0
+   \   00000034   00106142           RSBMI    R1,R1,#+0
+   \   00000038   010052E1           CMP      R2,R1
+   \   0000003C   080000AA           BGE      ??ProcessAutoLand_1
+    357          		{
+    358          			y_origin = y_target;
+    359          			y_increment = 0;
+   \   00000040   0010A0E3           MOV      R1,#+0
+   \   00000044   181080E5           STR      R1,[R0, #+24]
+    360          			current_movement = NOT_MOVING;
+   \   00000048   281080E5           STR      R1,[R0, #+40]
+    361          			current_screen = y_origin / YSIZE_PHYS;
+   \   0000004C   ........           LDR      R1,??DataTable6_2  ;; 0x78787879
+   \   00000050   0C3080E5           STR      R3,[R0, #+12]
+   \   00000054   9321C1E0           SMULL    R2,R1,R3,R1
+   \   00000058   C113B0E1           ASRS     R1,R1,#+7
+   \   0000005C   01108142           ADDMI    R1,R1,#+1
+   \   00000060   081080E5           STR      R1,[R0, #+8]
+    362          		}
+    363          		if (y_origin < 0)
+   \                     ??ProcessAutoLand_1:
+   \   00000064   0C1090E5           LDR      R1,[R0, #+12]
+   \   00000068   000051E3           CMP      R1,#+0
+   \   0000006C   0300005A           BPL      ??ProcessAutoLand_2
+    364          		{		// Should never get here!
+    365          			y_origin = 0;
+   \   00000070   0010A0E3           MOV      R1,#+0
+   \   00000074   0C1080E5           STR      R1,[R0, #+12]
+    366          			y_increment = 0;
+   \   00000078   181080E5           STR      R1,[R0, #+24]
+    367          			return;
+   \   0000007C   010000EA           B        ??ProcessAutoLand_0
+    368          		}
+    369          		GUI_SetOrg(0,y_origin);
+   \                     ??ProcessAutoLand_2:
+   \   00000080   0000A0E3           MOV      R0,#+0
+   \   00000084   ........           BL       GUI_SetOrg
+   \                     ??ProcessAutoLand_0:
+   \   00000088   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   0000008C   0080BDE8           POP      {PC}             ;; return
+    370          	}
+    371          }
+
+   \                                 In section .data, align 4
+   \                     screen_scrolling:
+   \   00000000   00000000           DC8 0, 0, 0, 0
+   \   00000004   00000000           DC8 0, 0, 0, 0
+   \   00000008   00000000           DC8 0, 0, 0, 0
+   \   0000000C   00000000           DC32 0
+   \   00000010   00000000           DC32 0
+   \   00000014   00000000           DC8 0, 0, 0, 0
+   \   00000018   00000000           DC32 0
+   \   0000001C   00000000           DC32 0
+   \   00000020   00000000           DC32 0
+   \   00000024   00000000           DC32 0
+   \   00000028   00000000           DC32 0
+   \   0000002C   00000000           DC8 0, 0, 0, 0
+   \   00000030   00000000           DC8 0, 0, 0, 0
+    372          
+    373          /*********************************************************************
+    374          *
+    375          *       MainTask
+    376          */
+    377          #if 0
+    378          #define	BTN_ROADRACE	GUI_ID_USER+0
+    379          #define	BTN_AUTOCROSS	GUI_ID_USER+
+    380          #define	BTN_HILLCLIMB	GUI_ID_USER+
+    381          #define	BTN_RALLY		GUI_ID_USER+
+    382          #define	BTN_DRAG		GUI_ID_USER+
+    383          #define	BTN_ENDURO		GUI_ID_USER+
+    384          #define	BTN_SHOWDRIVER	GUI_ID_USER+
+    385          #define	BTN_		GUI_ID_USER+
+    386          #define	BTN_		GUI_ID_USER+
+    387          #define	BTN_		GUI_ID_USER+
+    388          #define	BTN_		GUI_ID_USER+
+    389          #define	BTN_		GUI_ID_USER+
+    390          #define	BTN_		GUI_ID_USER+
+    391          #define	BTN_		GUI_ID_USER+
+    392          #define	BTN_		GUI_ID_USER+
+    393          #define	BTN_		GUI_ID_USER+
+    394          #define	BTN_		GUI_ID_USER+
+    395          #define	BTN_		GUI_ID_USER+
+    396          #define	BTN_		GUI_ID_USER+
+    397          #endif
+    398          
+    399          
+    400          char * apTracks[] = {
+   \                     apTracks:
+   \   00000034   ............       DC32 `?<Constant "Road Atlanta">`, `?<Constant "Roebling Road">`
+   \              ....        
+   \   0000003C   ............       DC32 `?<Constant "Barber">`, `?<Constant "Daytona">`
+   \              ....        
+   \   00000044   ............       DC32 `?<Constant "VIR">`, `?<Constant "Mid Ohio">`
+   \              ....        
+   \   0000004C   ............       DC32 `?<Constant "Watkins Glen">`, `?<Constant "Road America">`
+   \              ....        
+   \   00000054   ........0000       DC32 `?<Constant "Laguna Seca">`, 0H
+   \              0000        
+    401          		"Road Atlanta",
+    402          		"Roebling Road",
+    403          		"Barber",
+    404          		"Daytona",
+    405          		"VIR",
+    406          		"Mid Ohio",
+    407          		"Watkins Glen",
+    408          		"Road America",
+    409          		"Laguna Seca",
+    410          		NULL
+    411          };
+    412          
+    413          char * apVehicles[] = {
+   \                     apVehicles:
+   \   0000005C   ............       DC32 `?<Constant "Spec Miata">`, `?<Constant "Lotus 57">`
+   \              ....        
+   \   00000064   ............       DC32 `?<Constant "Porsche Boxster">`, `?<Constant "Spec Racer">`
+   \              ....        
+   \   0000006C   ............       DC32 `?<Constant "\\'69 Corvette">`, `?<Constant "Austin Healey">`
+   \              ....        
+   \   00000074   ............       DC32 `?<Constant "Lotus Elise">`, `?<Constant "Formula Atlantic">`, 0H
+   \              ....00000000
+    414          		"Spec Miata",
+    415          		"Lotus 57",
+    416          		"Porsche Boxster",
+    417          		"Spec Racer",
+    418          		"'69 Corvette",
+    419          		"Austin Healey",
+    420          		"Lotus Elise",
+    421          		"Formula Atlantic",
+    422          		NULL
+    423          };
+    424          
+    425          char * apDrivers[] = {
+   \                     apDrivers:
+   \   00000080   ............       DC32 `?<Constant "Glenn Stephens">`, `?<Constant "Ken Cowin">`
+   \              ....        
+   \   00000088   ............       DC32 `?<Constant "Rob Basil">`, `?<Constant "Brian Boyer">`
+   \              ....        
+   \   00000090   ............       DC32 `?<Constant "Andre Surles">`, `?<Constant "Ed Jensen">`
+   \              ....        
+   \   00000098   ............       DC32 `?<Constant "Gordon Rhea">`, `?<Constant "Bob Toler">`
+   \              ....        
+   \   000000A0   ............       DC32 `?<Constant "Rick Stone">`, `?<Constant "Schumacher">`
+   \              ....        
+   \   000000A8   ........0000       DC32 `?<Constant "The Stig">`, 0H
+   \              0000        
+    426          	"Glenn Stephens", 
+    427          	"Ken Cowin", 
+    428          	"Rob Basil", 
+    429          	"Brian Boyer", 
+    430          	"Andre Surles", 
+    431          	"Ed Jensen", 
+    432          	"Gordon Rhea", 
+    433          	"Bob Toler",
+    434          	"Rick Stone",
+    435          	"Schumacher",
+    436          	"The Stig",
+    437          	NULL
+    438          };
+    439          
+
+   \                                 In section .text, align 4, keep-with-next
+    440          void Display_Config(int screen, WM_HWIN hPrev) {
+   \                     Display_Config:
+   \   00000000   F14F2DE9           PUSH     {R0,R4-R11,LR}
+   \   00000004   18D04DE2           SUB      SP,SP,#+24
+   \   00000008   0100A0E1           MOV      R0,R1
+    441          WM_HWIN hBtn;
+    442          //int count = 0;
+    443          
+    444          	current_screen = screen;
+   \   0000000C   ........           LDR      R4,??DataTable6_1  ;; screen_scrolling
+   \   00000010   18109DE5           LDR      R1,[SP, #+24]
+   \   00000014   081084E5           STR      R1,[R4, #+8]
+    445          	WM_DeleteWindow(hPrev);
+   \   00000018   ........           BL       WM_DeleteWindow
+    446          #if 1
+    447          	//
+    448          	// NOTE: WHEN CREATING THIS WINDOW AS A WINDOW INSTEAD OF JUST DRAWING THE CONTROLS TO
+    449          	// THE DESKTOP THE BOTTONS WILL SCROLL WHEN PRESSED IF THEIR PARENTS ARE SET TO 0.
+    450          	// SETTING THE PARENTS TO THIS WINDOW STOPS THE SCROLLING MOTION WHEN THE BUTTONS ARE PRESSED.
+    451          	//
+    452          	hWnd = WM_CreateWindow(0, 0, XSIZE_PHYS, YSIZE_PHYS*8, WM_CF_SHOW, _cbMainCallback, 0);
+   \   0000001C   0000A0E3           MOV      R0,#+0
+   \   00000020   08008DE5           STR      R0,[SP, #+8]
+   \   00000024   ........           LDR      R0,??DataTable6_3  ;; _cbMainCallback
+   \   00000028   883EA0E3           MOV      R3,#+2176
+   \   0000002C   04008DE5           STR      R0,[SP, #+4]
+   \   00000030   0200A0E3           MOV      R0,#+2
+   \   00000034   00008DE5           STR      R0,[SP, #+0]
+   \   00000038   782FA0E3           MOV      R2,#+480
+   \   0000003C   0010A0E3           MOV      R1,#+0
+   \   00000040   0000A0E3           MOV      R0,#+0
+   \   00000044   ........           BL       WM_CreateWindow
+    453          #else
+    454          	WM_SetCallback( WM_GetDesktopWindow(), _cbMainCallback);
+    455          #endif
+    456          	BUTTON_SetDefaultFont(&GUI_Font24_ASCII);
+   \   00000048   ........           LDR      R5,??DataTable6_4  ;; GUI_Font24_ASCII
+   \   0000004C   040084E5           STR      R0,[R4, #+4]
+   \   00000050   0500A0E1           MOV      R0,R5
+   \   00000054   ........           BL       BUTTON_SetDefaultFont
+   \   00000058   0100A0E3           MOV      R0,#+1
+   \   0000005C   800E80E3           ORR      R0,R0,#0x800
+   \   00000060   0C008DE5           STR      R0,[SP, #+12]
+   \   00000064   0000A0E3           MOV      R0,#+0
+   \   00000068   08008DE5           STR      R0,[SP, #+8]
+   \   0000006C   0200A0E3           MOV      R0,#+2
+   \   00000070   04008DE5           STR      R0,[SP, #+4]
+   \   00000074   040094E5           LDR      R0,[R4, #+4]
+   \   00000078   5030A0E3           MOV      R3,#+80
+   \   0000007C   00008DE5           STR      R0,[SP, #+0]
+   \   00000080   6420A0E3           MOV      R2,#+100
+   \   00000084   2D10A0E3           MOV      R1,#+45
+   \   00000088   2D00A0E3           MOV      R0,#+45
+    457          
+    458          // Page 1 (and duplicate page 8): Mode Selection Screen
+    459          	hBtn = BUTTON_CreateEx( 45,   45, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 1);
+   \   0000008C   ........           BL       BUTTON_CreateEx
+    460          //	BUTTON_SetBkColor(hBtn, BUTTON_CI_UNPRESSED, GUI_BLUE);
+    461          //	BUTTON_SetTextColor(hBtn, BUTTON_CI_UNPRESSED, GUI_WHITE);
+    462          	BUTTON_SetText(hBtn, "Road\nRace");
+   \   00000090   ........           LDR      R6,??DataTable6_5  ;; `?<Constant "Road\\nRace">`
+   \   00000094   0610A0E1           MOV      R1,R6
+   \   00000098   ........           BL       BUTTON_SetText
+   \   0000009C   0200A0E3           MOV      R0,#+2
+   \   000000A0   800E80E3           ORR      R0,R0,#0x800
+   \   000000A4   0C008DE5           STR      R0,[SP, #+12]
+   \   000000A8   0000A0E3           MOV      R0,#+0
+   \   000000AC   08008DE5           STR      R0,[SP, #+8]
+   \   000000B0   0200A0E3           MOV      R0,#+2
+   \   000000B4   04008DE5           STR      R0,[SP, #+4]
+   \   000000B8   040094E5           LDR      R0,[R4, #+4]
+   \   000000BC   5030A0E3           MOV      R3,#+80
+   \   000000C0   00008DE5           STR      R0,[SP, #+0]
+   \   000000C4   6420A0E3           MOV      R2,#+100
+   \   000000C8   2D10A0E3           MOV      R1,#+45
+   \   000000CC   BE00A0E3           MOV      R0,#+190
+    463          
+    464          	hBtn = BUTTON_CreateEx( 190,  45, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 2);
+   \   000000D0   ........           BL       BUTTON_CreateEx
+    465          	BUTTON_SetText(hBtn, "Autocross");
+   \   000000D4   0C1086E2           ADD      R1,R6,#+12
+   \   000000D8   ........           BL       BUTTON_SetText
+    466          
+    467          	hBtn = BUTTON_CreateEx( 335,  45, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 3);
+   \   000000DC   0300A0E3           MOV      R0,#+3
+   \   000000E0   800E80E3           ORR      R0,R0,#0x800
+   \   000000E4   0C008DE5           STR      R0,[SP, #+12]
+   \   000000E8   0000A0E3           MOV      R0,#+0
+   \   000000EC   08008DE5           STR      R0,[SP, #+8]
+   \   000000F0   0200A0E3           MOV      R0,#+2
+   \   000000F4   04008DE5           STR      R0,[SP, #+4]
+   \   000000F8   040094E5           LDR      R0,[R4, #+4]
+   \   000000FC   4F70A0E3           MOV      R7,#+79
+   \   00000100   407F87E3           ORR      R7,R7,#0x100
+   \   00000104   00008DE5           STR      R0,[SP, #+0]
+   \   00000108   5030A0E3           MOV      R3,#+80
+   \   0000010C   6420A0E3           MOV      R2,#+100
+   \   00000110   2D10A0E3           MOV      R1,#+45
+   \   00000114   0700A0E1           MOV      R0,R7
+   \   00000118   ........           BL       BUTTON_CreateEx
+    468          	BUTTON_SetText(hBtn, "Hillclimb");
+   \   0000011C   181086E2           ADD      R1,R6,#+24
+   \   00000120   ........           BL       BUTTON_SetText
+   \   00000124   0400A0E3           MOV      R0,#+4
+   \   00000128   800E80E3           ORR      R0,R0,#0x800
+   \   0000012C   0C008DE5           STR      R0,[SP, #+12]
+   \   00000130   0000A0E3           MOV      R0,#+0
+   \   00000134   08008DE5           STR      R0,[SP, #+8]
+   \   00000138   0200A0E3           MOV      R0,#+2
+   \   0000013C   04008DE5           STR      R0,[SP, #+4]
+   \   00000140   040094E5           LDR      R0,[R4, #+4]
+   \   00000144   5030A0E3           MOV      R3,#+80
+   \   00000148   00008DE5           STR      R0,[SP, #+0]
+   \   0000014C   6420A0E3           MOV      R2,#+100
+   \   00000150   A010A0E3           MOV      R1,#+160
+   \   00000154   2D00A0E3           MOV      R0,#+45
+    469          
+    470          	hBtn = BUTTON_CreateEx( 45,  160, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 4);
+   \   00000158   ........           BL       BUTTON_CreateEx
+    471          	BUTTON_SetText(hBtn, "Rally");
+   \   0000015C   241086E2           ADD      R1,R6,#+36
+   \   00000160   ........           BL       BUTTON_SetText
+   \   00000164   0500A0E3           MOV      R0,#+5
+   \   00000168   800E80E3           ORR      R0,R0,#0x800
+   \   0000016C   0C008DE5           STR      R0,[SP, #+12]
+   \   00000170   0000A0E3           MOV      R0,#+0
+   \   00000174   08008DE5           STR      R0,[SP, #+8]
+   \   00000178   0200A0E3           MOV      R0,#+2
+   \   0000017C   04008DE5           STR      R0,[SP, #+4]
+   \   00000180   040094E5           LDR      R0,[R4, #+4]
+   \   00000184   5030A0E3           MOV      R3,#+80
+   \   00000188   00008DE5           STR      R0,[SP, #+0]
+   \   0000018C   6420A0E3           MOV      R2,#+100
+   \   00000190   A010A0E3           MOV      R1,#+160
+   \   00000194   BE00A0E3           MOV      R0,#+190
+    472          
+    473          	hBtn = BUTTON_CreateEx( 190, 160, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 5);
+   \   00000198   ........           BL       BUTTON_CreateEx
+    474          	BUTTON_SetText(hBtn, "Drag");
+   \   0000019C   2C1086E2           ADD      R1,R6,#+44
+   \   000001A0   ........           BL       BUTTON_SetText
+    475          
+    476          	hBtn = BUTTON_CreateEx( 335, 160, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 6);
+   \   000001A4   0000A0E3           MOV      R0,#+0
+   \   000001A8   08008DE5           STR      R0,[SP, #+8]
+   \   000001AC   0200A0E3           MOV      R0,#+2
+   \   000001B0   04008DE5           STR      R0,[SP, #+4]
+   \   000001B4   040094E5           LDR      R0,[R4, #+4]
+   \   000001B8   0680A0E3           MOV      R8,#+6
+   \   000001BC   808E88E3           ORR      R8,R8,#0x800
+   \   000001C0   00008DE5           STR      R0,[SP, #+0]
+   \   000001C4   0C808DE5           STR      R8,[SP, #+12]
+   \   000001C8   5030A0E3           MOV      R3,#+80
+   \   000001CC   6420A0E3           MOV      R2,#+100
+   \   000001D0   A010A0E3           MOV      R1,#+160
+   \   000001D4   0700A0E1           MOV      R0,R7
+   \   000001D8   ........           BL       BUTTON_CreateEx
+    477          	BUTTON_SetText(hBtn, "Enduro");
+   \   000001DC   341086E2           ADD      R1,R6,#+52
+   \   000001E0   ........           BL       BUTTON_SetText
+    478          
+    479          	// dusplicate screen for virtual page 8
+    480          	hBtn = BUTTON_CreateEx( 45,   45 + YSIZE_PHYS*7, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 1);
+   \   000001E4   050048E2           SUB      R0,R8,#+5
+   \   000001E8   0C008DE5           STR      R0,[SP, #+12]
+   \   000001EC   0000A0E3           MOV      R0,#+0
+   \   000001F0   08008DE5           STR      R0,[SP, #+8]
+   \   000001F4   0200A0E3           MOV      R0,#+2
+   \   000001F8   04008DE5           STR      R0,[SP, #+4]
+   \   000001FC   040094E5           LDR      R0,[R4, #+4]
+   \   00000200   699048E2           SUB      R9,R8,#+105
+   \   00000204   00008DE5           STR      R0,[SP, #+0]
+   \   00000208   5030A0E3           MOV      R3,#+80
+   \   0000020C   6420A0E3           MOV      R2,#+100
+   \   00000210   0910A0E1           MOV      R1,R9
+   \   00000214   2D00A0E3           MOV      R0,#+45
+   \   00000218   ........           BL       BUTTON_CreateEx
+    481          	BUTTON_SetText(hBtn, "Road\nRace");
+   \   0000021C   0610A0E1           MOV      R1,R6
+   \   00000220   ........           BL       BUTTON_SetText
+    482          
+    483          	hBtn = BUTTON_CreateEx( 190,  45 + YSIZE_PHYS*7, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 2);
+   \   00000224   0400C8E3           BIC      R0,R8,#0x4
+   \   00000228   0C008DE5           STR      R0,[SP, #+12]
+   \   0000022C   0000A0E3           MOV      R0,#+0
+   \   00000230   08008DE5           STR      R0,[SP, #+8]
+   \   00000234   0200A0E3           MOV      R0,#+2
+   \   00000238   04008DE5           STR      R0,[SP, #+4]
+   \   0000023C   040094E5           LDR      R0,[R4, #+4]
+   \   00000240   5030A0E3           MOV      R3,#+80
+   \   00000244   00008DE5           STR      R0,[SP, #+0]
+   \   00000248   6420A0E3           MOV      R2,#+100
+   \   0000024C   0910A0E1           MOV      R1,R9
+   \   00000250   BE00A0E3           MOV      R0,#+190
+   \   00000254   ........           BL       BUTTON_CreateEx
+    484          	BUTTON_SetText(hBtn, "Autocross");
+   \   00000258   0C1086E2           ADD      R1,R6,#+12
+   \   0000025C   ........           BL       BUTTON_SetText
+    485          
+    486          	hBtn = BUTTON_CreateEx( 335,  45 + YSIZE_PHYS*7, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 3);
+   \   00000260   030048E2           SUB      R0,R8,#+3
+   \   00000264   0C008DE5           STR      R0,[SP, #+12]
+   \   00000268   0000A0E3           MOV      R0,#+0
+   \   0000026C   08008DE5           STR      R0,[SP, #+8]
+   \   00000270   0200A0E3           MOV      R0,#+2
+   \   00000274   04008DE5           STR      R0,[SP, #+4]
+   \   00000278   040094E5           LDR      R0,[R4, #+4]
+   \   0000027C   5030A0E3           MOV      R3,#+80
+   \   00000280   00008DE5           STR      R0,[SP, #+0]
+   \   00000284   6420A0E3           MOV      R2,#+100
+   \   00000288   0910A0E1           MOV      R1,R9
+   \   0000028C   0700A0E1           MOV      R0,R7
+   \   00000290   ........           BL       BUTTON_CreateEx
+    487          	BUTTON_SetText(hBtn, "Hillclimb");
+   \   00000294   181086E2           ADD      R1,R6,#+24
+   \   00000298   ........           BL       BUTTON_SetText
+    488          
+    489          	hBtn = BUTTON_CreateEx( 45,  160 + YSIZE_PHYS*7, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 4);
+   \   0000029C   0200C8E3           BIC      R0,R8,#0x2
+   \   000002A0   0C008DE5           STR      R0,[SP, #+12]
+   \   000002A4   0000A0E3           MOV      R0,#+0
+   \   000002A8   08008DE5           STR      R0,[SP, #+8]
+   \   000002AC   0200A0E3           MOV      R0,#+2
+   \   000002B0   04008DE5           STR      R0,[SP, #+4]
+   \   000002B4   040094E5           LDR      R0,[R4, #+4]
+   \   000002B8   5030A0E3           MOV      R3,#+80
+   \   000002BC   00008DE5           STR      R0,[SP, #+0]
+   \   000002C0   6420A0E3           MOV      R2,#+100
+   \   000002C4   811EA0E3           MOV      R1,#+2064
+   \   000002C8   2D00A0E3           MOV      R0,#+45
+   \   000002CC   ........           BL       BUTTON_CreateEx
+    490          	BUTTON_SetText(hBtn, "Rally");
+   \   000002D0   241086E2           ADD      R1,R6,#+36
+   \   000002D4   ........           BL       BUTTON_SetText
+    491          
+    492          	hBtn = BUTTON_CreateEx( 190, 160 + YSIZE_PHYS*7, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 5);
+   \   000002D8   010048E2           SUB      R0,R8,#+1
+   \   000002DC   0C008DE5           STR      R0,[SP, #+12]
+   \   000002E0   0000A0E3           MOV      R0,#+0
+   \   000002E4   08008DE5           STR      R0,[SP, #+8]
+   \   000002E8   0200A0E3           MOV      R0,#+2
+   \   000002EC   04008DE5           STR      R0,[SP, #+4]
+   \   000002F0   040094E5           LDR      R0,[R4, #+4]
+   \   000002F4   5030A0E3           MOV      R3,#+80
+   \   000002F8   00008DE5           STR      R0,[SP, #+0]
+   \   000002FC   6420A0E3           MOV      R2,#+100
+   \   00000300   811EA0E3           MOV      R1,#+2064
+   \   00000304   BE00A0E3           MOV      R0,#+190
+   \   00000308   ........           BL       BUTTON_CreateEx
+    493          	BUTTON_SetText(hBtn, "Drag");
+   \   0000030C   2C1086E2           ADD      R1,R6,#+44
+   \   00000310   ........           BL       BUTTON_SetText
+    494          
+    495          	hBtn = BUTTON_CreateEx( 335, 160 + YSIZE_PHYS*7, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 6);
+   \   00000314   0000A0E3           MOV      R0,#+0
+   \   00000318   08008DE5           STR      R0,[SP, #+8]
+   \   0000031C   0200A0E3           MOV      R0,#+2
+   \   00000320   04008DE5           STR      R0,[SP, #+4]
+   \   00000324   040094E5           LDR      R0,[R4, #+4]
+   \   00000328   0C808DE5           STR      R8,[SP, #+12]
+   \   0000032C   00008DE5           STR      R0,[SP, #+0]
+   \   00000330   5030A0E3           MOV      R3,#+80
+   \   00000334   6420A0E3           MOV      R2,#+100
+   \   00000338   811EA0E3           MOV      R1,#+2064
+   \   0000033C   0700A0E1           MOV      R0,R7
+   \   00000340   ........           BL       BUTTON_CreateEx
+    496          	BUTTON_SetText(hBtn, "Enduro");
+   \   00000344   341086E2           ADD      R1,R6,#+52
+   \   00000348   ........           BL       BUTTON_SetText
+    497          
+    498          // Page 2: Driver Selection Screen
+    499          	{
+    500          		LISTWHEEL_Handle hListWheel;
+    501          		hListWheel = LISTWHEEL_CreateEx(45, 55 + YSIZE_PHYS, 180, 180, hWnd, WM_CF_SHOW, 0, GUI_ID_LISTWHEEL0, apDrivers);
+   \   0000034C   800084E2           ADD      R0,R4,#+128
+   \   00000350   10008DE5           STR      R0,[SP, #+16]
+   \   00000354   980FA0E3           MOV      R0,#+608
+   \   00000358   0C008DE5           STR      R0,[SP, #+12]
+   \   0000035C   0000A0E3           MOV      R0,#+0
+   \   00000360   08008DE5           STR      R0,[SP, #+8]
+   \   00000364   0200A0E3           MOV      R0,#+2
+   \   00000368   04008DE5           STR      R0,[SP, #+4]
+   \   0000036C   040094E5           LDR      R0,[R4, #+4]
+   \   00000370   B420A0E3           MOV      R2,#+180
+   \   00000374   00008DE5           STR      R0,[SP, #+0]
+   \   00000378   B430A0E3           MOV      R3,#+180
+   \   0000037C   931082E2           ADD      R1,R2,#+147
+   \   00000380   2D00A0E3           MOV      R0,#+45
+   \   00000384   ........           BL       LISTWHEEL_CreateEx
+   \   00000388   00A0A0E1           MOV      R10,R0
+    502          		LISTWHEEL_SetLineHeight(hListWheel, 36);
+   \   0000038C   2410A0E3           MOV      R1,#+36
+   \   00000390   ........           BL       LISTWHEEL_SetLineHeight
+    503          		LISTWHEEL_SetSnapPosition(hListWheel, 72);
+   \   00000394   4810A0E3           MOV      R1,#+72
+   \   00000398   0A00A0E1           MOV      R0,R10
+   \   0000039C   ........           BL       LISTWHEEL_SetSnapPosition
+    504          		LISTWHEEL_SetFont(hListWheel, &GUI_Font24_ASCII);
+   \   000003A0   0510A0E1           MOV      R1,R5
+   \   000003A4   0A00A0E1           MOV      R0,R10
+   \   000003A8   ........           BL       LISTWHEEL_SetFont
+    505          		LISTWHEEL_SetTextAlign(hListWheel, GUI_TA_HCENTER);
+   \   000003AC   0210A0E3           MOV      R1,#+2
+   \   000003B0   0A00A0E1           MOV      R0,R10
+   \   000003B4   ........           BL       LISTWHEEL_SetTextAlign
+    506          		LISTWHEEL_SetOwnerDraw(hListWheel, &_OwnerDraw);
+   \   000003B8   ........           LDR      R9,??DataTable6_6  ;; _OwnerDraw
+   \   000003BC   0A00A0E1           MOV      R0,R10
+   \   000003C0   0910A0E1           MOV      R1,R9
+   \   000003C4   ........           BL       LISTWHEEL_SetOwnerDraw
+    507          	}
+    508          	hBtn = BUTTON_CreateEx( 270,  45 + YSIZE_PHYS, 180, 50, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 11);
+   \   000003C8   050088E2           ADD      R0,R8,#+5
+   \   000003CC   0C008DE5           STR      R0,[SP, #+12]
+   \   000003D0   0000A0E3           MOV      R0,#+0
+   \   000003D4   08008DE5           STR      R0,[SP, #+8]
+   \   000003D8   0200A0E3           MOV      R0,#+2
+   \   000003DC   04008DE5           STR      R0,[SP, #+4]
+   \   000003E0   040094E5           LDR      R0,[R4, #+4]
+   \   000003E4   41A0C7E3           BIC      R10,R7,#0x41
+   \   000003E8   00008DE5           STR      R0,[SP, #+0]
+   \   000003EC   B420A0E3           MOV      R2,#+180
+   \   000003F0   3230A0E3           MOV      R3,#+50
+   \   000003F4   891082E2           ADD      R1,R2,#+137
+   \   000003F8   0A00A0E1           MOV      R0,R10
+   \   000003FC   ........           BL       BUTTON_CreateEx
+    509          	BUTTON_SetText(hBtn, "Add Driver");
+   \   00000400   3C1086E2           ADD      R1,R6,#+60
+   \   00000404   ........           BL       BUTTON_SetText
+   \   00000408   060088E2           ADD      R0,R8,#+6
+   \   0000040C   0C008DE5           STR      R0,[SP, #+12]
+   \   00000410   0000A0E3           MOV      R0,#+0
+   \   00000414   08008DE5           STR      R0,[SP, #+8]
+   \   00000418   0200A0E3           MOV      R0,#+2
+   \   0000041C   04008DE5           STR      R0,[SP, #+4]
+   \   00000420   040094E5           LDR      R0,[R4, #+4]
+   \   00000424   3230A0E3           MOV      R3,#+50
+   \   00000428   00008DE5           STR      R0,[SP, #+0]
+   \   0000042C   B420A0E3           MOV      R2,#+180
+   \   00000430   621FA0E3           MOV      R1,#+392
+   \   00000434   0A00A0E1           MOV      R0,R10
+    510          
+    511          	hBtn = BUTTON_CreateEx( 270,  120 + YSIZE_PHYS, 180, 50, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 12);
+   \   00000438   ........           BL       BUTTON_CreateEx
+    512          	BUTTON_SetText(hBtn, "Edit Driver");
+   \   0000043C   481086E2           ADD      R1,R6,#+72
+   \   00000440   ........           BL       BUTTON_SetText
+   \   00000444   070088E2           ADD      R0,R8,#+7
+   \   00000448   0C008DE5           STR      R0,[SP, #+12]
+   \   0000044C   0000A0E3           MOV      R0,#+0
+   \   00000450   08008DE5           STR      R0,[SP, #+8]
+   \   00000454   0200A0E3           MOV      R0,#+2
+   \   00000458   04008DE5           STR      R0,[SP, #+4]
+   \   0000045C   040094E5           LDR      R0,[R4, #+4]
+   \   00000460   3230A0E3           MOV      R3,#+50
+   \   00000464   00008DE5           STR      R0,[SP, #+0]
+   \   00000468   B420A0E3           MOV      R2,#+180
+   \   0000046C   841087E2           ADD      R1,R7,#+132
+   \   00000470   0A00A0E1           MOV      R0,R10
+    513          
+    514          	hBtn = BUTTON_CreateEx( 270,  195 + YSIZE_PHYS, 180, 50, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 13);
+   \   00000474   ........           BL       BUTTON_CreateEx
+    515          	BUTTON_SetText(hBtn, "Delete Driver");
+   \   00000478   541086E2           ADD      R1,R6,#+84
+   \   0000047C   ........           BL       BUTTON_SetText
+    516          
+    517          // Page 3: Vehicle Selection Screen
+    518          	{
+    519          		LISTWHEEL_Handle hListWheel;
+    520          		hListWheel = LISTWHEEL_CreateEx(45, 55 + YSIZE_PHYS*2, 180, 180, hWnd, WM_CF_SHOW, 0, GUI_ID_LISTWHEEL1, apVehicles);
+   \   00000480   5C0084E2           ADD      R0,R4,#+92
+   \   00000484   10008DE5           STR      R0,[SP, #+16]
+   \   00000488   6100A0E3           MOV      R0,#+97
+   \   0000048C   800F80E3           ORR      R0,R0,#0x200
+   \   00000490   0C008DE5           STR      R0,[SP, #+12]
+   \   00000494   0000A0E3           MOV      R0,#+0
+   \   00000498   08008DE5           STR      R0,[SP, #+8]
+   \   0000049C   0200A0E3           MOV      R0,#+2
+   \   000004A0   04008DE5           STR      R0,[SP, #+4]
+   \   000004A4   040094E5           LDR      R0,[R4, #+4]
+   \   000004A8   B430A0E3           MOV      R3,#+180
+   \   000004AC   00008DE5           STR      R0,[SP, #+0]
+   \   000004B0   B420A0E3           MOV      R2,#+180
+   \   000004B4   421F87E2           ADD      R1,R7,#+264
+   \   000004B8   2D00A0E3           MOV      R0,#+45
+   \   000004BC   ........           BL       LISTWHEEL_CreateEx
+   \   000004C0   00B0A0E1           MOV      R11,R0
+    521          		LISTWHEEL_SetLineHeight(hListWheel, 36);
+   \   000004C4   2410A0E3           MOV      R1,#+36
+   \   000004C8   ........           BL       LISTWHEEL_SetLineHeight
+    522          		LISTWHEEL_SetSnapPosition(hListWheel, 72);
+   \   000004CC   4810A0E3           MOV      R1,#+72
+   \   000004D0   0B00A0E1           MOV      R0,R11
+   \   000004D4   ........           BL       LISTWHEEL_SetSnapPosition
+    523          		LISTWHEEL_SetFont(hListWheel, &GUI_Font24_ASCII);
+   \   000004D8   0510A0E1           MOV      R1,R5
+   \   000004DC   0B00A0E1           MOV      R0,R11
+   \   000004E0   ........           BL       LISTWHEEL_SetFont
+    524          		LISTWHEEL_SetTextAlign(hListWheel, GUI_TA_HCENTER);
+   \   000004E4   0210A0E3           MOV      R1,#+2
+   \   000004E8   0B00A0E1           MOV      R0,R11
+   \   000004EC   ........           BL       LISTWHEEL_SetTextAlign
+    525          		LISTWHEEL_SetOwnerDraw(hListWheel, &_OwnerDraw);
+   \   000004F0   0910A0E1           MOV      R1,R9
+   \   000004F4   0B00A0E1           MOV      R0,R11
+   \   000004F8   ........           BL       LISTWHEEL_SetOwnerDraw
+    526          	}
+    527          	hBtn = BUTTON_CreateEx( 270,  45 + YSIZE_PHYS*2, 190, 50, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 21);
+   \   000004FC   0F0088E2           ADD      R0,R8,#+15
+   \   00000500   0C008DE5           STR      R0,[SP, #+12]
+   \   00000504   0000A0E3           MOV      R0,#+0
+   \   00000508   08008DE5           STR      R0,[SP, #+8]
+   \   0000050C   0200A0E3           MOV      R0,#+2
+   \   00000510   04008DE5           STR      R0,[SP, #+4]
+   \   00000514   040094E5           LDR      R0,[R4, #+4]
+   \   00000518   3230A0E3           MOV      R3,#+50
+   \   0000051C   00008DE5           STR      R0,[SP, #+0]
+   \   00000520   BE20A0E3           MOV      R2,#+190
+   \   00000524   FE1087E2           ADD      R1,R7,#+254
+   \   00000528   0A00A0E1           MOV      R0,R10
+   \   0000052C   ........           BL       BUTTON_CreateEx
+    528          	BUTTON_SetText(hBtn, "Add Vehicle");
+   \   00000530   641086E2           ADD      R1,R6,#+100
+   \   00000534   ........           BL       BUTTON_SetText
+    529          
+    530          	hBtn = BUTTON_CreateEx( 270,  120 + YSIZE_PHYS*2, 190, 50, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 22);
+   \   00000538   100088E3           ORR      R0,R8,#0x10
+   \   0000053C   0C008DE5           STR      R0,[SP, #+12]
+   \   00000540   0000A0E3           MOV      R0,#+0
+   \   00000544   08008DE5           STR      R0,[SP, #+8]
+   \   00000548   0200A0E3           MOV      R0,#+2
+   \   0000054C   04008DE5           STR      R0,[SP, #+4]
+   \   00000550   040094E5           LDR      R0,[R4, #+4]
+   \   00000554   3230A0E3           MOV      R3,#+50
+   \   00000558   00008DE5           STR      R0,[SP, #+0]
+   \   0000055C   BE20A0E3           MOV      R2,#+190
+   \   00000560   A61FA0E3           MOV      R1,#+664
+   \   00000564   0A00A0E1           MOV      R0,R10
+   \   00000568   ........           BL       BUTTON_CreateEx
+    531          	BUTTON_SetText(hBtn, "Edit Vehicle");
+   \   0000056C   701086E2           ADD      R1,R6,#+112
+   \   00000570   ........           BL       BUTTON_SetText
+    532          
+    533          	hBtn = BUTTON_CreateEx( 270,  195 + YSIZE_PHYS*2, 190, 50, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 23);
+   \   00000574   110088E3           ORR      R0,R8,#0x11
+   \   00000578   0C008DE5           STR      R0,[SP, #+12]
+   \   0000057C   0000A0E3           MOV      R0,#+0
+   \   00000580   08008DE5           STR      R0,[SP, #+8]
+   \   00000584   0200A0E3           MOV      R0,#+2
+   \   00000588   04008DE5           STR      R0,[SP, #+4]
+   \   0000058C   040094E5           LDR      R0,[R4, #+4]
+   \   00000590   3230A0E3           MOV      R3,#+50
+   \   00000594   00008DE5           STR      R0,[SP, #+0]
+   \   00000598   BE20A0E3           MOV      R2,#+190
+   \   0000059C   651F87E2           ADD      R1,R7,#+404
+   \   000005A0   0A00A0E1           MOV      R0,R10
+   \   000005A4   ........           BL       BUTTON_CreateEx
+    534          	BUTTON_SetText(hBtn, "Delete Vehicle");
+   \   000005A8   801086E2           ADD      R1,R6,#+128
+   \   000005AC   ........           BL       BUTTON_SetText
+    535          
+    536          // Page 4: Storage Screen
+    537          	hBtn = BUTTON_CreateEx( 80,   45 + YSIZE_PHYS*3, 120, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 31);
+   \   000005B0   6D0E87E2           ADD      R0,R7,#+1744
+   \   000005B4   0C008DE5           STR      R0,[SP, #+12]
+   \   000005B8   0000A0E3           MOV      R0,#+0
+   \   000005BC   08008DE5           STR      R0,[SP, #+8]
+   \   000005C0   0200A0E3           MOV      R0,#+2
+   \   000005C4   04008DE5           STR      R0,[SP, #+4]
+   \   000005C8   040094E5           LDR      R0,[R4, #+4]
+   \   000005CC   5DB0A0E3           MOV      R11,#+93
+   \   000005D0   C0BF8BE3           ORR      R11,R11,#0x300
+   \   000005D4   00008DE5           STR      R0,[SP, #+0]
+   \   000005D8   5030A0E3           MOV      R3,#+80
+   \   000005DC   7820A0E3           MOV      R2,#+120
+   \   000005E0   0B10A0E1           MOV      R1,R11
+   \   000005E4   5000A0E3           MOV      R0,#+80
+   \   000005E8   ........           BL       BUTTON_CreateEx
+    538          	BUTTON_SetText(hBtn, "Format\nSD Card");
+   \   000005EC   901086E2           ADD      R1,R6,#+144
+   \   000005F0   ........           BL       BUTTON_SetText
+    539          
+    540          	hBtn = BUTTON_CreateEx( 280,  45 + YSIZE_PHYS*3, 120, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 32);
+   \   000005F4   820EA0E3           MOV      R0,#+2080
+   \   000005F8   0C008DE5           STR      R0,[SP, #+12]
+   \   000005FC   0000A0E3           MOV      R0,#+0
+   \   00000600   08008DE5           STR      R0,[SP, #+8]
+   \   00000604   0200A0E3           MOV      R0,#+2
+   \   00000608   04008DE5           STR      R0,[SP, #+4]
+   \   0000060C   040094E5           LDR      R0,[R4, #+4]
+   \   00000610   5030A0E3           MOV      R3,#+80
+   \   00000614   00008DE5           STR      R0,[SP, #+0]
+   \   00000618   7820A0E3           MOV      R2,#+120
+   \   0000061C   0B10A0E1           MOV      R1,R11
+   \   00000620   460FA0E3           MOV      R0,#+280
+   \   00000624   ........           BL       BUTTON_CreateEx
+    541          	BUTTON_SetText(hBtn, "Erase\nSD Card");
+   \   00000628   A01086E2           ADD      R1,R6,#+160
+   \   0000062C   ........           BL       BUTTON_SetText
+   \   00000630   1B0088E2           ADD      R0,R8,#+27
+   \   00000634   0C008DE5           STR      R0,[SP, #+12]
+   \   00000638   0000A0E3           MOV      R0,#+0
+   \   0000063C   08008DE5           STR      R0,[SP, #+8]
+   \   00000640   0200A0E3           MOV      R0,#+2
+   \   00000644   04008DE5           STR      R0,[SP, #+4]
+   \   00000648   040094E5           LDR      R0,[R4, #+4]
+   \   0000064C   5030A0E3           MOV      R3,#+80
+   \   00000650   00008DE5           STR      R0,[SP, #+0]
+   \   00000654   7820A0E3           MOV      R2,#+120
+   \   00000658   F41FA0E3           MOV      R1,#+976
+   \   0000065C   5000A0E3           MOV      R0,#+80
+    542          
+    543          	hBtn = BUTTON_CreateEx( 80, 160 + YSIZE_PHYS*3, 120, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 33);
+   \   00000660   ........           BL       BUTTON_CreateEx
+    544          	BUTTON_SetText(hBtn, "Delete\nSessions");
+   \   00000664   B01086E2           ADD      R1,R6,#+176
+   \   00000668   ........           BL       BUTTON_SetText
+   \   0000066C   1C0088E2           ADD      R0,R8,#+28
+   \   00000670   0C008DE5           STR      R0,[SP, #+12]
+   \   00000674   0000A0E3           MOV      R0,#+0
+   \   00000678   08008DE5           STR      R0,[SP, #+8]
+   \   0000067C   0200A0E3           MOV      R0,#+2
+   \   00000680   04008DE5           STR      R0,[SP, #+4]
+   \   00000684   040094E5           LDR      R0,[R4, #+4]
+   \   00000688   5030A0E3           MOV      R3,#+80
+   \   0000068C   00008DE5           STR      R0,[SP, #+0]
+   \   00000690   7820A0E3           MOV      R2,#+120
+   \   00000694   F41FA0E3           MOV      R1,#+976
+   \   00000698   460FA0E3           MOV      R0,#+280
+    545          
+    546          	hBtn = BUTTON_CreateEx( 280, 160 + YSIZE_PHYS*3, 120, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 34);
+   \   0000069C   ........           BL       BUTTON_CreateEx
+    547          	BUTTON_SetText(hBtn, "Restore\nFactory\nDefaults");
+   \   000006A0   C01086E2           ADD      R1,R6,#+192
+   \   000006A4   ........           BL       BUTTON_SetText
+    548          
+    549          // Page 5: Select Track Screen
+    550          	{
+    551          		LISTWHEEL_Handle hListWheel;
+    552          		hListWheel = LISTWHEEL_CreateEx(45, 55 + YSIZE_PHYS*4, 180, 180, hWnd, WM_CF_SHOW, 0, GUI_ID_LISTWHEEL2, apTracks);
+   \   000006A8   340084E2           ADD      R0,R4,#+52
+   \   000006AC   10008DE5           STR      R0,[SP, #+16]
+   \   000006B0   550F8AE2           ADD      R0,R10,#+340
+   \   000006B4   0C008DE5           STR      R0,[SP, #+12]
+   \   000006B8   0000A0E3           MOV      R0,#+0
+   \   000006BC   08008DE5           STR      R0,[SP, #+8]
+   \   000006C0   0200A0E3           MOV      R0,#+2
+   \   000006C4   04008DE5           STR      R0,[SP, #+4]
+   \   000006C8   040094E5           LDR      R0,[R4, #+4]
+   \   000006CC   B430A0E3           MOV      R3,#+180
+   \   000006D0   00008DE5           STR      R0,[SP, #+0]
+   \   000006D4   B420A0E3           MOV      R2,#+180
+   \   000006D8   CA1F87E2           ADD      R1,R7,#+808
+   \   000006DC   2D00A0E3           MOV      R0,#+45
+   \   000006E0   ........           BL       LISTWHEEL_CreateEx
+   \   000006E4   00B0A0E1           MOV      R11,R0
+    553          		LISTWHEEL_SetLineHeight(hListWheel, 36);
+   \   000006E8   2410A0E3           MOV      R1,#+36
+   \   000006EC   ........           BL       LISTWHEEL_SetLineHeight
+    554          		LISTWHEEL_SetSnapPosition(hListWheel, 72);
+   \   000006F0   4810A0E3           MOV      R1,#+72
+   \   000006F4   0B00A0E1           MOV      R0,R11
+   \   000006F8   ........           BL       LISTWHEEL_SetSnapPosition
+    555          		LISTWHEEL_SetFont(hListWheel, &GUI_Font24_ASCII);
+   \   000006FC   0510A0E1           MOV      R1,R5
+   \   00000700   0B00A0E1           MOV      R0,R11
+   \   00000704   ........           BL       LISTWHEEL_SetFont
+    556          		LISTWHEEL_SetTextAlign(hListWheel, GUI_TA_HCENTER);
+   \   00000708   0210A0E3           MOV      R1,#+2
+   \   0000070C   0B00A0E1           MOV      R0,R11
+   \   00000710   ........           BL       LISTWHEEL_SetTextAlign
+    557          		LISTWHEEL_SetOwnerDraw(hListWheel, &_OwnerDraw);
+   \   00000714   0910A0E1           MOV      R1,R9
+   \   00000718   0B00A0E1           MOV      R0,R11
+   \   0000071C   ........           BL       LISTWHEEL_SetOwnerDraw
+    558          	}
+    559          
+    560          	hBtn = BUTTON_CreateEx( 270,  45 + YSIZE_PHYS*4, 180, 50, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 11);
+   \   00000720   050088E2           ADD      R0,R8,#+5
+   \   00000724   0C008DE5           STR      R0,[SP, #+12]
+   \   00000728   0000A0E3           MOV      R0,#+0
+   \   0000072C   08008DE5           STR      R0,[SP, #+8]
+   \   00000730   0200A0E3           MOV      R0,#+2
+   \   00000734   04008DE5           STR      R0,[SP, #+4]
+   \   00000738   040094E5           LDR      R0,[R4, #+4]
+   \   0000073C   6D10A0E3           MOV      R1,#+109
+   \   00000740   00008DE5           STR      R0,[SP, #+0]
+   \   00000744   3230A0E3           MOV      R3,#+50
+   \   00000748   B420A0E3           MOV      R2,#+180
+   \   0000074C   401E81E3           ORR      R1,R1,#0x400
+   \   00000750   0A00A0E1           MOV      R0,R10
+   \   00000754   ........           BL       BUTTON_CreateEx
+    561          	BUTTON_SetText(hBtn, "Add Track");
+   \   00000758   DC1086E2           ADD      R1,R6,#+220
+   \   0000075C   ........           BL       BUTTON_SetText
+    562          
+    563          	hBtn = BUTTON_CreateEx( 270,  120 + YSIZE_PHYS*4, 180, 50, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 12);
+   \   00000760   060088E2           ADD      R0,R8,#+6
+   \   00000764   0C008DE5           STR      R0,[SP, #+12]
+   \   00000768   0000A0E3           MOV      R0,#+0
+   \   0000076C   08008DE5           STR      R0,[SP, #+8]
+   \   00000770   0200A0E3           MOV      R0,#+2
+   \   00000774   04008DE5           STR      R0,[SP, #+4]
+   \   00000778   040094E5           LDR      R0,[R4, #+4]
+   \   0000077C   B810A0E3           MOV      R1,#+184
+   \   00000780   00008DE5           STR      R0,[SP, #+0]
+   \   00000784   3230A0E3           MOV      R3,#+50
+   \   00000788   B420A0E3           MOV      R2,#+180
+   \   0000078C   401E81E3           ORR      R1,R1,#0x400
+   \   00000790   0A00A0E1           MOV      R0,R10
+   \   00000794   ........           BL       BUTTON_CreateEx
+    564          	BUTTON_SetText(hBtn, "Edit Track");
+   \   00000798   E81086E2           ADD      R1,R6,#+232
+   \   0000079C   ........           BL       BUTTON_SetText
+    565          
+    566          	hBtn = BUTTON_CreateEx( 270,  195 + YSIZE_PHYS*4, 180, 50, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 13);
+   \   000007A0   070088E2           ADD      R0,R8,#+7
+   \   000007A4   0C008DE5           STR      R0,[SP, #+12]
+   \   000007A8   0000A0E3           MOV      R0,#+0
+   \   000007AC   08008DE5           STR      R0,[SP, #+8]
+   \   000007B0   0200A0E3           MOV      R0,#+2
+   \   000007B4   04008DE5           STR      R0,[SP, #+4]
+   \   000007B8   040094E5           LDR      R0,[R4, #+4]
+   \   000007BC   3230A0E3           MOV      R3,#+50
+   \   000007C0   00008DE5           STR      R0,[SP, #+0]
+   \   000007C4   B420A0E3           MOV      R2,#+180
+   \   000007C8   ED1F87E2           ADD      R1,R7,#+948
+   \   000007CC   0A00A0E1           MOV      R0,R10
+   \   000007D0   ........           BL       BUTTON_CreateEx
+    567          	BUTTON_SetText(hBtn, "Delete Track");
+   \   000007D4   F41086E2           ADD      R1,R6,#+244
+   \   000007D8   ........           BL       BUTTON_SetText
+    568          
+    569          // Page 6
+    570          	hBtn = BUTTON_CreateEx( 80,   45 + YSIZE_PHYS*5, 120, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 31);
+   \   000007DC   6D0E87E2           ADD      R0,R7,#+1744
+   \   000007E0   0C008DE5           STR      R0,[SP, #+12]
+   \   000007E4   0000A0E3           MOV      R0,#+0
+   \   000007E8   08008DE5           STR      R0,[SP, #+8]
+   \   000007EC   0200A0E3           MOV      R0,#+2
+   \   000007F0   04008DE5           STR      R0,[SP, #+4]
+   \   000007F4   040094E5           LDR      R0,[R4, #+4]
+   \   000007F8   7D50A0E3           MOV      R5,#+125
+   \   000007FC   505E85E3           ORR      R5,R5,#0x500
+   \   00000800   00008DE5           STR      R0,[SP, #+0]
+   \   00000804   5030A0E3           MOV      R3,#+80
+   \   00000808   7820A0E3           MOV      R2,#+120
+   \   0000080C   0510A0E1           MOV      R1,R5
+   \   00000810   5000A0E3           MOV      R0,#+80
+   \   00000814   ........           BL       BUTTON_CreateEx
+    571          	BUTTON_SetText(hBtn, "A0\nDisabled");
+   \   00000818   411F86E2           ADD      R1,R6,#+260
+   \   0000081C   ........           BL       BUTTON_SetText
+    572          
+    573          	hBtn = BUTTON_CreateEx( 280,  45 + YSIZE_PHYS*5, 120, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 32);
+   \   00000820   820EA0E3           MOV      R0,#+2080
+   \   00000824   0C008DE5           STR      R0,[SP, #+12]
+   \   00000828   0000A0E3           MOV      R0,#+0
+   \   0000082C   08008DE5           STR      R0,[SP, #+8]
+   \   00000830   0200A0E3           MOV      R0,#+2
+   \   00000834   04008DE5           STR      R0,[SP, #+4]
+   \   00000838   040094E5           LDR      R0,[R4, #+4]
+   \   0000083C   5030A0E3           MOV      R3,#+80
+   \   00000840   00008DE5           STR      R0,[SP, #+0]
+   \   00000844   7820A0E3           MOV      R2,#+120
+   \   00000848   0510A0E1           MOV      R1,R5
+   \   0000084C   460FA0E3           MOV      R0,#+280
+   \   00000850   ........           BL       BUTTON_CreateEx
+    574          	BUTTON_SetText(hBtn, "A1\nDisabled");
+   \   00000854   441F86E2           ADD      R1,R6,#+272
+   \   00000858   ........           BL       BUTTON_SetText
+    575          
+    576          	hBtn = BUTTON_CreateEx( 80, 160 + YSIZE_PHYS*5, 120, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 33);
+   \   0000085C   A90F85E2           ADD      R0,R5,#+676
+   \   00000860   0C008DE5           STR      R0,[SP, #+12]
+   \   00000864   0000A0E3           MOV      R0,#+0
+   \   00000868   08008DE5           STR      R0,[SP, #+8]
+   \   0000086C   0200A0E3           MOV      R0,#+2
+   \   00000870   04008DE5           STR      R0,[SP, #+4]
+   \   00000874   040094E5           LDR      R0,[R4, #+4]
+   \   00000878   5030A0E3           MOV      R3,#+80
+   \   0000087C   00008DE5           STR      R0,[SP, #+0]
+   \   00000880   7820A0E3           MOV      R2,#+120
+   \   00000884   5F1EA0E3           MOV      R1,#+1520
+   \   00000888   5000A0E3           MOV      R0,#+80
+   \   0000088C   ........           BL       BUTTON_CreateEx
+    577          	BUTTON_SetText(hBtn, "A2\nDisabled");
+   \   00000890   471F86E2           ADD      R1,R6,#+284
+   \   00000894   ........           BL       BUTTON_SetText
+    578          
+    579          	hBtn = BUTTON_CreateEx( 280, 160 + YSIZE_PHYS*5, 120, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 34);
+   \   00000898   1C0088E2           ADD      R0,R8,#+28
+   \   0000089C   0C008DE5           STR      R0,[SP, #+12]
+   \   000008A0   0000A0E3           MOV      R0,#+0
+   \   000008A4   08008DE5           STR      R0,[SP, #+8]
+   \   000008A8   0200A0E3           MOV      R0,#+2
+   \   000008AC   04008DE5           STR      R0,[SP, #+4]
+   \   000008B0   040094E5           LDR      R0,[R4, #+4]
+   \   000008B4   5030A0E3           MOV      R3,#+80
+   \   000008B8   00008DE5           STR      R0,[SP, #+0]
+   \   000008BC   7820A0E3           MOV      R2,#+120
+   \   000008C0   5F1EA0E3           MOV      R1,#+1520
+   \   000008C4   460FA0E3           MOV      R0,#+280
+   \   000008C8   ........           BL       BUTTON_CreateEx
+    580          	BUTTON_SetText(hBtn, "A3\nDisabled");
+   \   000008CC   4A1F86E2           ADD      R1,R6,#+296
+   \   000008D0   ........           BL       BUTTON_SetText
+    581          
+    582          // Page 7
+    583          	hBtn = BUTTON_CreateEx( 45,   45 + YSIZE_PHYS*6, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 1);
+   \   000008D4   445F85E2           ADD      R5,R5,#+272
+   \   000008D8   5D0F85E2           ADD      R0,R5,#+372
+   \   000008DC   0C008DE5           STR      R0,[SP, #+12]
+   \   000008E0   0000A0E3           MOV      R0,#+0
+   \   000008E4   08008DE5           STR      R0,[SP, #+8]
+   \   000008E8   0200A0E3           MOV      R0,#+2
+   \   000008EC   04008DE5           STR      R0,[SP, #+4]
+   \   000008F0   040094E5           LDR      R0,[R4, #+4]
+   \   000008F4   5030A0E3           MOV      R3,#+80
+   \   000008F8   00008DE5           STR      R0,[SP, #+0]
+   \   000008FC   6420A0E3           MOV      R2,#+100
+   \   00000900   0510A0E1           MOV      R1,R5
+   \   00000904   2D00A0E3           MOV      R0,#+45
+   \   00000908   ........           BL       BUTTON_CreateEx
+    584          	BUTTON_SetText(hBtn, "Unit of\nMeasure");
+   \   0000090C   4D1F86E2           ADD      R1,R6,#+308
+   \   00000910   ........           BL       BUTTON_SetText
+    585          
+    586          	hBtn = BUTTON_CreateEx( 190,  45 + YSIZE_PHYS*6, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 2);
+   \   00000914   0400C8E3           BIC      R0,R8,#0x4
+   \   00000918   0C008DE5           STR      R0,[SP, #+12]
+   \   0000091C   0000A0E3           MOV      R0,#+0
+   \   00000920   08008DE5           STR      R0,[SP, #+8]
+   \   00000924   0200A0E3           MOV      R0,#+2
+   \   00000928   04008DE5           STR      R0,[SP, #+4]
+   \   0000092C   040094E5           LDR      R0,[R4, #+4]
+   \   00000930   5030A0E3           MOV      R3,#+80
+   \   00000934   00008DE5           STR      R0,[SP, #+0]
+   \   00000938   6420A0E3           MOV      R2,#+100
+   \   0000093C   0510A0E1           MOV      R1,R5
+   \   00000940   BE00A0E3           MOV      R0,#+190
+   \   00000944   ........           BL       BUTTON_CreateEx
+    587          	BUTTON_SetText(hBtn, "Time");
+   \   00000948   511F86E2           ADD      R1,R6,#+324
+   \   0000094C   ........           BL       BUTTON_SetText
+    588          
+    589          	hBtn = BUTTON_CreateEx( 335,  45 + YSIZE_PHYS*6, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 3);
+   \   00000950   030048E2           SUB      R0,R8,#+3
+   \   00000954   0C008DE5           STR      R0,[SP, #+12]
+   \   00000958   0000A0E3           MOV      R0,#+0
+   \   0000095C   08008DE5           STR      R0,[SP, #+8]
+   \   00000960   0200A0E3           MOV      R0,#+2
+   \   00000964   04008DE5           STR      R0,[SP, #+4]
+   \   00000968   040094E5           LDR      R0,[R4, #+4]
+   \   0000096C   5030A0E3           MOV      R3,#+80
+   \   00000970   00008DE5           STR      R0,[SP, #+0]
+   \   00000974   6420A0E3           MOV      R2,#+100
+   \   00000978   0510A0E1           MOV      R1,R5
+   \   0000097C   0700A0E1           MOV      R0,R7
+   \   00000980   ........           BL       BUTTON_CreateEx
+    590          	BUTTON_SetText(hBtn, "Display\nSettings");
+   \   00000984   531F86E2           ADD      R1,R6,#+332
+   \   00000988   ........           BL       BUTTON_SetText
+    591          
+    592          	hBtn = BUTTON_CreateEx( 45,  160 + YSIZE_PHYS*6, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 4);
+   \   0000098C   0200C8E3           BIC      R0,R8,#0x2
+   \   00000990   0C008DE5           STR      R0,[SP, #+12]
+   \   00000994   0000A0E3           MOV      R0,#+0
+   \   00000998   08008DE5           STR      R0,[SP, #+8]
+   \   0000099C   0200A0E3           MOV      R0,#+2
+   \   000009A0   04008DE5           STR      R0,[SP, #+4]
+   \   000009A4   040094E5           LDR      R0,[R4, #+4]
+   \   000009A8   5030A0E3           MOV      R3,#+80
+   \   000009AC   00008DE5           STR      R0,[SP, #+0]
+   \   000009B0   6420A0E3           MOV      R2,#+100
+   \   000009B4   701EA0E3           MOV      R1,#+1792
+   \   000009B8   2D00A0E3           MOV      R0,#+45
+   \   000009BC   ........           BL       BUTTON_CreateEx
+    593          	BUTTON_SetText(hBtn, "Other");
+   \   000009C0   581F86E2           ADD      R1,R6,#+352
+   \   000009C4   ........           BL       BUTTON_SetText
+    594          
+    595          	hBtn = BUTTON_CreateEx( 190, 160 + YSIZE_PHYS*6, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 5);
+   \   000009C8   5E0F85E2           ADD      R0,R5,#+376
+   \   000009CC   0C008DE5           STR      R0,[SP, #+12]
+   \   000009D0   0000A0E3           MOV      R0,#+0
+   \   000009D4   08008DE5           STR      R0,[SP, #+8]
+   \   000009D8   0200A0E3           MOV      R0,#+2
+   \   000009DC   04008DE5           STR      R0,[SP, #+4]
+   \   000009E0   040094E5           LDR      R0,[R4, #+4]
+   \   000009E4   5030A0E3           MOV      R3,#+80
+   \   000009E8   00008DE5           STR      R0,[SP, #+0]
+   \   000009EC   6420A0E3           MOV      R2,#+100
+   \   000009F0   701EA0E3           MOV      R1,#+1792
+   \   000009F4   BE00A0E3           MOV      R0,#+190
+   \   000009F8   ........           BL       BUTTON_CreateEx
+    596          	BUTTON_SetText(hBtn, "Other");
+   \   000009FC   581F86E2           ADD      R1,R6,#+352
+   \   00000A00   ........           BL       BUTTON_SetText
+    597          
+    598          	hBtn = BUTTON_CreateEx( 335, 160 + YSIZE_PHYS*6, 100, 80, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 6);
+   \   00000A04   0000A0E3           MOV      R0,#+0
+   \   00000A08   08008DE5           STR      R0,[SP, #+8]
+   \   00000A0C   0200A0E3           MOV      R0,#+2
+   \   00000A10   04008DE5           STR      R0,[SP, #+4]
+   \   00000A14   040094E5           LDR      R0,[R4, #+4]
+   \   00000A18   0C808DE5           STR      R8,[SP, #+12]
+   \   00000A1C   00008DE5           STR      R0,[SP, #+0]
+   \   00000A20   5030A0E3           MOV      R3,#+80
+   \   00000A24   6420A0E3           MOV      R2,#+100
+   \   00000A28   701EA0E3           MOV      R1,#+1792
+   \   00000A2C   0700A0E1           MOV      R0,R7
+   \   00000A30   ........           BL       BUTTON_CreateEx
+    599          	BUTTON_SetText(hBtn, "Other");
+   \   00000A34   581F86E2           ADD      R1,R6,#+352
+   \   00000A38   ........           BL       BUTTON_SetText
+    600          
+    601          
+    602          //	hBtn = BUTTON_CreateEx( 50, 80 + YSIZE_PHYS*6, 100, 30, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 1);
+    603          //	BUTTON_SetBitmap(hBtn, BUTTON_BI_UNPRESSED, &bmtestbutton);
+    604          //	BUTTON_SetText(hBtn, "Go To Page 2");
+    605          
+    606          //	// Put another button to show a popup on page 5
+    607          //	hBtn = BUTTON_CreateEx( 50, 180 + YSIZE_PHYS, 200, 30, hWnd, WM_CF_SHOW, 0, GUI_ID_USER + 7);
+    608          //	BUTTON_SetText(hBtn, "Pop up a dialog box");
+    609          
+    610          //	BUTTON_SetDefaultBkColor(GUI_BLACK, BUTTON_CI_UNPRESSED);
+    611          //	BUTTON_SetDefaultTextColor(GUI_WHITE, BUTTON_CI_UNPRESSED);
+    612          	
+    613          	FRAMEWIN_SetDefaultBarColor(1, GUI_BLACK);
+   \   00000A3C   0010A0E3           MOV      R1,#+0
+   \   00000A40   0100A0E3           MOV      R0,#+1
+   \   00000A44   ........           BL       FRAMEWIN_SetDefaultBarColor
+    614          	FRAMEWIN_SetDefaultBorderSize(2);
+   \   00000A48   0200A0E3           MOV      R0,#+2
+   \   00000A4C   ........           BL       FRAMEWIN_SetDefaultBorderSize
+    615          	FRAMEWIN_SetDefaultClientColor(GUI_BLACK);
+   \   00000A50   0000A0E3           MOV      R0,#+0
+   \   00000A54   ........           BL       FRAMEWIN_SetDefaultClientColor
+    616          	FRAMEWIN_SetDefaultTextAlign(GUI_TA_HCENTER);
+   \   00000A58   0200A0E3           MOV      R0,#+2
+   \   00000A5C   ........           BL       FRAMEWIN_SetDefaultTextAlign
+    617          	FRAMEWIN_SetDefaultTitleHeight(20);
+   \   00000A60   1400A0E3           MOV      R0,#+20
+   \   00000A64   ........           BL       FRAMEWIN_SetDefaultTitleHeight
+    618          	FRAMEWIN_SetDefaultFont(&GUI_Font16_ASCII);
+   \   00000A68   ........           LDR      R0,??DataTable6_7  ;; GUI_Font16_ASCII
+   \   00000A6C   ........           BL       FRAMEWIN_SetDefaultFont
+    619          
+    620          	GUI_SetOrg(0, y_origin = screen*YSIZE_PHYS);
+   \   00000A70   18009DE5           LDR      R0,[SP, #+24]
+   \   00000A74   442FA0E3           MOV      R2,#+272
+   \   00000A78   920001E0           MUL      R1,R2,R0
+   \   00000A7C   0000A0E3           MOV      R0,#+0
+   \   00000A80   0C1084E5           STR      R1,[R4, #+12]
+   \   00000A84   ........           BL       GUI_SetOrg
+    621          	screen_scrolling = ACTIVE;
+   \   00000A88   0100A0E3           MOV      R0,#+1
+   \   00000A8C   000084E5           STR      R0,[R4, #+0]
+    622          }
+   \   00000A90   1CD08DE2           ADD      SP,SP,#+28
+   \   00000A94   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    623          
+
+   \                                 In section .text, align 4, keep-with-next
+    624          static int _OwnerDraw(const WIDGET_ITEM_DRAW_INFO * pDrawItemInfo) {
+   \                     _OwnerDraw:
+   \   00000000   00402DE9           PUSH     {LR}
+    625          	switch (pDrawItemInfo->Cmd) {
+   \   00000004   041090E5           LDR      R1,[R0, #+4]
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   030051E3           CMP      R1,#+3
+   \   00000010   0B00001A           BNE      ??_OwnerDraw_0
+    626          		case WIDGET_DRAW_OVERLAY:
+    627          			GUI_SetColor(GUI_RED);
+   \   00000014   FF00A0E3           MOV      R0,#+255
+   \   00000018   ........           BL       GUI_SetColor
+    628          			GUI_DrawHLine(67, 0, 180);
+   \   0000001C   B420A0E3           MOV      R2,#+180
+   \   00000020   0010A0E3           MOV      R1,#+0
+   \   00000024   4300A0E3           MOV      R0,#+67
+   \   00000028   ........           BL       GUI_DrawHLine
+    629          			GUI_DrawHLine(103, 0, 180);
+   \   0000002C   B420A0E3           MOV      R2,#+180
+   \   00000030   0010A0E3           MOV      R1,#+0
+   \   00000034   6700A0E3           MOV      R0,#+103
+   \   00000038   ........           BL       GUI_DrawHLine
+    630          			break;
+    631          		default:
+    632          	return LISTWHEEL_OwnerDraw(pDrawItemInfo);
+    633          	}
+    634          return 0;
+   \   0000003C   0000A0E3           MOV      R0,#+0
+   \   00000040   000000EA           B        ??_OwnerDraw_1
+   \                     ??_OwnerDraw_0:
+   \   00000044   ........           BL       LISTWHEEL_OwnerDraw
+   \                     ??_OwnerDraw_1:
+   \   00000048   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   0000004C   0080BDE8           POP      {PC}             ;; return
+    635          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5:
+   \   00000000   ........           DC32     GUI_Font24_ASCII
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5_1:
+   \   00000000   ........           DC32     bmfourwayarrow
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6:
+   \   00000000   ........           DC32     `?<Constant "Mode Selection">`
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_1:
+   \   00000000   ........           DC32     screen_scrolling
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_2:
+   \   00000000   79787878           DC32     0x78787879
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_3:
+   \   00000000   ........           DC32     _cbMainCallback
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_4:
+   \   00000000   ........           DC32     GUI_Font24_ASCII
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_5:
+   \   00000000   ........           DC32     `?<Constant "Road\\nRace">`
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_6:
+   \   00000000   ........           DC32     _OwnerDraw
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_7:
+   \   00000000   ........           DC32     GUI_Font16_ASCII
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Road Atlanta">`:
+   \   00000000   526F61642041       DC8 "Road Atlanta"
+   \              746C616E7461
+   \              00          
+   \   0000000D   000000             DC8 0, 0, 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Roebling Road">`:
+   \   00000000   526F65626C69       DC8 "Roebling Road"
+   \              6E6720526F61
+   \              6400        
+   \   0000000E   0000               DC8 0, 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Barber">`:
+   \   00000000   426172626572       DC8 "Barber"
+   \              00          
+   \   00000007   00                 DC8 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Daytona">`:
+   \   00000000   446179746F6E       DC8 "Daytona"
+   \              6100        
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "VIR">`:
+   \   00000000   56495200           DC8 "VIR"
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Mid Ohio">`:
+   \   00000000   4D6964204F68       DC8 "Mid Ohio"
+   \              696F00      
+   \   00000009   000000             DC8 0, 0, 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Watkins Glen">`:
+   \   00000000   5761746B696E       DC8 "Watkins Glen"
+   \              7320476C656E
+   \              00          
+   \   0000000D   000000             DC8 0, 0, 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Road America">`:
+   \   00000000   526F61642041       DC8 "Road America"
+   \              6D6572696361
+   \              00          
+   \   0000000D   000000             DC8 0, 0, 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Laguna Seca">`:
+   \   00000000   4C6167756E61       DC8 "Laguna Seca"
+   \              205365636100
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Spec Miata">`:
+   \   00000000   53706563204D       DC8 "Spec Miata"
+   \              6961746100  
+   \   0000000B   00                 DC8 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Lotus 57">`:
+   \   00000000   4C6F74757320       DC8 "Lotus 57"
+   \              353700      
+   \   00000009   000000             DC8 0, 0, 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Porsche Boxster">`:
+   \   00000000   506F72736368       DC8 "Porsche Boxster"
+   \              6520426F7873
+   \              74657200    
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Spec Racer">`:
+   \   00000000   537065632052       DC8 "Spec Racer"
+   \              6163657200  
+   \   0000000B   00                 DC8 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "\\'69 Corvette">`:
+   \   00000000   27363920436F       DC8 "'69 Corvette"
+   \              727665747465
+   \              00          
+   \   0000000D   000000             DC8 0, 0, 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Austin Healey">`:
+   \   00000000   41757374696E       DC8 "Austin Healey"
+   \              204865616C65
+   \              7900        
+   \   0000000E   0000               DC8 0, 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Lotus Elise">`:
+   \   00000000   4C6F74757320       DC8 "Lotus Elise"
+   \              456C69736500
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Formula Atlantic">`:
+   \   00000000   466F726D756C       DC8 "Formula Atlantic"
+   \              612041746C61
+   \              6E74696300  
+   \   00000011   000000             DC8 0, 0, 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Glenn Stephens">`:
+   \   00000000   476C656E6E20       DC8 "Glenn Stephens"
+   \              537465706865
+   \              6E7300      
+   \   0000000F   00                 DC8 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Ken Cowin">`:
+   \   00000000   4B656E20436F       DC8 "Ken Cowin"
+   \              77696E00    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Rob Basil">`:
+   \   00000000   526F62204261       DC8 "Rob Basil"
+   \              73696C00    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Brian Boyer">`:
+   \   00000000   427269616E20       DC8 "Brian Boyer"
+   \              426F79657200
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Andre Surles">`:
+   \   00000000   416E64726520       DC8 "Andre Surles"
+   \              5375726C6573
+   \              00          
+   \   0000000D   000000             DC8 0, 0, 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Ed Jensen">`:
+   \   00000000   4564204A656E       DC8 "Ed Jensen"
+   \              73656E00    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Gordon Rhea">`:
+   \   00000000   476F72646F6E       DC8 "Gordon Rhea"
+   \              205268656100
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Bob Toler">`:
+   \   00000000   426F6220546F       DC8 "Bob Toler"
+   \              6C657200    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Rick Stone">`:
+   \   00000000   5269636B2053       DC8 "Rick Stone"
+   \              746F6E6500  
+   \   0000000B   00                 DC8 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Schumacher">`:
+   \   00000000   536368756D61       DC8 "Schumacher"
+   \              6368657200  
+   \   0000000B   00                 DC8 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "The Stig">`:
+   \   00000000   546865205374       DC8 "The Stig"
+   \              696700      
+   \   00000009   000000             DC8 0, 0, 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Mode Selection">`:
+   \   00000000   4D6F64652053       DC8 "Mode Selection"
+   \              656C65637469
+   \              6F6E00      
+   \   0000000F   00                 DC8 0
+   \   00000010   447269766572       DC8 "Driver Selection"
+   \              2053656C6563
+   \              74696F6E00  
+   \   00000021   000000             DC8 0, 0, 0
+   \   00000024   56656869636C       DC8 "Vehicle Selection"
+   \              652053656C65
+   \              6374696F6E00
+   \   00000036   0000               DC8 0, 0
+   \   00000038   53746F726167       DC8 "Storage"
+   \              6500        
+   \   00000040   547261636B73       DC8 "Tracks"
+   \              00          
+   \   00000047   00                 DC8 0
+   \   00000048   436F6E666967       DC8 "Configure Inputs"
+   \              75726520496E
+   \              7075747300  
+   \   00000059   000000             DC8 0, 0, 0
+   \   0000005C   53797374656D       DC8 "System Setup"
+   \              205365747570
+   \              00          
+   \   00000069   000000             DC8 0, 0, 0
+
+   \                                 In section .rodata, align 4
+   \                     `?<Constant "Road\\nRace">`:
+   \   00000000   526F61640A52       DC8 "Road\012Race"
+   \              61636500    
+   \   0000000A   0000               DC8 0, 0
+   \   0000000C   4175746F6372       DC8 "Autocross"
+   \              6F737300    
+   \   00000016   0000               DC8 0, 0
+   \   00000018   48696C6C636C       DC8 "Hillclimb"
+   \              696D6200    
+   \   00000022   0000               DC8 0, 0
+   \   00000024   52616C6C7900       DC8 "Rally"
+   \   0000002A   0000               DC8 0, 0
+   \   0000002C   4472616700         DC8 "Drag"
+   \   00000031   000000             DC8 0, 0, 0
+   \   00000034   456E6475726F       DC8 "Enduro"
+   \              00          
+   \   0000003B   00                 DC8 0
+   \   0000003C   416464204472       DC8 "Add Driver"
+   \              6976657200  
+   \   00000047   00                 DC8 0
+   \   00000048   456469742044       DC8 "Edit Driver"
+   \              726976657200
+   \   00000054   44656C657465       DC8 "Delete Driver"
+   \              204472697665
+   \              7200        
+   \   00000062   0000               DC8 0, 0
+   \   00000064   416464205665       DC8 "Add Vehicle"
+   \              6869636C6500
+   \   00000070   456469742056       DC8 "Edit Vehicle"
+   \              656869636C65
+   \              00          
+   \   0000007D   000000             DC8 0, 0, 0
+   \   00000080   44656C657465       DC8 "Delete Vehicle"
+   \              205665686963
+   \              6C6500      
+   \   0000008F   00                 DC8 0
+   \   00000090   466F726D6174       DC8 "Format\012SD Card"
+   \              0A5344204361
+   \              726400      
+   \   0000009F   00                 DC8 0
+   \   000000A0   45726173650A       DC8 "Erase\012SD Card"
+   \              534420436172
+   \              6400        
+   \   000000AE   0000               DC8 0, 0
+   \   000000B0   44656C657465       DC8 "Delete\012Sessions"
+   \              0A5365737369
+   \              6F6E7300    
+   \   000000C0   526573746F72       DC8 "Restore\012Factory\012Defaults"
+   \              650A46616374
+   \              6F72790A4465
+   \              6661756C7473
+   \              00          
+   \   000000D9   000000             DC8 0, 0, 0
+   \   000000DC   416464205472       DC8 "Add Track"
+   \              61636B00    
+   \   000000E6   0000               DC8 0, 0
+   \   000000E8   456469742054       DC8 "Edit Track"
+   \              7261636B00  
+   \   000000F3   00                 DC8 0
+   \   000000F4   44656C657465       DC8 "Delete Track"
+   \              20547261636B
+   \              00          
+   \   00000101   000000             DC8 0, 0, 0
+   \   00000104   41300A446973       DC8 "A0\012Disabled"
+   \              61626C656400
+   \   00000110   41310A446973       DC8 "A1\012Disabled"
+   \              61626C656400
+   \   0000011C   41320A446973       DC8 "A2\012Disabled"
+   \              61626C656400
+   \   00000128   41330A446973       DC8 "A3\012Disabled"
+   \              61626C656400
+   \   00000134   556E6974206F       DC8 "Unit of\012Measure"
+   \              660A4D656173
+   \              75726500    
+   \   00000144   54696D6500         DC8 "Time"
+   \   00000149   000000             DC8 0, 0, 0
+   \   0000014C   446973706C61       DC8 "Display\012Settings"
+   \              790A53657474
+   \              696E677300  
+   \   0000015D   000000             DC8 0, 0, 0
+   \   00000160   4F7468657200       DC8 "Other"
+   \   00000166   0000               DC8 0, 0
+    636          
+    637          // Save for reference
+    638          	//hBtn = BUTTON_CreateEx( 50, 80, 100, 30, hWnd, WM_CF_SHOW, 0, GUI_ID_BUTTON1);
+    639          	//BUTTON_SetBitmap(hBtn, BUTTON_BI_UNPRESSED, &bmtestbutton);
+    640          
+    641          	//hBtn = BUTTON_CreateEx( 50, 40 + YSIZE_PHYS, 165, 81, hWnd, WM_CF_SHOW, 0, GUI_ID_BUTTON2);
+    642          	//BUTTON_SetBitmap(hBtn, BUTTON_BI_UNPRESSED, &bmBoxsterButton);
+    643          
+    644          
+    645          /*************************** End of file ****************************/
+    646          
+
+   Maximum stack usage in bytes:
+
+     Function              .cstack
+     --------              -------
+     Display_Config            64
+     MoveLeft                   8
+     MoveRight                  8
+     ProcessAutoLand            8
+     ProcessScreenMovement     32
+     StartAutoLand              0
+     _OwnerDraw                 8
+     _cbMainCallback            8
+
+
+   Section sizes:
+
+     Function/Label                 Bytes
+     --------------                 -----
+     buttoncount                       4
+     _cbMainCallback                 628
+     StartAutoLand                    96
+     MoveRight                        16
+     MoveLeft                         12
+     ProcessScreenMovement           460
+     ProcessAutoLand                 144
+     screen_scrolling                176
+     hWnd
+     current_screen
+     y_origin
+     x_start
+     previous_touch_state
+     y_increment
+     y_target
+     KMCDialogSemaphone
+     pressingbutton_semaphore
+     current_movement
+     lastx
+     lasty
+     apTracks
+     apVehicles
+     apDrivers
+     Display_Config                 2712
+     _OwnerDraw                       80
+     ??DataTable5                      4
+     ??DataTable5_1                    4
+     ??DataTable6                      4
+     ??DataTable6_1                    4
+     ??DataTable6_2                    4
+     ??DataTable6_3                    4
+     ??DataTable6_4                    4
+     ??DataTable6_5                    4
+     ??DataTable6_6                    4
+     ??DataTable6_7                    4
+     ?<Constant "Road Atlanta">       16
+     ?<Constant "Roebling Road">      16
+     ?<Constant "Barber">              8
+     ?<Constant "Daytona">             8
+     ?<Constant "VIR">                 4
+     ?<Constant "Mid Ohio">           12
+     ?<Constant "Watkins Glen">       16
+     ?<Constant "Road America">       16
+     ?<Constant "Laguna Seca">        12
+     ?<Constant "Spec Miata">         12
+     ?<Constant "Lotus 57">           12
+     ?<Constant "Porsche Boxster">    16
+     ?<Constant "Spec Racer">         12
+     ?<Constant "\'69 Corvette">      16
+     ?<Constant "Austin Healey">      16
+     ?<Constant "Lotus Elise">        12
+     ?<Constant "Formula Atlantic">   20
+     ?<Constant "Glenn Stephens">     16
+     ?<Constant "Ken Cowin">          12
+     ?<Constant "Rob Basil">          12
+     ?<Constant "Brian Boyer">        12
+     ?<Constant "Andre Surles">       16
+     ?<Constant "Ed Jensen">          12
+     ?<Constant "Gordon Rhea">        12
+     ?<Constant "Bob Toler">          12
+     ?<Constant "Rick Stone">         12
+     ?<Constant "Schumacher">         12
+     ?<Constant "The Stig">           12
+     ?<Constant "Mode Selection">    108
+     ?<Constant "Road\nRace">        360
+
+ 
+     4 bytes in section .bss
+   176 bytes in section .data
+   832 bytes in section .rodata
+ 4 188 bytes in section .text
+ 
+ 4 188 bytes of CODE  memory
+   832 bytes of CONST memory
+   180 bytes of DATA  memory
+
+Errors: none
+Warnings: none

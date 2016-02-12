@@ -1,0 +1,1161 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:14:17 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\WinDrive.c                           #
+#    Command line =  C:\DUII\TargetHW\FS\WinDrive.c -D DEBUG=1 -D             #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\WinDrive.lst               #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\WinDrive.o                  #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\WinDrive.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : WinDrive.c
+     19          Purpose     : Device Driver using Windows I/O function for 
+     20                        logical sector access .
+     21          ---------------------------END-OF-HEADER------------------------------
+     22          */
+     23          
+     24          /*********************************************************************
+     25          *
+     26          *             #include Section
+     27          *
+     28          **********************************************************************
+     29          */
+     30          
+     31          #include "FS_Int.h" 
+     32          
+     33          #ifdef _WIN32
+     34          #define WIN32_LEAN_AND_MEAN
+     35          #include "resource.h"
+     36          #include <windows.h>
+     37          #include <commctrl.h>
+     38          #include <commdlg.h>
+     39          #include <winioctl.h>
+     40          #include <stdio.h>
+     41          /*********************************************************************
+     42          *
+     43          *       Defines
+     44          *
+     45          **********************************************************************
+     46          */
+     47          #ifndef   WD_SECTOR_SIZE
+     48            #define WD_SECTOR_SIZE 512
+     49          #endif
+     50          
+     51          #ifdef FS_WD_MAXUNITS
+     52            #define NUM_UNITS          FS_WD_MAXUNITS
+     53          #else
+     54            #define NUM_UNITS          4
+     55          #endif
+     56          
+     57          #define WIN_SIZE_X              (310)
+     58          #define WIN_SIZE_Y              (180)
+     59          #define WIN_MIN_SIZE_X          (WIN_SIZE_X)
+     60          #define WIN_MIN_SIZE_Y          (WIN_SIZE_Y)
+     61          #define WIN_DIST_XY             5
+     62          
+     63          
+     64          #define ID_CB_DRIVE             ID_COMBO0
+     65          #define ID_ED_FILE              ID_EDIT0
+     66          #define ID_DRIVE0               300
+     67          #define ID_BTN_SEL_FILE         ID_BUTTON0
+     68          #define ID_BTN_CREATE_IMG       ID_BUTTON1
+     69          
+     70          
+     71          #define ID_ED_NUMSECTORS        ID_EDIT1
+     72          #define ID_ED_SECTORSIZE        ID_EDIT2
+     73          
+     74          #define REG_PATH                "Software\\Segger\\FS\\Windrive"
+     75          
+     76          /*********************************************************************
+     77          *
+     78          *       Local data types
+     79          *
+     80          **********************************************************************
+     81          */
+     82          typedef struct {
+     83            HANDLE  hDrive;
+     84            U32     BytesPerSector;
+     85            char    IsDisk;
+     86            char    acName[255];
+     87          } WD_PROPS;
+     88          
+     89          /*********************************************************************
+     90          *
+     91          *       Static data
+     92          *
+     93          **********************************************************************
+     94          */
+     95          static WD_PROPS * _apProps[NUM_UNITS];
+     96          static int        _NumUnits;
+     97          static HINSTANCE  _hInst;
+     98          static HWND       _hWndMain;
+     99          static RECT       _rPrev;                   // Contains the previous rectangle of main windows client area. (Used for resizing of dialog items)
+    100          static char       _acFile[MAX_PATH];
+    101          static U8         _UnitToConfig;
+    102          /*********************************************************************
+    103          *
+    104          *       Static code
+    105          *
+    106          **********************************************************************
+    107          */
+    108          
+    109          
+    110          /*********************************************************************
+    111          *
+    112          *       _GetInitialWinRect
+    113          */
+    114          static void _GetInitialWinRect(RECT * pRect, unsigned Width, unsigned Height) {
+    115            RECT rParent, rDesk;
+    116            int  x, y;
+    117          
+    118            pRect->left   = 0;
+    119            pRect->top    = 0;
+    120            pRect->right  = Width;
+    121            pRect->bottom = Height;
+    122            GetWindowRect(_hWndMain, &rParent);
+    123            SystemParametersInfo(SPI_GETWORKAREA, 0, &rDesk, 0);
+    124            x = rParent.left + ((rParent.right  - rParent.left) - Width) / 2;
+    125            y = rParent.top  + ((rParent.bottom - rParent.top)  - Height) / 2;
+    126            x = MAX(MIN(x, rDesk.right  - (int)Width),  0);
+    127            y = MAX(MIN(y, rDesk.bottom - (int)Height), 0);
+    128            OffsetRect(pRect, x, y);
+    129          }
+    130          
+    131          /*********************************************************************
+    132          *
+    133          *       _SetDefaultFont
+    134          */
+    135          static void _SetDefaultFont(HWND hWnd) {
+    136            HFONT  hfnt = (HFONT)GetStockObject(ANSI_VAR_FONT); 
+    137            SendMessage(hWnd, WM_SETFONT, (WPARAM) hfnt, MAKELPARAM(1, 0)); 
+    138          }                                  
+    139          
+    140          
+    141          /*********************************************************************
+    142          *
+    143          *       _AddDlgItemEx
+    144          */
+    145          static HWND _AddDlgItemEx(HWND hDlg, const char* pClass, const char* pName,
+    146                                  int x, int y, int w, int h, int Id, int Flags, int ExFlags)
+    147          {
+    148            HWND hWin;
+    149          
+    150            hWin = CreateWindowEx(ExFlags, pClass, pName, Flags, x, y, w, h, hDlg, NULL, _hInst, NULL);
+    151            _SetDefaultFont(hWin);
+    152            SetWindowLong(hWin, GWL_ID, Id);
+    153            return hWin;
+    154          }
+    155          
+    156          /*********************************************************************
+    157          *
+    158          *       _AddDlgItem
+    159          *
+    160          *
+    161          * Examples:
+    162          *   _AddDlgItem(hWnd, "COMBOBOX", NULL,         44,  12,  60, 320, ID_COMBO0, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE);
+    163          *   _AddDlgItem(hWnd, "BUTTON",   "&CheckBox",  128, 100, 150,  15, ID_CHECK0,  BS_AUTOCHECKBOX | WS_TABSTOP, 0);
+    164          */
+    165          static HWND _AddDlgItem(HWND hDlg, const char* pClass, const char* pName,
+    166                                int x, int y, int w, int h, int Id, int Flags, int ExFlags)
+    167          {
+    168            Flags |= WS_CLIPCHILDREN | WS_CHILD | WS_VISIBLE;
+    169            return _AddDlgItemEx(hDlg, pClass, pName, x, y, w, h, Id, Flags, ExFlags);
+    170          }
+    171          
+    172          /*********************************************************************
+    173          *
+    174          *       _ComboboxAddString
+    175          */
+    176          static void _ComboboxAddString(HWND hCombo, const char* pText, int Id) {
+    177            int NumItems = SendMessage(hCombo, CB_GETCOUNT, 0, 0);
+    178            SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM) (LPCTSTR)pText);
+    179            SendMessage(hCombo, CB_SETITEMDATA ,(WPARAM)NumItems, (LPARAM) (DWORD) Id);
+    180          }
+    181          
+    182          /*********************************************************************
+    183          *
+    184          *       _ComboboxFindItem
+    185          */
+    186          int _ComboboxFindItem(HWND hCombo, int Id) {
+    187            int i, NumItems = SendMessage(hCombo, CB_GETCOUNT, 0, 0);
+    188            for (i = 0; i < NumItems; i++) {
+    189              if ((SendMessage(hCombo, CB_GETITEMDATA, (WPARAM)i, 0)) == Id) {
+    190                return i;
+    191              }
+    192            }
+    193            return -1;
+    194          }
+    195          
+    196          /*********************************************************************
+    197          *
+    198          *       _SetComboByID
+    199          */
+    200          void _SetComboByID(HWND hCombo, int Id, int Default) {
+    201            int Index = _ComboboxFindItem(hCombo, Id);
+    202            if (Index < 0) {
+    203              Index = _ComboboxFindItem(hCombo, Default);
+    204            }
+    205            SendMessage(hCombo, CB_SETCURSEL, ((Index < 0) ? 0 : Index), 0);
+    206          }
+    207          
+    208          
+    209          /*********************************************************************
+    210          *
+    211          *       _OnNewFile
+    212          */
+    213          static void _OnNewFile(HWND hWnd) {
+    214            OPENFILENAME Ofn = {0};
+    215            char         acFileName[MAX_PATH];
+    216          
+    217            acFileName[0]         = 0;
+    218            Ofn.lStructSize       = sizeof(Ofn);
+    219            Ofn.hwndOwner         = hWnd; 
+    220            Ofn.hInstance         = _hInst; 
+    221            Ofn.lpstrFilter       = "Image Files (*.img, *.bin, *.raw)\0*.img;*.bin;*.raw\0\0"; 
+    222            Ofn.lpstrCustomFilter = NULL; 
+    223            Ofn.nMaxCustFilter    = 0; 
+    224            Ofn.nFilterIndex      = 0; 
+    225            Ofn.lpstrFile         = &acFileName[0]; 
+    226            Ofn.nMaxFile          = sizeof(acFileName); 
+    227            Ofn.lpstrFileTitle    = NULL; 
+    228            Ofn.nMaxFileTitle     = 0; 
+    229            Ofn.lpstrInitialDir   = NULL; 
+    230            Ofn.lpstrTitle        = 0; 
+    231            Ofn.Flags             = OFN_CREATEPROMPT | OFN_PATHMUSTEXIST; 
+    232            Ofn.nFileOffset       = 0; 
+    233            Ofn.nFileExtension    = 0; 
+    234            Ofn.lpstrDefExt       = "img"; 
+    235            Ofn.lCustData         = 0; 
+    236            Ofn.lpfnHook          = NULL; 
+    237            Ofn.lpTemplateName    = NULL;
+    238            GetOpenFileName(&Ofn);
+    239            SetDlgItemText(hWnd, ID_ED_FILE, acFileName);
+    240          }
+    241          
+    242          static void _CreateImageFile(const char * sFileImageName, unsigned NumSectors, unsigned SectorSize) {
+    243            HANDLE  hFile;
+    244            U32     NumBytes;
+    245            void  * pMemory;
+    246            U32     NumBytesWritten;
+    247          
+    248            hFile = CreateFile(sFileImageName, GENERIC_WRITE, FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+    249            if (hFile == INVALID_HANDLE_VALUE) {
+    250              char ac[200];
+    251              sprintf(ac, "File  %s could not be written", sFileImageName);
+    252              MessageBox(NULL, ac, "_CreateImageFile", MB_OK);
+    253              return;
+    254            }
+    255            NumBytes       = NumSectors * SectorSize;
+    256            pMemory = malloc(NumBytes);
+    257            if (pMemory) {
+    258              memset(pMemory, 0, NumBytes);
+    259              WriteFile(hFile, pMemory, NumBytes, &NumBytesWritten, NULL);
+    260              CloseHandle(hFile);
+    261              free(pMemory);
+    262            }
+    263          }
+    264          
+    265          /*********************************************************************
+    266          *
+    267          *       _OnInitDialog
+    268          */
+    269          static BOOL _OnInitCreateImageDialog(HWND hWnd) {
+    270            int     x, y;
+    271            char    ac[256];
+    272            RECT    r = {0};
+    273            HICON   hIcon;
+    274            int     Style;
+    275          
+    276            //
+    277            // Init dialog window
+    278            //
+    279            _GetInitialWinRect(&r, 270, 160);
+    280            SetWindowPos (hWnd, 0, r.left, r.top, (r.right - r.left), (r.bottom - r.top), SWP_NOZORDER);
+    281          //  GetClientRect(hWnd, &_rPrev);
+    282            sprintf(ac, "Create Image file");
+    283            SetWindowText(hWnd, ac);
+    284            Style = GetWindowLong(hWnd, GWL_STYLE); 
+    285            Style |= DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU;
+    286            SetWindowLong(hWnd, GWL_STYLE, Style);
+    287            //
+    288            // Add icon to dialog box
+    289            //
+    290            hIcon = (HICON)LoadImage(_hInst, MAKEINTRESOURCE(IDI_ICON), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+    291            SendMessage(hWnd, WM_SETICON, (WPARAM)ICON_BIG, (LPARAM)hIcon);
+    292            x =  0; y = 0;
+    293            _AddDlgItem(hWnd, "STATIC",   "Image file name",                15+x,   3+y, 105,  15, IDC_STATIC,        0                                           , 0);
+    294            _AddDlgItem(hWnd, "EDIT",     NULL,                             15+x,  18+y, 210,  23, ID_ED_FILE,        WS_TABSTOP  | ES_AUTOHSCROLL                , WS_EX_CLIENTEDGE);
+    295            _AddDlgItem(hWnd, "BUTTON",   "...",                           225+x,  18+y,  26,  23, ID_BTN_SEL_FILE,   WS_TABSTOP                                  , 0);
+    296            _AddDlgItem(hWnd, "STATIC",   "Number of sectors",              15+x,  50+y, 105,  15, IDC_STATIC,        0                                           , 0);
+    297            _AddDlgItem(hWnd, "EDIT",     NULL,                             15+x,  65+y, 105,  23, ID_ED_NUMSECTORS,  WS_TABSTOP  | ES_AUTOHSCROLL   |  ES_NUMBER , WS_EX_CLIENTEDGE);
+    298            _AddDlgItem(hWnd, "STATIC",   "sectors size",                  184+x,  50+y,  70,  15, IDC_STATIC,        0                                           , 0);
+    299            _AddDlgItem(hWnd, "EDIT",     NULL,                            184+x,  65+y,  70,  23, ID_ED_SECTORSIZE,  WS_TABSTOP  | ES_AUTOHSCROLL   |  ES_NUMBER | ES_READONLY, WS_EX_CLIENTEDGE);
+    300            _AddDlgItem(hWnd, "BUTTON",   "&Create",                        15+x, 103+y,  60,  23, IDOK ,             WS_TABSTOP  | BS_DEFPUSHBUTTON              , 0);
+    301            _AddDlgItem(hWnd, "BUTTON",   "C&ancel",                       195+x, 103+y,  60,  23, IDCANCEL,          WS_TABSTOP  | BS_PUSHBUTTON                 , 0);
+    302            _AddDlgItem(hWnd, "STATIC",   "x",                             152+x,  68+y,  12,  16, IDC_STATIC,        0                                           , 0);
+    303            SetDlgItemText(hWnd, ID_ED_SECTORSIZE, "512");
+    304            SetFocus(GetDlgItem(hWnd, IDOK));
+    305            return FALSE;  // We have initially set the focus, when we return FALSE.
+    306          }
+    307          
+    308          
+    309          /*********************************************************************
+    310          *
+    311          *       _cbChangeDialog
+    312          */
+    313          static BOOL CALLBACK _cbCreateImageDialog(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {
+    314            int ItemId = LOWORD(wParam);
+    315            int r      = 0;
+    316          
+    317            switch (Msg) {
+    318            case WM_INITDIALOG:
+    319              return _OnInitCreateImageDialog(hWnd);
+    320            case WM_CLOSE:
+    321              EndDialog(hWnd, 0);
+    322              return FALSE;
+    323            case WM_COMMAND:
+    324              switch (ItemId) {
+    325              case ID_BTN_SEL_FILE:
+    326                _OnNewFile(hWnd);
+    327                break;
+    328              case IDOK:
+    329                {
+    330                  char acBuffer[MAX_PATH];
+    331                  unsigned NumSectors;
+    332                  unsigned SectorSize;
+    333          
+    334                  GetDlgItemText(hWnd, ID_ED_NUMSECTORS, &acBuffer[0], sizeof(acBuffer));
+    335                  NumSectors = atoi(acBuffer);
+    336                  if (NumSectors == 0) {
+    337                    MessageBox(hWnd, "Wrong number of sectors entered!", "Error", MB_OK | MB_ICONHAND);
+    338                    SetDlgItemText(hWnd, ID_ED_NUMSECTORS, "0");
+    339                    break;
+    340                  }
+    341                  GetDlgItemText(hWnd, ID_ED_SECTORSIZE, &acBuffer[0], sizeof(acBuffer));
+    342                  SectorSize = atoi(acBuffer);
+    343                  if (SectorSize != 512) {
+    344                    MessageBox(hWnd, "Sector size must be 512 bytes", "Error", MB_OK | MB_ICONHAND);
+    345                    SetDlgItemText(hWnd, ID_ED_SECTORSIZE, "512");
+    346                    break;
+    347                  }
+    348                  GetDlgItemText(hWnd, ID_ED_FILE, &acBuffer[0], sizeof(acBuffer));
+    349                  if (acBuffer[0] == 0) {
+    350                    MessageBox(hWnd, "Image file name is missing", "Error", MB_OK | MB_ICONHAND);
+    351                    _OnNewFile(hWnd);
+    352                    break;
+    353                  }
+    354                  _CreateImageFile(acBuffer, NumSectors, SectorSize);
+    355                  r = 1;
+    356                  strcpy(_acFile, acBuffer);
+    357                  EndDialog(hWnd, r);
+    358                  return FALSE;
+    359                }
+    360              case IDCANCEL:
+    361                EndDialog(hWnd, r);
+    362                return FALSE;
+    363              default:
+    364                break;
+    365              }
+    366              break;
+    367            }
+    368            return FALSE;
+    369          }
+    370          
+    371          /*********************************************************************
+    372          *
+    373          *       _InitDriveCombo
+    374          */
+    375          static void _InitDriveCombo(HWND hWnd) {
+    376            HWND   hComboBox;
+    377            char   acDir[MAX_PATH];
+    378            char   acRootDrive[MAX_PATH];
+    379            char * p;
+    380            int    i;
+    381            int    Id;
+    382            U32    DriveMask;
+    383          
+    384            hComboBox = GetDlgItem(hWnd, ID_COMBO0);
+    385            DriveMask = GetLogicalDrives();
+    386            //
+    387            //  Get the drive where windows is installed.
+    388            //  This drive shall not be in the list.
+    389            //
+    390            GetWindowsDirectory(&acDir[0], sizeof(acDir));
+    391            p = strchr(&acDir[0], '\\');
+    392            if (p) {
+    393              *p = 0;
+    394            }
+    395            sprintf(acRootDrive, "\\\\.\\%s", acDir);
+    396            Id = 0;
+    397            //
+    398            // Check and add all available drives
+    399            //
+    400            for (i = 0; i < 26; i++) {
+    401              char ac[20];
+    402              
+    403              sprintf(ac, "\\\\.\\%c:", i + 'A');
+    404              if ((DriveMask & (1 << i))) {
+    405                unsigned DriveType;
+    406          
+    407                sprintf(acDir, "%s\\", ac);
+    408                DriveType = GetDriveType(acDir);
+    409                if ((DriveType == DRIVE_REMOVABLE) || 
+    410                    (DriveType == DRIVE_RAMDISK)   ||
+    411                    (DriveType == DRIVE_FIXED))       {
+    412                  if (strcmp(acRootDrive, ac)) {
+    413                    _ComboboxAddString(hComboBox, ac, ID_DRIVE0 + Id++);
+    414                  }
+    415                }
+    416              }
+    417            }
+    418            SendMessage(hComboBox, CB_SETCURSEL, 0, 0);
+    419          }
+    420          
+    421          /*********************************************************************
+    422          *
+    423          *       _UpdateDialog
+    424          */
+    425          static void _UpdateDialog(HWND hWnd) {
+    426            if (IsDlgButtonChecked(hWnd, ID_RADIO0) == BST_CHECKED) {
+    427              CheckDlgButton(hWnd, ID_RADIO1, BST_UNCHECKED);
+    428              EnableWindow(GetDlgItem(hWnd, ID_CB_DRIVE), 1);
+    429              EnableWindow(GetDlgItem(hWnd, ID_ED_FILE) , 0);
+    430              EnableWindow(GetDlgItem(hWnd, ID_BTN_SEL_FILE) , 0);
+    431            } else if (IsDlgButtonChecked(hWnd, ID_RADIO1) == BST_CHECKED) {
+    432              CheckDlgButton(hWnd, ID_RADIO0, BST_UNCHECKED);
+    433              EnableWindow(GetDlgItem(hWnd, ID_CB_DRIVE)    , 0);
+    434              EnableWindow(GetDlgItem(hWnd, ID_ED_FILE)     , 1);
+    435              EnableWindow(GetDlgItem(hWnd, ID_BTN_SEL_FILE), 1);
+    436            }
+    437          }
+    438          
+    439          /*********************************************************************
+    440          *
+    441          *       _OnCreateImage
+    442          */
+    443          static void _OnCreateImage(HWND hWnd) {
+    444            if (DialogBox(_hInst, MAKEINTRESOURCE(IDD_MAINDIALOG), hWnd, (DLGPROC)_cbCreateImageDialog)) {
+    445              SetDlgItemText(hWnd, ID_ED_FILE, _acFile);
+    446              CheckDlgButton(hWnd, ID_RADIO1, BST_CHECKED);
+    447            } else {
+    448              CheckDlgButton(hWnd, ID_RADIO0, BST_CHECKED);
+    449            }
+    450            _UpdateDialog(hWnd);
+    451          }
+    452          
+    453          /*********************************************************************
+    454          *
+    455          *       _OnInitDialog
+    456          */
+    457          static BOOL _OnInitChangeDialog(HWND hWnd) {
+    458            int     x, y;
+    459            char    ac[256];
+    460            RECT    r = {0};
+    461            HICON   hIcon;
+    462            const char * s = NULL;
+    463          
+    464            //
+    465            // Check if there is a file name available.
+    466            //
+    467            if ((_acFile[0] != '\\') && (_acFile[0] != '\0')) {
+    468              s = _acFile;
+    469            }
+    470            //
+    471            // Init dialog window
+    472            //
+    473            _GetInitialWinRect(&r, WIN_SIZE_X, WIN_SIZE_Y);
+    474            SetWindowPos (hWnd, 0, r.left, r.top, (r.right - r.left), (r.bottom - r.top), SWP_NOZORDER);
+    475            GetClientRect(hWnd, &_rPrev);
+    476            sprintf(ac, "WinDrive configuration");
+    477            SetWindowText(hWnd, ac);
+    478            //
+    479            // Add icon to dialog box
+    480            //
+    481            hIcon = (HICON)LoadImage(_hInst, MAKEINTRESOURCE(IDI_ICON), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+    482            SendMessage(hWnd, WM_SETICON, (WPARAM)ICON_BIG, (LPARAM)hIcon);
+    483            //
+    484            // Create separator
+    485            //
+    486            x =  2; y = 50;
+    487            _AddDlgItem(hWnd, "STATIC",   NULL,                              1+x,   0+y, 443,   2,  0,                SS_BLACKFRAME      | SS_SUNKEN, 0);
+    488            //
+    489            // Create dialog items
+    490            //
+    491            x = -3; y = 0;
+    492            _AddDlgItem(hWnd, "BUTTON",   "&Drive",                         11+x,  16+y,  55,  15, ID_RADIO0,         BS_AUTORADIOBUTTON | WS_TABSTOP | WS_GROUP  , 0);
+    493            _AddDlgItem(hWnd, "BUTTON",   "&File",                          11+x,  65+y,  55,  15, ID_RADIO1,         BS_AUTORADIOBUTTON | WS_TABSTOP | 0         , 0);
+    494            _AddDlgItem(hWnd, "COMBOBOX", NULL,                             80+x,  16+y, 220, 120, ID_CB_DRIVE,       CBS_DROPDOWNLIST   | WS_TABSTOP | WS_VSCROLL, WS_EX_CLIENTEDGE);
+    495            _AddDlgItem(hWnd, "EDIT",     s,                                80+x,  65+y, 200,  20, ID_ED_FILE,        WS_TABSTOP         | ES_AUTOHSCROLL         , WS_EX_CLIENTEDGE);
+    496            _AddDlgItem(hWnd, "BUTTON",   "...",                           279+x,  66+y,  18,  18, ID_BTN_SEL_FILE,   WS_TABSTOP                                  , 0);
+    497            _AddDlgItem(hWnd, "BUTTON",   "C&reate Image",                 165+x,  95+y,  80,  23, ID_BTN_CREATE_IMG, WS_TABSTOP                                  , 0);
+    498            _AddDlgItem(hWnd, "BUTTON",   "&OK",                           165+x, 125+y,  60,  23, IDOK ,             WS_TABSTOP         | BS_DEFPUSHBUTTON       , 0);
+    499            _AddDlgItem(hWnd, "BUTTON",   "&Cancel",                       235+x, 125+y,  60,  23, IDCANCEL,          WS_TABSTOP         | BS_PUSHBUTTON          , 0);
+    500            _InitDriveCombo(hWnd);
+    501            if (s) {
+    502              CheckDlgButton(hWnd, ID_RADIO1, BST_CHECKED);
+    503            } else {
+    504              CheckDlgButton(hWnd, ID_RADIO0, BST_CHECKED);
+    505            }
+    506            _UpdateDialog(hWnd);
+    507            SetFocus(GetDlgItem(hWnd, IDOK));
+    508            return FALSE;  // We have initially set the focus, when we return FALSE.
+    509          }
+    510          
+    511          /*********************************************************************
+    512          *
+    513          *       _OnSelectFile
+    514          */
+    515          static void _OnSelectFile(HWND hWnd) {
+    516            OPENFILENAME Ofn = {0};
+    517            char         acFileName[MAX_PATH];
+    518          
+    519            acFileName[0]         = 0;
+    520            Ofn.lStructSize       = sizeof(Ofn);
+    521            Ofn.hwndOwner         = hWnd; 
+    522            Ofn.hInstance         = _hInst; 
+    523            Ofn.lpstrFilter       = "Image Files (*.img, *.bin, *.raw)\0*.img;*.bin;*.raw\0\0"; 
+    524            Ofn.lpstrCustomFilter = NULL; 
+    525            Ofn.nMaxCustFilter    = 0; 
+    526            Ofn.nFilterIndex      = 0; 
+    527            Ofn.lpstrFile         = &acFileName[0]; 
+    528            Ofn.nMaxFile          = sizeof(acFileName); 
+    529            Ofn.lpstrFileTitle    = NULL; 
+    530            Ofn.nMaxFileTitle     = 0; 
+    531            Ofn.lpstrInitialDir   = NULL; 
+    532            Ofn.lpstrTitle        = 0; 
+    533            Ofn.Flags             = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST; 
+    534            Ofn.nFileOffset       = 0; 
+    535            Ofn.nFileExtension    = 0; 
+    536            Ofn.lpstrDefExt       = NULL; 
+    537            Ofn.lCustData         = 0; 
+    538            Ofn.lpfnHook          = NULL; 
+    539            Ofn.lpTemplateName    = NULL;
+    540            GetOpenFileName(&Ofn);
+    541            SetDlgItemText(hWnd, ID_ED_FILE, acFileName);
+    542          }
+    543          
+    544          /*********************************************************************
+    545          *
+    546          *       _cbChangeDialog
+    547          */
+    548          static BOOL CALLBACK _cbChangeDialog(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {
+    549            int ItemId = LOWORD(wParam);
+    550          
+    551            switch (Msg) {
+    552            case WM_INITDIALOG:
+    553              return _OnInitChangeDialog(hWnd);
+    554            case WM_DESTROY:
+    555              _hWndMain = NULL;
+    556              break;
+    557            case WM_CLOSE:
+    558              EndDialog(hWnd, 0);
+    559              return FALSE;
+    560            case WM_COMMAND:
+    561              switch (ItemId) {
+    562              case ID_RADIO0:
+    563              case ID_RADIO1:
+    564                _UpdateDialog(hWnd);
+    565                break;
+    566              case ID_BTN_SEL_FILE:
+    567                _OnSelectFile(hWnd);
+    568                break;
+    569              case ID_BTN_CREATE_IMG:
+    570                _OnCreateImage(hWnd);
+    571                break;
+    572              case IDOK:
+    573                {
+    574                  int    Item = 0;
+    575          
+    576                  if (IsDlgButtonChecked(hWnd, ID_RADIO0) == BST_CHECKED) {
+    577                    Item = ID_CB_DRIVE;
+    578                  } else if (IsDlgButtonChecked(hWnd, ID_RADIO1) == BST_CHECKED) {
+    579                    Item = ID_ED_FILE;
+    580                  }
+    581                  GetDlgItemText(hWnd, Item, _acFile, MAX_PATH);
+    582                  strcpy(_apProps[_UnitToConfig]->acName, _acFile);
+    583                  EndDialog(hWnd, 0);
+    584                  return FALSE;
+    585                }
+    586              case IDCANCEL:
+    587                EndDialog(hWnd, 0);
+    588                return FALSE;
+    589              default:
+    590                break;
+    591              }
+    592              break;
+    593            }
+    594            return FALSE;
+    595          }
+    596          
+    597          /*********************************************************************
+    598          *
+    599          *       _GethInstance
+    600          *
+    601          */
+    602          static HINSTANCE _GethInstance(void) {
+    603           MEMORY_BASIC_INFORMATION mbi; 
+    604          
+    605           VirtualQuery(_GethInstance, &mbi, sizeof(mbi)); 
+    606           return (HINSTANCE)(mbi.AllocationBase); 
+    607          }
+    608          
+    609          
+    610          /*********************************************************************
+    611          *
+    612          *       _LoadInfo
+    613          *
+    614          */
+    615          static int _LoadInfo(U8 Unit, char * sInfo, unsigned MaxLen) {  
+    616            DWORD Type = REG_NONE;
+    617            HKEY  hKey;
+    618            int   r;
+    619            r = RegCreateKey(HKEY_CURRENT_USER, REG_PATH, &hKey);
+    620            if (r == 0) {
+    621              char ac[10];
+    622          
+    623              sprintf(ac, "%d", Unit);
+    624              r = RegQueryValueEx(hKey, ac, 0, &Type, (U8 *)sInfo, (U32 *)&MaxLen);
+    625              RegCloseKey(hKey);
+    626            }
+    627            return (r ? 1 : ((Type != REG_SZ) ? 1 : 0));
+    628          }
+    629          
+    630          /*********************************************************************
+    631          *
+    632          *       _LoadInfo
+    633          *
+    634          */
+    635          static void _SaveInfo(U8 Unit, char * sInfo, unsigned MaxLen) {  
+    636            HKEY  hKey;
+    637            int   r;
+    638          
+    639            r = RegCreateKey(HKEY_CURRENT_USER, REG_PATH, &hKey);
+    640            if (r == 0) {
+    641              char ac[10];
+    642          
+    643              sprintf(ac, "%d", Unit);
+    644              r = RegSetValueEx(hKey, ac, 0, REG_SZ, (const U8 *)sInfo, strlen(sInfo));
+    645              RegCloseKey(hKey);
+    646            }
+    647          }
+    648          
+    649          /*********************************************************************
+    650          *
+    651          *       _ConfigDialog
+    652          *
+    653          */
+    654          static void _ConfigDialog(U8 Unit) {  
+    655            char ac[400];
+    656          
+    657            _hInst = _GethInstance();
+    658            if (_hWndMain == NULL) {
+    659              GetConsoleTitle(ac, sizeof(ac));
+    660              _hWndMain = FindWindow("ConsoleWindowClass", ac);
+    661            }
+    662            InitCommonControls();
+    663            _LoadInfo(Unit, _acFile, sizeof(_acFile));
+    664            sprintf(ac, "win:%d: is configured as \"%s\".\n Do you want to keep this setting?", Unit, _acFile);
+    665            if (MessageBox(_hWndMain, ac, "FS WinDrive Question", MB_YESNO | MB_ICONQUESTION) == IDNO) {
+    666              _UnitToConfig = Unit;
+    667              DialogBox(_hInst, MAKEINTRESOURCE(IDD_MAINDIALOG), _hWndMain, (DLGPROC)_cbChangeDialog);
+    668            } else {
+    669              WD_PROPS * pProps;
+    670          
+    671              pProps = _apProps[Unit];
+    672              strcpy(pProps->acName, _acFile);
+    673            }
+    674            _SaveInfo(Unit, _acFile, sizeof(_acFile));
+    675          }
+    676          
+    677          /*********************************************************************
+    678          *
+    679          *       _Init
+    680          *
+    681          */
+    682          static int _Init(WD_PROPS * pProps) {
+    683            int r;
+    684          
+    685            r = -1;
+    686            if (pProps->hDrive == INVALID_HANDLE_VALUE) {
+    687              if (pProps->acName[0]) {
+    688                DISK_GEOMETRY DiskGeometry;
+    689                DWORD Size;
+    690                U32 BytesPerSector;
+    691          
+    692                pProps->hDrive = CreateFile(pProps->acName, 
+    693                                              GENERIC_READ    | GENERIC_WRITE, FILE_SHARE_READ,
+    694                                              NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH, NULL);
+    695                if (pProps->hDrive != INVALID_HANDLE_VALUE) {
+    696                  Size = sizeof(DiskGeometry);
+    697                  FS_MEMSET(&DiskGeometry, 0, Size);
+    698                  if (DeviceIoControl(pProps->hDrive, IOCTL_DISK_GET_DRIVE_GEOMETRY, NULL, 0, &DiskGeometry, Size, &Size, NULL)) {
+    699                    U32 Dummy;
+    700          
+    701                    BytesPerSector = DiskGeometry.BytesPerSector;
+    702                    pProps->IsDisk = 1;
+    703                    //
+    704                    //  In order to use windrive with Windows Vista and Windows 7, we need to exclusively lock the volume
+    705                    //  otherwise the cannot perform write operation on that volume.
+    706                    //  On the operation system this does not hurt.
+    707                    //
+    708                    if (DeviceIoControl(pProps->hDrive, FSCTL_DISMOUNT_VOLUME, NULL, 0, NULL, 0, &Dummy, NULL)) {
+    709                      DeviceIoControl(pProps->hDrive, FSCTL_LOCK_VOLUME, NULL, 0, NULL, 0, &Dummy, NULL);
+    710                      
+    711                    } else {
+    712                      MessageBox(NULL, "Unable to open drive for write operations.\n Device is opened read-only", "WinDrive warning", MB_OK | MB_ICONWARNING);
+    713                    }
+    714                  } else {
+    715                    BytesPerSector = WD_SECTOR_SIZE;
+    716                  }
+    717                  pProps->BytesPerSector = BytesPerSector;
+    718                  r = 0;
+    719                }
+    720              }
+    721            }
+    722            return r;
+    723          }
+    724          
+    725          /*********************************************************************
+    726          *
+    727          *       _AllocIfRequired
+    728          *
+    729          */
+    730          static void _AllocIfRequired(U8 Unit) {
+    731            WD_PROPS * pProps;
+    732          
+    733            pProps = _apProps[Unit];
+    734            if (pProps == NULL) {
+    735              pProps  = (WD_PROPS *)FS_AllocZeroed(sizeof(WD_PROPS));   // Alloc memory. This is guaranteed to work by the memory module.
+    736              pProps->hDrive = INVALID_HANDLE_VALUE;
+    737              _apProps[Unit] = pProps;
+    738            }
+    739          }
+    740          
+    741          /*********************************************************************
+    742          *
+    743          *       _Read
+    744          *
+    745          *  Description:
+    746          *    FS driver function. Read sector(s) from the media.
+    747          *
+    748          *  Parameters:
+    749          *    Unit    - Device number.
+    750          *    Sector      - Sector to be read from the device.
+    751          *    pBuffer     - Pointer to data.
+    752          * 
+    753          *  Return value:
+    754          *    ==0         - Sector has been written to the device.
+    755          *    <0          - An error has occurred.
+    756          */
+    757          
+    758          static int _Read(WD_PROPS * pProps, U32 SectorNo, void *pBuffer, U32 NumSectors) {
+    759            U32 NumBytesTransfered;
+    760            U32 NumBytes;
+    761            LARGE_INTEGER FilePos;
+    762          
+    763            NumBytes = pProps->BytesPerSector * NumSectors;
+    764            FilePos.QuadPart     = (__int64)SectorNo * (__int64)pProps->BytesPerSector; 
+    765          
+    766            SetFilePointer(pProps->hDrive, FilePos.LowPart, &FilePos.HighPart, FILE_BEGIN);
+    767            ReadFile(pProps->hDrive, pBuffer, NumBytes, &NumBytesTransfered, NULL);
+    768            return (NumBytesTransfered == NumBytes) ? 0 : -1;
+    769          }
+    770          
+    771          /*********************************************************************
+    772          *
+    773          *       _Write
+    774          *
+    775          *  Description:
+    776          *    FS driver function. Write sector(s) to the media.
+    777          *
+    778          *  Parameters:
+    779          *    Unit    - Device number.
+    780          *    Sector      - Sector to be written to the device.
+    781          *    pBuffer     - Pointer to data to be stored.
+    782          * 
+    783          *  Return value:
+    784          *    ==0         - Sector has been written to the device.
+    785          *    <0          - An error has occurred.
+    786          */
+    787          static int _Write(WD_PROPS * pProps, U32 SectorNo, const void *pBuffer, U32 NumSectors) {
+    788            U32 NumBytesTransfered;
+    789            U32 NumBytes;
+    790            LARGE_INTEGER FilePos;
+    791          
+    792            NumBytes = pProps->BytesPerSector * NumSectors;
+    793            FilePos.QuadPart     = (__int64)SectorNo * (__int64)pProps->BytesPerSector; 
+    794          
+    795            SetFilePointer(pProps->hDrive, FilePos.LowPart, &FilePos.HighPart, FILE_BEGIN);
+    796            WriteFile(pProps->hDrive, pBuffer, NumBytes, &NumBytesTransfered, NULL);
+    797            return (NumBytesTransfered == NumBytes) ? 0 : -1;
+    798          }
+    799          
+    800          /*********************************************************************
+    801          *
+    802          *       Public code (indirectly thru callback)
+    803          *
+    804          **********************************************************************
+    805          */
+    806          
+    807          /*********************************************************************
+    808          *
+    809          *       _WD_Read
+    810          *
+    811          *  Description:
+    812          *    FS driver function. Read a sector from the media.
+    813          *
+    814          *  Parameters:
+    815          *    Unit    - Device number.
+    816          *    Sector      - Sector to be read from the device.
+    817          *    pBuffer     - Pointer to buffer for storing the data.
+    818          * 
+    819          *  Return value:
+    820          *    ==0         - Sector has been read and copied to pBuffer.
+    821          *    <0          - An error has occurred.
+    822          */
+    823          
+    824          static int _WD_Read(U8 Unit, U32 Sector, void *pBuffer, U32 NumSectors) {
+    825            WD_PROPS * pProps;
+    826          
+    827            pProps = _apProps[Unit];
+    828            return _Read(pProps, Sector, pBuffer, NumSectors);
+    829          }
+    830          
+    831          
+    832          /*********************************************************************
+    833          *
+    834          *       _WD_Write
+    835          *
+    836          *  Description:
+    837          *    FS driver function. Write sector to the media.
+    838          *
+    839          *  Parameters:
+    840          *    Unit    - Device number.
+    841          *    Sector      - Sector to be written to the device.
+    842          *    pBuffer     - Pointer to data to be stored.
+    843          * 
+    844          *  Return value:
+    845          *    ==0         - Sector has been written to the device.
+    846          *    <0          - An error has occurred.
+    847          */
+    848          static int _WD_Write(U8 Unit, U32 SectorNo, const void * pData, U32 NumSectors, U8 RepeatSame) {
+    849            U8       * p;
+    850            U32        i;
+    851            int        r;
+    852            U32        BytesPerSector;
+    853            WD_PROPS * pProps;
+    854          
+    855          
+    856            r = 0;
+    857            pProps = _apProps[Unit];
+    858            if (RepeatSame) {
+    859              BytesPerSector = pProps->BytesPerSector;
+    860              p = (U8 *)malloc(NumSectors * BytesPerSector);
+    861              if (p) {
+    862                for (i = 0; i < NumSectors; i++) {
+    863                  memcpy(p + i * BytesPerSector, pData, BytesPerSector);
+    864                }
+    865                _Write(pProps, SectorNo, p, NumSectors);
+    866                free(p);
+    867              } else {
+    868                for (i = 0; i < NumSectors; i++) {
+    869                  if (_Write(pProps, SectorNo++, pData, 1)) {
+    870                    r = -1;
+    871                    break;
+    872                  }
+    873                }
+    874              }
+    875            } else {
+    876              r = _Write(pProps, SectorNo, pData, NumSectors);
+    877            }
+    878          
+    879            return r;
+    880          }
+    881          
+    882          /*********************************************************************
+    883          *
+    884          *       _WD_GetStatus
+    885          *
+    886          *  Description:
+    887          *    FS driver function. Get status of the media.
+    888          *
+    889          *  Parameters:
+    890          *    Unit                  - Device number.
+    891          * 
+    892          *  Return value:
+    893          *    FS_MEDIA_STATE_UNKNOWN  if the state of the media is unknown.
+    894          *    FS_MEDIA_NOT_PRESENT    if media is not present.
+    895          *    FS_MEDIA_IS_PRESENT     if media is     present.
+    896          */
+    897          static int _WD_GetStatus(U8 Unit) {
+    898            WD_PROPS * pProps;
+    899            int        r;
+    900            U32        Dummy;
+    901          
+    902            r = FS_MEDIA_NOT_PRESENT;
+    903            pProps = _apProps[Unit];
+    904            if (pProps->hDrive == INVALID_HANDLE_VALUE) {
+    905              if (_Init(pProps) == 0) {
+    906                if (pProps->IsDisk) {
+    907                  if (DeviceIoControl(pProps->hDrive, IOCTL_STORAGE_CHECK_VERIFY, NULL, 0, NULL, 0, &Dummy, NULL)) {
+    908                    r = FS_MEDIA_IS_PRESENT;
+    909                  }
+    910                } else {
+    911                  r = FS_MEDIA_IS_PRESENT;
+    912                }
+    913              }
+    914          
+    915            } else {
+    916              r = FS_MEDIA_IS_PRESENT;
+    917            }
+    918            return r;
+    919          }
+    920          
+    921          /*********************************************************************
+    922          *
+    923          *       _WD_IoCtl
+    924          *
+    925          *  Description:
+    926          *    FS driver function. Execute device command.
+    927          *
+    928          *  Parameters:
+    929          *    Unit        - Unit number.
+    930          *    Cmd         - Command to be executed.
+    931          *    Aux         - Parameter depending on command.
+    932          *    pBuffer     - Pointer to a buffer used for the command.
+    933          * 
+    934          *  Return value:
+    935          *    Command specific. In general a negative value means an error.
+    936          */
+    937          static int _WD_IoCtl(U8 Unit, I32 Cmd, I32 Aux, void *pBuffer) {
+    938            FS_DEV_INFO *pInfo;
+    939            U32 NumCylinders;
+    940            U32 NumSectors;
+    941            WD_PROPS * pProps;
+    942          
+    943            pProps = _apProps[Unit];
+    944            FS_USE_PARA(Aux);
+    945            switch (Cmd) {
+    946            case FS_CMD_GET_DEVINFO:
+    947              if (pBuffer) {
+    948                DISK_GEOMETRY DiskGeometry;
+    949                DWORD Size;
+    950                BOOL  r;
+    951                U32   LastError;
+    952          
+    953                Size = sizeof(DiskGeometry);
+    954                FS_MEMSET(&DiskGeometry, 0, Size);
+    955                pInfo = (FS_DEV_INFO *)pBuffer;
+    956                r = DeviceIoControl(pProps->hDrive, IOCTL_DISK_GET_DRIVE_GEOMETRY, NULL, 0, &DiskGeometry, Size, &Size, NULL);
+    957                LastError = GetLastError();
+    958                //
+    959                // Verify whether we have a image file or a real disk device
+    960                //
+    961                if (r != 0) {
+    962                  NumCylinders = (U32)DiskGeometry.Cylinders.QuadPart;
+    963                  if (DiskGeometry.SectorsPerTrack == 63) {
+    964                    //
+    965                    // Some media report inaccurate values (MMC/SD).
+    966                    // Since we can not read the Number of sectors from the card info structure, we have to estimate: -6%
+    967                    //
+    968                    NumCylinders = (NumCylinders + 1) & ~1;
+    969                    NumSectors = NumCylinders * DiskGeometry.SectorsPerTrack * DiskGeometry.TracksPerCylinder;
+    970                    NumSectors = (U32)(((__int64)NumSectors * 94) / 100);
+    971                  } else {
+    972                    NumSectors = NumCylinders * DiskGeometry.SectorsPerTrack * DiskGeometry.TracksPerCylinder;
+    973                  }
+    974                //
+    975                // If we use an image file, DeviceIoControl 
+    976                // will fail with the reason of having a invalid parameter
+    977                // specified.
+    978                //
+    979                } else if (r == 0 && LastError == ERROR_INVALID_PARAMETER) {
+    980                  U32 NumBytesHigh;
+    981                  
+    982                  NumSectors = GetFileSize(pProps->hDrive, &NumBytesHigh) >> 9;
+    983                  NumSectors |= NumBytesHigh << (32 - 9);
+    984                  DiskGeometry.BytesPerSector    = WD_SECTOR_SIZE;
+    985                  DiskGeometry.TracksPerCylinder = 63;
+    986                  DiskGeometry.SectorsPerTrack   = 255;
+    987                //
+    988                // Otherwise operation failed.
+    989                //
+    990                } else {
+    991                  return -1;
+    992                }
+    993                pInfo->NumSectors      = NumSectors;
+    994                pInfo->BytesPerSector  = (U16)DiskGeometry.BytesPerSector;
+    995                pInfo->NumHeads        = (U16)DiskGeometry.TracksPerCylinder;
+    996                pInfo->SectorsPerTrack = (U16)DiskGeometry.SectorsPerTrack;
+    997                return 0;
+    998              }
+    999              break;
+   1000              case FS_CMD_UNMOUNT:
+   1001              case FS_CMD_UNMOUNT_FORCED:
+   1002                DeviceIoControl(pProps->hDrive, FSCTL_UNLOCK_VOLUME, NULL, 0, NULL, 0, &NumCylinders, NULL);
+   1003                CloseHandle(pProps->hDrive);
+   1004                pProps->hDrive = INVALID_HANDLE_VALUE;
+   1005                return 0;
+   1006          #if FS_SUPPORT_DEINIT
+   1007            case FS_CMD_DEINIT:
+   1008              FS_FREE(pProps);
+   1009              _NumUnits--;
+   1010              return 0;
+   1011          #endif
+   1012            }
+   1013            return -1;
+   1014          }
+   1015          
+   1016          /*********************************************************************
+   1017          *
+   1018          *       _WD_InitMedium
+   1019          *
+   1020          *  Description:
+   1021          *    Initialize the specified medium.
+   1022          *
+   1023          *  Parameters:
+   1024          *    Unit    - Unit number.
+   1025          *
+   1026          *  Return value:
+   1027          */
+   1028          static int _WD_InitMedium(U8 Unit) {
+   1029            WD_PROPS * pProps;
+   1030          
+   1031            pProps = _apProps[Unit];
+   1032            return _Init(pProps);
+   1033          }
+   1034          
+   1035          /*********************************************************************
+   1036          *
+   1037          *       _WD_AddDevice
+   1038          *
+   1039          *  Description:
+   1040          *    Initializes the low-level driver object.
+   1041          *
+   1042          *  Return value:
+   1043          *    >= 0                       - Command successfully executed, Unit no.
+   1044          *    <  0                       - Error, could not add device
+   1045          *
+   1046          */
+   1047          static int _WD_AddDevice(void) {
+   1048            U8         Unit;
+   1049            WD_PROPS * pProps;
+   1050          
+   1051            if (_NumUnits >= NUM_UNITS) {
+   1052              return -1;
+   1053            }
+   1054            Unit = _NumUnits++;
+   1055            _AllocIfRequired(Unit);
+   1056            pProps = _apProps[Unit];
+   1057            _Init(pProps);
+   1058            return Unit;
+   1059          }
+   1060          
+   1061          /*********************************************************************
+   1062          *
+   1063          *       _WD_GetNumUnits
+   1064          */
+   1065          static int _WD_GetNumUnits(void) {
+   1066            return _NumUnits;
+   1067          }
+   1068          
+   1069          /*********************************************************************
+   1070          *
+   1071          *       _WD_GetDriverName
+   1072          */
+   1073          static const char * _WD_GetDriverName(U8 Unit) {
+   1074            return "win";
+   1075          }
+   1076          
+   1077          
+   1078          /*********************************************************************
+   1079          *
+   1080          *       Public code
+   1081          *
+   1082          **********************************************************************
+   1083          */
+   1084          /*********************************************************************
+   1085          *
+   1086          *       WINDRIVE_Configure
+   1087          */
+   1088          void WINDRIVE_Configure(U8 Unit, const char * sWindowsDriveName) {
+   1089            WD_PROPS * pProps;
+   1090          
+   1091            if (Unit >= _NumUnits) {
+   1092              return;
+   1093            }
+   1094            _AllocIfRequired(Unit);
+   1095            pProps = _apProps[Unit];
+   1096          
+   1097            if (sWindowsDriveName == NULL) {
+   1098              _ConfigDialog(Unit);
+   1099            } else {
+   1100              strcpy(pProps->acName, sWindowsDriveName);
+   1101            }
+   1102          }
+   1103          
+   1104          /*********************************************************************
+   1105          *
+   1106          *       Public const
+   1107          *
+   1108          **********************************************************************
+   1109          */
+   1110          const FS_DEVICE_TYPE FS_WINDRIVE_Driver = {
+   1111            _WD_GetDriverName,
+   1112            _WD_AddDevice,
+   1113            _WD_Read,
+   1114            _WD_Write,
+   1115            _WD_IoCtl,
+   1116            _WD_InitMedium,
+   1117            _WD_GetStatus,
+   1118            _WD_GetNumUnits
+   1119          };
+   1120          
+   1121          #endif  // _WIN32
+   1122          
+   1123          /*************************** End of file ****************************/
+
+
+ 
+ 
+ 0 bytes of memory
+
+Errors: none
+Warnings: none

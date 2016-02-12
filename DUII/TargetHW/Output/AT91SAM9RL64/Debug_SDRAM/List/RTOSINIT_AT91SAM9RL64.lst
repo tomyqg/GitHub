@@ -1,0 +1,1888 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     02/Dec/2015  11:33:32 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\Setup\RTOSINIT_AT91SAM9RL64.c           #
+#    Command line =  C:\DUII\TargetHW\Setup\RTOSINIT_AT91SAM9RL64.c -D        #
+#                    DEBUG=1 -D SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D        #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\RT #
+#                    OSINIT_AT91SAM9RL64.lst                                  #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\RTO #
+#                    SINIT_AT91SAM9RL64.o                                     #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\Setup\RTOSINIT_AT91SAM9RL64.c
+      1          /*********************************************************************
+      2          *               SEGGER MICROCONTROLLER SYSTEME GmbH                  *
+      3          *       Solutions for real time microcontroller applications         *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *       (c) 1995 - 2007  SEGGER Microcontroller Systeme GmbH         *
+      7          *                                                                    *
+      8          *       www.segger.com     Support: support@segger.com               *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          *                                                                    *
+     12          *       embOS * Real time operating system for microcontrollers      *
+     13          *                                                                    *
+     14          *                                                                    *
+     15          *       Please note:                                                 *
+     16          *                                                                    *
+     17          *       Knowledge of this file may under no circumstances            *
+     18          *       be used to write a similar product or a real-time            *
+     19          *       operating system for in-house use.                           *
+     20          *                                                                    *
+     21          *       Thank you for your fairness !                                *
+     22          *                                                                    *
+     23          **********************************************************************
+     24          *                                                                    *
+     25          *       embOS version: 3.52e                                         *
+     26          *                                                                    *
+     27          **********************************************************************
+     28          
+     29          ----------------------------------------------------------------------
+     30          File    : RTOSINIT_AT91SAM9RL64.c
+     31                    for ATMEL AT91SAM9Rx64 CPU
+     32          
+     33          Purpose : Initializes and handles the hardware for the OS as far
+     34                    as required by the OS.
+     35                    Feel free to modify this file acc. to your
+     36                    target system.
+     37          --------  END-OF-HEADER  ---------------------------------------------
+     38          */
+     39          
+     40          #include "RTOS.H"
+     41          #include "JLINKDCC.h"
+     42          
+     43          /*********************************************************************
+     44          *
+     45          *       Configuration
+     46          *
+     47          **********************************************************************
+     48          */
+     49          
+     50          #define ALLOW_NESTED_INTERRUPTS 0   // Caution: Nesting interrupts will cause higher stack load on system stack CSTACK
+     51          
+     52          /*********************************************************************
+     53          *
+     54          *       Clock frequency settings
+     55          */
+     56          
+     57          #define OS_FSYS 200000000uL
+     58          
+     59          #ifndef   OS_PCLK_TIMER
+     60            #define OS_PCLK_TIMER (OS_FSYS / 2)
+     61          #endif
+     62          
+     63          #ifndef   OS_TICK_FREQ
+     64            #define OS_TICK_FREQ (1000)
+     65          #endif
+     66          
+     67          #define OS_TIMER_PRESCALE (16) // prescaler for system timer is fixed to 16
+     68          
+     69          #define MUL_PLLA     (50)      // Multiplier
+     70          #define OUT_PLLA     (0x02)     // High speed setting
+     71          #define COUNT_PLLA   (0x3F)     // startup counter
+     72          #define DIV_PLLA     (3)       // Divider
+     73          
+     74          #define _PLLAR_VALUE ((1 << 29)                  \
+     75                               |((MUL_PLLA-1) << 16)       \
+     76                               |(OUT_PLLA     << 14)       \
+     77                               |(COUNT_PLLA   << 8)        \
+     78                               |(DIV_PLLA     << 0))
+     79          
+     80          #define MUL_PLLB     (0x08)     // Multiplier
+     81          #define OUT_PLLB     (0x00)     // High speed setting
+     82          #define COUNT_PLLB   (0x3f)     // startup counter
+     83          #define DIV_PLLB     (0x01)       // Divider
+     84          #define USB_DIV      (0x01)       // USB-clock Divider
+     85          
+     86          #define _PLLBR_VALUE ((USB_DIV      << 28)       \
+     87                               |((MUL_PLLB-1) << 16)       \
+     88                               |(OUT_PLLB     << 14)       \
+     89                               |(COUNT_PLLB   << 8)        \
+     90                               |(DIV_PLLB     << 0))
+     91          
+     92          #define MCKR_MDIV    (0x01)     // Main clock is processor clock / 2
+     93          #define MCKR_PRES    (0)        // Processor clock is selected clock
+     94          #define MCKR_CSS     (0x02)     // PLLA is selected clock
+     95          
+     96          #define _MCKR_VALUE  ((MCKR_MDIV << 8)   \
+     97                               |(MCKR_PRES << 2)   \
+     98                               |(MCKR_CSS  << 0))
+     99          
+    100          /*********************************************************************
+    101          *
+    102          *       UART settings for OSView
+    103          *       If you do not want (or can not due to hardware limitations)
+    104          *       to dedicate a UART to OSView, please define it to be -1
+    105          *       Currently the standard code enables UART 0 per default
+    106          */
+    107          
+    108          #define OS_UART (-1)
+    109          
+    110          #ifndef   OS_UART
+    111            #define OS_UART (1)
+    112          #endif
+    113          
+    114          #ifndef   OS_PCLK_UART
+    115            #define OS_PCLK_UART (OS_FSYS / 2)
+    116          #endif
+    117          
+    118          #ifndef   OS_BAUDRATE
+    119            #define OS_BAUDRATE (115200)
+    120          #endif
+    121          
+    122          /********************************************************************/
+    123          
+    124          #ifndef   SDRAM_TARGET
+    125            #define SDRAM_TARGET 0
+    126          #endif
+    127          
+    128          /****** End of configuration settings *******************************/
+    129          
+    130          #define OS_UART_USED ((OS_UART == 0) || (OS_UART == 1) || (OS_UART == 2))
+    131          
+    132          /*********************************************************************
+    133          *
+    134          *       Local defines (sfrs used in RTOSInit.c)
+    135          *
+    136          **********************************************************************
+    137          */
+    138          
+    139          /*      USART, used for OSView communication */
+    140          #define _USART0_BASE_ADDR  (0xFFFB0000)
+    141          #define _USART1_BASE_ADDR  (0xFFFB4000)
+    142          #define _USART2_BASE_ADDR  (0xFFFB8000)
+    143          
+    144          /*      Debug unit */
+    145          #define _DBGU_BASE_ADDR    (0xFFFFF200)
+    146          #define _DBGU_IMR     (*(volatile OS_U32*) (_DBGU_BASE_ADDR + 0x10)) /* Interrupt Mask Register */
+    147          #define _DBGU_SR      (*(volatile OS_U32*) (_DBGU_BASE_ADDR + 0x14)) /* Channel Status Register */
+    148          #define DBGU_COMMRX   (1 << 31)
+    149          #define DBGU_COMMTX   (1 << 30)
+    150          #define DBGU_RXBUFF   (1 << 12)
+    151          #define DBGU_TXBUFE   (1 << 11)
+    152          #define DBGU_TXEMPTY  (1 <<  9)
+    153          #define DBGU_PARE     (1 <<  7)
+    154          #define DBGU_FRAME    (1 <<  6)
+    155          #define DBGU_OVRE     (1 <<  5)
+    156          #define DBGU_ENDTX    (1 <<  4)
+    157          #define DBGU_ENDRX    (1 <<  3)
+    158          #define DBGU_TXRDY    (1 <<  1)
+    159          #define DBGU_RXRDY    (1 <<  0)
+    160          #define DBGU_MASK_ALL (DBGU_COMMRX | DBGU_COMMTX  | DBGU_RXBUFF |  \
+    161                                 DBGU_TXBUFE | DBGU_TXEMPTY | DBGU_PARE   |  \
+    162                                 DBGU_FRAME  | DBGU_OVRE    | DBGU_ENDTX  |  \
+    163                                 DBGU_ENDRX  | DBGU_TXRDY   | DBGU_RXRDY)
+    164          
+    165          /*      Reset controller */
+    166          #define _RSTC_BASE_ADDR    (0xFFFFFD00)
+    167          #define _RSTC_CR      (*(volatile OS_U32*) (_RSTC_BASE_ADDR + 0x00))
+    168          #define _RSTC_SR      (*(volatile OS_U32*) (_RSTC_BASE_ADDR + 0x04))
+    169          #define _RSTC_MR      (*(volatile OS_U32*) (_RSTC_BASE_ADDR + 0x08))
+    170          #define RSTC_URSTEN   (1 <<  0)  /* User reset enable           */
+    171          #define RSTC_BODIEN   (1 << 16)  /* Brownout interrupt enable   */
+    172          #define RSTC_URSTIEN  (1 <<  4)  /* User reset interrupt enable */
+    173          #define RSTC_BODSTS   (1 <<  1)  /* Brownout status             */
+    174          #define RSTC_URSTS    (1 <<  0)  /* User reset status           */
+    175          
+    176          /*      Real time timer */
+    177          #define _RTT_BASE_ADDR     (0xFFFFFD20)
+    178          #define _RTT_MR       (*(volatile OS_U32*) (_RTT_BASE_ADDR + 0x00))
+    179          #define _RTT_SR       (*(volatile OS_U32*) (_RTT_BASE_ADDR + 0x0C))
+    180          #define RTT_RTTINCIEN (1 << 17)
+    181          #define RTT_ALMIEN    (1 << 16)
+    182          #define RTT_RTTINC    (1 << 1)
+    183          #define RTT_ALMS      (1 << 0)
+    184          
+    185          /*      Periodic interval timer */
+    186          #define _PIT_BASE_ADDR     (0xFFFFFD30)
+    187          #define _PIT_MR       (*(volatile OS_U32*) (_PIT_BASE_ADDR + 0x00))
+    188          #define _PIT_SR       (*(volatile OS_U32*) (_PIT_BASE_ADDR + 0x04))
+    189          #define _PIT_PIVR     (*(volatile OS_U32*) (_PIT_BASE_ADDR + 0x08))
+    190          #define _PIT_PIIR     (*(volatile OS_U32*) (_PIT_BASE_ADDR + 0x0C))
+    191          
+    192          /*      Watchdog */
+    193          #define _WDT_BASE_ADDR     (0xFFFFFD40)
+    194          #define _WDT_CR       (*(volatile OS_U32*) (_WDT_BASE_ADDR + 0x00))
+    195          #define _WDT_MR       (*(volatile OS_U32*) (_WDT_BASE_ADDR + 0x04))
+    196          #define _WDT_SR       (*(volatile OS_U32*) (_WDT_BASE_ADDR + 0x08))
+    197          #define WDT_WDFIEN    (1 << 12) /* Watchdog interrupt enable flag in mode register */
+    198          #define WDT_WDERR     (1 <<  1) /* Watchdog error status flag                      */
+    199          #define WDT_WDUNF     (1 <<  0) /* Watchdog underflow status flag                  */
+    200          
+    201          /*      PIO control register */
+    202          #define _PIOA_BASE_ADDR    (0xfffff400)
+    203          #define _PIOB_BASE_ADDR    (0xfffff600)
+    204          #define _PIOC_BASE_ADDR    (0xfffff800)
+    205          
+    206          
+    207          /*      Power management controller */
+    208          #define _PMC_BASE_ADDR     (0xFFFFFC00)
+    209          
+    210          #define _PMC_CKGR_PLLAR (*(volatile OS_U32*) (_PMC_BASE_ADDR + 0x28))  /* PLLA register */
+    211          #define _PMC_CKGR_PLLBR (*(volatile OS_U32*) (_PMC_BASE_ADDR + 0x2c))  /* PLLB register */
+    212          
+    213          #define _PMC_PCER     (*(volatile OS_U32*) (_PMC_BASE_ADDR + 0x10))  /* Peripheral clock enable register */
+    214          #define _PMC_MOR      (*(volatile OS_U32*) (_PMC_BASE_ADDR + 0x20))  /* main oscillator register */
+    215          #define _PMC_PLLR     (*(volatile OS_U32*) (_PMC_BASE_ADDR + 0x2c))  /* PLL register */
+    216          #define _PMC_MCKR     (*(volatile OS_U32*) (_PMC_BASE_ADDR + 0x30))  /* Master clock register */
+    217          #define _PMC_SR       (*(volatile OS_U32*) (_PMC_BASE_ADDR + 0x68))  /* status register */
+    218          #define _PMC_IMR      (*(volatile OS_U32*) (_PMC_BASE_ADDR + 0x6C))  /* interrupt mask register */
+    219          
+    220          #define _PMC_MOSCS    (1 <<  0)
+    221          #define _CKGR_MAINRDY (1 << 16)
+    222          #define _PMC_LOCKA    (1 <<  1)
+    223          #define _PMC_LOCKB    (1 <<  2)
+    224          #define _PMC_MCKRDY   (1 <<  3)
+    225          #define _PMC_PCKRDY2  (1 << 10)
+    226          #define _PMC_PCKRDY1  (1 <<  9)
+    227          #define _PMC_PCKRDY0  (1 <<  8)
+    228          #define _PMC_MASK_ALL (_PMC_PCKRDY2 | _PMC_PCKRDY1 | _PMC_PCKRDY0 | \
+    229                                 _PMC_MCKRDY  | _PMC_LOCKB    | _PMC_MOSCS)
+    230          
+    231          /*      Advanced interrupt controller (AIC) */
+    232          #define _AIC_BASE_ADDR      (0xfffff000)
+    233          #define _AIC_SMR_BASE_ADDR  (_AIC_BASE_ADDR + 0x00)
+    234          #define _AIC_SVR_BASE_ADDR  (_AIC_BASE_ADDR + 0x80)
+    235          #define _AIC_SVR0      (*(volatile OS_U32*) (_AIC_SVR_BASE_ADDR + 0x00))
+    236          #define _AIC_SVR1      (*(volatile OS_U32*) (_AIC_SVR_BASE_ADDR + 0x04))
+    237          #define _AIC_IVR       (*(volatile OS_U32*) (_AIC_BASE_ADDR + 0x100))
+    238          #define _AIC_ISR       (*(volatile OS_U32*) (_AIC_BASE_ADDR + 0x108))
+    239          #define _AIC_IPR       (*(volatile OS_U32*) (_AIC_BASE_ADDR + 0x10c))
+    240          #define _AIC_IDCR      (*(volatile OS_U32*) (_AIC_BASE_ADDR + 0x124))
+    241          #define _AIC_ICCR      (*(volatile OS_U32*) (_AIC_BASE_ADDR + 0x128))
+    242          #define _AIC_IECR      (*(volatile OS_U32*) (_AIC_BASE_ADDR + 0x120))
+    243          #define _AIC_EOICR     (*(volatile OS_U32*) (_AIC_BASE_ADDR + 0x130))
+    244          #define _AIC_SPU       (*(volatile OS_U32*) (_AIC_BASE_ADDR + 0x134))
+    245          #define _AIC_DCR       (*(volatile OS_U32*) (_AIC_BASE_ADDR + 0x138))
+    246          #define _AIC_FFDR      (*(volatile OS_U32*) (_AIC_BASE_ADDR + 0x144))
+    247          
+    248          /*      AIC interrupt sources and peripheral IDs        */
+    249          #define _SYSTEM_IRQ_ID  (1)   /* System IRQ ID             */
+    250          #define _US0IRQ_ID      (6)   /* USART Channel 0 interrupt */
+    251          #define _US1IRQ_ID      (7)   /* USART Channel 1 interrupt */
+    252          #define _US2IRQ_ID      (8)   /* USART Channel 2 interrupt */
+    253          
+    254          #ifndef   _NUM_INT_SOURCES
+    255            #define _NUM_INT_SOURCES   (32)
+    256          #endif
+    257          
+    258          #define _INT_PRIORITY_MASK (0x07)
+    259          #define _NUM_INT_PRIORITIES   (8)
+    260          
+    261          /*      MATRIX + EBI interface */
+    262          #define _MATRIX_BASE_ADDR   (0xFFFFEE00)                                // MATRIX Base Address
+    263          
+    264          //#define _MATRIX_MCFG   (*(volatile OS_U32*) (_MATRIX_BASE_ADDR + 0x00)) // MATRIX Master configuration register
+    265          #define _MATRIX_EBICSA (*(volatile OS_U32*) (_MATRIX_BASE_ADDR + 0x120)) // MATRIX EBI Chip Select Assignment register
+    266          
+    267          /*      PIOC, used as data BUS */
+    268          #define _PIOB_PDR      (*(volatile OS_U32*) (_PIOB_BASE_ADDR + 0x04))    // PIOB disable register
+    269          #define _PIOB_MDDR     (*(volatile OS_U32*) (_PIOB_BASE_ADDR + 0x54))    // PIOB multi driver disable register
+    270          #define _PIOB_ASR      (*(volatile OS_U32*) (_PIOB_BASE_ADDR + 0x70))    // PIOB peripheral A select register
+    271          
+    272          /*      SDRAM controller */
+    273          #define _SDRAMC_BASE_ADDR  (0xFFFFEA00)   // SDRAMC Base Address
+    274          #define _SDRAMC_MR     (*(volatile OS_U32*) (_SDRAMC_BASE_ADDR + 0x00)) // (SDRAMC) SDRAM Controller Mode Register
+    275          #define _SDRAMC_TR     (*(volatile OS_U32*) (_SDRAMC_BASE_ADDR + 0x04)) // (SDRAMC) SDRAM Controller Refresh timer Register
+    276          #define _SDRAMC_CR     (*(volatile OS_U32*) (_SDRAMC_BASE_ADDR + 0x08)) // (SDRAMC) SDRAM Controller Configuration Register
+    277          #define _SDRAMC_LPR    (*(volatile OS_U32*) (_SDRAMC_BASE_ADDR + 0x10)) // (SDRAMC) SDRAM Controller Low Power Register
+    278          #define _SDRAMC_MDR    (*(volatile OS_U32*) (_SDRAMC_BASE_ADDR + 0x24)) // (SDRAMC) SDRAM Controller Memory Device Register
+    279          
+    280          #define _SDRAMC_MODE_NORMAL_CMD   (0x0) // (SDRAMC) Normal Mode
+    281          #define _SDRAMC_MODE_NOP_CMD      (0x1) // (SDRAMC) Issue a All Banks Precharge Command at every access
+    282          #define _SDRAMC_MODE_PRCGALL_CMD  (0x2) // (SDRAMC) Issue a All Banks Precharge Command at every access
+    283          #define _SDRAMC_MODE_LMR_CMD      (0x3) // (SDRAMC) Issue a Load Mode Register at every access
+    284          #define _SDRAMC_MODE_RFSH_CMD     (0x4) // (SDRAMC) Issue a Refresh
+    285          
+    286          #define SDRAM_BASE_ADDR   (0x20000000)
+    287          
+    288          /*      SMC, static memory controller */
+    289          
+    290          #define _SMC_BASE_ADDR   (0xFFFFEC00)                   // SMC  Base Address
+    291          #define _SMC2_BASE_ADDR  (_SMC_BASE_ADDR + (0x10 * 2))  // SMC2 Base Address
+    292          #define _SMC_SETUP2      (*(volatile OS_U32*) (_SMC2_BASE_ADDR + 0x00))
+    293          #define _SMC_PULSE2      (*(volatile OS_U32*) (_SMC2_BASE_ADDR + 0x04))
+    294          #define _SMC_CYCLE2      (*(volatile OS_U32*) (_SMC2_BASE_ADDR + 0x08))
+    295          #define _SMC_MODE2       (*(volatile OS_U32*) (_SMC2_BASE_ADDR + 0x0C))
+    296          
+    297          /*********************************************************************
+    298          *
+    299          *       local data
+    300          *
+    301          **********************************************************************
+    302          */
+    303          
+    304          /*********************************************************************
+    305          *
+    306          *       MMU and cache configuration
+    307          */
+    308          #pragma data_alignment=16384
+
+   \                                 In section .noinit, align 16384
+    309          __no_init unsigned int TranslationTable [0x1000];
+   \                     TranslationTable:
+   \   00000000                      DS8 16384
+    310          
+    311          /*********************************************************************
+    312          *
+    313          *       Static data
+    314          *
+    315          **********************************************************************
+    316          */
+    317          
+    318          /*********************************************************************
+    319          *
+    320          *       Local functions
+    321          *
+    322          **********************************************************************
+    323          */
+    324          
+    325          /*********************************************************************
+    326          *
+    327          *       _HandlePmcIrq(), Power management controller interrupt
+    328          *       If not used for application, this handler may be removed
+    329          */
+    330          static void _HandlePmcIrq(void) {
+    331            OS_U32 IrqSource;
+    332            IrqSource  = _PMC_IMR;
+    333            IrqSource &= (_PMC_SR & _PMC_MASK_ALL);
+    334            if (IrqSource) {  /* PMC interrupt pending? */
+    335              while(1);       /* Not implemented        */
+    336            }
+    337          }
+    338          
+    339          /*********************************************************************
+    340          *
+    341          *       _HandleRttIrq(), Real time timer interrupt handler
+    342          *       If not used for application, this handler may be removed
+    343          */
+    344          static void _HandleRttIrq(void) {
+    345            OS_U32 IrqStatus;
+    346            OS_U32 IrqEnabled;
+    347          
+    348            IrqEnabled = _RTT_MR & (RTT_RTTINCIEN  | RTT_ALMIEN);
+    349            IrqStatus  = _RTT_SR & (RTT_RTTINC | RTT_ALMS);
+    350            if ((IrqStatus & RTT_RTTINC) && (IrqEnabled & RTT_RTTINCIEN )) { /* RTT inc. interrupt pending ? */
+    351              while(1);                /* Not implemented */
+    352            }
+    353            if ((IrqStatus & RTT_ALMS) && (IrqEnabled & RTT_ALMIEN )) {      /* Alarm interrupt pending ? */
+    354              while(1);                /* Not implemented */
+    355            }
+    356          }
+    357          
+    358          /*********************************************************************
+    359          *
+    360          *       _HandleDbguIrq(), Debug unit interrupt handler
+    361          *       If not used for application, this handler may be removed
+    362          */
+    363          static void _HandleDbguIrq(void) {
+    364            OS_U32 IrqSource;
+    365          
+    366            IrqSource  = _DBGU_IMR;
+    367            IrqSource &= (_DBGU_SR & DBGU_MASK_ALL);
+    368            if (IrqSource) { /* Any interrupt pending ? */
+    369              while(1);      /* Not implemented         */
+    370            }
+    371          }
+    372          
+    373          /*********************************************************************
+    374          *
+    375          *       _HandleRstcIrq(), Reset controller interrupt handler
+    376          *       If not used for application, this handler may be removed
+    377          */
+    378          static void _HandleRstcIrq(void) {
+    379            OS_U32 IrqStatus;
+    380            OS_U32 IrqEnabled;
+    381          
+    382            IrqEnabled = _RSTC_MR & (RSTC_BODIEN | RSTC_URSTIEN);
+    383            IrqStatus  = _RSTC_SR & (RSTC_BODSTS | RSTC_URSTS);
+    384            if ((IrqStatus & RSTC_BODSTS) && (IrqEnabled & RSTC_BODIEN )) {  /* Brownout interrupt pending ?   */
+    385              while(1);                /* Not implemented */
+    386            }
+    387            if ((IrqStatus & RSTC_URSTS) && (IrqEnabled & RSTC_URSTIEN )) {  /* User reset interrupt pending ? */
+    388              while(1);                /* Not implemented */
+    389            }
+    390          }
+    391          
+    392          /*********************************************************************
+    393          *
+    394          *       _HandleWdtIrq(), watchdog timer interrupt handler
+    395          *       If not used for application, this handler may be removed
+    396          */
+    397          static void _HandleWdtIrq(void) {
+    398            OS_U32 IrqStatus;
+    399          
+    400            IrqStatus = _WDT_SR & (WDT_WDERR | WDT_WDUNF);
+    401            if (IrqStatus && (_WDT_MR & WDT_WDFIEN)) { /* Watchdog error interrupt pending ? */
+    402              while(1);                                /* Not implemented */
+    403            }
+    404          }
+    405          
+    406          /*********************************************************************
+    407          *
+    408          *       _DefaultFiqHandler(), a dummy FIQ handler
+    409          */
+
+   \                                 In section .text, align 4, keep-with-next
+    410          static void _DefaultFiqHandler(void) {
+    411            while(1);
+   \                     _DefaultFiqHandler:
+   \                     ??_DefaultFiqHandler_0:
+   \   00000000   FEFFFFEA           B        ??_DefaultFiqHandler_0
+    412          }
+    413          
+    414          /*********************************************************************
+    415          *
+    416          *       _DefaultIrqHandler, a dummy IRQ handler
+    417          *
+    418          *       This handler is initially written into all AIC interrupt vectors
+    419          *       It is called, if no interrupt vector was installed for
+    420          *       specific interrupt source.
+    421          *       May be used during debugging to detect uninstalled interrupts
+    422          */
+
+   \                                 In section .text, align 4, keep-with-next
+    423          static void _DefaultIrqHandler(void) {
+    424            OS_U32 IrqSource;
+    425            IrqSource = _AIC_ISR;  /* detect source of uninstalled interrupt */
+   \                     _DefaultIrqHandler:
+   \   00000000   F700E0E3           MVN      R0,#+247
+   \   00000004   E00EC0E3           BIC      R0,R0,#0xE00
+   \   00000008   001090E5           LDR      R1,[R0, #+0]
+    426            while(IrqSource == _AIC_ISR);
+   \                     ??_DefaultIrqHandler_0:
+   \   0000000C   002090E5           LDR      R2,[R0, #+0]
+   \   00000010   020051E1           CMP      R1,R2
+   \   00000014   FCFFFF0A           BEQ      ??_DefaultIrqHandler_0
+    427          }
+   \   00000018   1EFF2FE1           BX       LR               ;; return
+    428          
+    429          /*********************************************************************
+    430          *
+    431          *       _SpuriousIrqHandler(), a dummy spurious IRQ handler
+    432          */
+
+   \                                 In section .bss, align 4
+    433          static OS_U32 _SpuriousIrqCnt;
+   \                     _SpuriousIrqCnt:
+   \   00000000                      DS8 4
+
+   \                                 In section .text, align 4, keep-with-next
+    434          static void _SpuriousIrqHandler(void) {
+    435            _SpuriousIrqCnt++;
+   \                     _SpuriousIrqHandler:
+   \   00000000   ........           LDR      R0,??DataTable5
+   \   00000004   001090E5           LDR      R1,[R0, #+0]
+   \   00000008   011081E2           ADD      R1,R1,#+1
+   \   0000000C   001080E5           STR      R1,[R0, #+0]
+    436          }
+   \   00000010   1EFF2FE1           BX       LR               ;; return
+    437          
+    438          /*********************************************************************
+    439          *
+    440          *       _OS_SystemIrqhandler()
+    441          *       the OS system interrupt, handles OS timer
+    442          */
+
+   \                                 In section .text, align 4, keep-with-next
+    443          static void _OS_SystemIrqhandler(void) {
+   \                     _OS_SystemIrqhandler:
+   \   00000000   00402DE9           PUSH     {LR}
+    444            volatile int Dummy;
+    445          
+    446            if (_PIT_SR & (1 << 0)) {  /* Timer interupt pending?            */
+   \   00000004   2400A0E3           MOV      R0,#+36
+   \   00000008   B00E80E3           ORR      R0,R0,#0xB00
+   \   0000000C   F00D10E5           LDR      R0,[R0, #-3568]
+   \   00000010   04D04DE2           SUB      SP,SP,#+4
+   \   00000014   010010E3           TST      R0,#0x1
+   \   00000018   0500000A           BEQ      ??_OS_SystemIrqhandler_0
+    447              Dummy = _PIT_PIVR;       /* Reset interrupt pending condition  */
+   \   0000001C   2800A0E3           MOV      R0,#+40
+   \   00000020   B00E80E3           ORR      R0,R0,#0xB00
+   \   00000024   F00D10E5           LDR      R0,[R0, #-3568]
+   \   00000028   00008DE5           STR      R0,[SP, #+0]
+    448              OS_HandleTick();         /* Call OS tick handler            */
+   \   0000002C   ........           BL       OS_TICK_Handle
+    449          #if DEBUG
+    450              DCC_Process();
+   \   00000030   ........           BL       JLINKDCC_Process
+    451          #endif
+    452            }
+    453            /* Call to following handlers may be removed if not used by application */
+    454            _HandlePmcIrq();
+   \                     ??_OS_SystemIrqhandler_0:
+   \   00000034   5C00A0E3           MOV      R0,#+92
+   \   00000038   A00E80E3           ORR      R0,R0,#0xA00
+   \   0000003C   5810A0E3           MOV      R1,#+88
+   \   00000040   F00D10E5           LDR      R0,[R0, #-3568]
+   \   00000044   A01E81E3           ORR      R1,R1,#0xA00
+   \   00000048   F01D11E5           LDR      R1,[R1, #-3568]
+   \   0000004C   000001E0           AND      R0,R1,R0
+   \   00000050   0D10A0E3           MOV      R1,#+13
+   \   00000054   701E81E3           ORR      R1,R1,#0x700
+   \   00000058   000011E1           TST      R1,R0
+   \   0000005C   0000000A           BEQ      ??_OS_SystemIrqhandler_1
+   \                     ??_OS_SystemIrqhandler_2:
+   \   00000060   FEFFFFEA           B        ??_OS_SystemIrqhandler_2
+    455            _HandleRttIrq();
+   \                     ??_OS_SystemIrqhandler_1:
+   \   00000064   B10EA0E3           MOV      R0,#+2832
+   \   00000068   1C10A0E3           MOV      R1,#+28
+   \   0000006C   F00D10E5           LDR      R0,[R0, #-3568]
+   \   00000070   B01E81E3           ORR      R1,R1,#0xB00
+   \   00000074   F01D11E5           LDR      R1,[R1, #-3568]
+   \   00000078   C00B00E2           AND      R0,R0,#0x30000
+   \   0000007C   031001E2           AND      R1,R1,#0x3
+   \   00000080   020011E3           TST      R1,#0x2
+   \   00000084   800B1013           TSTNE    R0,#0x20000
+   \   00000088   0000000A           BEQ      ??_OS_SystemIrqhandler_3
+   \                     ??_OS_SystemIrqhandler_4:
+   \   0000008C   FEFFFFEA           B        ??_OS_SystemIrqhandler_4
+   \                     ??_OS_SystemIrqhandler_3:
+   \   00000090   010011E3           TST      R1,#0x1
+   \   00000094   400B1013           TSTNE    R0,#0x10000
+   \   00000098   0000000A           BEQ      ??_OS_SystemIrqhandler_5
+   \                     ??_OS_SystemIrqhandler_6:
+   \   0000009C   FEFFFFEA           B        ??_OS_SystemIrqhandler_6
+    456            _HandleDbguIrq();
+   \                     ??_OS_SystemIrqhandler_5:
+   \   000000A0   EF00E0E3           MVN      R0,#+239
+   \   000000A4   D00EC0E3           BIC      R0,R0,#0xD00
+   \   000000A8   000090E5           LDR      R0,[R0, #+0]
+   \   000000AC   0410A0E3           MOV      R1,#+4
+   \   000000B0   F01D11E5           LDR      R1,[R1, #-3568]
+   \   000000B4   000001E0           AND      R0,R1,R0
+   \   000000B8   EF11A0E3           MOV      R1,#-1073741765
+   \   000000BC   6B1D81E3           ORR      R1,R1,#0x1AC0
+   \   000000C0   000011E1           TST      R1,R0
+   \   000000C4   0000000A           BEQ      ??_OS_SystemIrqhandler_7
+   \                     ??_OS_SystemIrqhandler_8:
+   \   000000C8   FEFFFFEA           B        ??_OS_SystemIrqhandler_8
+    457            _HandleRstcIrq();
+   \                     ??_OS_SystemIrqhandler_7:
+   \   000000CC   F800A0E3           MOV      R0,#+248
+   \   000000D0   A00E80E3           ORR      R0,R0,#0xA00
+   \   000000D4   F00D10E5           LDR      R0,[R0, #-3568]
+   \   000000D8   1010A0E3           MOV      R1,#+16
+   \   000000DC   401B81E3           ORR      R1,R1,#0x10000
+   \   000000E0   000001E0           AND      R0,R1,R0
+   \   000000E4   F410A0E3           MOV      R1,#+244
+   \   000000E8   A01E81E3           ORR      R1,R1,#0xA00
+   \   000000EC   F01D11E5           LDR      R1,[R1, #-3568]
+   \   000000F0   031001E2           AND      R1,R1,#0x3
+   \   000000F4   020011E3           TST      R1,#0x2
+   \   000000F8   400B1013           TSTNE    R0,#0x10000
+   \   000000FC   0000000A           BEQ      ??_OS_SystemIrqhandler_9
+   \                     ??_OS_SystemIrqhandler_10:
+   \   00000100   FEFFFFEA           B        ??_OS_SystemIrqhandler_10
+   \                     ??_OS_SystemIrqhandler_9:
+   \   00000104   010011E3           TST      R1,#0x1
+   \   00000108   10001013           TSTNE    R0,#0x10
+   \   0000010C   0000000A           BEQ      ??_OS_SystemIrqhandler_11
+   \                     ??_OS_SystemIrqhandler_12:
+   \   00000110   FEFFFFEA           B        ??_OS_SystemIrqhandler_12
+    458            _HandleWdtIrq();
+   \                     ??_OS_SystemIrqhandler_11:
+   \   00000114   3800A0E3           MOV      R0,#+56
+   \   00000118   B00E80E3           ORR      R0,R0,#0xB00
+   \   0000011C   F00D10E5           LDR      R0,[R0, #-3568]
+   \   00000120   030010E3           TST      R0,#0x3
+   \   00000124   0500000A           BEQ      ??_OS_SystemIrqhandler_13
+   \   00000128   3400A0E3           MOV      R0,#+52
+   \   0000012C   B00E80E3           ORR      R0,R0,#0xB00
+   \   00000130   F00D10E5           LDR      R0,[R0, #-3568]
+   \   00000134   400D10E3           TST      R0,#0x1000
+   \   00000138   0000000A           BEQ      ??_OS_SystemIrqhandler_13
+   \                     ??_OS_SystemIrqhandler_14:
+   \   0000013C   FEFFFFEA           B        ??_OS_SystemIrqhandler_14
+    459          }
+   \                     ??_OS_SystemIrqhandler_13:
+   \   00000140   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000144   0080BDE8           POP      {PC}             ;; return
+    460          
+    461          /*********************************************************************
+    462          *
+    463          *       _InitAIC()
+    464          *
+    465          *       Initialize interupt controller by setting default vectors
+    466          *       and clearing all interrupts
+    467          */
+    468          static void _InitAIC(void) {
+    469            int  i;
+    470            OS_ISR_HANDLER** papISR;
+    471          
+    472            _AIC_IDCR = 0xFFFFFFFF;                     /* Disable all interrupts     */
+    473            _AIC_ICCR = 0xFFFFFFFF;                     /* Clear all interrupts       */
+    474            _AIC_FFDR = 0xFFFFFFFF;                     /* Reset fast forcings        */
+    475            _AIC_SVR0 = (int) _DefaultFiqHandler;       /* dummy FIQ handler          */
+    476            _AIC_SPU  = (int) _SpuriousIrqHandler ;     /* dummy spurious handler     */
+    477            papISR = (OS_ISR_HANDLER**) _AIC_SVR_BASE_ADDR;
+    478            for (i = 1; i < _NUM_INT_SOURCES; i++)  {   /* initially set all sources  */
+    479              *(papISR + i) = &_DefaultIrqHandler;      /* to dummy irq handler       */
+    480            }
+    481            for (i = 0; i < _NUM_INT_PRIORITIES; i++) {
+    482              _AIC_EOICR = 0;                           /* Reset interrupt controller */
+    483            }
+    484          #if DEBUG  // For debugging activate AIC protected mode
+    485            _AIC_DCR |= 0x01;  // Enable AIC protected mode
+    486          #endif
+    487          }
+    488          
+    489          /*********************************************************************
+    490          *
+    491          *       _InitFlash
+    492          *
+    493          * Function description
+    494          *   Initialize wait states and BUS interface for external Flash access
+    495          *   Needs to be called before main clock is switched to high speed
+    496          *   Depends on specific hardware and has to be implemented by user.
+    497          */
+    498          static void _InitFlash(void) {
+    499          }
+    500          
+    501          /*********************************************************************
+    502          *
+    503          *       _InitClocks
+    504          *
+    505          * Function description
+    506          *   Initialize main clock and PLLs
+    507          *
+    508          * NOTES: (1) Settings used here are for AT91SAM9261-EK eval board
+    509          *            and may have to be modified for other target board or frequency
+    510          */
+    511          static void _InitClocks(OS_U32 PLLA_Val, OS_U32 PLLB_Val, OS_U32 MCKR_Val) {
+    512            //
+    513            // Enable main clock OSC and wait until clock is stable
+    514            //
+    515            _PMC_MOR = ((48/8) << 8) + 0x01; // Startup time = 48 slow clocks, Main oscillator enable
+    516            while ((_PMC_SR & _PMC_MOSCS) == 0) {
+    517            }
+    518            //
+    519            // Initialize PLL A for Main clock
+    520            //
+    521            _PMC_CKGR_PLLAR = PLLA_Val;              // Setup PLL A
+    522            //
+    523            // Wait until PLLA locks
+    524            //
+    525            while((_PMC_SR & _PMC_LOCKA) == 0) {
+    526            }
+    527            //
+    528            // Wait until the master clock is stable
+    529            //
+    530            while((_PMC_SR & _PMC_MCKRDY) == 0) {
+    531            }
+    532            //
+    533            // Initialize PLL B for USB clock
+    534            //
+    535            _PMC_CKGR_PLLBR = PLLB_Val;         // Setup PLL B
+    536            //
+    537            // Wait until PLLB locks
+    538            //
+    539            while((_PMC_SR & _PMC_LOCKB) == 0)  {
+    540            }
+    541            //
+    542            // Wait until the master clock is stable
+    543            //
+    544            while ((_PMC_SR & _PMC_MCKRDY) == 0) {
+    545            }
+    546            //
+    547            // Select PLL A clock as clock source
+    548            //
+    549            _PMC_MCKR = MCKR_Val;
+    550            //
+    551            // Wait until the master clock is stable */
+    552            //
+    553            while((_PMC_SR & _PMC_MCKRDY) == 0) {
+    554            }
+    555          }
+    556          
+    557          /*********************************************************************
+    558          *
+    559          *       _InitSDRAM
+    560          *
+    561          * Function description
+    562          *   Initialize SDRAM controller
+    563          *
+    564          * NOTE: Settings used here are for AT91SAM9261-EK eval board
+    565          *       and may have to be modified for other target boards
+    566          */
+    567          static void _InitSDRAM(void) {
+    568            volatile int i;
+    569            //
+    570            // Setup bus interface for SDRAM if not already initialized
+    571            //
+    572            if ((_MATRIX_EBICSA & (1 << 1)) == 0) {
+    573              //
+    574              // Activate CS1 for SDRAM
+    575              //
+    576              _MATRIX_EBICSA |=  (1 << 1)    // Activate CS1 for SDRAM
+    577                               | (1 << 16)   // Memory is powered from 3.3V
+    578                              ;
+    579              //
+    580              // Setup PIO for SDRAM
+    581              //
+    582              _PMC_PCER |= (1 << 3);         // Enable peripheral clock for PIOB
+    583              _PIOB_MDDR = 0xFFFF0000;       // Disable Multi driver for data lines on PIOB
+    584              _PIOB_ASR  = 0xFFFF0000;       // Upper 16 lines are data lines for SDRAM
+    585              _PIOB_PDR  = 0xFFFF0000;       // Disable PIO for upper 16 bits
+    586              //
+    587              // Initialize SDRAM controller
+    588              //
+    589              _SDRAMC_MR     = _SDRAMC_MODE_NOP_CMD;  // Output one NOP via mode register
+    590              //
+    591              // Setup refresh timer. We assume one refresh cycle every 7.81 micro seconds.
+    592              // If SDRAM runs with other refresh rates (for example 15.61 us), this may be changed
+    593              //
+    594              _SDRAMC_TR     = (781 * (OS_FSYS / 2000)) / 100000;
+    595              _SDRAMC_TR     = (1562 * (OS_FSYS / 2000)) / 100000;
+    596          
+    597              _SDRAMC_CR     = 0x01          // 9 Column bits
+    598                             |(0x02 << 2)    // 13 Rows
+    599                             |(0x01 << 4)    // 4 Banks
+    600                             |(0x02 << 5)    // 2 CAS cycles
+    601                             |(0x00 << 7)    // 32 bit Data BUS
+    602                             |(0x02 << 8)    // 2 write recovery cycles
+    603                             |(0x07 << 12)   // 7 RAS cycles
+    604                             |(0x02 << 16)   // 2 RAS precharge time cycles
+    605                             |(0x02 << 20)   // 2 cycles RAS to CAS delay
+    606                             |(0x05 << 24)   // 5 cycles RAS active time
+    607                             |(0x08 << 28)   // 8 cycles command recovery time
+    608                             ;
+    609          
+    610          
+    611              _SDRAMC_LPR    = 0;            // Reset Low Power register
+    612              _SDRAMC_MDR    = 0;            // Set Memory device register to SDRAM device
+    613              //
+    614              // Delay at least 200 us
+    615              //
+    616              for (i = 0; i < 10000; i++) {  // Delay
+    617              }
+    618              *(volatile int*) (SDRAM_BASE_ADDR) = 0x0;       // Output a NOP to SDRAM
+    619              for (i = 0; i < 10000; i++) {  // Delay
+    620              }
+    621              //
+    622              // Perform a "precharge All" sequence
+    623              //
+    624              _SDRAMC_MR     = _SDRAMC_MODE_PRCGALL_CMD;
+    625              *(volatile int*) (SDRAM_BASE_ADDR) = 0x1;       // Write to SDRAM
+    626              //
+    627              // Perform 8 auto-refresh (CBR) cycles.
+    628              //
+    629              _SDRAMC_MR = _SDRAMC_MODE_RFSH_CMD;      // Set mode
+    630              for (i = 0; i < 8; i++) {                // Auto-Refresh, 8 times
+    631                *(volatile int*) SDRAM_BASE_ADDR = i;  // Dummy write
+    632              }
+    633              //
+    634              // Issue a mode register cycle
+    635              //
+    636              _SDRAMC_MR     = _SDRAMC_MODE_LMR_CMD;
+    637              *(volatile int*) (SDRAM_BASE_ADDR) = 0x55555555;   // Write to SDRAM, the value does not care
+    638              //
+    639              // Finally set controller to normal mode and perform a dummy write to any location
+    640              //
+    641              _SDRAMC_MR     = _SDRAMC_MODE_NORMAL_CMD;
+    642              *(volatile int*) (SDRAM_BASE_ADDR) = 0xababcafe;   // Write to SDRAM, the value does not care
+    643            }
+    644          }
+    645          
+    646          /*********************************************************************
+    647          *
+    648          *       _InitSMC
+    649          *
+    650          * Function description
+    651          *   Initialize static memory controller
+    652          *
+    653          * NOTE: Settings used here are for AT91SAM9261-EK eval board
+    654          *       and enable access to external Ethernet controller
+    655          */
+    656          static void _InitSMC(void) {
+    657            #define   NRD_PULSE_2     (3)
+    658            #define   NWR_PULSE_2     (3)
+    659            #define   NRD_SETUP_2     (1)
+    660            #define   NWR_SETUP_2     (1)
+    661            #define   NCS_RD_SETUP_2  (0)
+    662            #define   NCS_WR_SETUP_2  (0)
+    663            #define   NCS_RD_PULSE_2  (NRD_SETUP_2 + NRD_PULSE_2 + 1 - NCS_RD_SETUP_2)
+    664            #define   NCS_WR_PULSE_2  (NWR_SETUP_2 + NWR_PULSE_2 + 1 - NCS_WR_SETUP_2)
+    665            #define   NRD_HOLD_2      (8)
+    666            #define   NWR_HOLD_2      (9)
+    667            _SMC_SETUP2 = (NCS_RD_SETUP_2 << 24)
+    668                        | (NRD_SETUP_2 << 16)
+    669                        | (NCS_WR_SETUP_2 << 8)
+    670                        | (NWR_SETUP_2 << 0)
+    671                        ;
+    672          
+    673            _SMC_PULSE2 = (NCS_RD_PULSE_2 << 24)
+    674                        | (NRD_PULSE_2 << 16)
+    675                        | (NCS_WR_PULSE_2 << 8)
+    676                        | (NWR_PULSE_2 << 0)
+    677                        ;
+    678          
+    679            _SMC_CYCLE2 = ((NRD_SETUP_2 + NRD_PULSE_2 + NRD_HOLD_2) << 16)  // NRD_SETUP + NRD_PULSE + NRD_HOLD
+    680                        | ((NWR_SETUP_2 + NWR_PULSE_2 + NWR_HOLD_2) << 0)   // NWR_SETUP + WWR_PULSE + NWR_HOLD
+    681                        ;
+    682            _SMC_MODE2  = 0x0000
+    683                        | (1 << 12)      // 16bit bus width
+    684                        | (1 << 8)       // Enable BAT mode for write access
+    685                        | (0 << 4)       // Disable NWAIT mode (not connected)
+    686                        | (1 << 1)       // Set WRITE_MODE for write cycles (write controlled)
+    687                        | (1 << 0)       // Set READ_MODE for read cycles (read controlled)
+    688                        ;
+    689          }
+    690          
+    691          /*********************************************************************
+    692          *
+    693          *       Global functions
+    694          *
+    695          **********************************************************************
+    696          */
+    697          
+    698          /*********************************************************************
+    699          *
+    700          *       OS_InitHW()
+    701          *
+    702          *       Initialize the hardware (timer) required for the OS to run.
+    703          *       May be modified, if an other timer should be used
+    704          */
+    705          #define OS_TIMER_RELOAD ((OS_PCLK_TIMER/OS_TIMER_PRESCALE/OS_TICK_FREQ) - 1)
+    706          #if (OS_TIMER_RELOAD >= 0x00100000)
+    707            #error "PIT timer can not be used, please check configuration"
+    708          #endif
+    709          
+
+   \                                 In section .text, align 4, keep-with-next
+    710          void OS_InitHW(void) {
+   \                     OS_InitHW:
+   \   00000000   00402DE9           PUSH     {LR}
+    711            OS_DI();
+   \   00000004   00000FE1           MRS      R0,CPSR
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   800080E3           ORR      R0,R0,#0x80
+   \   00000010   00F021E1           MSR      CPSR_c,R0
+    712            /* Initialize PIT as OS timer, enable timer + timer interrupt */
+    713            _PIT_MR = ((OS_TIMER_RELOAD & 0x000FFFFF) | (1 << 25) | (1 << 24));
+   \   00000014   AC00A0E3           MOV      R0,#+172
+   \   00000018   ........           LDR      R1,??DataTable5_1  ;; 0x3001869
+   \   0000001C   C00E80E3           ORR      R0,R0,#0xC00
+   \   00000020   7C1F00E5           STR      R1,[R0, #-3964]
+    714            OS_ARM_InstallISRHandler(_SYSTEM_IRQ_ID, _OS_SystemIrqhandler);
+   \   00000024   00000FE1           MRS      R0,CPSR
+   \   00000028   800080E3           ORR      R0,R0,#0x80
+   \   0000002C   00F021E1           MSR      CPSR_c,R0
+   \   00000030   7B00E0E3           MVN      R0,#+123
+   \   00000034   ........           LDR      R1,??DataTable5_2
+   \   00000038   F00EC0E3           BIC      R0,R0,#0xF00
+   \   0000003C   001080E5           STR      R1,[R0, #+0]
+   \   00000040   ........           BL       OS_RestoreI
+    715            OS_ARM_EnableISR(_SYSTEM_IRQ_ID);
+   \   00000044   00000FE1           MRS      R0,CPSR
+   \   00000048   800080E3           ORR      R0,R0,#0x80
+   \   0000004C   00F021E1           MSR      CPSR_c,R0
+   \   00000050   9C00A0E3           MOV      R0,#+156
+   \   00000054   0210A0E3           MOV      R1,#+2
+   \   00000058   7C1F00E5           STR      R1,[R0, #-3964]
+   \   0000005C   ........           BL       OS_RestoreI
+    716            OS_COM_Init();
+    717            OS_RestoreI();
+   \   00000060   04D08DE2           ADD      SP,SP,#+4
+   \   00000064   0040BDE8           POP      {LR}
+   \   00000068   ........           B        OS_RestoreI      ;; tailcall
+    718          }
+    719          
+    720          /*********************************************************************
+    721          *
+    722          *       Idle loop  (OS_Idle)
+    723          *
+    724          *       Please note:
+    725          *       This is basically the "core" of the idle loop.
+    726          *       This core loop can be changed, but:
+    727          *       The idle loop does not have a stack of its own, therefore no
+    728          *       functionality should be implemented that relies on the stack
+    729          *       to be preserved. However, a simple program loop can be programmed
+    730          *       (like toggeling an output or incrementing a counter)
+    731          */
+
+   \                                 In section .text, align 4, keep-with-next
+    732          void OS_Idle(void) {         /* Idle loop: No task is ready to exec */
+    733            while (1) {
+   \                     OS_Idle:
+   \                     ??OS_Idle_0:
+   \   00000000   FEFFFFEA           B        ??OS_Idle_0
+    734            }
+    735          }
+    736          
+    737          /*********************************************************************
+    738          *
+    739          *       Get time [cycles]
+    740          *
+    741          *       This routine is required for task-info via OSView or high
+    742          *       resolution time maesurement functions.
+    743          *       It returns the system time in timer clock cycles.
+    744          */
+
+   \                                 In section .text, align 4, keep-with-next
+    745          OS_U32 OS_GetTime_Cycles(void) {
+    746            unsigned int t_cnt;
+    747            OS_U32 time ;
+    748          
+    749            t_cnt = _PIT_PIIR;           /* Read current timer value   */
+   \                     OS_GetTime_Cycles:
+   \   00000000   C300E0E3           MVN      R0,#+195
+   \   00000004   800FC0E3           BIC      R0,R0,#0x200
+    750            time  = OS_GetTime32();      /* Read current OS time    */
+   \   00000008   ........           LDR      R1,??DataTable5_3
+   \   0000000C   000090E5           LDR      R0,[R0, #+0]
+    751            if (t_cnt & 0xFFF00000) {    /* Timer Interrupt pending ?  */
+   \   00000010   F024A0E3           MOV      R2,#-268435456
+   \   00000014   1C1091E5           LDR      R1,[R1, #+28]
+   \   00000018   FF2682E3           ORR      R2,R2,#0xFF00000
+   \   0000001C   000012E1           TST      R2,R0
+    752              time  += (t_cnt >> 20);    /* Adjust result              */
+   \   00000020   201A8110           ADDNE    R1,R1,R0, LSR #+20
+    753              t_cnt &= 0x000FFFFF;
+   \   00000024   0006A011           LSLNE    R0,R0,#+12
+    754            }
+    755            return (OS_TIMER_RELOAD * time) + t_cnt;
+   \   00000028   6920A0E3           MOV      R2,#+105
+   \   0000002C   2006A011           LSRNE    R0,R0,#+12
+   \   00000030   602D82E3           ORR      R2,R2,#0x1800
+   \   00000034   920120E0           MLA      R0,R2,R1,R0
+   \   00000038   1EFF2FE1           BX       LR               ;; return
+    756          }
+    757          
+    758          /*********************************************************************
+    759          *
+    760          *       OS_ConvertCycles2us
+    761          *
+    762          *       Convert Cycles into micro seconds.
+    763          *
+    764          *       If your clock frequency is not a multiple of 1 MHz,
+    765          *       you may have to modify this routine in order to get proper
+    766          *       diagonstics.
+    767          *
+    768          *       This routine is required for profiling or high resolution time
+    769          *       measurement only. It does not affect operation of the OS.
+    770          */
+
+   \                                 In section .text, align 4, keep-with-next
+    771          OS_U32 OS_ConvertCycles2us(OS_U32 Cycles) {
+    772            Cycles *= 16;   /* eliminate effect of prescaler which is fixed to 16 */
+    773            return Cycles/(OS_FSYS/1000000);
+   \                     OS_ConvertCycles2us:
+   \   00000000   ........           LDR      R2,??DataTable5_4  ;; 0xa3d70a3e
+   \   00000004   0002A0E1           LSL      R0,R0,#+4
+   \   00000008   902281E0           UMULL    R2,R1,R0,R2
+   \   0000000C   A103A0E1           LSR      R0,R1,#+7
+   \   00000010   1EFF2FE1           BX       LR               ;; return
+    774          }
+    775          
+    776          /*********************************************************************
+    777          *
+    778          *       Communication for OSView via UART (optional)
+    779          *
+    780          **********************************************************************
+    781          */
+    782          #if OS_UART_USED
+    783            #if (OS_UART == 0)
+    784              #define _PIO_US_BASE_ADDR     (_PIOA_BASE_ADDR)
+    785              #define _OS_UART_BASE_ADDR    (_USART0_BASE_ADDR)
+    786              #define OS_UART_ID           (_US0IRQ_ID)
+    787              #define OS_UART_RX_PIN       (7)
+    788              #define OS_UART_TX_PIN       (6)
+    789            #elif (OS_UART == 1)
+    790              #define _PIO_US_BASE_ADDR     (_PIOA_BASE_ADDR)
+    791              #define _OS_UART_BASE_ADDR    (_USART1_BASE_ADDR)
+    792              #define OS_UART_ID            (_US1IRQ_ID)
+    793              #define OS_UART_RX_PIN        (12)
+    794              #define OS_UART_TX_PIN        (11)
+    795            #elif (OS_UART == 2)
+    796              #define _PIO_US_BASE_ADDR     (_PIOA_BASE_ADDR)
+    797              #define _OS_UART_BASE_ADDR    (_USART2_BASE_ADDR)
+    798              #define OS_UART_ID            (_US2IRQ_ID)
+    799              #define OS_UART_RX_PIN        (14)
+    800              #define OS_UART_TX_PIN        (13)
+    801            #endif
+    802          
+    803            #define _PIO_US_PDR  (*(volatile OS_U32*)(_PIO_US_BASE_ADDR + 0x04)) // PIO disable register
+    804            #define _PIO_US_ASR  (*(volatile OS_U32*)(_PIO_US_BASE_ADDR + 0x70)) // PIO peripheral "A" select register
+    805            #define _PIO_US_BSR  (*(volatile OS_U32*)(_PIO_US_BASE_ADDR + 0x74)) // PIO peripheral "B" select register
+    806          
+    807            #define PIO_PDR_USART ((1 << OS_UART_RX_PIN) | (1 << OS_UART_TX_PIN))
+    808          
+    809            #define _US_CR   (*(volatile OS_U32*)(_OS_UART_BASE_ADDR + 0x00))
+    810            #define _US_MR   (*(volatile OS_U32*)(_OS_UART_BASE_ADDR + 0x04))
+    811            #define _US_IER  (*(volatile OS_U32*)(_OS_UART_BASE_ADDR + 0x08))
+    812            #define _US_IDR  (*(volatile OS_U32*)(_OS_UART_BASE_ADDR + 0x0c))
+    813            #define _US_IMR  (*(volatile OS_U32*)(_OS_UART_BASE_ADDR + 0x10))
+    814            #define _US_CSR  (*(volatile OS_U32*)(_OS_UART_BASE_ADDR + 0x14))
+    815            #define _US_RHR  (*(volatile OS_U32*)(_OS_UART_BASE_ADDR + 0x18))
+    816            #define _US_THR  (*(volatile OS_U32*)(_OS_UART_BASE_ADDR + 0x1c))
+    817            #define _US_BRGR (*(volatile OS_U32*)(_OS_UART_BASE_ADDR + 0x20))
+    818            #define _US_RTOR (*(volatile OS_U32*)(_OS_UART_BASE_ADDR + 0x24))
+    819            #define _US_TTGR (*(volatile OS_U32*)(_OS_UART_BASE_ADDR + 0x28))
+    820          
+    821            #define _US_TPR  (*(volatile OS_U32*)(_OS_UART_BASE_ADDR + 0x108))
+    822            #define _US_TCR  (*(volatile OS_U32*)(_OS_UART_BASE_ADDR + 0x10c))
+    823            #define _US_PTCR (*(volatile OS_U32*)(_OS_UART_BASE_ADDR + 0x120))
+    824          
+    825            #define US_RXRDY   (1 << 0)         /* Rx status flag                  */
+    826            #define US_TXRDY   (1 << 1)         /* Tx RDY Status flag              */
+    827            #define US_TXEMPTY (1 << 9)         /* Tx EMPTY Status flag            */
+    828            #define US_ENDTX   (1 << 4)         /* Tx end flag                     */
+    829            #define USART_RX_ERROR_FLAGS (0xE0) /* Parity, framing, overrun error  */
+    830          
+    831            #define OS_UART_PRIO    (0x00)      /* Lowest priority for UART interrupts */
+    832            #define US_TX_INT_FLAG  (US_TXRDY)
+    833          
+    834          /*********************************************************************
+    835          *
+    836          *       OS_COM_ISR_Usart() OS USART interrupt handler
+    837          *       handles both, Rx and Tx interrupt
+    838          */
+    839          static void OS_COM_ISR_Usart(void) {
+    840            int UsartStatus;
+    841            volatile int Dummy;
+    842          
+    843            UsartStatus = _US_CSR;                   /* Examine status register */
+    844            do {
+    845              if (UsartStatus & US_RXRDY) {          /* Data received?          */
+    846                if (UsartStatus & USART_RX_ERROR_FLAGS) {  /* Any error ?       */
+    847                  Dummy = _US_RHR;                   /* => Discard data         */
+    848                  _US_CR = (1 << 8);                 /* RSTSTA: Reset Status Bits PARE, FRAME, OVRE and RXBRK */
+    849                } else {
+    850                  OS_OnRx(_US_RHR);                  /* Process actual byte     */
+    851                }
+    852              }
+    853              if (UsartStatus & _US_IMR & US_TX_INT_FLAG) { /* Check Tx status => Send next character */
+    854                if (OS_OnTx()) {                     /* No more characters to send ?  */
+    855                  _US_IDR = US_TX_INT_FLAG;          /* Disable further tx interrupts */
+    856                }
+    857              }
+    858              UsartStatus = _US_CSR;                 /* Examine current status  */
+    859            } while (UsartStatus & _US_IMR & (US_TX_INT_FLAG | US_RXRDY));
+    860          }
+    861          
+    862          /*********************************************************************
+    863          *
+    864          *       OS_COM_Send1()
+    865          *       Never call this function directly from your application
+    866          */
+    867          void OS_COM_Send1(OS_U8 c) {
+    868            while((_US_CSR & US_TX_INT_FLAG) == 0) { // Wait until THR becomes available
+    869            }
+    870            _US_THR = c;
+    871            _US_IER  = US_TX_INT_FLAG; /* enable Tx interrupt */
+    872          }
+    873          
+    874          /*********************************************************************
+    875          *
+    876          *       OS_COM_Init()
+    877          *       Initialize UART for OSView
+    878          */
+    879          void OS_COM_Init(void) {             /* Initialize UART, enable UART interrupts */
+    880            _PMC_PCER  = (1 << OS_UART_ID);    /* Enable peripheral clock for selected USART */
+    881            _PIO_US_PDR  = PIO_PDR_USART;      /* Enable peripheral output signals on PIO for USART (disable PIO Port) */
+    882            _PIO_US_ASR  = PIO_PDR_USART;      /* Select "A" peripherals on PIO for USART (USART Rx, TX) */
+    883            _PIO_US_BSR  = 0;                  /* Deselct "B" peripherals on PIO for USART */
+    884            _US_CR   = (1 <<  2) |             /* RSTRX: Reset Receiver: 1 = The receiver logic is reset. */
+    885                       (1 <<  3)               /* RSTTX: Reset Transmitter: 1 = The transmitter logic is reset. */
+    886                     ;
+    887            _US_CR   = (0 <<  2) |             /* RSTRX: Reset Receiver: 1 = The receiver logic is reset. */
+    888                       (0 <<  3) |             /* RSTTX: Reset Transmitter: 1 = The transmitter logic is reset. */
+    889                       (1 <<  4) |             /* RXEN: Receiver Enable: 1 = The receiver is enabled if RXDIS is 0. */
+    890                       (0 <<  5) |             /* RXDIS: Receiver Disable: 0 = Noeffect. */
+    891                       (1 <<  6) |             /* TXEN: Transmitter Enable: 1 = The transmitter is enabled if TXDIS is 0. */
+    892                       (0 <<  7) |             /* TXDIS: Transmitter Disable: 0 = Noeffect. */
+    893                       (1 <<  8) |             /* RSTSTA: Reset Status Bits: 1 = Resets the status bits PARE, FRAME, OVRE and RXBRK in the US_CSR. */
+    894                       (0 <<  9) |             /* STTBRK: Start Break: 0 = Noeffect. */
+    895                       (0 << 10) |             /* STPBRK: Stop Break: 0 = Noeffect. */
+    896                       (0 << 11) |             /* STTTO: Start Time-out: 0 = Noeffect. */
+    897                       (0 << 12)               /* SENDA: Send Address: 0 = Noeffect. */
+    898                     ;
+    899            _US_MR   = (0 <<  4) |             /* USCLKS: Clock Selection: 0 = MCK */
+    900                       (3 <<  6) |             /* CHRL: Character Length: 3 = Eight bits */
+    901                       (0 <<  8) |             /* SYNC: Synchronous Mode Select: 0 = USART operates in Asynchronous Mode. */
+    902                     (0x4 <<  9) |             /* PAR: Parity Type: 0x4 = No parity */
+    903                       (0 << 12) |             /* NBSTOP: Number of Stop Bits: 0 = 1 stop bit */
+    904                       (0 << 14) |             /* CHMODE: Channel Mode: 0 = Normal mode */
+    905                       (0 << 17) |             /* MODE9: 9-bit Character Length: 0 = CHRL defines character length. */
+    906                       (0 << 18)               /* CKLO: Clock Output Select: 0 = The USART does not drive the SCK pin. */
+    907                     ;
+    908            _US_BRGR = (OS_PCLK_UART / (OS_BAUDRATE * 16));
+    909            _US_IDR  = 0xFFFFFFFF;             /* Disable all interrupts     */
+    910            _US_IER  = (1 << 0) |              /* Enable Rx Interrupt        */
+    911                       (0 << 1);               /* Do not Enable Tx Interrupt */
+    912            /* Setup interrupt controller for OS USART */
+    913            OS_ARM_InstallISRHandler(OS_UART_ID, &OS_COM_ISR_Usart);  /* OS UART interrupt handler vector */
+    914            OS_ARM_ISRSetPrio(OS_UART_ID, OS_UART_PRIO);              /* Level sensitive, selected priority. */
+    915            _AIC_ICCR = (1 << OS_UART_ID);                            /* Clear OS usart interrupt.        */
+    916            OS_ARM_EnableISR(OS_UART_ID);                             /* Enable OS usart interrupts       */
+    917          }
+    918          
+    919          #else  /* selected UART not supported, using dummies */
+    920          
+
+   \                                 In section .text, align 4, keep-with-next
+    921          void OS_COM_Init(void) {}
+   \                     OS_COM_Init:
+   \   00000000   1EFF2FE1           BX       LR               ;; return
+
+   \                                 In section .text, align 4, keep-with-next
+    922          void OS_COM_Send1(OS_U8 c) {
+    923            OS_USEPARA(c);           /* avoid compiler warning */
+    924            OS_COM_ClearTxActive();  /* let the OS know that Tx is not busy */
+   \                     OS_COM_Send1:
+   \   00000000   ........           B        OS_COM_ClearTxActive  ;; tailcall
+    925          }
+    926          
+    927          #endif /*  OS_UART_USED  */
+    928          
+    929          /****** Final check of configuration ********************************/
+    930          
+    931          #ifndef OS_UART_USED
+    932            #error "OS_UART_USED has to be defined"
+    933          #endif
+    934          
+    935          /*********************************************************************
+    936          *
+    937          *       OS interrupt handler and ISR specific functions
+    938          *
+    939          **********************************************************************
+    940          */
+    941          
+    942          /*********************************************************************
+    943          *
+    944          *       OS_irq_handler
+    945          *
+    946          *       Detect reason for IRQ and call correspondig service routine.
+    947          *       OS_irq_handler is called from OS_IRQ_SERVICE function
+    948          *       found in RTOSVect.asm
+    949          */
+
+   \                                 In section .text, align 4, keep-with-next
+    950          OS_INTERWORK void OS_irq_handler(void) {
+   \                     OS_irq_handler:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+    951            OS_ISR_HANDLER* pISR;
+    952            pISR = (OS_ISR_HANDLER*) _AIC_IVR;   // Read interrupt vector to release NIRQ to CPU core
+   \   00000004   FF00E0E3           MVN      R0,#+255
+   \   00000008   E00EC0E3           BIC      R0,R0,#0xE00
+   \   0000000C   004090E5           LDR      R4,[R0, #+0]
+   \   00000010   ........           LDR      R5,??DataTable5_5
+    953          #if DEBUG
+    954            _AIC_IVR = (OS_U32) pISR;            // Write back any value to IVR register to allow interrupt stacking in protected mode
+   \   00000014   004080E5           STR      R4,[R0, #+0]
+    955          #endif
+    956          #if ALLOW_NESTED_INTERRUPTS
+    957            OS_EnterNestableInterrupt();         // Now interrupts may be reenabled. If nesting should be allowed
+    958          #else
+    959            OS_EnterInterrupt();                 // Inform OS that interrupt handler is running
+   \   00000018   0000D5E5           LDRB     R0,[R5, #+0]
+   \   0000001C   010080E2           ADD      R0,R0,#+1
+   \   00000020   0000C5E5           STRB     R0,[R5, #+0]
+   \   00000024   ........           BL       OS_AssertCPUInISRMode
+   \   00000028   ........           LDR      R6,??DataTable5_3
+   \   0000002C   0000D6E5           LDRB     R0,[R6, #+0]
+   \   00000030   010080E2           ADD      R0,R0,#+1
+   \   00000034   0000C6E5           STRB     R0,[R6, #+0]
+   \   00000038   0100D6E5           LDRB     R0,[R6, #+1]
+   \   0000003C   010080E2           ADD      R0,R0,#+1
+   \   00000040   0100C6E5           STRB     R0,[R6, #+1]
+    960          #endif
+    961            pISR();                              // Call interrupt service routine
+   \   00000044   34FF2FE1           BLX      R4
+    962            OS_DI();                             // Disable interrupts and unlock
+   \   00000048   00000FE1           MRS      R0,CPSR
+   \   0000004C   800080E3           ORR      R0,R0,#0x80
+   \   00000050   00F021E1           MSR      CPSR_c,R0
+    963            _AIC_EOICR = 0;                      // interrupt controller =>  Restore previous priority
+   \   00000054   3000A0E3           MOV      R0,#+48
+   \   00000058   0010A0E3           MOV      R1,#+0
+   \   0000005C   001F00E5           STR      R1,[R0, #-3840]
+    964          #if ALLOW_NESTED_INTERRUPTS
+    965            OS_LeaveNestableInterrupt();         // Leave nestable interrupt, perform task switch if required
+    966          #else
+    967            OS_LeaveInterrupt();                 // Leave interrupt, perform task switch if required
+   \   00000060   0000D5E5           LDRB     R0,[R5, #+0]
+   \   00000064   011040E2           SUB      R1,R0,#+1
+   \   00000068   0010C5E5           STRB     R1,[R5, #+0]
+   \   0000006C   000050E3           CMP      R0,#+0
+   \   00000070   0100001A           BNE      ??OS_irq_handler_0
+   \   00000074   9800A0E3           MOV      R0,#+152
+   \   00000078   ........           BL       OS_Error
+   \                     ??OS_irq_handler_0:
+   \   0000007C   0100D6E5           LDRB     R0,[R6, #+1]
+   \   00000080   010040E2           SUB      R0,R0,#+1
+   \   00000084   0100C6E5           STRB     R0,[R6, #+1]
+   \   00000088   0000D6E5           LDRB     R0,[R6, #+0]
+   \   0000008C   010050E3           CMP      R0,#+1
+   \   00000090   0400001A           BNE      ??OS_irq_handler_1
+   \   00000094   041096E5           LDR      R1,[R6, #+4]
+   \   00000098   000051E3           CMP      R1,#+0
+   \   0000009C   0100000A           BEQ      ??OS_irq_handler_1
+   \   000000A0   7040BDE8           POP      {R4-R6,LR}
+   \   000000A4   ........           B        OS_SwitchFromInt  ;; tailcall
+   \                     ??OS_irq_handler_1:
+   \   000000A8   010040E2           SUB      R0,R0,#+1
+   \   000000AC   0000C6E5           STRB     R0,[R6, #+0]
+    968          #endif
+    969          }
+   \   000000B0   7080BDE8           POP      {R4-R6,PC}       ;; return
+    970          
+    971          /*********************************************************************
+    972          *
+    973          *       OS_ARM_InstallISRHandler
+    974          */
+
+   \                                 In section .text, align 4, keep-with-next
+    975          OS_ISR_HANDLER* OS_ARM_InstallISRHandler (int ISRIndex, OS_ISR_HANDLER* pISRHandler) {
+   \                     OS_ARM_InstallISRHandler:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+    976            OS_ISR_HANDLER*  pOldHandler;
+    977            OS_ISR_HANDLER** papISR;
+    978          
+    979          #if DEBUG
+    980            if ((unsigned)ISRIndex >= _NUM_INT_SOURCES) {
+   \   00000004   200050E3           CMP      R0,#+32
+   \   00000008   0300003A           BCC      ??OS_ARM_InstallISRHandler_0
+    981              OS_Error(OS_ERR_ISR_INDEX);
+   \   0000000C   6400A0E3           MOV      R0,#+100
+   \   00000010   ........           BL       OS_Error
+    982              return NULL;
+   \   00000014   0000A0E3           MOV      R0,#+0
+   \   00000018   1080BDE8           POP      {R4,PC}
+    983            }
+    984          #endif
+    985            OS_DI();
+   \                     ??OS_ARM_InstallISRHandler_0:
+   \   0000001C   00200FE1           MRS      R2,CPSR
+   \   00000020   802082E3           ORR      R2,R2,#0x80
+   \   00000024   02F021E1           MSR      CPSR_c,R2
+    986            papISR = (OS_ISR_HANDLER**)_AIC_SVR_BASE_ADDR;
+    987            pOldHandler          = *(papISR + ISRIndex);
+   \   00000028   0021A0E1           LSL      R2,R0,#+2
+   \   0000002C   804F12E5           LDR      R4,[R2, #-3968]
+    988            *(papISR + ISRIndex) = pISRHandler;
+   \   00000030   0001A0E1           LSL      R0,R0,#+2
+   \   00000034   801F00E5           STR      R1,[R0, #-3968]
+    989            OS_RestoreI();
+   \   00000038   ........           BL       OS_RestoreI
+    990            return pOldHandler;
+   \   0000003C   0400A0E1           MOV      R0,R4
+   \   00000040   1080BDE8           POP      {R4,PC}          ;; return
+    991          }
+    992          
+    993          /*********************************************************************
+    994          *
+    995          *       OS_ARM_EnableISR
+    996          */
+
+   \                                 In section .text, align 4, keep-with-next
+    997          void OS_ARM_EnableISR(int ISRIndex) {
+   \                     OS_ARM_EnableISR:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+    998          #if DEBUG
+    999            if ((unsigned)ISRIndex >= _NUM_INT_SOURCES) {
+   \   00000008   200050E3           CMP      R0,#+32
+   \   0000000C   0200003A           BCC      ??OS_ARM_EnableISR_0
+   1000              OS_Error(OS_ERR_ISR_INDEX);
+   \   00000010   6400A0E3           MOV      R0,#+100
+   \   00000014   ........           BL       OS_Error
+   1001              return;
+   \   00000018   080000EA           B        ??OS_ARM_EnableISR_1
+   1002            }
+   1003          #endif
+   1004          
+   1005            OS_DI();
+   \                     ??OS_ARM_EnableISR_0:
+   \   0000001C   00100FE1           MRS      R1,CPSR
+   \   00000020   801081E3           ORR      R1,R1,#0x80
+   \   00000024   01F021E1           MSR      CPSR_c,R1
+   1006            _AIC_IECR = (1 << ISRIndex);
+   \   00000028   0110A0E3           MOV      R1,#+1
+   \   0000002C   1100A0E1           LSL      R0,R1,R0
+   \   00000030   DF10E0E3           MVN      R1,#+223
+   \   00000034   E01EC1E3           BIC      R1,R1,#0xE00
+   \   00000038   000081E5           STR      R0,[R1, #+0]
+   1007            OS_RestoreI();
+   \   0000003C   ........           BL       OS_RestoreI
+   1008          }
+   \                     ??OS_ARM_EnableISR_1:
+   \   00000040   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000044   0080BDE8           POP      {PC}             ;; return
+   1009          
+   1010          /*********************************************************************
+   1011          *
+   1012          *       OS_ARM_DisableISR
+   1013          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1014          void OS_ARM_DisableISR(int ISRIndex) {
+   \                     OS_ARM_DisableISR:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   1015          #if DEBUG
+   1016            if ((unsigned)ISRIndex >= _NUM_INT_SOURCES) {
+   \   00000008   200050E3           CMP      R0,#+32
+   \   0000000C   0200003A           BCC      ??OS_ARM_DisableISR_0
+   1017              OS_Error(OS_ERR_ISR_INDEX);
+   \   00000010   6400A0E3           MOV      R0,#+100
+   \   00000014   ........           BL       OS_Error
+   1018              return;
+   \   00000018   080000EA           B        ??OS_ARM_DisableISR_1
+   1019            }
+   1020          #endif
+   1021          
+   1022            OS_DI();
+   \                     ??OS_ARM_DisableISR_0:
+   \   0000001C   00100FE1           MRS      R1,CPSR
+   \   00000020   801081E3           ORR      R1,R1,#0x80
+   \   00000024   01F021E1           MSR      CPSR_c,R1
+   1023            _AIC_IDCR = (1 << ISRIndex);
+   \   00000028   0110A0E3           MOV      R1,#+1
+   \   0000002C   1100A0E1           LSL      R0,R1,R0
+   \   00000030   DB10E0E3           MVN      R1,#+219
+   \   00000034   E01EC1E3           BIC      R1,R1,#0xE00
+   \   00000038   000081E5           STR      R0,[R1, #+0]
+   1024            OS_RestoreI();
+   \   0000003C   ........           BL       OS_RestoreI
+   1025          }
+   \                     ??OS_ARM_DisableISR_1:
+   \   00000040   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000044   0080BDE8           POP      {PC}             ;; return
+   1026          
+   1027          /*********************************************************************
+   1028          *
+   1029          *       OS_ARM_ISRSetPrio
+   1030          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1031          int OS_ARM_ISRSetPrio(int ISRIndex, int Prio) {
+   \                     OS_ARM_ISRSetPrio:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   1032            OS_U32* pPrio;
+   1033            int     OldPrio;
+   1034          
+   1035          #if DEBUG
+   1036            if ((unsigned)ISRIndex >= _NUM_INT_SOURCES) {
+   \   00000004   200050E3           CMP      R0,#+32
+   \   00000008   0300003A           BCC      ??OS_ARM_ISRSetPrio_0
+   1037              OS_Error(OS_ERR_ISR_INDEX);
+   \   0000000C   6400A0E3           MOV      R0,#+100
+   \   00000010   ........           BL       OS_Error
+   1038              return 0;
+   \   00000014   0000A0E3           MOV      R0,#+0
+   \   00000018   1080BDE8           POP      {R4,PC}
+   1039            }
+   1040          #endif
+   1041            OS_DI();
+   \                     ??OS_ARM_ISRSetPrio_0:
+   \   0000001C   00200FE1           MRS      R2,CPSR
+   \   00000020   802082E3           ORR      R2,R2,#0x80
+   \   00000024   02F021E1           MSR      CPSR_c,R2
+   1042            pPrio = (OS_U32*)_AIC_SMR_BASE_ADDR;
+   1043            OldPrio = pPrio[ISRIndex];
+   \   00000028   FF20E0E3           MVN      R2,#+255
+   \   0000002C   F02EC2E3           BIC      R2,R2,#0xF00
+   \   00000030   004192E7           LDR      R4,[R2, +R0, LSL #+2]
+   1044            pPrio[ISRIndex] = (OldPrio & ~_INT_PRIORITY_MASK) | (Prio & _INT_PRIORITY_MASK);
+   \   00000034   071001E2           AND      R1,R1,#0x7
+   \   00000038   0730C4E3           BIC      R3,R4,#0x7
+   \   0000003C   031081E1           ORR      R1,R1,R3
+   \   00000040   001182E7           STR      R1,[R2, +R0, LSL #+2]
+   1045            OS_RestoreI();
+   \   00000044   ........           BL       OS_RestoreI
+   1046            return OldPrio & _INT_PRIORITY_MASK;
+   \   00000048   070004E2           AND      R0,R4,#0x7
+   \   0000004C   1080BDE8           POP      {R4,PC}          ;; return
+   1047          }
+   1048          
+   1049          /*********************************************************************
+   1050          *
+   1051          *       __low_level_init()
+   1052          *
+   1053          *       Initialize memory controller, clock generation and pll
+   1054          *
+   1055          *       Has to be modified, if another CPU clock frequency should be
+   1056          *       used. This function is called during startup and
+   1057          *       has to return 1 to perform segment initialization
+   1058          */
+   1059          OS_INTERWORK int __low_level_init(void);  // Avoid "no ptototype" warning
+
+   \                                 In section .text, align 4, keep-with-next
+   1060          OS_INTERWORK int __low_level_init(void) {
+   \                     __low_level_init:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   1061            _WDT_MR = (1 << 15);                    // Initially disable watchdog
+   \   00000004   4D0FA0E3           MOV      R0,#+308
+   \   00000008   801CA0E3           MOV      R1,#+32768
+   \   0000000C   F01300E5           STR      R1,[R0, #-1008]
+   1062            //
+   1063            //  Setup waitstates for external BUS interface before switching to high speed
+   1064            //
+   1065            _InitFlash();
+   1066            //
+   1067            //  Initialize main clock oscillator and PLLs
+   1068            //
+   1069            _InitClocks(_PLLAR_VALUE, _PLLBR_VALUE, _MCKR_VALUE);
+   \   00000010   0110A0E3           MOV      R1,#+1
+   \   00000014   1000A0E3           MOV      R0,#+16
+   \   00000018   601E81E3           ORR      R1,R1,#0x600
+   \   0000001C   04D04DE2           SUB      SP,SP,#+4
+   \   00000020   F01300E5           STR      R1,[R0, #-1008]
+   \                     ??__low_level_init_0:
+   \   00000024   5800A0E3           MOV      R0,#+88
+   \   00000028   F00310E5           LDR      R0,[R0, #-1008]
+   \   0000002C   010010E3           TST      R0,#0x1
+   \   00000030   FBFFFF0A           BEQ      ??__low_level_init_0
+   \   00000034   ........           LDR      R1,??DataTable5_6  ;; 0x2031bf03
+   \   00000038   1800A0E3           MOV      R0,#+24
+   \   0000003C   F01300E5           STR      R1,[R0, #-1008]
+   \                     ??__low_level_init_1:
+   \   00000040   5800A0E3           MOV      R0,#+88
+   \   00000044   F00310E5           LDR      R0,[R0, #-1008]
+   \   00000048   020010E3           TST      R0,#0x2
+   \   0000004C   FBFFFF0A           BEQ      ??__low_level_init_1
+   \                     ??__low_level_init_2:
+   \   00000050   5800A0E3           MOV      R0,#+88
+   \   00000054   F00310E5           LDR      R0,[R0, #-1008]
+   \   00000058   080010E3           TST      R0,#0x8
+   \   0000005C   FBFFFF0A           BEQ      ??__low_level_init_2
+   \   00000060   ........           LDR      R1,??DataTable5_7  ;; 0x10073f01
+   \   00000064   1C00A0E3           MOV      R0,#+28
+   \   00000068   F01300E5           STR      R1,[R0, #-1008]
+   \                     ??__low_level_init_3:
+   \   0000006C   5800A0E3           MOV      R0,#+88
+   \   00000070   F00310E5           LDR      R0,[R0, #-1008]
+   \   00000074   040010E3           TST      R0,#0x4
+   \   00000078   FBFFFF0A           BEQ      ??__low_level_init_3
+   \                     ??__low_level_init_4:
+   \   0000007C   5800A0E3           MOV      R0,#+88
+   \   00000080   F00310E5           LDR      R0,[R0, #-1008]
+   \   00000084   080010E3           TST      R0,#0x8
+   \   00000088   FBFFFF0A           BEQ      ??__low_level_init_4
+   \   0000008C   2000A0E3           MOV      R0,#+32
+   \   00000090   E21080E2           ADD      R1,R0,#+226
+   \   00000094   F01300E5           STR      R1,[R0, #-1008]
+   \                     ??__low_level_init_5:
+   \   00000098   5800A0E3           MOV      R0,#+88
+   \   0000009C   F00310E5           LDR      R0,[R0, #-1008]
+   \   000000A0   080010E3           TST      R0,#0x8
+   \   000000A4   FBFFFF0A           BEQ      ??__low_level_init_5
+   1070            //
+   1071            //  Initialize SDRAM
+   1072            //
+   1073            _InitSDRAM();
+   \   000000A8   FF40E0E3           MVN      R4,#+255
+   \   000000AC   544DC4E3           BIC      R4,R4,#0x1500
+   \   000000B0   200594E5           LDR      R0,[R4, #+1312]
+   \   000000B4   020010E3           TST      R0,#0x2
+   \   000000B8   4100001A           BNE      ??__low_level_init_6
+   \   000000BC   200594E5           LDR      R0,[R4, #+1312]
+   \   000000C0   FF1C81E2           ADD      R1,R1,#+65280
+   \   000000C4   000081E1           ORR      R0,R1,R0
+   \   000000C8   200584E5           STR      R0,[R4, #+1312]
+   \   000000CC   EF00E0E3           MVN      R0,#+239
+   \   000000D0   C00FC0E3           BIC      R0,R0,#0x300
+   \   000000D4   001090E5           LDR      R1,[R0, #+0]
+   \   000000D8   1020A0E3           MOV      R2,#+16
+   \   000000DC   081081E3           ORR      R1,R1,#0x8
+   \   000000E0   001080E5           STR      R1,[R0, #+0]
+   \   000000E4   EA0CC4E3           BIC      R0,R4,#0xEA00
+   \   000000E8   540C84E5           STR      R0,[R4, #+3156]
+   \   000000EC   700C84E5           STR      R0,[R4, #+3184]
+   \   000000F0   040C84E5           STR      R0,[R4, #+3076]
+   \   000000F4   0100A0E3           MOV      R0,#+1
+   \   000000F8   000084E5           STR      R0,[R4, #+0]
+   \   000000FC   C31F80E3           ORR      R1,R0,#0x30C
+   \   00000100   041084E5           STR      R1,[R4, #+4]
+   \   00000104   8110A0E1           MOV      R1,R1, LSL #+1
+   \   00000108   041084E5           STR      R1,[R4, #+4]
+   \   0000010C   ........           LDR      R1,??DataTable5_8  ;; 0x85227259
+   \   00000110   9C2D82E3           ORR      R2,R2,#0x2700
+   \   00000114   081084E5           STR      R1,[R4, #+8]
+   \   00000118   0010A0E3           MOV      R1,#+0
+   \   0000011C   101084E5           STR      R1,[R4, #+16]
+   \   00000120   241084E5           STR      R1,[R4, #+36]
+   \   00000124   00108DE5           STR      R1,[SP, #+0]
+   \   00000128   020000EA           B        ??__low_level_init_7
+   \                     ??__low_level_init_8:
+   \   0000012C   00309DE5           LDR      R3,[SP, #+0]
+   \   00000130   013083E2           ADD      R3,R3,#+1
+   \   00000134   00308DE5           STR      R3,[SP, #+0]
+   \                     ??__low_level_init_7:
+   \   00000138   00309DE5           LDR      R3,[SP, #+0]
+   \   0000013C   020053E1           CMP      R3,R2
+   \   00000140   F9FFFFBA           BLT      ??__low_level_init_8
+   \   00000144   8035A0E3           MOV      R3,#+536870912
+   \   00000148   001083E5           STR      R1,[R3, #+0]
+   \   0000014C   00108DE5           STR      R1,[SP, #+0]
+   \   00000150   020000EA           B        ??__low_level_init_9
+   \                     ??__low_level_init_10:
+   \   00000154   00C09DE5           LDR      R12,[SP, #+0]
+   \   00000158   01C08CE2           ADD      R12,R12,#+1
+   \   0000015C   00C08DE5           STR      R12,[SP, #+0]
+   \                     ??__low_level_init_9:
+   \   00000160   00C09DE5           LDR      R12,[SP, #+0]
+   \   00000164   02005CE1           CMP      R12,R2
+   \   00000168   F9FFFFBA           BLT      ??__low_level_init_10
+   \   0000016C   0220A0E3           MOV      R2,#+2
+   \   00000170   002084E5           STR      R2,[R4, #+0]
+   \   00000174   000083E5           STR      R0,[R3, #+0]
+   \   00000178   0400A0E3           MOV      R0,#+4
+   \   0000017C   000084E5           STR      R0,[R4, #+0]
+   \   00000180   00108DE5           STR      R1,[SP, #+0]
+   \   00000184   040000EA           B        ??__low_level_init_11
+   \                     ??__low_level_init_12:
+   \   00000188   00009DE5           LDR      R0,[SP, #+0]
+   \   0000018C   000083E5           STR      R0,[R3, #+0]
+   \   00000190   00009DE5           LDR      R0,[SP, #+0]
+   \   00000194   010080E2           ADD      R0,R0,#+1
+   \   00000198   00008DE5           STR      R0,[SP, #+0]
+   \                     ??__low_level_init_11:
+   \   0000019C   00009DE5           LDR      R0,[SP, #+0]
+   \   000001A0   080050E3           CMP      R0,#+8
+   \   000001A4   F7FFFFBA           BLT      ??__low_level_init_12
+   \   000001A8   0300A0E3           MOV      R0,#+3
+   \   000001AC   000084E5           STR      R0,[R4, #+0]
+   \   000001B0   ........           LDR      R0,??DataTable5_9  ;; 0x55555555
+   \   000001B4   000083E5           STR      R0,[R3, #+0]
+   \   000001B8   ........           LDR      R0,??DataTable5_10  ;; 0xababcafe
+   \   000001BC   001084E5           STR      R1,[R4, #+0]
+   \   000001C0   000083E5           STR      R0,[R3, #+0]
+   1074            //
+   1075            //  Initialize static memory controller
+   1076            //
+   1077            _InitSMC();
+   \                     ??__low_level_init_6:
+   \   000001C4   0100A0E3           MOV      R0,#+1
+   \   000001C8   400B80E3           ORR      R0,R0,#0x10000
+   \   000001CC   200284E5           STR      R0,[R4, #+544]
+   \   000001D0   ........           LDR      R0,??DataTable5_11  ;; 0x5030503
+   \   000001D4   ........           LDR      R5,??DataTable5_12
+   \   000001D8   240284E5           STR      R0,[R4, #+548]
+   \   000001DC   0D00A0E3           MOV      R0,#+13
+   \   000001E0   C00A80E3           ORR      R0,R0,#0xC0000
+   \   000001E4   280284E5           STR      R0,[R4, #+552]
+   \   000001E8   0300A0E3           MOV      R0,#+3
+   \   000001EC   440D80E3           ORR      R0,R0,#0x1100
+   \   000001F0   2C0284E5           STR      R0,[R4, #+556]
+   1078            //
+   1079            // Init MMU and caches
+   1080            //
+   1081            OS_ARM_MMU_InitTT      (&TranslationTable[0]);
+   \   000001F4   0500A0E1           MOV      R0,R5
+   \   000001F8   ........           BL       OS_ARM_MMU_InitTT
+   1082          
+   1083          
+   1084          #if SDRAM_TARGET
+   1085            OS_ARM_MMU_AddTTEntries(&TranslationTable[0], OS_ARM_CACHEMODE_C_B,     0x000, 0x200, 0x001);    // SDRAM, the first MB remapped to 0 to map vectors to correct address, cacheable, bufferable
+   \   000001FC   0100A0E3           MOV      R0,#+1
+   \   00000200   00008DE5           STR      R0,[SP, #+0]
+   \   00000204   803FA0E3           MOV      R3,#+512
+   \   00000208   0020A0E3           MOV      R2,#+0
+   \   0000020C   0C10A0E3           MOV      R1,#+12
+   \   00000210   0500A0E1           MOV      R0,R5
+   \   00000214   ........           BL       OS_ARM_MMU_AddTTEntries
+   1086          #else
+   1087            OS_ARM_MMU_AddTTEntries(&TranslationTable[0], OS_ARM_CACHEMODE_C_B,     0x000, 0x000, 0x001);    // Internal SRAM, cacheable, bufferable
+   1088          #endif
+   1089            OS_ARM_MMU_AddTTEntries(&TranslationTable[0], OS_ARM_CACHEMODE_NC_NB,   0x003, 0x003, 0x001);    // Internal SRAM, original address, NON cachable, NON bufferable
+   \   00000218   0100A0E3           MOV      R0,#+1
+   \   0000021C   00008DE5           STR      R0,[SP, #+0]
+   \   00000220   0330A0E3           MOV      R3,#+3
+   \   00000224   0320A0E3           MOV      R2,#+3
+   \   00000228   0010A0E3           MOV      R1,#+0
+   \   0000022C   0500A0E1           MOV      R0,R5
+   \   00000230   ........           BL       OS_ARM_MMU_AddTTEntries
+   1090            OS_ARM_MMU_AddTTEntries(&TranslationTable[0], OS_ARM_CACHEMODE_NC_NB,   0x004, 0x004, 0x001);    // Internal ROM
+   \   00000234   0100A0E3           MOV      R0,#+1
+   \   00000238   00008DE5           STR      R0,[SP, #+0]
+   \   0000023C   0430A0E3           MOV      R3,#+4
+   \   00000240   0420A0E3           MOV      R2,#+4
+   \   00000244   0010A0E3           MOV      R1,#+0
+   \   00000248   0500A0E1           MOV      R0,R5
+   \   0000024C   ........           BL       OS_ARM_MMU_AddTTEntries
+   1091            OS_ARM_MMU_AddTTEntries(&TranslationTable[0], OS_ARM_CACHEMODE_NC_NB,   0x005, 0x005, 0x001);    // LCD controller, NON cachable, NON bufferable
+   \   00000250   0100A0E3           MOV      R0,#+1
+   \   00000254   00008DE5           STR      R0,[SP, #+0]
+   \   00000258   0530A0E3           MOV      R3,#+5
+   \   0000025C   0520A0E3           MOV      R2,#+5
+   \   00000260   0010A0E3           MOV      R1,#+0
+   \   00000264   0500A0E1           MOV      R0,R5
+   \   00000268   ........           BL       OS_ARM_MMU_AddTTEntries
+   1092            OS_ARM_MMU_AddTTEntries(&TranslationTable[0], OS_ARM_CACHEMODE_NC_NB,   0x006, 0x006, 0x001);    // USB FIFO RAM, NON cachable, NON bufferable
+   \   0000026C   0100A0E3           MOV      R0,#+1
+   \   00000270   00008DE5           STR      R0,[SP, #+0]
+   \   00000274   0630A0E3           MOV      R3,#+6
+   \   00000278   0620A0E3           MOV      R2,#+6
+   \   0000027C   0010A0E3           MOV      R1,#+0
+   \   00000280   0500A0E1           MOV      R0,R5
+   \   00000284   ........           BL       OS_ARM_MMU_AddTTEntries
+   1093            OS_ARM_MMU_AddTTEntries(&TranslationTable[0], OS_ARM_CACHEMODE_C_B,     0x200, 0x200, 0x040);    // SDRAM, original address, 64MB, cacheable, bufferable
+   \   00000288   4000A0E3           MOV      R0,#+64
+   \   0000028C   00008DE5           STR      R0,[SP, #+0]
+   \   00000290   803FA0E3           MOV      R3,#+512
+   \   00000294   802FA0E3           MOV      R2,#+512
+   \   00000298   0C10A0E3           MOV      R1,#+12
+   \   0000029C   0500A0E1           MOV      R0,R5
+   \   000002A0   ........           BL       OS_ARM_MMU_AddTTEntries
+   1094            OS_ARM_MMU_AddTTEntries(&TranslationTable[0], OS_ARM_CACHEMODE_C_NB,    0x240, 0x200, 0x040);    // SDRAM, mapped to 0x24000000, cacheable, NON bufferable
+   \   000002A4   4000A0E3           MOV      R0,#+64
+   \   000002A8   00008DE5           STR      R0,[SP, #+0]
+   \   000002AC   803FA0E3           MOV      R3,#+512
+   \   000002B0   902FA0E3           MOV      R2,#+576
+   \   000002B4   0810A0E3           MOV      R1,#+8
+   \   000002B8   0500A0E1           MOV      R0,R5
+   \   000002BC   ........           BL       OS_ARM_MMU_AddTTEntries
+   1095            OS_ARM_MMU_AddTTEntries(&TranslationTable[0], OS_ARM_CACHEMODE_NC_NB,   0x280, 0x200, 0x040);    // SDRAM, mapped to 0x28000000, NON cacheable, NON bufferable
+   \   000002C0   4000A0E3           MOV      R0,#+64
+   \   000002C4   00008DE5           STR      R0,[SP, #+0]
+   \   000002C8   803FA0E3           MOV      R3,#+512
+   \   000002CC   A02FA0E3           MOV      R2,#+640
+   \   000002D0   0010A0E3           MOV      R1,#+0
+   \   000002D4   0500A0E1           MOV      R0,R5
+   \   000002D8   ........           BL       OS_ARM_MMU_AddTTEntries
+   1096            OS_ARM_MMU_AddTTEntries(&TranslationTable[0], OS_ARM_CACHEMODE_NC_NB,   0x300, 0x300, 0x001);    // External SRAM area CS2, connected to Ethernet controller
+   \   000002DC   0100A0E3           MOV      R0,#+1
+   \   000002E0   00008DE5           STR      R0,[SP, #+0]
+   \   000002E4   C03FA0E3           MOV      R3,#+768
+   \   000002E8   C02FA0E3           MOV      R2,#+768
+   \   000002EC   0010A0E3           MOV      R1,#+0
+   \   000002F0   0500A0E1           MOV      R0,R5
+   \   000002F4   ........           BL       OS_ARM_MMU_AddTTEntries
+   1097            OS_ARM_MMU_AddTTEntries(&TranslationTable[0], OS_ARM_CACHEMODE_NC_NB,   0x400, 0x400, 0x020);    // NAND controller, NON cacheable, NON bufferable
+   \   000002F8   2000A0E3           MOV      R0,#+32
+   \   000002FC   00008DE5           STR      R0,[SP, #+0]
+   \   00000300   403EA0E3           MOV      R3,#+1024
+   \   00000304   402EA0E3           MOV      R2,#+1024
+   \   00000308   0010A0E3           MOV      R1,#+0
+   \   0000030C   0500A0E1           MOV      R0,R5
+   \   00000310   ........           BL       OS_ARM_MMU_AddTTEntries
+   1098            OS_ARM_MMU_AddTTEntries(&TranslationTable[0], OS_ARM_CACHEMODE_NC_NB,   0xff0, 0xff0, 0x010);    // SFR area NON cacheable, NON bufferable
+   \   00000314   1000A0E3           MOV      R0,#+16
+   \   00000318   00008DE5           STR      R0,[SP, #+0]
+   \   0000031C   FF3EA0E3           MOV      R3,#+4080
+   \   00000320   FF2EA0E3           MOV      R2,#+4080
+   \   00000324   0010A0E3           MOV      R1,#+0
+   \   00000328   0500A0E1           MOV      R0,R5
+   \   0000032C   ........           BL       OS_ARM_MMU_AddTTEntries
+   1099            OS_ARM_MMU_Enable      (&TranslationTable[0]);
+   \   00000330   0500A0E1           MOV      R0,R5
+   \   00000334   ........           BL       OS_ARM_MMU_Enable
+   1100            OS_ARM_ICACHE_Enable();
+   \   00000338   ........           BL       OS_ARM_ICACHE_Enable
+   1101            OS_ARM_DCACHE_Enable();
+   \   0000033C   ........           BL       OS_ARM_DCACHE_Enable
+   1102            //
+   1103            // Initialize interrupt controller
+   1104            //
+   1105            _InitAIC();
+   \   00000340   0000E0E3           MVN      R0,#+0
+   \   00000344   240784E5           STR      R0,[R4, #+1828]
+   \   00000348   280784E5           STR      R0,[R4, #+1832]
+   \   0000034C   440784E5           STR      R0,[R4, #+1860]
+   \   00000350   ........           LDR      R0,??DataTable5_13
+   \   00000354   8810A0E3           MOV      R1,#+136
+   \   00000358   800684E5           STR      R0,[R4, #+1664]
+   \   0000035C   ........           LDR      R0,??DataTable5_14
+   \   00000360   601E81E3           ORR      R1,R1,#0x600
+   \   00000364   340784E5           STR      R0,[R4, #+1844]
+   \   00000368   ........           LDR      R0,??DataTable5_15
+   \   0000036C   041081E0           ADD      R1,R1,R4
+   \   00000370   840684E5           STR      R0,[R4, #+1668]
+   \   00000374   0520A0E3           MOV      R2,#+5
+   \                     ??__low_level_init_13:
+   \   00000378   040081E4           STR      R0,[R1], #+4
+   \   0000037C   040081E4           STR      R0,[R1], #+4
+   \   00000380   040081E4           STR      R0,[R1], #+4
+   \   00000384   040081E4           STR      R0,[R1], #+4
+   \   00000388   040081E4           STR      R0,[R1], #+4
+   \   0000038C   040081E4           STR      R0,[R1], #+4
+   \   00000390   012052E2           SUBS     R2,R2,#+1
+   \   00000394   F7FFFF1A           BNE      ??__low_level_init_13
+   \   00000398   0800A0E3           MOV      R0,#+8
+   \   0000039C   0010A0E3           MOV      R1,#+0
+   \                     ??__low_level_init_14:
+   \   000003A0   301784E5           STR      R1,[R4, #+1840]
+   \   000003A4   010050E2           SUBS     R0,R0,#+1
+   \   000003A8   FCFFFF1A           BNE      ??__low_level_init_14
+   \   000003AC   380794E5           LDR      R0,[R4, #+1848]
+   1106            //
+   1107            //  Perform other initialization here, if required
+   1108            //
+   1109            _RSTC_MR = ((0xA5 << 24) | RSTC_URSTEN);  // write KEY and URSTEN to allow USER RESET
+   \   000003B0   0110A0E3           MOV      R1,#+1
+   \   000003B4   010080E3           ORR      R0,R0,#0x1
+   \   000003B8   380784E5           STR      R0,[R4, #+1848]
+   \   000003BC   F800A0E3           MOV      R0,#+248
+   \   000003C0   A51481E3           ORR      R1,R1,#0xA5000000
+   \   000003C4   F01300E5           STR      R1,[R0, #-1008]
+   1110            return 1;
+   \   000003C8   0100A0E3           MOV      R0,#+1
+   \   000003CC   04D08DE2           ADD      SP,SP,#+4
+   \   000003D0   3080BDE8           POP      {R4,R5,PC}       ;; return
+   1111          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5:
+   \   00000000   ........           DC32     _SpuriousIrqCnt
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5_1:
+   \   00000000   69180003           DC32     0x3001869
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5_2:
+   \   00000000   ........           DC32     _OS_SystemIrqhandler
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5_3:
+   \   00000000   ........           DC32     OS_Global
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5_4:
+   \   00000000   3E0AD7A3           DC32     0xa3d70a3e
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5_5:
+   \   00000000   ........           DC32     OS_InInt
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5_6:
+   \   00000000   03BF3120           DC32     0x2031bf03
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5_7:
+   \   00000000   013F0710           DC32     0x10073f01
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5_8:
+   \   00000000   59722285           DC32     0x85227259
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5_9:
+   \   00000000   55555555           DC32     0x55555555
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5_10:
+   \   00000000   FECAABAB           DC32     0xababcafe
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5_11:
+   \   00000000   03050305           DC32     0x5030503
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5_12:
+   \   00000000   ........           DC32     TranslationTable
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5_13:
+   \   00000000   ........           DC32     _DefaultFiqHandler
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5_14:
+   \   00000000   ........           DC32     _SpuriousIrqHandler
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5_15:
+   \   00000000   ........           DC32     _DefaultIrqHandler
+   1112          
+   1113          /*****  EOF  ********************************************************/
+   1114          
+
+   Maximum stack usage in bytes:
+
+     Function                 .cstack
+     --------                 -------
+     OS_ARM_DisableISR             8
+     OS_ARM_EnableISR              8
+     OS_ARM_ISRSetPrio             8
+     OS_ARM_InstallISRHandler      8
+     OS_COM_Init                   0
+     OS_COM_Send1                  8
+     OS_ConvertCycles2us           0
+     OS_GetTime_Cycles             0
+     OS_Idle                       0
+     OS_InitHW                     8
+     OS_irq_handler               16
+     _DefaultFiqHandler            0
+     _DefaultIrqHandler            0
+     _OS_SystemIrqhandler          8
+     _SpuriousIrqHandler           0
+     __low_level_init             16
+
+
+   Section sizes:
+
+     Function/Label           Bytes
+     --------------           -----
+     TranslationTable         16384
+     _DefaultFiqHandler           4
+     _DefaultIrqHandler          28
+     _SpuriousIrqCnt              4
+     _SpuriousIrqHandler         20
+     _OS_SystemIrqhandler       328
+     OS_InitHW                  108
+     OS_Idle                      4
+     OS_GetTime_Cycles           60
+     OS_ConvertCycles2us         20
+     OS_COM_Init                  4
+     OS_COM_Send1                 4
+     OS_irq_handler             180
+     OS_ARM_InstallISRHandler    68
+     OS_ARM_EnableISR            72
+     OS_ARM_DisableISR           72
+     OS_ARM_ISRSetPrio           80
+     __low_level_init           980
+     ??DataTable5                 4
+     ??DataTable5_1               4
+     ??DataTable5_2               4
+     ??DataTable5_3               4
+     ??DataTable5_4               4
+     ??DataTable5_5               4
+     ??DataTable5_6               4
+     ??DataTable5_7               4
+     ??DataTable5_8               4
+     ??DataTable5_9               4
+     ??DataTable5_10              4
+     ??DataTable5_11              4
+     ??DataTable5_12              4
+     ??DataTable5_13              4
+     ??DataTable5_14              4
+     ??DataTable5_15              4
+
+ 
+      4 bytes in section .bss
+ 16 384 bytes in section .noinit
+  2 096 bytes in section .text
+ 
+  2 096 bytes of CODE memory
+ 16 388 bytes of DATA memory
+
+Errors: none
+Warnings: none

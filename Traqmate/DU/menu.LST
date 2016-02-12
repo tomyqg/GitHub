@@ -1,0 +1,2526 @@
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 1   
+
+
+C51 COMPILER V9.51, COMPILATION OF MODULE MENU
+OBJECT MODULE PLACED IN menu.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE menu.c WARNINGLEVEL(1) OPTIMIZE(9,SIZE) BROWSE MDU_F120 INCDIR(..\..\C51\IN
+                    -C\;..\CommonFiles\) DB DEFINE(DISPLAY,EXTCLK6,NODEBUG,PACKMEM)
+
+line level    source
+
+   1          #include <stdlib.h>
+   2          #include <ctype.h>
+   3          #include <display.h>
+   4          
+   5          //------------------------------------------------------------------------------------
+   6          // Menu.c
+   7          //------------------------------------------------------------------------------------
+   8          // Copyright 2004 - 2010 Track Systems Technologies, LLC
+   9          //
+  10          // AUTH: GAS
+  11          // DATE: 28 AUG 04
+  12          //               10 JAN 05 - load menus from flash
+  13          //               25 JAN 05 - revised menu system, added erase session & session detail
+  14          //               30 MAR 05 - changed menu system to scrolling cursor
+  15          //
+  16          // This file contains the menu control functions
+  17          //
+  18          
+  19          // function prototype
+  20          void Draw_Menu(void);
+  21          
+  22          // data structures used exclusively by menu system
+  23          static xdata menutype *menu;
+  24          static xdata menutype getback;
+  25          
+  26          //
+  27          // Session_Init
+  28          //
+  29          // This function reads the Dataflash to create a list of sessions
+  30          //
+  31          void Session_Init() {
+  32   1              xdata flashpagetype flashpage;          // where to get the data
+  33   1              xdata u08 i,j;
+  34   1      
+  35   1              // get the index information
+  36   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+  37   1      
+  38   1              j = 0;
+  39   1              for (i = 0; i<NUMSESSIONS; i++) {
+  40   2                      // look for a starting segment number
+  41   2                      if (0xFFFF != flashpage.index.session[i].startseg &&
+  42   2                              0xFFFF != flashpage.index.session[i].endseg) {
+  43   3      
+  44   3                              // print session number
+  45   3                              sprintf(menunames.session[j], "%02d ", (int) (i+1));
+  46   3      
+  47   3                              // add the date and time
+  48   3                              formattime(flashpage.index.session[i].starttime,
+  49   3                                                      flashpage.index.session[i].startweeks,
+  50   3                                                      SHORTDANDT, &(menunames.session[j][3]));
+  51   3      
+  52   3                              // create the menu entry
+  53   3                              menulists.sessionlist[j].actionid = FUNCSUB;
+  54   3                              menulists.sessionlist[j].action.f = &sesstitle;
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 2   
+
+  55   3                              menulists.sessionlist[j].itemname = menunames.session[j];
+  56   3      
+  57   3                              j++;
+  58   3                      } // if
+  59   2              } // for
+  60   1      
+  61   1              sessions.num_items = j;
+  62   1      
+  63   1              // point to last session entry
+  64   1              if (sessions.num_items <= 3)
+  65   1                      sessions.top_line = 0;
+  66   1              else
+  67   1                      sessions.top_line = sessions.num_items - 3;
+  68   1      
+  69   1              if (sessions.num_items == 0)
+  70   1                      sessions.current_sel = sessions.current_hl = 0;
+  71   1              else
+  72   1                      sessions.current_sel = sessions.current_hl = j-1;
+  73   1      
+  74   1              // put in end marker
+  75   1              menulists.sessionlist[j].actionid = LASTITEM;
+  76   1              menulists.sessionlist[j].action.submenu = NULL;
+  77   1              menulists.sessionlist[j].itemname = NULL;
+  78   1      } // Session_Init
+  79          
+  80          //------------------------------------------------------------------------------------
+  81          // Menu_Op
+  82          //------------------------------------------------------------------------------------
+  83          //
+  84          // Bring up the specified menu
+  85          //
+  86          void Menu_Op (menuop operation, displaybutton button) reentrant {
+  87   1              u08 temp;
+  88   1              menutype *menuptr;
+  89   1              static BOOL firsttime = TRUE;
+  90   1      
+  91   1              if (firsttime) {
+  92   2                      menu = &mainmenu;
+  93   2                      getback.menuname = NULL;
+  94   2                      getback.prev_menu = NULL;
+  95   2                      getback.num_items =
+  96   2                      getback.current_sel =
+  97   2                      getback.current_hl = 0;
+  98   2                      getback.menulist = NULL;
+  99   2                      firsttime = FALSE;
+ 100   2              } // if
+ 101   1      
+ 102   1              switch (operation) {
+ 103   2                      case INIT: {
+ 104   3                              // initialize if necessary
+ 105   3                              if (0 == menu->num_items)
+ 106   3                                      for (menu->num_items=0;
+ 107   3                                              LASTITEM != menu->menulist[menu->num_items].actionid;
+ 108   3                                              menu->num_items++);
+ 109   3      
+ 110   3                              // put display in direct line access mode
+ 111   3                              Reset_Top_Line();
+ 112   3      
+ 113   3                              if (0xFF == menu->top_line) { // graphic menu
+ 114   4                                      Write_Screen((u08 *) menu->menulist[menu->current_hl].itemname, '-');
+ 115   4                              } // if
+ 116   3                              else { // text menu
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 3   
+
+ 117   4                                      Clear_Screen();
+ 118   4      
+ 119   4                                      // put up a line bar
+ 120   4                                      Write_Icon(0, 0, NUMBER_OF_COLUMNS, 8, &(menubar[0]), '-');
+ 121   4      
+ 122   4                                      temp = 6*(20-strlen(menu->menuname))/2;
+ 123   4                                      // write menu centered name
+ 124   4                                      Write_Text(0, temp, menu->menuname, '-');
+ 125   4      
+ 126   4                                      // skip the b.s. if it is a viewlist
+ 127   4                                      if (VIEWLIST == menu->menulist[0].actionid)
+ 128   4                                              menu->current_sel = menu->current_hl = menu->top_line = 0;
+ 129   4                                      else {
+ 130   5                                              // start off with currently selected item on the screen
+ 131   5                                              if (PICKLIST == menu->menulist[0].actionid &&
+ 132   5                                                      (menu->current_sel < menu->top_line ||
+ 133   5                                                      menu->current_sel > menu->top_line+2)) {
+ 134   6      
+ 135   6                                                      menu->current_hl = menu->current_sel;
+ 136   6                                                      if (menu->num_items <= 3 || menu->current_hl == 0)
+ 137   6                                                              menu->top_line = 0;
+ 138   6                                                      else
+ 139   6                                                              menu->top_line = MIN(menu->current_hl-1, menu->num_items-3);
+ 140   6                                              } // if
+ 141   5                                      } // if
+ 142   4      
+ 143   4                                      Draw_Menu();
+ 144   4                              } // else
+ 145   3                              break;
+ 146   3                      } // INIT
+ 147   2                      case BUTTONPRESS: {
+ 148   3                              switch (button) {
+ 149   4                                      case UP:
+ 150   4                                              // note: up and dn button overrides works differently
+ 151   4                                              // from sel/back because they work within a single menu
+ 152   4                                              // check for button override
+ 153   4                                              if (NULL != button_overlay[UP]) {
+ 154   5                                                      (*button_overlay[UP])(menu);
+ 155   5                                                      break;
+ 156   5                                              } // if
+ 157   4      
+ 158   4                                              if (0xFF == menu->top_line) { // graphic menu
+ 159   5                                                      if (menu->current_hl > 0) {
+ 160   6                                                              menu->current_hl--;
+ 161   6                                                              Write_Screen((u08 *) menu->menulist[menu->current_hl].itemname, '-');
+ 162   6                                                      } // if
+ 163   5                                              } // if
+ 164   4                                              else { // text menu
+ 165   5                                                      if (menu->num_items != 0) { // dont do anything to empty lists
+ 166   6                                                              // if highlight is not top item, move it up a line
+ 167   6                                                              if (menu->top_line < menu->current_hl)
+ 168   6                                                                      menu->current_hl--;
+ 169   6                                                              else { // highlight on top line
+ 170   7                                                                      if (menu->top_line > 0) {       // check for first item
+ 171   8                                                                              menu->top_line--;       // move highlight and top line up one
+ 172   8                                                                              menu->current_hl--;
+ 173   8                                                                      } // if
+ 174   7                                                              } // else
+ 175   6      
+ 176   6                                                              Draw_Menu();
+ 177   6                                                      } // if
+ 178   5                                              } // else
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 4   
+
+ 179   4                                              break;
+ 180   4                                      case DN:
+ 181   4                                              // note: up and dn button overrides works differently
+ 182   4                                              // from sel/back because they work within a single menu
+ 183   4                                              // check for button override
+ 184   4                                              if (NULL != button_overlay[DN]) {
+ 185   5                                                      (*button_overlay[DN])(menu);
+ 186   5                                                      break;
+ 187   5                                              } // if
+ 188   4      
+ 189   4                                              if (0xFF == menu->top_line) { // graphic menu
+ 190   5                                                      if (menu->current_hl <= menu->num_items-1) {
+ 191   6                                                              menu->current_hl++;
+ 192   6                                                              Write_Screen((u08 *) menu->menulist[menu->current_hl].itemname, '-');
+ 193   6                                                      } // if
+ 194   5                                              } // if
+ 195   4                                              else { // text menu
+ 196   5                                                      if (menu->num_items != 0) { // dont do anything to empty lists
+ 197   6                                                              // if highlight is not bottom item, move it down a line
+ 198   6                                                              if (menu->current_hl - menu->top_line < 2)
+ 199   6                                                                      menu->current_hl = MIN(menu->current_hl+1, menu->num_items-1);
+ 200   6                                                              else { // highlight on bottom line
+ 201   7                                                                      if (menu->top_line+3 < menu->num_items) {       // check for last item
+ 202   8                                                                              menu->top_line++;       // move highlight and top line down one
+ 203   8                                                                              menu->current_hl++;
+ 204   8                                                                      } // if
+ 205   7                                                              } // else
+ 206   6      
+ 207   6                                                              Draw_Menu();
+ 208   6                                                      } // if
+ 209   5                                              } // else
+ 210   4                                              break;
+ 211   4                                      case BACK:
+ 212   4                                              // note: back and sel button overrides works differently
+ 213   4                                              // from up/down because they cause menu to menu transitions
+ 214   4                                              // check for button override
+ 215   4                                              if (NULL != button_overlay[BACK]) {
+ 216   5                                                      menuptr = (*button_overlay[BACK])(menu);
+ 217   5      
+ 218   5                                                      // now execute menu function if desired
+ 219   5                                                      if (NULL != menuptr) {
+ 220   6                                                              menu = menuptr;
+ 221   6                                                              Menu_Op(INIT, BACK);
+ 222   6                                                      } // if
+ 223   5                                              } // if
+ 224   4                                              else { // no overlay so go back a menu
+ 225   5                                                      menu = menu->prev_menu;
+ 226   5                                                      tm_state = WAITING;
+ 227   5                                                      Menu_Op(INIT, BACK);
+ 228   5                                              } // else
+ 229   4                                              break;
+ 230   4                                      case SEL:
+ 231   4                                              // note: back and sel button overrides works differently
+ 232   4                                              // from up/down because they cause menu to menu transitions
+ 233   4                                              // check for button override
+ 234   4                                              if (NULL != button_overlay[SEL]) {
+ 235   5                                                      menuptr = (*button_overlay[SEL])(menu);
+ 236   5      
+ 237   5                                                      // now execute menu function if desired
+ 238   5                                                      if (NULL != menuptr) {
+ 239   6                                                              menu = menuptr;
+ 240   6                                                              Menu_Op(INIT, SEL);
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 5   
+
+ 241   6                                                      } // if
+ 242   5                                              } // if
+ 243   4                                              else {  //  no overlay so do what the menu tells you
+ 244   5                                                      if (NULL != menu->menulist) {
+ 245   6                                                              switch (menu->menulist[menu->current_hl].actionid) {
+ 246   7                                                                      case SUBMENU:   // transfer to another list of choices
+ 247   7                                                                              menu = menu->menulist[menu->current_hl].action.submenu;
+ 248   7                                                                              Menu_Op(INIT, SEL);
+ 249   7                                                                              break;
+ 250   7                                                                      case PICKLIST:  // pick an item from the list
+ 251   7                                                                              menu->current_sel = menu->current_hl;
+ 252   7                                                                              tm_state = WAITING;
+ 253   7                                                                              // execute if there is an action associated with this menu pick
+ 254   7                                                                              if (NULL != menu->menulist[menu->current_hl].action.f)
+ 255   7                                                                                      menuptr = (menutype *)(menu->menulist[menu->current_hl].action.f)(menu);
+ 256   7                                                                              Menu_Op(INIT, SEL);
+ 257   7                                                                              break;
+ 258   7                                                                      case FUNCNORET: // turn over all control to function
+ 259   7                                                                              // save a copy of menu to pass to function
+ 260   7                                                                              menuptr = menu;
+ 261   7      
+ 262   7                                                                              // create dummy menu for return from function
+ 263   7                                                                              getback.prev_menu = menu;
+ 264   7                                                                              menu = &getback;
+ 265   7      
+ 266   7                                                                              // execute the function
+ 267   7                                                                              if (NULL != menuptr->menulist[menuptr->current_hl].action.f)
+ 268   7                                                                                      (menuptr->menulist[menuptr->current_hl].action.f)(menuptr);
+ 269   7                                                                              break;
+ 270   7                                                                      case FUNCRETURN: // execute function then go to prev menu
+ 271   7                                                                              // return up a level
+ 272   7                                                                              menu = menu->prev_menu;
+ 273   7      
+ 274   7                                                                              // execute the function
+ 275   7                                                                              if (NULL != menu->menulist[menu->current_hl].action.f)
+ 276   7                                                                                      (menu->menulist[menu->current_hl].action.f)(NULL);
+ 277   7      
+ 278   7                                                                              tm_state = WAITING;
+ 279   7                                                                              Menu_Op(INIT, SEL);
+ 280   7      
+ 281   7                                                                              break;
+ 282   7                                                                      case FUNCSUB:   // execute initialization function then go into submenu
+ 283   7                                                                              // execute the function
+ 284   7                                                                              if (NULL != menu->menulist[menu->current_hl].action.f)
+ 285   7                                                                                      menuptr = (menutype *)(menu->menulist[menu->current_hl].action.f)(menu);
+ 286   7      
+ 287   7                                                                              if (NULL != menuptr)
+ 288   7                                                                                      menu = menuptr;
+ 289   7      
+ 290   7                                                                              Menu_Op(INIT, SEL);
+ 291   7                                                                              break;
+ 292   7                                                                      case CONFIRM:
+ 293   7                                                                              // fill in confirm menu for return from function
+ 294   7                                                                              confirm.prev_menu = menu;
+ 295   7      
+ 296   7                                                                              // assign the actions
+ 297   7                                                                              confirm.menulist[0].action.f =
+ 298   7                                                                                      menu->menulist[menu->current_hl].action.f;
+ 299   7                                                                              confirm.menulist[1].action.submenu = menu;
+ 300   7      
+ 301   7                                                                              menu = &confirm;
+ 302   7      
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 6   
+
+ 303   7                                                                              Menu_Op(INIT, SEL);
+ 304   7                                                                              break;
+ 305   7                                                                      case VIEWLIST:  // just scroll menu items to be viewed
+ 306   7                                                                              // keep current sel even with hl
+ 307   7      //                                                                      menu->current_sel = menu->current_hl;
+ 308   7                                                                              break;
+ 309   7                                                                      default:        // do nothing
+ 310   7                                                                              break;
+ 311   7                                                              } // switch
+ 312   6                                                      } // if
+ 313   5                                              } // if
+ 314   4                                              break;
+ 315   4                                      case ONOFF: {
+ 316   5                                              u08 status;
+ 317   5      
+ 318   5                                              // save power
+ 319   5                                              BACKLITEKB = 0;
+ 320   5                                              BACKLITEDS = 0;
+ 321   5      
+ 322   5                                              // tell user
+ 323   5                                              Write_Screen((u08 *) end, '-');
+ 324   5      
+ 325   5                                              // save data
+ 326   5                                              if (RECORDING(tm_state))
+ 327   5                                                      End_Session(session, pagecnt, iopagecnt);
+ 328   5                                              if (TIMING == tm_state ||
+ 329   5                                                      AUTOXHOLDTIME == tm_state ||
+ 330   5                                                      HILLCLIMBSTART == tm_state ||
+ 331   5                                                      HILLCLIMBFINISH == tm_state ||
+ 332   5                                                      DRAGHOLDTIME == tm_state ||
+ 333   5                                                      DRAGHOLDNUMS == tm_state) {
+ 334   6                                                              Lap_Store();
+ 335   6                                                              Sector_Store();
+ 336   6                                              } // if
+ 337   5      
+ 338   5                                              // wait for Serial Flash to be finished
+ 339   5                                              do {
+ 340   6                                                      status = DataFlash_Read_Status();
+ 341   6                                              } while (!(status & STATUS_READY_MASK));
+ 342   5      
+ 343   5                                              // wait for button release so we don't power right back up
+ 344   5      //                                      while (!ONOFF_SW) ;
+ 345   5      
+ 346   5                                              // go away
+ 347   5                                              while (1) {
+ 348   6                                                      u16 retry;
+ 349   6      
+ 350   6                                                      // tell SU to shut us down
+ 351   6                                                      SendMessage((u08) DISPLAY_UNIT, (u08) SENSOR_UNIT, (u08) POWER_DOWN, (u08) 0);
+ 352   6      
+ 353   6                                                      // wait a bit. if still alive, send it again
+ 354   6                                                      for (retry = 0; retry < 40000; retry++) ;
+ 355   6                                              } // while
+ 356   5                                              break;
+ 357   5                                      } // case ONOFF
+ 358   4                                      case LITE:
+ 359   4                                              // toggle backlights
+ 360   4      //                                      BACKLITEKB = ~BACKLITEKB;
+ 361   4                                              BACKLITEDS = ~BACKLITEDS;
+ 362   4                                              break;
+ 363   4                              } // switch button
+ 364   3                      } // case BUTTONPRESS
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 7   
+
+ 365   2              } // switch operation
+ 366   1      } // Menu_Op
+ 367          
+ 368          void Draw_Menu(void) {
+ 369   1              xdata char attrib;
+ 370   1              xdata u08 *icon;
+ 371   1              xdata u08 temp;
+ 372   1      
+ 373   1              // handle legitimately empty list
+ 374   1              if (0 == menu->num_items) {
+ 375   2                      Write_Icon(0, 16, NUMBER_OF_COLUMNS, 8, &(reversebar[0]), '-');
+ 376   2                      Write_Text(2, (u08) (NUMBER_OF_COLUMNS - 6*strlen("LIST EMPTY")),
+ 377   2                                              "LIST EMPTY", '^');
+ 378   2              }
+ 379   1              else {
+ 380   2                      xdata u08 i;
+ 381   2                      for (i = 1; i <= MIN(3, menu->num_items); i++) {
+ 382   3                              // check for highlighting
+ 383   3                              if (VIEWLIST != menu->menulist[menu->top_line+i-1].actionid &&
+ 384   3                                      menu->current_hl == (menu->top_line + i - 1))
+ 385   3                                      // white on black
+ 386   3                                      attrib = '~';
+ 387   3                              else
+ 388   3                                      // black on white
+ 389   3                                      attrib = '-';
+ 390   3      
+ 391   3                              // default line is just clear
+ 392   3                              icon = (u08 *) clearbar;
+ 393   3      
+ 394   3                              // write the appropriate icon
+ 395   3                              // no icons if only one choice
+ 396   3                              if (menu->num_items == 1)
+ 397   3                                      icon = (u08 *) cleartopbot;
+ 398   3                              else { // more than one
+ 399   4                                      switch (i) {
+ 400   5                                              case 1: // working with first menu line
+ 401   5                                                      if (menu->top_line == 0)
+ 402   5                                                              // first item so show top bar
+ 403   5                                                              icon = (u08 *) cleartop;
+ 404   5                                                      else
+ 405   5                                                              // more items to scroll so show arrow
+ 406   5                                                              icon = (u08 *) clearup;
+ 407   5                                                      break;
+ 408   5                                              case 2: // check for end of menu list
+ 409   5                                                      if (menu->num_items != 2) break;
+ 410   5                                                      // if only 2 menu items, treat it like the 3rd line so fall through
+ 411   5                                              case 3: // working with last menu line
+ 412   5                                                      if (menu->top_line + i == menu->num_items)
+ 413   5                                                              // last item so show bottom bar
+ 414   5                                                              icon = (u08 *) clearbot;
+ 415   5                                                      else
+ 416   5                                                              // more items to scroll so show arrow
+ 417   5                                                              icon = (u08 *) cleardn;
+ 418   5                                                      break;
+ 419   5                                      } // switch
+ 420   4                              } // else
+ 421   3      
+ 422   3                              // write the background
+ 423   3                              Write_Icon(0, 8*i, NUMBER_OF_COLUMNS, 8, icon, attrib);
+ 424   3      
+ 425   3                              // figure out starting column
+ 426   3                              temp = NUMBER_OF_COLUMNS - 6*strlen(menu->menulist[menu->top_line+i-1].itemname);
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 8   
+
+ 427   3      
+ 428   3                              // if it's a PICKLIST, mark if currently selected item
+ 429   3                              if (menu->top_line+i-1 == menu->current_sel && PICKLIST == menu->menulist[menu->top_line+i-1].actionid)
+ 430   3                                      Write_Text(i, (u08) (temp-12), "*", '^');
+ 431   3      
+ 432   3                              // write the text
+ 433   3                              Write_Text(i, temp,     menu->menulist[menu->top_line+i-1].itemname, '^');
+ 434   3      
+ 435   3                      } // for
+ 436   2              } // if
+ 437   1      } // Draw_Menu
+ 438          
+ 439          // Menu Executable Functions
+ 440          
+ 441          menutype *collectdata(menutype *menu) {
+ 442   1              xdata u08 storedata = FALSE;
+ 443   1              xdata u08 samprate;                             // used for sampling rate and general temporary variable
+ 444   1      
+ 445   1              if (!su_present)
+ 446   1                      Info_Screen("No SU");
+ 447   1              else {
+ 448   2                      xdata u16 i;
+ 449   2                      u08 index = menu->current_hl;
+ 450   2      
+ 451   2                      // Set up input scaling
+ 452   2                      DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, IODEFPAGE);
+ 453   2                      for (samprate=0; samprate<NUMANALOGS; samprate++)
+ 454   2                              analogscaling[samprate] = flashpage.io.analogs[samprate];
+ 455   2                      for (samprate=0; samprate<NUMTDDIGITALS; samprate++)
+ 456   2                              digitalscaling[samprate] = flashpage.io.digitals[samprate+4];
+ 457   2      
+ 458   2                      // put in the write address
+ 459   2                      com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START] = 0;
+ 460   2                      com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+1] = IODEFPAGE & 0xFF;
+ 461   2              
+ 462   2                      // copy segment into output buffer
+ 463   2                      for (i=0; i < MAX_PAGE_SIZE; i++)
+ 464   2                              com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+2+i] = flashpage.bigbuff[i];
+ 465   2              
+ 466   2                      // send io defs to SU for use in digital outputs
+ 467   2                      SendMessage((u08) DISPLAY_UNIT, (u08) SENSOR_UNIT, (u08) WRITE_SEGMENT, MSGDATA);
+ 468   2      
+ 469   2                      // wait to get ACK from SU
+ 470   2                      while (0 != CTS[SENSOR_UNIT-1]);
+ 471   2      
+ 472   2                      // get the driver and car info
+ 473   2                      DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, USERPAGE);
+ 474   2      
+ 475   2                      // assign the current selections        
+ 476   2                      lap.tracknum = flashpage.user.selectedtrack;
+ 477   2                      samprate = (u08) flashpage.user.modesample & 0x0F;
+ 478   2                      currentcar.cylandweight = flashpage.user.car[flashpage.user.selectedcar].carspecs.cylandweight;
+ 479   2                      currentcar.revwarning = flashpage.user.car[flashpage.user.selectedcar].carspecs.revwarning;
+ 480   2                      currentcar.revlimit = flashpage.user.car[flashpage.user.selectedcar].carspecs.revlimit;
+ 481   2      
+ 482   2                      // set up the I/O collection
+ 483   2                      iocollect = flashpage.user.iodata;
+ 484   2      
+ 485   2                      // use to synch up io, accelerometer data, and GPS data
+ 486   2                      firstpulse = TRUE;
+ 487   2      
+ 488   2                      // make this one function work for collect data and other modes
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 9   
+
+ 489   2                      if (menu == &other)
+ 490   2                              index += 20;
+ 491   2      
+ 492   2                      switch (index) {
+ 493   3      
+ 494   3                      // Record Data Modes
+ 495   3                      case 0: // laps
+ 496   3                      case 1: // qualifying
+ 497   3                      case 9: { // hillclimb (segment timing)
+ 498   4                              if (1 == index) timingmode = QUAL;
+ 499   4                              else timingmode = LAP;
+ 500   4      
+ 501   4                              Write_Screen((u08 *) findgps, '-');
+ 502   4      
+ 503   4                              // initialize lap stuff
+ 504   4                              lap.currentheading =
+ 505   4                              lap.previousheading = 0;
+ 506   4                              lap.previouspos.time =
+ 507   4                              lap.currentpos.time = 0;
+ 508   4                              lap.previouspos.lat =
+ 509   4                              lap.currentpos.lat = 0;
+ 510   4                              lap.previouspos.lon =
+ 511   4                              lap.currentpos.lon = 0;
+ 512   4                              lap.previouspos.alt =
+ 513   4                              lap.currentpos.alt = 0;
+ 514   4                              lap.currentlap = 0;
+ 515   4                              *((u32 *) lap.currentpos.velpack) =
+ 516   4                              *((u32 *) lap.previouspos.velpack) = 0L;
+ 517   4                              lap.previouspos.temp =
+ 518   4                              lap.currentpos.temp = 0;
+ 519   4                              lap.distance = 0.0;
+ 520   4                              lap.timernminus1 = 0;
+ 521   4      
+ 522   4                              // figure out current graph scale settings
+ 523   4                              switch ((scratch.calibrate.usersettings & 0xE0) >> 5) {
+ 524   5                                      case 2:
+ 525   5                                              graphratio = 0.5;
+ 526   5                                              break;
+ 527   5                                      case 4:
+ 528   5                                              graphratio = 2.0;
+ 529   5                                              break;
+ 530   5                                      case 5:
+ 531   5                                              graphratio = 5.0;
+ 532   5                                              break;
+ 533   5                                      case 6:
+ 534   5                                              graphratio = 10.0;
+ 535   5                                              break;
+ 536   5                                      case 3:
+ 537   5                                      default:
+ 538   5                                              graphratio = 1.0;                                       
+ 539   5                              } // switch     
+ 540   4                              
+ 541   4                              // figure out current tracklength
+ 542   4                              switch ((scratch.calibrate.usersettings & 0x0E) >> 1) {
+ 543   5                                      case 0:
+ 544   5                                              tracksampledist = SHORTTRACKDIST;
+ 545   5                                              break;
+ 546   5                                      case 2:
+ 547   5                                              tracksampledist = LONGTRACKDIST;
+ 548   5                                              break;
+ 549   5                                      case 1:
+ 550   5                                      default:
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 10  
+
+ 551   5                                              tracksampledist = MEDTRACKDIST;                                 
+ 552   5                              } // switch
+ 553   4                                                                                      
+ 554   4                              // initialize lap storage
+ 555   4                              for (i = 0; i < NUMLAPS; i++)
+ 556   4                                      laplist[i] = 0xFFFFFFFF;
+ 557   4      
+ 558   4                              // get the track info
+ 559   4                              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, TRACKPAGE);
+ 560   4      
+ 561   4                              // retrieve the information
+ 562   4                              lap.startpos.lat = flashpage.circuit.track[lap.tracknum].startlat;
+ 563   4                              lap.startpos.lon = flashpage.circuit.track[lap.tracknum].startlon;
+ 564   4      //                      lap.startpos.alt = flashpage.circuit.track[lap.tracknum].startalt;
+ 565   4                              lap.startheading = flashpage.circuit.track[lap.tracknum].starthead;
+ 566   4              
+ 567   4                              // use menu entry storage to remember current track name
+ 568   4                              strncpy(menunames.track[lap.tracknum], flashpage.circuit.track[lap.tracknum].name, NAMELEN);
+ 569   4      
+ 570   4                              // put in null terminator just in case
+ 571   4                              menunames.track[lap.tracknum][NAMELEN-1] = '\0';
+ 572   4                      
+ 573   4                              if (9 == index) {       // get the track finish line info for hillclimbs
+ 574   5                                      DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, TRACKFINPAGE);
+ 575   5              
+ 576   5                                      lap.finishpos.lat = flashpage.finishandgear.trackfinish[lap.tracknum].finishlat;
+ 577   5                                      lap.finishpos.lon = flashpage.finishandgear.trackfinish[lap.tracknum].finishlon;
+ 578   5      //                              lap.finishpos.alt = flashpage.finishandgear.trackfinish[lap.tracknum].finishalt;
+ 579   5                                      lap.finishheading = flashpage.finishandgear.trackfinish[lap.tracknum].finishhead;
+ 580   5                              } // if
+ 581   4      
+ 582   4                              // get sector information for this track
+ 583   4                              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, PREDPAGESTART + (lap.tracknum / 4));
+ 584   4      
+ 585   4                              // if we don't have a starting position, get one        
+ 586   4                              if (lap.startpos.lat == 0xFFFFFFFF || lap.startpos.lat == 0) {
+ 587   5                                      button_overlay[SEL] = markstart;
+ 588   5                                      if (9 == index)
+ 589   5                                              tm_state = HILLCLIMB;
+ 590   5                                      else
+ 591   5                                              tm_state = LAPS;
+ 592   5                                      
+ 593   5                                      // clear best sectors and initialize
+ 594   5                                      for (i = 0; i < NUMSECTORS; i++)
+ 595   5                                              sector[i].reference = sector[i].current =
+ 596   5                                              flashpage.storedsectors[lap.tracknum % 4].bestsectortimes[i] = 0L;
+ 597   5                                      
+ 598   5                                      // reset best laptime and initialize
+ 599   5                                      lap.besttime = flashpage.storedsectors[lap.tracknum % 4].bestlapever = 0xFFFFFFFF;
+ 600   5      
+ 601   5                                      // write out new best lap info
+ 602   5                                      DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, PREDPAGESTART + (lap.tracknum 
+             -/ 4));
+ 603   5                              } // if
+ 604   4                              else {
+ 605   5                                      // valid track with a starting position so get stored predictive lap timing sectors
+ 606   5                                      // and reference laptime for this track
+ 607   5                                      if (QUAL == timingmode) {
+ 608   6                                              for (i = 0; i < NUMSECTORS; i++)
+ 609   6                                                      sector[i].current = sector[i].reference = 0L;
+ 610   6                                              lap.besttime = 0xFFFFFFFF;
+ 611   6                                      } // if
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 11  
+
+ 612   5                                      else { // QUAL != timingmode)
+ 613   6                                              // get the best sectors
+ 614   6                                              for (i = 0; i < NUMSECTORS; i++) {
+ 615   7                                                      sector[i].current = 0L;
+ 616   7                                                      sector[i].reference = flashpage.storedsectors[lap.tracknum % 4].bestsectortimes[i];
+ 617   7                                              } // for
+ 618   6                                              
+ 619   6                                              // get the best laptime 
+ 620   6                                              lap.besttime = flashpage.storedsectors[lap.tracknum % 4].bestlapever;
+ 621   6                                      } // else
+ 622   5      
+ 623   5                                      button_overlay[SEL] = clearmenu;
+ 624   5                                      if (9 == index)
+ 625   5                                              tm_state = HILLCLIMBWAITSTART;
+ 626   5                                      else
+ 627   5                                              tm_state = WAITSTART;
+ 628   5                              } // else
+ 629   4      
+ 630   4                              storedata = TRUE;
+ 631   4                              } // else
+ 632   3                              break;
+ 633   3                      case 2: // Autocross (staged start)
+ 634   3                      case 3: // 1/8 mile (staged start)
+ 635   3                      case 4: // Drag (staged start)
+ 636   3                              Write_Screen((u08 *) findgps, '-');
+ 637   3      
+ 638   3                              // initialize lap stuff
+ 639   3                              lap.currentheading =
+ 640   3                              lap.previousheading = 0;
+ 641   3                              lap.previouspos.time =
+ 642   3                              lap.currentpos.time = 0;
+ 643   3                              lap.previouspos.lat =
+ 644   3                              lap.currentpos.lat = 0;
+ 645   3                              lap.previouspos.lon =
+ 646   3                              lap.currentpos.lon = 0;
+ 647   3                              lap.previouspos.alt =
+ 648   3                              lap.currentpos.alt = 0;
+ 649   3                              *((u32 *) lap.currentpos.velpack) =
+ 650   3                              *((u32 *) lap.previouspos.velpack) = 0L;
+ 651   3                              lap.previouspos.temp =
+ 652   3                              lap.currentpos.temp = 0;
+ 653   3      
+ 654   3                              // initialize lap storage
+ 655   3                              for (i = 0; i < NUMLAPS; i++)
+ 656   3                                      laplist[i] = 0xFFFFFFFF;
+ 657   3      
+ 658   3                              // get the track info
+ 659   3                              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, TRACKFINPAGE);
+ 660   3      
+ 661   3                              // retrieve the information
+ 662   3                              lap.finishpos.lat = flashpage.finishandgear.trackfinish[lap.tracknum].finishlat;
+ 663   3                              lap.finishpos.lon = flashpage.finishandgear.trackfinish[lap.tracknum].finishlon;
+ 664   3      //                      lap.finishpos.alt = flashpage.finishandgear.trackfinish[lap.tracknum].finishalt;
+ 665   3                              lap.finishheading = flashpage.finishandgear.trackfinish[lap.tracknum].finishhead;
+ 666   3      
+ 667   3                              // prepare to set a starting line position
+ 668   3                              button_overlay[SEL] = stage;
+ 669   3      
+ 670   3                              if (2 == index) {
+ 671   4                                      tm_state = AUTOXSTAGE;
+ 672   4                                      timingmode = QUAL;              // moves timing icon up on screen
+ 673   4                              } // if
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 12  
+
+ 674   3                              else {
+ 675   4                                      tm_state = DRAGSTAGE;
+ 676   4      
+ 677   4                                      dragnumbers.quarter = (4 == index);             // TRUE if 1/4, FALSE if 1/8 mile
+ 678   4                                      dragnumbers.sixtyfoot =
+ 679   4                                      dragnumbers.zerosixty =
+ 680   4                                      dragnumbers.zerohundred =
+ 681   4                                      dragnumbers.threethirty =
+ 682   4                                      dragnumbers.eighthmile =
+ 683   4                                      dragnumbers.quartermile =
+ 684   4                                      dragnumbers.eighthtrap = 
+ 685   4                                      dragnumbers.quartertrap = 
+ 686   4                                      dragnumbers.reaction =
+ 687   4                                      dragnumbers.launchg =
+ 688   4                                      dragnumbers.horsepower =
+ 689   4                                      dragnumbers.torque = 0;
+ 690   4                                      
+ 691   4                                      timingmode = REV;               // timing icon in center of screen
+ 692   4                              } // else
+ 693   3      
+ 694   3                              // override programmed values for track length and sampling rate
+ 695   3                              tracksampledist = SHORTTRACKDIST;       // all short distances
+ 696   3                              samps_per_sec = 40;                                     // 40Hz
+ 697   3                              samprate = 4;                                           // 40Hz                 
+ 698   3      
+ 699   3                              storedata = TRUE;
+ 700   3                              break;
+ 701   3                      case 5: // Drive
+ 702   3                              Clear_Screen();
+ 703   3      
+ 704   3                              tm_state = DRIVE;
+ 705   3                              storedata = TRUE;
+ 706   3                              button_overlay[UP] = previnput;
+ 707   3                              button_overlay[DN] = nextinput;
+ 708   3                              
+ 709   3                              // remember start if good gps signal
+ 710   3                              if (gpslock >= GPS_GOOD) {
+ 711   4                                      // record starting position
+ 712   4                                      Lap_Check(START_POSITION, NULL);
+ 713   4                              } // if
+ 714   3                              break;
+ 715   3                      case 6: // Tach & Speedo
+ 716   3                              tm_state = GPSRPM;
+ 717   3                              storedata = TRUE;
+ 718   3                              button_overlay[UP] = previnput;
+ 719   3                              button_overlay[DN] = nextinput;
+ 720   3                              
+ 721   3                              // remember start if good gps signal
+ 722   3                              if (gpslock >= GPS_GOOD) {
+ 723   4                                      // record starting position
+ 724   4                                      Lap_Check(START_POSITION, NULL);
+ 725   4                              } // if
+ 726   3                              break;
+ 727   3                      case 7: { // Gauges
+ 728   4                              xdata BOOL found;
+ 729   4                              xdata u08 checkbits;
+ 730   4      
+ 731   4                              // find the first selected input point
+ 732   4                              for (checkbits = 2; checkbits < 7; checkbits++)
+ 733   4                                      // check for bit set enabling i/o point
+ 734   4                                      if (found = ((iocollect >> checkbits) & 0x01)) break;
+ 735   4                              if (found) {
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 13  
+
+ 736   5                                      if (checkbits == 6) // RPM
+ 737   5                                              tm_state = GPSRPM;
+ 738   5                                      else if (checkbits == 5) // digitals
+ 739   5                                              tm_state = GAUGED4;
+ 740   5                                      else // analogs
+ 741   5                                              tm_state = GAUGEA0 + (checkbits-2);
+ 742   5      
+ 743   5                                      storedata = TRUE;
+ 744   5                                      button_overlay[UP] = previnput;
+ 745   5                                      button_overlay[DN] = nextinput;
+ 746   5                              } // if
+ 747   4                              else { // none enabled
+ 748   5                                      Info_Screen("No Inputs");
+ 749   5                                      tm_state = WAIT4BACK;
+ 750   5                                      storedata = FALSE;
+ 751   5                              } // else
+ 752   4                              break;
+ 753   4                      } // case
+ 754   3                      case 8: // G Forces
+ 755   3                              tm_state = GFORCES;
+ 756   3                              storedata = TRUE;
+ 757   3                              button_overlay[UP] = previnput;
+ 758   3                              button_overlay[DN] = nextinput;
+ 759   3      
+ 760   3                              Clear_Screen();
+ 761   3                              // put up a line bar
+ 762   3                              Write_Icon(0, 0, NUMBER_OF_COLUMNS, 8, &(menubar[0]), '-');
+ 763   3              
+ 764   3                              // write menu centered name
+ 765   3                              Write_Text(0, 36, "G-Forces", '-');
+ 766   3                              break;
+ 767   3                      case 10: // Gs and Location
+ 768   3                              Clear_Screen();
+ 769   3                              tm_state = GPSREC;
+ 770   3                              storedata = TRUE;
+ 771   3      
+ 772   3                              // remember start if good gps signal
+ 773   3                              if (gpslock >= GPS_GOOD) {
+ 774   4                                      // record starting position
+ 775   4                                      Lap_Check(START_POSITION, NULL);
+ 776   4                              } // if
+ 777   3                              break;
+ 778   3                      case 11: // Inputs
+ 779   3                              Clear_Screen();
+ 780   3                              // put up a line bar
+ 781   3                              Write_Icon(0, 0, NUMBER_OF_COLUMNS, 8, &(menubar[0]), '-');
+ 782   3      
+ 783   3                              // write menu centered name
+ 784   3                              Write_Text(0, 42, "Inputs", '-');
+ 785   3                              tm_state = INPUTS;
+ 786   3                              storedata = TRUE;
+ 787   3                              break;
+ 788   3                      // Other Modes
+ 789   3                      case 20: // GPS Compass
+ 790   3                              Clear_Screen();
+ 791   3                              tm_state = COMPASS;
+ 792   3                              samprate = 2;                   // 20Hz
+ 793   3                              storedata = FALSE;
+ 794   3                              break;
+ 795   3                      case 21: // Instruments
+ 796   3                              Clear_Screen();
+ 797   3                              tm_state = INSTRUMENT;
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 14  
+
+ 798   3                              samprate = 2;                   // 20Hz
+ 799   3                              storedata = FALSE;
+ 800   3                              break;
+ 801   3                      case 22: // GPS Location
+ 802   3                              Clear_Screen();
+ 803   3                              tm_state = GPSINFO;
+ 804   3                              samprate = 2;                   // 20Hz
+ 805   3                              storedata = FALSE;
+ 806   3                              break;
+ 807   3                      case 23: // Check Inputs
+ 808   3                              Clear_Screen();
+ 809   3                              // put up a line bar
+ 810   3                              Write_Icon(0, 0, NUMBER_OF_COLUMNS, 8, &(menubar[0]), '-');
+ 811   3      
+ 812   3                              // write menu centered name
+ 813   3                              Write_Text(0, 42, "Inputs", '-');
+ 814   3      
+ 815   3                              tm_state = CHKINPUTS;
+ 816   3                              samprate = 2;                   // 20Hz
+ 817   3                              storedata = FALSE;
+ 818   3                              break;
+ 819   3      
+ 820   3                      } // switch
+ 821   2              } // else
+ 822   1      
+ 823   1              if (storedata) {
+ 824   2                      // initialize
+ 825   2                      gcnt = secondcnt = 0;
+ 826   2      
+ 827   2                      firstpulse = TRUE;
+ 828   2                      iobyte = MAX_PAGE_SIZE - 1;             // point to MSB
+ 829   2                      session = Start_Session(&pagecnt, &iopagecnt);
+ 830   2                      if (0 == session) { // no sessions available
+ 831   3                              Info_Screen("Mem Full");
+ 832   3                              tm_state = WAITING;
+ 833   3                      } // if
+ 834   2              }
+ 835   1              // tell SU to start sending data
+ 836   1              if (tm_state != WAITING) {
+ 837   2                      u08 i;
+ 838   2                      com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START] = tm_state;
+ 839   2                      com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+1] = samprate;
+ 840   2                      com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+2] = iocollect;
+ 841   2                      // set up input scaling, send over the number of bits to shift, 20 = 4, 10 = 3, 5 = 2
+ 842   2                      for (i=0; i<NUMANALOGS; i++) {
+ 843   3                              switch (analogscaling[i].maxscale) {
+ 844   4                                      case 10: com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+3+i] = 3;
+ 845   4                                              break;
+ 846   4                                      case 5: com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+3+i] = 2;
+ 847   4                                              break;
+ 848   4                                      case 20:
+ 849   4                                      default: com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+3+i] = 4;
+ 850   4                                              break;
+ 851   4                              } // switch
+ 852   3                      } // for
+ 853   2                      // send frequency alarm data for currently selected car
+ 854   2                      com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+7] =
+ 855   2                              flashpage.user.car[flashpage.user.selectedcar].carspecs.cylandweight & 0x0F;
+ 856   2                      * (u16 *) (com[msgrouting[SENSOR_UNIT]].txbuff+DATA_START+8) =
+ 857   2                              flashpage.user.car[flashpage.user.selectedcar].carspecs.revwarning;
+ 858   2      
+ 859   2                      SendMessage((u08) DISPLAY_UNIT, (u08) SENSOR_UNIT, (u08) MODE_CHANGE, (6+NUMANALOGS));
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 15  
+
+ 860   2              } // if
+ 861   1      
+ 862   1              // overlay back button to turn off data collection
+ 863   1              button_overlay[BACK] = idle;
+ 864   1      
+ 865   1              return(NULL);
+ 866   1      } // collectdata
+ 867          
+ 868          //
+ 869          // Menu Functions
+ 870          //
+ 871          // These functions are automatically called during menu transitions based
+ 872          // on the static and dynamic menu structures.
+ 873          //
+ 874          
+ 875          // menutype *calibrate(menutype *menu) { return(menu); }
+ 876          
+ 877          menutype *eraseall(menutype *menu) {
+ 878   1              tm_state = WAITING;
+ 879   1      
+ 880   1              // wipe out the indexes
+ 881   1              DataFlash_Erase_Page(INDEXPAGE);
+ 882   1      
+ 883   1              // wipe out all data
+ 884   1              DataFlash_Erase_Range(FIRSTDATAPAGE, LASTLAPPAGE, TRUE);
+ 885   1      
+ 886   1              // just in case
+ 887   1              Init_Tables();
+ 888   1      
+ 889   1              Clear_Screen();
+ 890   1      
+ 891   1              return(&setup);
+ 892   1      }
+ 893          
+ 894          menutype *wipemem(menutype *menu) {
+ 895   1              tm_state = WAITING;
+ 896   1      
+ 897   1              // wipe out all data
+ 898   1              DataFlash_Erase_Range(INDEXPAGE, numpages-1, TRUE);
+ 899   1      
+ 900   1              // just in case
+ 901   1              Init_Tables();
+ 902   1      
+ 903   1              Clear_Screen();
+ 904   1      
+ 905   1              return(&setup);
+ 906   1      }
+ 907          
+ 908          #ifdef PACKMEM
+ 909          menutype *packmem(menutype *menu) {
+ 910   1              tm_state = WAITING;
+ 911   1      
+ 912   1              Pack_Sessions(TRUE);
+ 913   1      
+ 914   1              Clear_Screen();
+ 915   1      
+ 916   1              return(&setup);
+ 917   1      }
+ 918          #endif
+ 919          
+ 920          //
+ 921          // This function saves the current user selections to flash
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 16  
+
+ 922          //
+ 923          menutype *savepicklists(menutype *menu) {
+ 924   1              xdata flashpagetype flashpage;          // where to get the data
+ 925   1      
+ 926   1              // get the driver and car info
+ 927   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, USERPAGE);
+ 928   1      
+ 929   1              // assign the current selections        
+ 930   1              flashpage.user.selecteddriver = drivers.current_sel;
+ 931   1              flashpage.user.selectedtrack = tracks.current_sel;
+ 932   1              flashpage.user.selectedcar = vehicles.current_sel;
+ 933   1              // clear out current mode
+ 934   1              flashpage.user.modesample &= 0xF0;
+ 935   1              // assign new sampling rate
+ 936   1              switch (samps_per_sec) {
+ 937   2                      case 20: // 20Hz
+ 938   2                              flashpage.user.modesample += 2;
+ 939   2                              break;
+ 940   2                      case 40: // 40Hz
+ 941   2                              flashpage.user.modesample += 4;
+ 942   2                              break;
+ 943   2                      case 10: // 10Hz
+ 944   2                      default:        // do nothing
+ 945   2                              break;
+ 946   2              } // switch
+ 947   1      
+ 948   1              // update the index
+ 949   1              DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, USERPAGE);
+ 950   1      
+ 951   1              return(menu);
+ 952   1      }
+ 953          
+ 954          // this function saves the sampling rate
+ 955          menutype *savesamp(menutype *menu) {
+ 956   1      
+ 957   1              // determine which selection was chosen
+ 958   1              switch (menu->current_hl) {
+ 959   2                      case 1: // 20Hz
+ 960   2                              samps_per_sec = 20;
+ 961   2                              break;
+ 962   2                      case 2: // 40Hz
+ 963   2                              samps_per_sec = 40;
+ 964   2                              break;
+ 965   2                      case 0: // 10Hz
+ 966   2                      default:
+ 967   2                              samps_per_sec = 10;
+ 968   2              } // switch
+ 969   1      
+ 970   1              savepicklists(menu);
+ 971   1      
+ 972   1              return (menu);
+ 973   1      } // savesamp
+ 974          
+ 975          // This function reads the configuration data written by Traqview and creates
+ 976          // the driver menu selections from it.
+ 977          //
+ 978          menutype *loaddrivers(menutype *menu) {
+ 979   1              // dynamically create menu lists with driver names
+ 980   1              xdata flashpagetype flashpage;          // where to get the data
+ 981   1              xdata int i,j;
+ 982   1      
+ 983   1              tm_state = WAITING;
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 17  
+
+ 984   1      
+ 985   1              // get the driver info
+ 986   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, USERPAGE);
+ 987   1      
+ 988   1              // assign the current selections        
+ 989   1              drivers.current_sel = flashpage.user.selecteddriver;
+ 990   1              vehicles.current_sel = flashpage.user.selectedcar;
+ 991   1              tracks.current_sel = flashpage.user.selectedtrack;
+ 992   1      
+ 993   1              j = 0;
+ 994   1              for (i=0; i<NUMDRIVERS; i++) {
+ 995   2                      if (0xFF != flashpage.user.drivername[i][0]
+ 996   2                              && '\0' != flashpage.user.drivername[i][0]) {
+ 997   3      
+ 998   3                              // create the menu entry
+ 999   3                              strncpy(menunames.driver[j], flashpage.user.drivername[i], NAMELEN);
+1000   3      
+1001   3                              // put in null terminator just in case
+1002   3                              menunames.driver[j][NAMELEN-1] = '\0';
+1003   3      
+1004   3                              // fill in the menu structure
+1005   3                              menulists.driverlist[j].actionid = PICKLIST;
+1006   3                              menulists.driverlist[j].action.f = &savepicklists;
+1007   3                              menulists.driverlist[j].itemname = menunames.driver[j];
+1008   3                              j++;
+1009   3                      } // if
+1010   2              } // for
+1011   1              menulists.driverlist[j].actionid = LASTITEM;
+1012   1              menulists.driverlist[j].action.submenu = NULL;
+1013   1              menulists.driverlist[j].itemname = NULL;
+1014   1      
+1015   1              // link the menu chain to newly-created menu list
+1016   1              return (&drivers);
+1017   1      } // loaddrivers
+1018          
+1019          // This function reads the configuration data written by Traqview and creates
+1020          // the vehicle menu selections from it.
+1021          //
+1022          menutype *loadvehicles(menutype *menu) {
+1023   1              xdata flashpagetype flashpage;          // where to get the data
+1024   1              xdata int i,j;
+1025   1      
+1026   1              tm_state = WAITING;
+1027   1      
+1028   1              // get the driver and car info
+1029   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, USERPAGE);
+1030   1      
+1031   1              // assign the current selections        
+1032   1              drivers.current_sel = flashpage.user.selecteddriver;
+1033   1              vehicles.current_sel = flashpage.user.selectedcar;
+1034   1              tracks.current_sel = flashpage.user.selectedtrack;
+1035   1      
+1036   1              j = 0;
+1037   1              for (i=0; i<NUMCARS; i++) {
+1038   2                      if (0xFF != flashpage.user.car[i].name[0]
+1039   2                              && '\0' != flashpage.user.car[i].name[0]) {
+1040   3      
+1041   3                              // create the menu entry
+1042   3                              strncpy(menunames.vehicle[j], flashpage.user.car[i].name, NAMELEN);
+1043   3      
+1044   3                              // put in null terminator just in case
+1045   3                              menunames.vehicle[j][NAMELEN-1] = '\0';
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 18  
+
+1046   3      
+1047   3                              // fill in the menu structure
+1048   3                              menulists.vehiclelist[j].actionid = PICKLIST;
+1049   3                              menulists.vehiclelist[j].action.f = &savepicklists;
+1050   3                              menulists.vehiclelist[j].itemname = menunames.vehicle[j];
+1051   3                              j++;
+1052   3                      } // if
+1053   2              } // for
+1054   1              menulists.vehiclelist[j].actionid = LASTITEM;
+1055   1              menulists.vehiclelist[j].action.submenu = NULL;
+1056   1              menulists.vehiclelist[j].itemname = NULL;
+1057   1      
+1058   1              // link the menu chain to newly-created menu list
+1059   1              return (&vehicles);
+1060   1      } // loadvehicles
+1061          
+1062          // This function reads the configuration data written by Traqview and creates
+1063          // the track menu selections from it.
+1064          // 
+1065          menutype *loadtracks(menutype *menu) {
+1066   1              xdata flashpagetype flashpage;          // where to get the data
+1067   1              xdata int i,j;
+1068   1      
+1069   1              tm_state = WAITING;
+1070   1      
+1071   1              // get the driver and car info
+1072   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, USERPAGE);
+1073   1      
+1074   1              // assign the current selections        
+1075   1              drivers.current_sel = flashpage.user.selecteddriver;
+1076   1              vehicles.current_sel = flashpage.user.selectedcar;
+1077   1              tracks.current_sel = flashpage.user.selectedtrack;
+1078   1      
+1079   1              // get the track info
+1080   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, TRACKPAGE);
+1081   1      
+1082   1              j = 0;
+1083   1              for (i=0; i<NUMTRACKS; i++) {
+1084   2                      if (0xFF != flashpage.circuit.track[i].name[0]
+1085   2                              && '\0' != flashpage.circuit.track[i].name[0]) {
+1086   3      
+1087   3                              // create the menu entry
+1088   3                              strncpy(menunames.track[j], flashpage.circuit.track[i].name, NAMELEN);
+1089   3      
+1090   3                              // put in null terminator just in case
+1091   3                              menunames.track[j][NAMELEN-1] = '\0';
+1092   3      
+1093   3                              // fill in the menu structure
+1094   3                              menulists.tracklist[j].actionid = PICKLIST;
+1095   3                              menulists.tracklist[j].action.f = &savepicklists;
+1096   3                              menulists.tracklist[j].itemname = menunames.track[j];
+1097   3                              j++;
+1098   3                      } // if
+1099   2              } // for
+1100   1              menulists.tracklist[j].actionid = LASTITEM;
+1101   1              menulists.tracklist[j].action.submenu = NULL;
+1102   1              menulists.tracklist[j].itemname = NULL;
+1103   1      
+1104   1              // link the menu chain to newly-created menu list
+1105   1              return (&tracks);
+1106   1      } // loadtracks
+1107          
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 19  
+
+1108          //
+1109          // This function reads the configuration data written by Traqview and assigns
+1110          // the currently selected sample rate from it
+1111          // 
+1112          menutype *loadsamp(menutype *menu) {
+1113   1              xdata flashpagetype flashpage;          // where to get the data
+1114   1      
+1115   1              // get the sample info
+1116   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, USERPAGE);
+1117   1      
+1118   1              // assign the current selections
+1119   1              drivers.current_sel = flashpage.user.selecteddriver;
+1120   1              vehicles.current_sel = flashpage.user.selectedcar;
+1121   1              tracks.current_sel = flashpage.user.selectedtrack;
+1122   1      
+1123   1              switch (flashpage.user.modesample & 0x0F) {
+1124   2                      case 2:
+1125   2                              samps_per_sec = 20;
+1126   2                              samprates.current_sel = samprates.current_hl = 1;
+1127   2                              break;
+1128   2                      case 4:
+1129   2                              samps_per_sec = 40;
+1130   2                              samprates.current_sel = samprates.current_hl = 2;
+1131   2                              break;
+1132   2                      case 0:
+1133   2                      default:
+1134   2                              samps_per_sec = 10;
+1135   2                              samprates.current_sel = samprates.current_hl = 0;
+1136   2              } // switch
+1137   1      
+1138   1              // link the menu chain to sample rate menu
+1139   1              return (&samprates);
+1140   1      } // loadsamp
+1141          
+1142          // this function saves the display units
+1143          menutype *saveunits(menutype *menu) {
+1144   1      
+1145   1              if (0 == menu->current_hl)  // English Standard units, set bit to 1
+1146   1                      scratch.calibrate.usersettings |= 0x01;
+1147   1              else  // Metric units, set bit to 0
+1148   1                      scratch.calibrate.usersettings &= 0xFE;
+1149   1      
+1150   1              // save new contrast in micro flash
+1151   1              EraseScratchpad();
+1152   1              WriteScratchpad(scratch.scratchbuff, SCRATCHLEN);
+1153   1      
+1154   1              return (menu);
+1155   1      } // saveunits
+1156          
+1157          //
+1158          // This function reads the unit configuration written by Traqview and assigns
+1159          // the currently selected units from it
+1160          // 
+1161          menutype *loadunits(menutype *menu) {
+1162   1      
+1163   1              if (scratch.calibrate.usersettings & 0x01)  // english
+1164   1                      unitchoices.current_sel = unitchoices.current_hl = 0;
+1165   1              else // metric
+1166   1                      unitchoices.current_sel = unitchoices.current_hl = 1;                                   
+1167   1      
+1168   1              // link the menu chain to unit selection menu
+1169   1              return (&unitchoices);
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 20  
+
+1170   1      } // loadunits
+1171          
+1172          
+1173          // this function saves the track length
+1174          //   bits 7-5 eight possible states for graph scale
+1175          //              000 = +-0.1 sec, 001 = +-0.2 sec, 010 = +-0.5 sec, 011 = +-1 sec,
+1176          //              100 = +-2 sec, 101 = +-5 sec, 110 = +-10 sec, 111 = +-20 sec
+1177          //   bits 4-2 eight possible states for track size
+1178          //              000 = small, 001 = med, 010 = large, others unused
+1179          menutype *savetracklen(menutype *menu) {
+1180   1      
+1181   1              scratch.calibrate.usersettings = (scratch.calibrate.usersettings & 0xF1) |
+1182   1                      (tracklenchoices.current_sel << 1);
+1183   1                      
+1184   1              // save new values in micro flash
+1185   1              EraseScratchpad();
+1186   1              WriteScratchpad(scratch.scratchbuff, SCRATCHLEN);
+1187   1      
+1188   1              return (menu);
+1189   1      } // savetracklength
+1190          
+1191          //
+1192          // This function reads the graph scale from microprocessor flash memory
+1193          // and put it into the menu system
+1194          // 
+1195          menutype *loadtracklen(menutype *menu) {
+1196   1      
+1197   1              tracklenchoices.current_sel =
+1198   1              tracklenchoices.current_hl =
+1199   1              (scratch.calibrate.usersettings & 0x0E) >> 1;
+1200   1      
+1201   1              // check range
+1202   1              if (tracklenchoices.current_sel > 2)
+1203   1                      tracklenchoices.current_sel =
+1204   1                      tracklenchoices.current_hl = 1;
+1205   1      
+1206   1              // link the menu chain to unit selection menu
+1207   1              return (&tracklenchoices);
+1208   1      } // loadtracklen
+1209          
+1210          // this function saves the graph scale
+1211          menutype *savescale(menutype *menu) {
+1212   1      
+1213   1              scratch.calibrate.usersettings = (scratch.calibrate.usersettings & 0x1F) |
+1214   1                      ((scalechoices.current_sel + 2) << 5); 
+1215   1      
+1216   1              // save values in micro flash
+1217   1              EraseScratchpad();
+1218   1              WriteScratchpad(scratch.scratchbuff, SCRATCHLEN);
+1219   1      
+1220   1              return (menu);
+1221   1      } // savescale
+1222          
+1223          //
+1224          // This function reads the graph scale from microprocessor flash memory
+1225          // and put it into the menu system
+1226          // 
+1227          menutype *loadgraphscale(menutype *menu) {
+1228   1      
+1229   1              switch ((scratch.calibrate.usersettings & 0xE0) >> 5) {
+1230   2                      case 2:         // 0.5
+1231   2                              scalechoices.current_sel = scalechoices.current_hl = 0;
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 21  
+
+1232   2                              break;
+1233   2                      case 4:         // 2.0
+1234   2                              scalechoices.current_sel = scalechoices.current_hl = 2;
+1235   2                              break;
+1236   2                      case 5:         // 5.0
+1237   2                              scalechoices.current_sel = scalechoices.current_hl = 3;
+1238   2                              break;
+1239   2                      case 6:         // 10.0
+1240   2                              scalechoices.current_sel = scalechoices.current_hl = 4;
+1241   2                              break;
+1242   2                      case 3:         // 1.0
+1243   2                      default:
+1244   2                              scalechoices.current_sel = scalechoices.current_hl = 1;                                 
+1245   2              } // switch
+1246   1      
+1247   1              // link the menu chain to unit selection menu
+1248   1              return (&scalechoices);
+1249   1      } // loadgraphscale
+1250          
+1251          menutype *review(menutype *menu) {
+1252   1              tm_state = WAITING;
+1253   1      
+1254   1              button_overlay[BACK] = NULL;
+1255   1      
+1256   1              // dynamically create menu lists with sessions names
+1257   1              Session_Init();
+1258   1      
+1259   1              // link the menu chain to newly-created menu list
+1260   1              return (&sessions);
+1261   1      }
+1262          
+1263          // add session number to menu title
+1264          menutype *sesstitle(menutype *menu) {
+1265   1              xdata int i,n;
+1266   1      
+1267   1              tm_state = WAITING;
+1268   1      
+1269   1              // get the index information
+1270   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+1271   1      
+1272   1              // find the nth non-blank session, i is session number - 1
+1273   1              n = 0;
+1274   1              for (i = 0; i<NUMSESSIONS; i++) {
+1275   2                      // look for a starting segment number
+1276   2                      if (0xFFFF != flashpage.index.session[i].startseg &&
+1277   2                              0xFFFF != flashpage.index.session[i].endseg)
+1278   2                                      if (menu->current_hl == n++) break;
+1279   2              } // for
+1280   1      
+1281   1              n = strlen(sessionmenu.menuname);
+1282   1              sprintf(&(sessionmenu.menuname[n-2]), "%02d", (int) (i+1));
+1283   1      
+1284   1              button_overlay[BACK] = review;
+1285   1      
+1286   1              // link the menu chain to session option list
+1287   1              return (&sessionmenu);
+1288   1      }
+1289          
+1290          //
+1291          // detail - shows details of a session
+1292          //
+1293          // dynamically create the detail text lines
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 22  
+
+1294          // line 0: driver name
+1295          // line 1: vehicle name
+1296          // line 2: track name
+1297          // line 3: memory usage
+1298          // line 4: starting date/time
+1299          // line 5: ending date/time
+1300          // line 6: laps, sampling rate
+1301          // line 7: temperature in F
+1302          //
+1303          menutype *detail(menutype *menu) {
+1304   1              xdata int i;
+1305   1              xdata u08 drivernum, tracknum, carnum;
+1306   1              xdata u16 startpage;
+1307   1              xdata u32 mem;
+1308   1              xdata u16 laps;
+1309   1              xdata float temperature;
+1310   1      
+1311   1              tm_state = WAITING;
+1312   1      
+1313   1              // initialize
+1314   1              details.menuname = sessionmenutitle;
+1315   1              details.prev_menu = &sessionmenu;
+1316   1              details.menulist = detaillist;
+1317   1              details.num_items =
+1318   1              details.current_sel =
+1319   1              details.current_hl =
+1320   1              details.top_line = 0;
+1321   1      
+1322   1              for (i = 0; i < NUMDETAILS; i++) {
+1323   2                      detaillist[i].actionid = VIEWLIST;
+1324   2                      detaillist[i].itemname = menunames.menudetail[i];
+1325   2                      detaillist[i].action.submenu = NULL;
+1326   2              } // for
+1327   1              // mark the end of the list
+1328   1              detaillist[NUMDETAILS].actionid = LASTITEM;
+1329   1              detaillist[NUMDETAILS].itemname = NULL;
+1330   1              detaillist[NUMDETAILS].action.submenu = NULL;
+1331   1      
+1332   1              // get the session number out of the title & convert to index
+1333   1              i = strlen(sessionmenu.menuname);
+1334   1              i = atoi(&(sessionmenu.menuname[i-2])) - 1;
+1335   1      
+1336   1              // get the lap information
+1337   1              DataFlash_Page_Read(MAX_PAGE_SIZE, (u08 *) laplist, (LASTLAPPAGE - NUMLAPPAGES + i + 1));
+1338   1      
+1339   1              for (laps = 0; laps < NUMLAPS; laps++)
+1340   1                      if (0xFFFFFFFF == laplist[laps]) break;
+1341   1      
+1342   1              // get the index information
+1343   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+1344   1      
+1345   1              // get the drivernum, tracknum, carnum out of session header
+1346   1              drivernum = flashpage.index.session[i].driver;
+1347   1              if (drivernum > NUMDRIVERS) drivernum = 0;
+1348   1              tracknum = flashpage.index.session[i].track;
+1349   1              if (tracknum > NUMTRACKS) tracknum = 0;
+1350   1              carnum = flashpage.index.session[i].car;
+1351   1              if (carnum > NUMCARS) carnum = 0;
+1352   1      
+1353   1              // remember where data starts to get temperature reading
+1354   1              startpage = flashpage.index.session[i].startseg;
+1355   1      
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 23  
+
+1356   1              // fill in the detail pages
+1357   1              // starting date/time
+1358   1              formattime(flashpage.index.session[i].starttime,
+1359   1                                      flashpage.index.session[i].startweeks,
+1360   1                                      LONGDANDT, menunames.menudetail[4]);
+1361   1              // ending date/time
+1362   1              formattime(flashpage.index.session[i].endtime,
+1363   1                                      flashpage.index.session[i].endweeks,
+1364   1                                      LONGDANDT, menunames.menudetail[5]);
+1365   1              // get number of segments
+1366   1              mem = (flashpage.index.session[i].endseg - flashpage.index.session[i].startseg + 1) +
+1367   1                      (flashpage.index.session[i].iostartseg - flashpage.index.session[i].ioendseg + 1);
+1368   1              // memory usage
+1369   1              sprintf(menunames.menudetail[3], "MEM %dK/%dK, %d%%",
+1370   1                      (u16) (mem/2), (numpages/2), (u16) ((mem*100)/numpages));
+1371   1      
+1372   1              // laps and sampling rate
+1373   1              switch (flashpage.index.session[i].modesample & 0x0F) {
+1374   2                      default:
+1375   2                      case 0:         // 10 ACC & 1 GPS per second (samptype10)
+1376   2                      case 1:         // 10 ACC & 2 GPS per second (samptype5)
+1377   2                              sprintf(menunames.menudetail[6], "LAPS %d, RATE 10Hz", laps);
+1378   2                              break;
+1379   2                      case 2:         // 20 ACC & 2 GPS per second (samptype10)
+1380   2                      case 3:         // 20 ACC & 4 GPS per second (samptype5)
+1381   2                              sprintf(menunames.menudetail[6], "LAPS %d, RATE 20Hz", laps);
+1382   2                              break;
+1383   2                      case 4:         // 40 ACC & 4 GPS per second (samptype10)
+1384   2                              sprintf(menunames.menudetail[6], "LAPS %d, RATE 40Hz", laps);
+1385   2                              break;
+1386   2              } // switch
+1387   1      
+1388   1              // get the driver and car information
+1389   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, USERPAGE);
+1390   1      
+1391   1              // copy out driver's name
+1392   1              strncpy(menunames.menudetail[0], flashpage.user.drivername[drivernum], NAMELEN);
+1393   1              // put in null terminator just in case
+1394   1              menunames.menudetail[0][NAMELEN-1] = '\0';
+1395   1      
+1396   1              // copy out car's name
+1397   1              strncpy(menunames.menudetail[1], flashpage.user.car[carnum].name, NAMELEN);
+1398   1              // put in null terminator just in case
+1399   1              menunames.menudetail[1][NAMELEN-1] = '\0';
+1400   1      
+1401   1              // get the track information
+1402   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, TRACKPAGE);
+1403   1      
+1404   1              // copy out track's name
+1405   1              strncpy(menunames.menudetail[2], flashpage.circuit.track[tracknum].name, NAMELEN);
+1406   1              // put in null terminator just in case
+1407   1              menunames.menudetail[2][NAMELEN-1] = '\0';
+1408   1      
+1409   1              // get the temperature from first programmed page
+1410   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, startpage);
+1411   1      
+1412   1              // should work for either samptype5 or samptype10
+1413   1              i = flashpage.secsamp10[1].gps.temp;
+1414   1              temperature = dotemp(flashpage.secsamp10[1].gps.temp, 'F');
+1415   1              sprintf(menunames.menudetail[7], "Temp %3.2f F", temperature);
+1416   1      
+1417   1              return (&details);
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 24  
+
+1418   1      } // detail
+1419          
+1420          //
+1421          // status - shows current unit status
+1422          //
+1423          // dynamically create the status text lines
+1424          // line 0: memory available
+1425          // line 1: sessions available
+1426          // line 2: battery voltage
+1427          // line 3: inputs enabled
+1428          //
+1429          // list of items must be less than NUMDETAILS
+1430          //
+1431          menutype *status(menutype *menu) {
+1432   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+1433   1              xdata u16 i;
+1434   1              xdata u16 mem = 0;
+1435   1              xdata u16 sess = 0;
+1436   1              xdata float hrsleft;
+1437   1              u08 iobytes = 0;
+1438   1              xdata u16 batvolt;
+1439   1      
+1440   1              tm_state = WAITING;
+1441   1      
+1442   1              // start ADC conversion to read battery voltage
+1443   1              SFRPAGE = ADC0_PAGE;
+1444   1              AD0INT = 0;
+1445   1              AD0BUSY = 1;
+1446   1      
+1447   1              // initialize
+1448   1              details.menuname = statustitle;
+1449   1              details.prev_menu = &mainmenu;
+1450   1              details.menulist = detaillist;
+1451   1              details.num_items =
+1452   1              details.current_sel =
+1453   1              details.current_hl =
+1454   1              details.top_line = 0;
+1455   1      
+1456   1              for (i = 0; i < NUMSTATUS; i++) {
+1457   2                      detaillist[i].actionid = VIEWLIST;
+1458   2                      detaillist[i].itemname = menunames.menudetail[i];
+1459   2                      detaillist[i].action.submenu = NULL;
+1460   2              } // for
+1461   1              // mark the end of the list
+1462   1              detaillist[NUMSTATUS].actionid = LASTITEM;
+1463   1              detaillist[NUMSTATUS].itemname = NULL;
+1464   1              detaillist[NUMSTATUS].action.submenu = NULL;
+1465   1      
+1466   1              SFRPAGE = SFRPAGE_SAVE;
+1467   1      
+1468   1              // refresh the current selections
+1469   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, USERPAGE);
+1470   1              // set up the I/O collection
+1471   1              iocollect = flashpage.user.iodata;
+1472   1      
+1473   1              // get the index information
+1474   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+1475   1      
+1476   1              // get memory usage and number of segments used
+1477   1              for (i = 0; i<NUMSESSIONS; i++) {
+1478   2                      // look for a starting segment number
+1479   2                      if (0xFFFF != flashpage.index.session[i].startseg) {
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 25  
+
+1480   3                              sess++;
+1481   3                              mem += (flashpage.index.session[i].endseg - flashpage.index.session[i].startseg + 1) +
+1482   3                              (flashpage.index.session[i].iostartseg - flashpage.index.session[i].ioendseg + 1);
+1483   3                      } // if
+1484   2              } // for
+1485   1      
+1486   1              // record time = memory available / record rate
+1487   1              // record rate = 3600 sec/hr * (pagesize/(samprate*iobytes) + (samprate/10/SAMP10S_PER_PAGE))
+1488   1              for (i=0; i < NUMTDINPUTBYTES; i++)
+1489   1                      if (iocollect & (1 << i)) iobytes++;
+1490   1      
+1491   1      //      hrsleft = 3600.0 * ((float) pagesize/(float) (samps_per_sec*iobytes) + ((float) samps_per_sec/10.0/(flo
+             -at) SAMP10S_PER_PAGE));
+1492   1              hrsleft = (float) (samps_per_sec*iobytes) / (float) pagesize;
+1493   1              hrsleft += (float) samps_per_sec/10.0/(float) SAMP10S_PER_PAGE;
+1494   1              hrsleft = hrsleft*3600.0;       // seg per hour
+1495   1              if (mem >= (LASTDATAPAGE-FIRSTDATAPAGE))
+1496   1                      hrsleft = 0.0;
+1497   1              else
+1498   1                      hrsleft = (float) (LASTDATAPAGE - mem) / hrsleft;       // hours
+1499   1      
+1500   1              sprintf(menunames.menudetail[0], "Rec Time: %2.1f Hrs", hrsleft);
+1501   1                                                                         
+1502   1              // session usage
+1503   1              sprintf(menunames.menudetail[1], "Sess Avail: %d", NUMSESSIONS - sess);
+1504   1      
+1505   1              // input points
+1506   1              //   bit 7 = 16bit Freq, 6 = all digitals, 5 = Anlg3, 4 = Anlg2
+1507   1              //   bit 3 = Anlg1, 2 = Anlg0, 1 = Freq1, 0 = Freq0
+1508   1              sprintf(menunames.menudetail[3], "I/O: A---- D-- F--", sess, NUMSESSIONS);
+1509   1      
+1510   1              // analogs
+1511   1              for (i=0; i<NUMANALOGS; i++)
+1512   1                      if (iocollect & (1 << (i+2)))
+1513   1                              menunames.menudetail[3][6+i] = '0' + i;
+1514   1      
+1515   1              // digitals
+1516   1              if (iocollect & 0x40) {
+1517   2                      menunames.menudetail[3][12] = '4';
+1518   2                      menunames.menudetail[3][13] = '5';
+1519   2              } // if
+1520   1      
+1521   1              // rpm
+1522   1              if (iocollect & 0x80) {
+1523   2                      menunames.menudetail[3][15] = 'R';
+1524   2                      menunames.menudetail[3][16] = 'P';
+1525   2                      menunames.menudetail[3][17] = 'M';
+1526   2              } // if
+1527   1      
+1528   1              SFRPAGE = ADC0_PAGE;
+1529   1              i=0;
+1530   1              // battery voltage
+1531   1              while (!AD0INT)
+1532   1                      if (++i > 10000) break;         // escape hatch 
+1533   1      
+1534   1              batvolt = ADC0;         // read ADC value
+1535   1      
+1536   1              SFRPAGE = SFRPAGE_SAVE;
+1537   1      
+1538   1              // usable range 3000 to 4096
+1539   1      #define LOWVOLT (POWER_THRESHOLD/4)
+1540   1      #define MAXVOLT (1000)          // just under 5V
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 26  
+
+1541   1      
+1542   1              i = (100 * (batvolt - LOWVOLT)) / (MAXVOLT - LOWVOLT);
+1543   1              sprintf(menunames.menudetail[2], "Power: %u%%", i);
+1544   1      
+1545   1      #undef MAXVOLT
+1546   1      #undef LOWVOLT
+1547   1      
+1548   1              return (&details);
+1549   1      } // status
+1550          
+1551          // finds the right session number and erases it
+1552          menutype *erasesess(menutype *menu) {
+1553   1              xdata u08 i;
+1554   1      
+1555   1              tm_state = WAITING;
+1556   1      
+1557   1              // get the index information
+1558   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+1559   1      
+1560   1              // get the session number out of the title
+1561   1              i = strlen(sessionmenu.menuname);
+1562   1              i = atoi(&(sessionmenu.menuname[i-2]));
+1563   1      
+1564   1              // make sure index is valid
+1565   1              if (i <= NUMSESSIONS)
+1566   1                      // session numbers start at 1
+1567   1                      Erase_Session(i);
+1568   1      
+1569   1              // since we just deleted an item, recreate menu lists with sessions names
+1570   1              Session_Init();
+1571   1      
+1572   1              // go back to "sessions"
+1573   1              return (&sessions);
+1574   1      } // erasesess
+1575          
+1576          menutype *idle(menutype *menu) {
+1577   1              u08 samprate;
+1578   1              u08 i;
+1579   1              xdata flashpagetype tempflash;
+1580   1      
+1581   1              if (DRIVING(tm_state)) {                // save the finish location
+1582   2                      // get the track finish info
+1583   2                      DataFlash_Page_Read(MAX_PAGE_SIZE, tempflash.bigbuff, TRACKFINPAGE);            
+1584   2              
+1585   2                      // save the finish information and set up to find the start
+1586   2                      lap.finishpos.lat = tempflash.finishandgear.trackfinish[lap.tracknum].finishlat = lap.currentpos.lat;
+1587   2                      lap.finishpos.lon = tempflash.finishandgear.trackfinish[lap.tracknum].finishlon = lap.currentpos.lon;
+1588   2                      lap.finishheading = tempflash.finishandgear.trackfinish[lap.tracknum].finishhead = lap.currentheading;
+1589   2              
+1590   2                      // write to flash
+1591   2                      DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, tempflash.bigbuff, TRACKFINPAGE);
+1592   2              } // if
+1593   1      
+1594   1              // only do this if we are storing data
+1595   1              if (RECORDING(tm_state)) {
+1596   2                      // write out the io data
+1597   2                      if (iocollect)
+1598   2                              DataFlash_Page_Write_From_Buffer_Erase(IOBUFFER, iopagecnt);
+1599   2                      // stop collecting data
+1600   2                      End_Session(session, pagecnt, iopagecnt);
+1601   2              } // if
+1602   1      
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 27  
+
+1603   1              if (TIMING == tm_state ||
+1604   1                      AUTOXHOLDTIME == tm_state ||
+1605   1                      DRAGHOLDTIME == tm_state ||
+1606   1                      DRAGHOLDNUMS == tm_state ||
+1607   1                      HILLCLIMBSTART == tm_state ||
+1608   1                      HILLCLIMBFINISH == tm_state) {
+1609   2                      // save the laps collected
+1610   2                      Lap_Store();
+1611   2      
+1612   2                      // save the best lap sectors
+1613   2                      Sector_Store();
+1614   2              } // if
+1615   1      
+1616   1              tm_state = WAITING;
+1617   1      
+1618   1              // get the sample info in case the mode changed it
+1619   1              DataFlash_Page_Read(MAX_PAGE_SIZE, tempflash.bigbuff, USERPAGE);
+1620   1      
+1621   1              switch (tempflash.user.modesample & 0x0F) {
+1622   2                      case 2:
+1623   2                              samps_per_sec = 20;
+1624   2                              samprate = 2;
+1625   2                              break;
+1626   2                      case 4:
+1627   2                              samps_per_sec = 40;
+1628   2                              samprate = 4;
+1629   2                              break;
+1630   2                      case 0:
+1631   2                      default:
+1632   2                              samps_per_sec = 10;
+1633   2                              samprate = 0;
+1634   2              } // switch
+1635   1      
+1636   1              // tell the sensor unit
+1637   1              com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START] = tm_state;
+1638   1              com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+1] = samprate;
+1639   1              com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+2] = iocollect;
+1640   1              
+1641   1              // Set up input scaling
+1642   1              for (i=0; i<NUMANALOGS; i++) {
+1643   2                      switch (analogscaling[i].maxscale) {
+1644   3                              case 20: com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+3+i] = 4;
+1645   3                                      break;
+1646   3                              case 10: com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+3+i] = 3;
+1647   3                                      break;
+1648   3                              case 5: com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+3+i] = 2;
+1649   3                                      break;
+1650   3                      } // switch
+1651   2              } // for
+1652   1              SendMessage((u08) DISPLAY_UNIT, (u08) SENSOR_UNIT, (u08) MODE_CHANGE, (6+NUMANALOGS));
+1653   1      
+1654   1              // remove button overlays
+1655   1              button_overlay[SEL] =
+1656   1              button_overlay[BACK] =
+1657   1              button_overlay[UP] =
+1658   1              button_overlay[DN] = NULL;
+1659   1      
+1660   1              return(menu->prev_menu);
+1661   1      } // idle
+1662          
+1663          menutype *markstart(menutype *menu) {
+1664   1      
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 28  
+
+1665   1              // only remember start finish and start timing if good gps signal
+1666   1              if (gpslock >= GPS_GOOD) {
+1667   2      
+1668   2                      // record starting position
+1669   2                      Lap_Check(START_POSITION, NULL);
+1670   2              }
+1671   1              return(NULL);
+1672   1      } // markstart
+1673          
+1674          menutype *markfinish(menutype *menu) {
+1675   1      
+1676   1              Lap_Check(FINISH_POSITION, NULL);
+1677   1              
+1678   1              return(NULL);
+1679   1      } // markfinish
+1680          
+1681          menutype *clearstart(menutype *tempmenu) {
+1682   1              int i;
+1683   1      
+1684   1              // save current data
+1685   1              DataFlash_Page_Write_Erase(GENBUFFER, pagesize, flashpage.bigbuff, pagecnt);
+1686   1      
+1687   1              // clear the temporary location
+1688   1              lap.distance = 0.0;
+1689   1              lap.currentlap = 0;
+1690   1      
+1691   1              // start finish changed so clear out best lap and sector times
+1692   1              // get the track finishline information
+1693   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, PREDPAGESTART + (lap.tracknum / 4));
+1694   1      
+1695   1              // clear out sector times
+1696   1              for (i = 0; i < NUMSECTORS; i++)
+1697   1                      flashpage.storedsectors[lap.tracknum % 4].bestsectortimes[i] = 0L;
+1698   1                                              
+1699   1              // clear the best laptime       
+1700   1              flashpage.storedsectors[lap.tracknum % 4].bestlapever = 0xFFFFFFFFL;
+1701   1              
+1702   1              // write it back out
+1703   1              DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, PREDPAGESTART + (lap.tracknum / 4
+             -));
+1704   1      
+1705   1              // get the track info
+1706   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, TRACKPAGE);
+1707   1      
+1708   1              // change the permanent start information
+1709   1              lap.startpos.lat = flashpage.circuit.track[lap.tracknum].startlat = 
+1710   1              lap.startpos.lon = flashpage.circuit.track[lap.tracknum].startlon = 0L;
+1711   1              flashpage.circuit.track[lap.tracknum].startalt = 0;
+1712   1              lap.startheading = flashpage.circuit.track[lap.tracknum].starthead = 0;
+1713   1      
+1714   1              // write it back out
+1715   1              DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, TRACKPAGE);
+1716   1      
+1717   1              // get the track finish line info
+1718   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, TRACKFINPAGE);
+1719   1      
+1720   1              // clear the permanent finish information
+1721   1              lap.finishpos.lat = flashpage.finishandgear.trackfinish[lap.tracknum].finishlat = 
+1722   1              lap.finishpos.lon = flashpage.finishandgear.trackfinish[lap.tracknum].finishlon = 0L;
+1723   1              flashpage.finishandgear.trackfinish[lap.tracknum].finishalt = 0;
+1724   1              lap.finishheading = flashpage.finishandgear.trackfinish[lap.tracknum].finishhead = 0;
+1725   1      
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 29  
+
+1726   1              // write it back out
+1727   1              DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, TRACKFINPAGE);
+1728   1      
+1729   1              // retrieve current data
+1730   1              DataFlash_Page_Read(pagesize, flashpage.bigbuff, pagecnt);
+1731   1      
+1732   1              // overlay back button to turn off data collection
+1733   1              button_overlay[BACK] = idle;
+1734   1      
+1735   1              if (tm_state == WAITING_LAP) {  // lapping mode
+1736   2                      // overlay select to choose starting point
+1737   2                      button_overlay[SEL] = markstart;
+1738   2                      // wait for user to hit button
+1739   2                      tm_state = LAPS;
+1740   2              } // if
+1741   1              else if (tm_state == WAITING_HILL) {
+1742   2                      // overlay select to choose starting point
+1743   2                      button_overlay[SEL] = markstart;
+1744   2      
+1745   2                      tm_state = HILLCLIMB;
+1746   2              } // else
+1747   1              else {  // autox mode
+1748   2                      // overlay select to choose starting point
+1749   2                      button_overlay[SEL] = NULL;      // don't need to clear it again, eh?
+1750   2      
+1751   2                      Write_Screen((u08 *) autoxready, '-');
+1752   2                      tm_state = AUTOXREADY;
+1753   2              } // else
+1754   1      
+1755   1              getback.prev_menu = &collect;
+1756   1              menu = &getback;
+1757   1      
+1758   1              return(NULL);
+1759   1      } // clearstart
+1760          
+1761          menutype *dontclear(menutype *tempmenu) {
+1762   1              // overlay back button to turn off data collection
+1763   1              button_overlay[BACK] = idle;
+1764   1              button_overlay[SEL] = clearmenu;
+1765   1              switch (tm_state) {
+1766   2                      case WAITING_LAP:
+1767   2                              tm_state = WAITSTART;
+1768   2                              break;
+1769   2                      case WAITING_HILL:
+1770   2                              tm_state = HILLCLIMBWAITSTART;
+1771   2                              break;
+1772   2                      default:
+1773   2                              Write_Screen((u08 *) autoxready, '-');
+1774   2                              tm_state = AUTOXREADY;
+1775   2              } // switch
+1776   1      
+1777   1              getback.prev_menu = &collect;
+1778   1              menu = &getback;
+1779   1      
+1780   1              return(NULL);
+1781   1      } // dontclear
+1782          
+1783          menutype *clearmenu(menutype *menu) {
+1784   1      
+1785   1              // get back to whatever we've got now
+1786   1              clearsf.prev_menu=menu;
+1787   1              button_overlay[SEL] = NULL;
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 30  
+
+1788   1              button_overlay[BACK] = dontclear;
+1789   1      
+1790   1              // capture incoming state in wait state
+1791   1              switch (tm_state) {
+1792   2                      case WAITSTART:
+1793   2                              tm_state = WAITING_LAP;
+1794   2                              break;
+1795   2                      case HILLCLIMBWAITSTART:
+1796   2                              tm_state = WAITING_HILL;
+1797   2                              break;
+1798   2                      default:
+1799   2                              tm_state = WAITING_AUTOX;
+1800   2                              break;
+1801   2              } // switch
+1802   1      
+1803   1              return (&clearsf);
+1804   1      } // clearmenu
+1805          
+1806          menutype *showlaps(menutype *menu) {
+1807   1              xdata u08 i;
+1808   1      
+1809   1      // 2.15 try
+1810   1              tm_state = REVIEW;
+1811   1      
+1812   1              // initialize
+1813   1              lap.currentlap = 1;
+1814   1              
+1815   1              lap.besttime = 0xFFFFFFFF;
+1816   1              lap.lastlap = 0;
+1817   1      
+1818   1              // get the session number out of the title
+1819   1              i = strlen(sessionmenu.menuname);
+1820   1              i = atoi(&(sessionmenu.menuname[i-2]));
+1821   1      
+1822   1              // make sure index is valid
+1823   1              if (i <= NUMSESSIONS)
+1824   1                      // read in the laplist
+1825   1                      DataFlash_Page_Read(MAX_PAGE_SIZE, (u08 *) laplist, (LASTLAPPAGE - NUMLAPPAGES + i));
+1826   1      
+1827   1              // find last programmed lap and best lap
+1828   1              for (i=0; i < NUMLAPS; i++) {
+1829   2                      if (0xFFFFFFFF == laplist[i]) break;
+1830   2                      if (laplist[i] < lap.besttime) lap.besttime = laplist[i];
+1831   2              } // for
+1832   1      
+1833   1              // check for no programmed laps
+1834   1              if (0 == (lap.lastlap = i)) {
+1835   2      
+1836   2                      // Tell user that no laps programmed
+1837   2                      Info_Screen("No Laps");
+1838   2      
+1839   2              } // if
+1840   1              else {
+1841   2                      // enable the buttons
+1842   2                      button_overlay[UP] = uplap;
+1843   2                      button_overlay[DN] = dnlap;
+1844   2      
+1845   2                      lap.timer = laplist[0];
+1846   2      
+1847   2                      // bring up the timing screen
+1848   2                      timingmode = REV;               // make sure numbers appear in correct spot
+1849   2                      Clear_Screen();
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 31  
+
+1850   2                      Write_Icon(21, 9, 81, 14, (u08 *) timingicon, '-');
+1851   2                      Write_Timer();
+1852   2      //              // Write the replay icon
+1853   2      //              Write_Icon(0, 0, 12, 10, (u08 *) replay, '-');
+1854   2                      Write_Lap();
+1855   2                      Write_Flag(lap.timer == lap.besttime);
+1856   2              } // else
+1857   1      
+1858   1              // gets you out of review
+1859   1              button_overlay[BACK] = backlap;
+1860   1      
+1861   1              return (NULL);
+1862   1      } // showlaps
+1863          
+1864          menutype *dnlap(menutype *menu) {
+1865   1      
+1866   1              if (lap.currentlap == lap.lastlap) lap.currentlap = 1;
+1867   1              else lap.currentlap++;
+1868   1      
+1869   1              lap.timer = laplist[lap.currentlap-1];
+1870   1      
+1871   1              // bring up the timing screen
+1872   1              Write_Timer();
+1873   1      //      // Write the replay icon
+1874   1      //      Write_Icon(0, 0, 12, 10, (u08 *) replay, '-');
+1875   1              Write_Lap();
+1876   1              Write_Flag(lap.timer == lap.besttime);
+1877   1      
+1878   1              return (NULL);
+1879   1      } // dnlap
+1880          
+1881          menutype *uplap(menutype *menu) {
+1882   1      
+1883   1              if (lap.currentlap == 1) lap.currentlap = lap.lastlap;
+1884   1              else lap.currentlap--;
+1885   1      
+1886   1              lap.timer = laplist[lap.currentlap-1];
+1887   1      
+1888   1              // bring up the timing screen
+1889   1              Write_Timer();
+1890   1      //      // Write the replay icon
+1891   1      //      Write_Icon(0, 0, 12, 10, (u08 *) replay, '-');
+1892   1              Write_Lap();
+1893   1              Write_Flag(lap.timer == lap.besttime);
+1894   1      
+1895   1              return (NULL);
+1896   1      } // uplap
+1897          
+1898          menutype *backlap(menutype *menu) {
+1899   1      
+1900   1              tm_state = WAITING;
+1901   1      
+1902   1              // remove button overlays
+1903   1              button_overlay[BACK] = 
+1904   1              button_overlay[UP] =
+1905   1              button_overlay[DN] = NULL;
+1906   1      
+1907   1              return(menu->prev_menu);
+1908   1      } // backlap
+1909          
+1910          menutype *previnput(menutype *menu) {
+1911   1              return (nextinput(menu));
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 32  
+
+1912   1      } // previnput
+1913          
+1914          menutype *nextinput(menutype *menu) {
+1915   1              switch (tm_state) {
+1916   2                      case DRIVE:
+1917   2                              if (iocollect & 0x04) {
+1918   3                                      tm_state = GAUGEA0;
+1919   3                                      break; }
+1920   2                      case GAUGEA0:
+1921   2                              if (iocollect & 0x08) {
+1922   3                                      tm_state = GAUGEA1;
+1923   3                                      break; }
+1924   2                      case GAUGEA1:
+1925   2                              if (iocollect & 0x10) {
+1926   3                                      tm_state = GAUGEA2;
+1927   3                                      break; }
+1928   2                      case GAUGEA2:
+1929   2                              if (iocollect & 0x20) {
+1930   3                                      tm_state = GAUGEA3;
+1931   3                                      break; }
+1932   2                      case GAUGEA3:
+1933   2                              if (iocollect & 0x40) {
+1934   3                                      tm_state = GAUGED4;
+1935   3                                      break; }
+1936   2                      case GAUGED4:
+1937   2                              if (iocollect & 0x40) {
+1938   3                                      tm_state = GAUGED5;
+1939   3                              break; }
+1940   2                      case GAUGED5:
+1941   2                              tm_state = GPSRPM;
+1942   2                              break;
+1943   2                      case GPSRPM:
+1944   2                              tm_state = GFORCES;
+1945   2                              Clear_Screen();
+1946   2                              // put up a line bar
+1947   2                              Write_Icon(0, 0, NUMBER_OF_COLUMNS, 8, &(menubar[0]), '-');
+1948   2              
+1949   2                              // write menu centered name
+1950   2                              Write_Text(0, 36, "G-Forces", '-');
+1951   2                              break;
+1952   2                      case GFORCES:
+1953   2                              tm_state = DRIVE;
+1954   2                              break;
+1955   2                      default:
+1956   2                              break;
+1957   2              } // switch
+1958   1      
+1959   1              return (NULL);
+1960   1      } // nextinput
+1961          
+1962          menutype *upcontrast(menutype *menu) {
+1963   1              xdata u08 tempstring[13];
+1964   1              u08 SFRPAGE_SAVE = SFRPAGE;             // Save Current SFR page
+1965   1      
+1966   1              // increase contrast
+1967   1              SFRPAGE = PCA0_PAGE;
+1968   1              if (++scratch.calibrate.contrast > CONTRAST_UPPER)
+1969   1                      scratch.calibrate.contrast = CONTRAST_UPPER;
+1970   1              PCA0CPL0 = scratch.calibrate.contrast;
+1971   1              PCA0CPH0 = scratch.calibrate.contrast;
+1972   1              SFRPAGE = SFRPAGE_SAVE;                 // Restore SFR page
+1973   1      
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 33  
+
+1974   1              sprintf(tempstring, "Cont %d", (s16) scratch.calibrate.contrast - CONTRAST_CENTER);
+1975   1              Info_Screen(tempstring);
+1976   1      
+1977   1              return (NULL);
+1978   1      } // upcontrast
+1979          
+1980          menutype *dncontrast(menutype *menu) {
+1981   1              xdata u08 tempstring[13];
+1982   1              u08 SFRPAGE_SAVE = SFRPAGE;             // Save Current SFR page
+1983   1      
+1984   1              // decrease contrast
+1985   1              SFRPAGE = PCA0_PAGE;
+1986   1              if (--scratch.calibrate.contrast < CONTRAST_LOWER)
+1987   1                      scratch.calibrate.contrast = CONTRAST_LOWER;
+1988   1              PCA0CPL0 = scratch.calibrate.contrast;
+1989   1              PCA0CPH0 = scratch.calibrate.contrast;
+1990   1              SFRPAGE = SFRPAGE_SAVE;                 // Restore SFR page
+1991   1      
+1992   1              sprintf(tempstring, "Cont %d", (s16) scratch.calibrate.contrast - CONTRAST_CENTER);
+1993   1              Info_Screen(tempstring);
+1994   1      
+1995   1              return (NULL);
+1996   1      } // dncontrast
+1997          
+1998          menutype *backcontrast(menutype *menu) {
+1999   1      
+2000   1              tm_state = WAITING;
+2001   1      
+2002   1              // save new contrast in micro flash
+2003   1              EraseScratchpad();
+2004   1              WriteScratchpad(scratch.scratchbuff, SCRATCHLEN);
+2005   1      
+2006   1              // remove button overlays
+2007   1              button_overlay[BACK] = 
+2008   1              button_overlay[UP] =
+2009   1              button_overlay[DN] = NULL;
+2010   1      
+2011   1              return(menu->prev_menu);
+2012   1      } // backcontrast
+2013          
+2014          menutype *contrast(menutype *menu) {
+2015   1              xdata u08 tempstring[13];
+2016   1      
+2017   1              tm_state = WAITING;
+2018   1      
+2019   1              sprintf(tempstring, "Cont %d", (s16) scratch.calibrate.contrast - CONTRAST_CENTER);
+2020   1              Info_Screen(tempstring);
+2021   1      
+2022   1              // enable the buttons
+2023   1              button_overlay[UP] = upcontrast;
+2024   1              button_overlay[DN] = dncontrast;
+2025   1              button_overlay[BACK] = backcontrast;
+2026   1      
+2027   1              return(NULL);
+2028   1      } // contrast
+2029          
+2030          menutype *upgmt(menutype *menu) {
+2031   1              xdata u08 tempstring[13];
+2032   1      
+2033   1              if (++scratch.calibrate.timecode > TIMECODE_UPPER)
+2034   1                      scratch.calibrate.timecode = TIMECODE_UPPER;
+2035   1      
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 34  
+
+2036   1              sprintf(tempstring, "GMT %+02d", (s16) scratch.calibrate.timecode);
+2037   1              Info_Screen(tempstring);
+2038   1      
+2039   1              return (NULL);
+2040   1      } // upgmt
+2041          
+2042          menutype *dngmt(menutype *menu) {
+2043   1              xdata u08 tempstring[13];
+2044   1      
+2045   1              if (--scratch.calibrate.timecode < TIMECODE_LOWER)
+2046   1                      scratch.calibrate.timecode = TIMECODE_LOWER;
+2047   1      
+2048   1              sprintf(tempstring, "GMT %+02d", (s16) scratch.calibrate.timecode);
+2049   1              Info_Screen(tempstring);
+2050   1      
+2051   1              return (NULL);
+2052   1      } // dngmt
+2053          
+2054          //
+2055          // This function allows the setting of time offset
+2056          // 
+2057          menutype *dogmt(menutype *menu) {
+2058   1              xdata u08 tempstring[13];
+2059   1      
+2060   1              tm_state = WAITING;
+2061   1      
+2062   1              sprintf(tempstring, "GMT %+02d", (s16) scratch.calibrate.timecode);
+2063   1              Info_Screen(tempstring);
+2064   1      
+2065   1              // enable the buttons
+2066   1              button_overlay[UP] = upgmt;
+2067   1              button_overlay[DN] = dngmt;
+2068   1              button_overlay[BACK] = backcontrast; // doubling up on this function
+2069   1      
+2070   1              return (NULL);
+2071   1      } // dogmt
+2072          
+2073          menutype *uplaphold(menutype *menu) {
+2074   1              xdata u08 tempstring[13];
+2075   1      
+2076   1              if ((scratch.calibrate.lapholdtime += 10) > LAPHOLD_UPPER)
+2077   1                      scratch.calibrate.lapholdtime = LAPHOLD_UPPER;
+2078   1      
+2079   1              sprintf(tempstring, "LapHold %3d", (s16) scratch.calibrate.lapholdtime);
+2080   1              Info_Screen(tempstring);
+2081   1      
+2082   1              return (NULL);
+2083   1      } // uplaphold
+2084          
+2085          menutype *dnlaphold(menutype *menu) {
+2086   1              xdata u08 tempstring[13];
+2087   1      
+2088   1              if (scratch.calibrate.lapholdtime <= (10 + LAPHOLD_LOWER))
+2089   1                      scratch.calibrate.lapholdtime = LAPHOLD_LOWER;
+2090   1              else
+2091   1                      scratch.calibrate.lapholdtime -= 10;
+2092   1      
+2093   1              sprintf(tempstring, "LapHold %3d", (s16) scratch.calibrate.lapholdtime);
+2094   1              Info_Screen(tempstring);
+2095   1      
+2096   1              return (NULL);
+2097   1      } // dnlaphold
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 35  
+
+2098          
+2099          //
+2100          // This function allows the setting of time offset
+2101          // 
+2102          menutype *laphold(menutype *menu) {
+2103   1              xdata u08 tempstring[13];
+2104   1      
+2105   1              tm_state = WAITING;
+2106   1      
+2107   1              sprintf(tempstring, "LapHold %3d", (s16) scratch.calibrate.lapholdtime);
+2108   1              Info_Screen(tempstring);
+2109   1      
+2110   1              // enable the buttons
+2111   1              button_overlay[UP] = uplaphold;
+2112   1              button_overlay[DN] = dnlaphold;
+2113   1              button_overlay[BACK] = backcontrast; // doubling up on this function
+2114   1      
+2115   1              return (NULL);
+2116   1      } // laphold
+2117          
+2118          menutype *stage(menutype *menu) {
+2119   1      //      u08 samprate;
+2120   1              u08 i;
+2121   1      
+2122   1              if (AUTOXSTAGE == tm_state) {
+2123   2                      Write_Screen((u08 *) autoxready, '-');
+2124   2              
+2125   2                      // check for finish position
+2126   2                      if (lap.finishpos.lat == 0xFFFFFFFF || lap.finishpos.lat == 0L)
+2127   2                              // no finish position so no need to clear it
+2128   2                              button_overlay[SEL] = NULL;
+2129   2                      else
+2130   2                              // select button will go to clear finish menu
+2131   2                              button_overlay[SEL] = clearmenu;
+2132   2              
+2133   2                      // now staged
+2134   2                      tm_state = AUTOXREADY;
+2135   2              } // if
+2136   1              else {  // DRAGSTAGE
+2137   2                      Write_Icon(0, 0, 59, 32, (u08 *) readytext, '-');
+2138   2                      
+2139   2                      // now staged
+2140   2                      tm_state = DRAGREADY;
+2141   2                      draglighttimer = 0;
+2142   2                      
+2143   2                      // clear select button
+2144   2                      button_overlay[SEL] = NULL;
+2145   2              } //else
+2146   1              
+2147   1              com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START] = tm_state;
+2148   1              com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+1] = 4;          // sampling rate always 40Hz for staged modes
+2149   1              com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+2] = iocollect;
+2150   1      
+2151   1              // Set up input scaling
+2152   1              for (i=0; i<NUMANALOGS; i++) {
+2153   2                      switch (analogscaling[i].maxscale) {
+2154   3                              case 20: com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+3+i] = 4;
+2155   3                                      break;
+2156   3                              case 10: com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+3+i] = 3;
+2157   3                                      break;
+2158   3                              case 5: com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+3+i] = 2;
+2159   3                                      break;
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 36  
+
+2160   3                      } // switch
+2161   2              } // for
+2162   1              SendMessage((u08) DISPLAY_UNIT, (u08) SENSOR_UNIT, (u08) MODE_CHANGE, (6+NUMANALOGS));
+2163   1      
+2164   1              return(NULL);
+2165   1      } // stage
+2166          
+2167          //
+2168          // This function reads the start screen configuration from scratchpad and assigns
+2169          // the currently selected start screen value from it
+2170          // 
+2171          menutype *loadstartscreen(menutype *menu) {
+2172   1      
+2173   1              switch (scratch.calibrate.menustart) {
+2174   2                      case (0xFF):
+2175   2                              startscreenchoices.current_sel = startscreenchoices.current_hl = 0;
+2176   2                              break;
+2177   2                      default:
+2178   2                              startscreenchoices.current_sel = startscreenchoices.current_hl = scratch.calibrate.menustart;
+2179   2                              break;
+2180   2              } // switch
+2181   1      
+2182   1              // link the menu chain to unit selection menu
+2183   1              return (&startscreenchoices);
+2184   1      } // loadstartscreen
+2185          
+2186          // this function saves the sampling rate
+2187          menutype *savestartscreen(menutype *menu) {
+2188   1      
+2189   1              // determine which selection was chosen
+2190   1              switch (menu->current_hl) {
+2191   2                      case 0: // Main Menu
+2192   2                              scratch.calibrate.menustart = 0xFF;
+2193   2                              break;
+2194   2                      default:
+2195   2                              scratch.calibrate.menustart = menu->current_hl;
+2196   2                              break;
+2197   2              } // switch
+2198   1      
+2199   1              // save new start menu in micro flash
+2200   1              EraseScratchpad();
+2201   1              WriteScratchpad(scratch.scratchbuff, SCRATCHLEN);
+2202   1      
+2203   1              return (menu);
+2204   1      } // savestartscreen
+2205          
+2206          //
+2207          // This function reads the start screen configuration from scratchpad and assigns
+2208          // the currently selected start screen value from it
+2209          // 
+2210          menutype *loadcameras(menutype *menu) {
+2211   1      
+2212   1              // get the page
+2213   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, IODEFPAGE);
+2214   1              
+2215   1              switch (flashpage.io.digouts[0] & 0x0F) {
+2216   2                      case SONYLANC:
+2217   2                              camerachoices.current_sel = camerachoices.current_hl = 6;
+2218   2                              break;          
+2219   2                      case GOPROCAMERA:
+2220   2                              camerachoices.current_sel = camerachoices.current_hl = 4;
+2221   2                              break;
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 37  
+
+2222   2                      case REPLAYCAMERA:
+2223   2                              camerachoices.current_sel = camerachoices.current_hl = 5;
+2224   2                              break;
+2225   2                      case REPLAYXDUSB:
+2226   2                              camerachoices.current_sel = camerachoices.current_hl = 7;
+2227   2                              break;
+2228   2                      case REPLAYMINI:
+2229   2                              camerachoices.current_sel = camerachoices.current_hl = 2;
+2230   2                              break;
+2231   2                      case REPLAYPRIME:
+2232   2                              camerachoices.current_sel = camerachoices.current_hl = 3;
+2233   2                              break;  
+2234   2                      case CAMERA:
+2235   2                      case MOBIUS:
+2236   2                              camerachoices.current_sel = camerachoices.current_hl = 1;
+2237   2                              break;
+2238   2                      default:
+2239   2                              camerachoices.current_sel = camerachoices.current_hl = 0;
+2240   2                              break;
+2241   2              } // switch
+2242   1                              
+2243   1              // link the menu chain to unit selection menu
+2244   1              return (&camerachoices);
+2245   1      } // loadcameras
+2246          
+2247          // this function saves the sampling rate
+2248          menutype *savecameras(menutype *menu) {
+2249   1      
+2250   1              // get the page
+2251   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, IODEFPAGE);
+2252   1              
+2253   1              // determine which selection was chosen and program the camera bits
+2254   1              switch (menu->current_hl) {
+2255   2                      case 0: // None
+2256   2                              flashpage.io.digouts[0] = (flashpage.io.digouts[0] & 0xF0) + DISABLED;
+2257   2                              break;
+2258   2                      case 1: // Mobius
+2259   2                              flashpage.io.digouts[0] = (flashpage.io.digouts[0] & 0xF0) + MOBIUS;
+2260   2                              break;
+2261   2                      case 2: // Replay Mini USB
+2262   2                              flashpage.io.digouts[0] = (flashpage.io.digouts[0] & 0xF0) + REPLAYMINI;
+2263   2                              break;
+2264   2                      case 3: // Replay PrimeX USB
+2265   2                              flashpage.io.digouts[0] = (flashpage.io.digouts[0] & 0xF0) + REPLAYPRIME;
+2266   2                              break;
+2267   2                      case 4: // GoPro
+2268   2                              flashpage.io.digouts[0] = (flashpage.io.digouts[0] & 0xF0) + GOPROCAMERA;
+2269   2                              break;
+2270   2                      case 5: // ReplayXD
+2271   2                              flashpage.io.digouts[0] = (flashpage.io.digouts[0] & 0xF0) + REPLAYCAMERA;
+2272   2                              break;
+2273   2                      case 6: // Sony HD
+2274   2                              flashpage.io.digouts[0] = (flashpage.io.digouts[0] & 0xF0) + SONYLANC;
+2275   2                              break;
+2276   2                      case 7: // ReplayXD USB
+2277   2                              flashpage.io.digouts[0] = (flashpage.io.digouts[0] & 0xF0) + REPLAYXDUSB;
+2278   2                              break;
+2279   2              } // switch
+2280   1      
+2281   1              // write buffer to flash
+2282   1              DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, IODEFPAGE);
+2283   1      
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 38  
+
+2284   1              return (menu);
+2285   1      } // savecameras
+2286          
+2287          //
+2288          // This function reads the auto on configuration from scratchpad and assigns
+2289          // the currently selected auto on value from it
+2290          // 
+2291          menutype *loadautoon(menutype *menu) {
+2292   1      
+2293   1              if (scratch.calibrate.usersettings & 0x10)  // disabled
+2294   1                      autoonchoices.current_sel = autoonchoices.current_hl = 0;
+2295   1              else // enabled
+2296   1                      autoonchoices.current_sel = autoonchoices.current_hl = 1;                                       
+2297   1      
+2298   1              // link the menu chain to unit selection menu
+2299   1              return (&autoonchoices);
+2300   1      } // loadautoon
+2301          
+2302          // this function saves the sampling rate
+2303          menutype *saveautoon(menutype *menu) {
+2304   1      
+2305   1              // determine which selection was chosen
+2306   1              switch (menu->current_hl) {
+2307   2                      case 1: // AutoOn Enabled
+2308   2                              scratch.calibrate.usersettings &= 0xEF;
+2309   2                              break;
+2310   2                      case 0: // AutoOn Disabled
+2311   2                      default:
+2312   2                              scratch.calibrate.usersettings |= 0x10;
+2313   2                              break;
+2314   2              } // switch
+2315   1      
+2316   1              // save new autoon status in micro flash
+2317   1              EraseScratchpad();
+2318   1              WriteScratchpad(scratch.scratchbuff, SCRATCHLEN);
+2319   1      
+2320   1              if (su_present && su_hw >= 200) {               // only do this if we are connected to SU2
+2321   2                      // Send AutoOn status to SU
+2322   2                      com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START] = AUTOONENABLED;
+2323   2                      SendMessage((u08) DISPLAY_UNIT, (u08) SENSOR_UNIT, (u08) AUTO_ON, !(menu->current_hl));
+2324   2              } // if
+2325   1      
+2326   1              return (menu);
+2327   1      } // savesautoon
+2328          
+2329          // this function displays the drag numbers
+2330          menutype *displaydragnums(menutype *menu) {
+2331   1              xdata float tempfloat;
+2332   1              xdata char tempstring[21];
+2333   1              xdata u16 tempweight;
+2334   1              xdata u08 hploc;                        // column on screen to put HP
+2335   1                                                      
+2336   1              tm_state = DRAGHOLDNUMS;
+2337   1              button_overlay[SEL] = NULL;
+2338   1      
+2339   1              // put up final adjusted numbers
+2340   1              Clear_Screen();
+2341   1      
+2342   1              if (0 == dragnumbers.zerosixty) {
+2343   2                      Write_Text(0, 0, "0-60: N/A", '-');
+2344   2              } // if
+2345   1              else {
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 39  
+
+2346   2                      sprintf(tempstring, "0-60: %1.1f", (float) dragnumbers.zerosixty / 100.0);
+2347   2                      Write_Text(0, 0, tempstring, '-');
+2348   2              } // else
+2349   1              
+2350   1              if (dragnumbers.reaction < 0) {
+2351   2                      Write_Text(0, 61, "REDLIGHT", '-');
+2352   2              } // if
+2353   1              else {
+2354   2                      tempfloat = (float) dragnumbers.reaction;
+2355   2                      tempfloat = tempfloat / 100.0;
+2356   2                      sprintf(tempstring, "RT: %1.2f", tempfloat);
+2357   2                      Write_Text(0, 61, tempstring, '-');
+2358   2              } // else
+2359   1      
+2360   1              sprintf(tempstring, "1/8:%1.2f", (float) dragnumbers.eighthmile / 100.0);
+2361   1              Write_Text(1, 0, tempstring, '-');
+2362   1      
+2363   1              sprintf(tempstring, "60': %1.2f", (float) dragnumbers.sixtyfoot / 100.0);
+2364   1              Write_Text(3, 0, tempstring, '-');
+2365   1              sprintf(tempstring, "330':%1.2f", (float) dragnumbers.threethirty / 100.0);
+2366   1              Write_Text(3, 61, tempstring, '-');
+2367   1      
+2368   1              if (dragnumbers.quarter) {
+2369   2                      hploc = 0;              // put hp on screen at 2, 0
+2370   2      //              if (0 != dragnumbers.zerohundred) {
+2371   2      //                      sprintf(tempstring, "100:%1.2f", (float) dragnumbers.zerohundred / 100.0);
+2372   2      //                      Write_Text(0, 61, tempstring, '-');
+2373   2      //              } // if
+2374   2      
+2375   2                      sprintf(tempstring, "1/4:%1.2f", (float) dragnumbers.quartermile / 100.0);
+2376   2                      Write_Text(1, 61, tempstring, '-');
+2377   2                      sprintf(tempstring, "@ %1.1f", (float) dragnumbers.quartertrap / 10.0);
+2378   2                      Write_Text(2, 61, tempstring, '-');
+2379   2                      
+2380   2              } // if
+2381   1              else {          // 1/8 mile
+2382   2                      hploc = 61;             // put hp on screen at 2, 61
+2383   2      
+2384   2                      sprintf(tempstring, "Gs: %1.2f", (float) dragnumbers.launchg / 100.0);
+2385   2                      Write_Text(1, 61, tempstring, '-');
+2386   2      
+2387   2                      sprintf(tempstring, "@ %1.1f", (float) dragnumbers.eighthtrap / 10.0);
+2388   2                      Write_Text(2, 0, tempstring, '-');
+2389   2              } // else
+2390   1              
+2391   1      
+2392   1              // calculate HP and torque
+2393   1              // see if vehicle weight is non-zero
+2394   1              // see if RPM enabled
+2395   1              // 1/8 mile 2,61
+2396   1              // 1/4 mile 
+2397   1              
+2398   1              // calculate hp if user has entered weight for vehicle
+2399   1              if (0 == (tempweight = currentcar.cylandweight & 0xFFF0)) {
+2400   2                      Write_Text(2, hploc, "HP: No Wt", '-');
+2401   2              } // if
+2402   1              else {          // got a weight value so calculate hp
+2403   2                      xdata float weightlbs, et, factor, hp;
+2404   2                      
+2405   2                      weightlbs = 2.0 * (float) (tempweight >> 4);
+2406   2      //                      weightkg = (float) weightlbs * 0.4536;
+2407   2                      et = ((float) dragnumbers.eighthmile) / 100.0;
+C51 COMPILER V9.51   MENU                                                                  11/30/2014 18:01:39 PAGE 40  
+
+2408   2      //              factor = et / 3.67926;          // conversion factor for 1/8 mile FROM WEBSITE THEN CONVERTED TO 1/8
+2409   2      //              factor = et / 3.85;                     // conversion factor for 1/8 mile FIRST ATTEMPT AT CALIBRATION
+2410   2                      factor = et / 4.00;                     // conversion factor for 1/8 mile CALIBRATED
+2411   2      
+2412   2                      hp = weightlbs / (factor * factor * factor);
+2413   2      
+2414   2                      dragnumbers.horsepower = (u16) (hp * 10.0);
+2415   2      
+2416   2                      sprintf(tempstring, "HP: %1.1f", hp);
+2417   2                      Write_Text(2, hploc, tempstring, '-');
+2418   2              } // if
+2419   1      
+2420   1              return (NULL);
+2421   1      } // displaydragnums
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =  12712    ----
+   CONSTANT SIZE    =    378    ----
+   XDATA SIZE       =     16    3918
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =      1     153
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

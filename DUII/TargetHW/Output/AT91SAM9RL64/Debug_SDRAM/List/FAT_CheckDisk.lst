@@ -1,0 +1,2606 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     14/Jul/2015  19:00:06 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\FAT_CheckDisk.c                      #
+#    Command line =  C:\DUII\TargetHW\FS\FAT_CheckDisk.c -D DEBUG=1 -D        #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\FA #
+#                    T_CheckDisk.lst                                          #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\FAT #
+#                    _CheckDisk.o                                             #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\FAT_CheckDisk.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : FAT_CheckDisk.c
+     19          Purpose     : Implementation of FS_FAT_CheckDisk
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          #include "FS_Int.h"
+     24          #include "FAT_Intern.h"
+     25          
+     26          /*********************************************************************
+     27          *
+     28          *       Typedefs
+     29          *
+     30          **********************************************************************
+     31          */
+     32          typedef struct {
+     33            U32 Value;
+     34            U32 DirFirstCluster;
+     35            U32 DirEntryIndex;
+     36          } CLUSTER_INFO;
+     37          
+     38          /*********************************************************************
+     39          *
+     40          *       Static data
+     41          *
+     42          **********************************************************************
+     43          */
+
+   \                                 In section .bss, align 4
+     44          static int _FileIndex;
+   \                     _FileIndex:
+   \   00000000                      DS8 4
+   \   00000004                      DS8 4
+   \   00000008                      DS8 4
+
+   \                                 In section .bss, align 4
+     45          static int _LastDirIndex;
+   \                     _LastDirIndex:
+   \   00000000                      DS8 4
+     46          static int _UseSameDir;
+     47          static int _AbortRequested;
+     48          
+     49          /*********************************************************************
+     50          *
+     51          *       Static code
+     52          *
+     53          **********************************************************************
+     54          */
+     55          
+     56          
+     57          /*********************************************************************
+     58          *
+     59          *       _IsValidEntryChar
+     60          *
+     61          */
+     62          static int _IsValidEntryChar(U8 Char2Check) {
+     63            if (Char2Check == ' ') {
+     64              return 1;
+     65            }
+     66            return FS_FAT_IsValidShortNameChar(Char2Check);
+     67          }
+     68          
+     69          /*********************************************************************
+     70          *
+     71          *       _CheckFileName
+     72          *
+     73          */
+     74          static int _CheckName(FS_FAT_DENTRY * pDirEntry) {
+     75            int i;
+     76            for (i = 0; i < 11; i++) {
+     77              U8 Char2Check;
+     78                  
+     79              if (pDirEntry->data[i] != 0x05) {
+     80                Char2Check = pDirEntry->data[i];
+     81              } else {
+     82                Char2Check = 0xe5;
+     83              }
+     84          
+     85              if (_IsValidEntryChar(Char2Check) == 0) {
+     86                return 1;
+     87              }
+     88              if ((Char2Check >= 'a') && (Char2Check < 'z')) {
+     89                return 1;
+     90              }
+     91            }
+     92            return 0;
+     93          }
+     94          
+     95          /*********************************************************************
+     96          *
+     97          *       _CalcCheckSum
+     98          *
+     99          *  Return value
+    100          *    0        Equal
+    101          *    1        Not equal
+    102          */
+    103          static U8 _CalcCheckSum(const char * sShortName) {
+    104            U8 Sum;
+    105            int i;
+    106          
+    107            Sum = 0;
+    108            for (i = 0; i < 11; i++) {
+    109              if (Sum & 1) {
+    110                Sum = (Sum >> 1) | 0x80;
+    111              } else {
+    112                Sum >>= 1;
+    113              }
+    114              Sum += *sShortName++;
+    115            }
+    116            return Sum;
+    117          }
+    118          
+    119          
+    120          /*********************************************************************
+    121          *
+    122          *       _CheckLongDirEntry
+    123          *
+    124          */
+
+   \                                 In section .text, align 4, keep-with-next
+    125          static int _CheckLongDirEntry(FS_VOLUME * pVolume, FS_DIR_POS * pDirPos, FS_FAT_DENTRY * pDirEntry, FS_SB * pSB) {
+   \                     _CheckLongDirEntry:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   0150A0E1           MOV      R5,R1
+   \   00000008   0260A0E1           MOV      R6,R2
+   \   0000000C   0370A0E1           MOV      R7,R3
+    126            FS_DIR_POS DirPos;
+    127            U32        CurrentIndex;
+    128            U32        NumEntries;
+    129            U8         Checksum;
+    130            U8         CalcedCheckSum;
+    131          
+    132            DirPos = *pDirPos; // Save old DirPos settings
+   \   00000010   0E10B5E8           LDM      R5!,{R1-R3,R12}
+   \   00000014   14D04DE2           SUB      SP,SP,#+20
+   \   00000018   0040A0E1           MOV      R4,R0
+   \   0000001C   0D00A0E1           MOV      R0,SP
+   \   00000020   0E10A0E8           STM      R0!,{R1-R3,R12}
+    133            //
+    134            //  Ensure that this is the last long file name entry.
+    135            //  (Note 1)
+    136            //
+    137            if ((pDirEntry->data[0]& 0x40) == 0) {
+   \   00000024   0000D6E5           LDRB     R0,[R6, #+0]
+   \   00000028   105045E2           SUB      R5,R5,#+16
+   \   0000002C   400010E3           TST      R0,#0x40
+   \   00000030   0500001A           BNE      ??_CheckLongDirEntry_0
+    138              pDirEntry->data[0] = 0xe5;  // Error, found a long file name entry with no last entry flag.
+   \   00000034   E500A0E3           MOV      R0,#+229
+   \   00000038   0000C6E5           STRB     R0,[R6, #+0]
+    139              FS__SB_MarkDirty(pSB);
+   \                     ??_CheckLongDirEntry_1:
+   \   0000003C   0700A0E1           MOV      R0,R7
+   \   00000040   ........           BL       FS__SB_MarkDirty
+    140              return 1;
+   \   00000044   0100A0E3           MOV      R0,#+1
+   \   00000048   420000EA           B        ??_CheckLongDirEntry_2
+    141            }
+    142            CurrentIndex = pDirEntry->data[0]& 0x3f;
+   \                     ??_CheckLongDirEntry_0:
+   \   0000004C   3FA000E2           AND      R10,R0,#0x3F
+    143            NumEntries   = CurrentIndex;
+   \   00000050   0A80A0E1           MOV      R8,R10
+    144            Checksum     = pDirEntry->data[13];
+   \   00000054   0D90D6E5           LDRB     R9,[R6, #+13]
+   \   00000058   E5B0A0E3           MOV      R11,#+229
+    145            do {
+    146              //
+    147              // Check entry for validity
+    148              //
+    149              if (pDirEntry->data[13] != Checksum) {
+   \                     ??_CheckLongDirEntry_3:
+   \   0000005C   0D00D6E5           LDRB     R0,[R6, #+13]
+   \   00000060   090050E1           CMP      R0,R9
+   \   00000064   0100000A           BEQ      ??_CheckLongDirEntry_4
+    150                pDirEntry->data[0] = 0xe5;  // Error, check sum does not match
+   \                     ??_CheckLongDirEntry_5:
+   \   00000068   00B0C6E5           STRB     R11,[R6, #+0]
+    151                FS__SB_MarkDirty(pSB);
+   \   0000006C   F2FFFFEA           B        ??_CheckLongDirEntry_1
+    152                return 1;      
+    153              }
+    154              if (pDirEntry->data[11] != FS_FAT_ATTR_LONGNAME) {
+   \                     ??_CheckLongDirEntry_4:
+   \   00000070   0B00D6E5           LDRB     R0,[R6, #+11]
+   \   00000074   0F0050E3           CMP      R0,#+15
+   \   00000078   FAFFFF1A           BNE      ??_CheckLongDirEntry_5
+    155                pDirEntry->data[0] = 0xe5;  // Error, attributes do not match.
+    156                FS__SB_MarkDirty(pSB);
+    157                return 1;      
+    158              }
+    159              if (FS_LoadU16LE(&pDirEntry->data[26]) != 0) {
+   \   0000007C   1A0086E2           ADD      R0,R6,#+26
+   \   00000080   ........           BL       FS_LoadU16LE
+   \   00000084   000050E3           CMP      R0,#+0
+   \   00000088   0200000A           BEQ      ??_CheckLongDirEntry_6
+    160                pDirEntry->data[0] = 0xe5;  // Error, First cluster information should be zero.
+   \   0000008C   00B0C6E5           STRB     R11,[R6, #+0]
+    161                FS__SB_MarkDirty(pSB);
+   \   00000090   0700A0E1           MOV      R0,R7
+   \   00000094   ........           BL       FS__SB_MarkDirty
+    162              }
+    163              //
+    164              // Get the next directory entry.
+    165              //
+    166              FS_FAT_IncDirPos(pDirPos);
+   \                     ??_CheckLongDirEntry_6:
+   \   00000098   0500A0E1           MOV      R0,R5
+   \   0000009C   ........           BL       FS_FAT_IncDirPos
+    167              pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, pDirPos);
+   \   000000A0   0520A0E1           MOV      R2,R5
+   \   000000A4   0710A0E1           MOV      R1,R7
+   \   000000A8   0400A0E1           MOV      R0,R4
+   \   000000AC   ........           BL       FS_FAT_GetDirEntry
+   \   000000B0   0060A0E1           MOV      R6,R0
+    168              //
+    169              // No more entries available.
+    170              //
+    171              if (pDirEntry->data[0] == 0) {
+   \   000000B4   0000D6E5           LDRB     R0,[R6, #+0]
+   \   000000B8   000050E3           CMP      R0,#+0
+   \   000000BC   2500000A           BEQ      ??_CheckLongDirEntry_2
+    172                return 0;
+    173              }
+    174            } while (--CurrentIndex);
+   \   000000C0   01A05AE2           SUBS     R10,R10,#+1
+   \   000000C4   E4FFFF1A           BNE      ??_CheckLongDirEntry_3
+    175            //
+    176            // Check if calced Check sum of short directory matches with the checksum stored in the LFN entry(ies)
+    177            //
+    178            CalcedCheckSum = _CalcCheckSum((const char *)&pDirEntry->data[0]);
+   \   000000C8   0000A0E3           MOV      R0,#+0
+   \   000000CC   0B10A0E3           MOV      R1,#+11
+   \   000000D0   190000EA           B        ??_CheckLongDirEntry_7
+    179            if (CalcedCheckSum != Checksum) {    
+   \                     ??_CheckLongDirEntry_8:
+   \   000000D4   000CA0E1           MOV      R0,R0, LSL #+24
+   \   000000D8   200C59E1           CMP      R9,R0, LSR #+24
+   \   000000DC   1900000A           BEQ      ??_CheckLongDirEntry_9
+    180              *pDirPos = DirPos;    
+   \   000000E0   0D00A0E1           MOV      R0,SP
+   \   000000E4   0E10B0E8           LDM      R0!,{R1-R3,R12}
+   \   000000E8   0E10A5E8           STM      R5!,{R1-R3,R12}
+   \   000000EC   105045E2           SUB      R5,R5,#+16
+    181              do {
+    182                pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, pDirPos);
+    183                pDirEntry->data[0] = 0xe5;
+   \                     ??_CheckLongDirEntry_10:
+   \   000000F0   0520A0E1           MOV      R2,R5
+   \   000000F4   0710A0E1           MOV      R1,R7
+   \   000000F8   0400A0E1           MOV      R0,R4
+   \   000000FC   ........           BL       FS_FAT_GetDirEntry
+   \   00000100   00B0C0E5           STRB     R11,[R0, #+0]
+    184                FS_FAT_IncDirPos(pDirPos);
+   \   00000104   0500A0E1           MOV      R0,R5
+   \   00000108   ........           BL       FS_FAT_IncDirPos
+    185              } while (--NumEntries);
+   \   0000010C   018058E2           SUBS     R8,R8,#+1
+   \   00000110   F6FFFF1A           BNE      ??_CheckLongDirEntry_10
+    186              FS__SB_MarkDirty(pSB);
+   \   00000114   C8FFFFEA           B        ??_CheckLongDirEntry_1
+   \                     ??_CheckLongDirEntry_11:
+   \   00000118   FF0000E2           AND      R0,R0,#0xFF
+   \   0000011C   8020A0E3           MOV      R2,#+128
+   \   00000120   A00082E1           ORR      R0,R2,R0, LSR #+1
+   \                     ??_CheckLongDirEntry_12:
+   \   00000124   0120D6E4           LDRB     R2,[R6], #+1
+   \   00000128   011051E2           SUBS     R1,R1,#+1
+   \   0000012C   000082E0           ADD      R0,R2,R0
+   \   00000130   E7FFFF0A           BEQ      ??_CheckLongDirEntry_8
+   \   00000134   010010E3           TST      R0,#0x1
+   \   00000138   F6FFFF1A           BNE      ??_CheckLongDirEntry_11
+   \                     ??_CheckLongDirEntry_7:
+   \   0000013C   000CA0E1           LSL      R0,R0,#+24
+   \   00000140   A00CA0E1           LSR      R0,R0,#+25
+   \   00000144   F6FFFFEA           B        ??_CheckLongDirEntry_12
+    187              return 1;
+    188            }
+    189            //
+    190            //  Move back to the last LFN entry. The short file name entry shall be check the other routine.
+    191            //
+    192            pDirPos->DirEntryIndex--;
+   \                     ??_CheckLongDirEntry_9:
+   \   00000148   080095E5           LDR      R0,[R5, #+8]
+   \   0000014C   010040E2           SUB      R0,R0,#+1
+   \   00000150   080085E5           STR      R0,[R5, #+8]
+    193            return 0;
+   \   00000154   0000A0E3           MOV      R0,#+0
+   \                     ??_CheckLongDirEntry_2:
+   \   00000158   14D08DE2           ADD      SP,SP,#+20       ;; stack cleaning
+   \   0000015C   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    194          }
+    195          
+    196          /*********************************************************************
+    197          *
+    198          *       _CheckDirEntry
+    199          *
+    200          */
+
+   \                                 In section .text, align 4, keep-with-next
+    201          static int _CheckDirEntry(FS_FAT_INFO * pFATInfo, FS_FAT_DENTRY * pDirEntry) {
+   \                     _CheckDirEntry:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0050A0E1           MOV      R5,R0
+   \   00000008   0140A0E1           MOV      R4,R1
+    202            U8  Attributes;
+    203            U32 FirstCluster;
+    204            U32 FileSize;
+    205            U32 TotalBytesOnDisk;
+    206          
+    207            Attributes = pDirEntry->data[DIR_ENTRY_OFF_ATTRIBUTES];
+   \   0000000C   0B00D4E5           LDRB     R0,[R4, #+11]
+    208            //
+    209            //  If any bits other than specified by FAT in 
+    210            //  the attributes field are set, mark as invalid
+    211            //
+    212            if (Attributes & ~(FS_FAT_ATTR_MASK)) {
+   \   00000010   3F10D0E3           BICS     R1,R0,#0x3F
+   \   00000014   0100000A           BEQ      ??_CheckDirEntry_0
+    213              return 1;
+   \                     ??_CheckDirEntry_1:
+   \   00000018   0100A0E3           MOV      R0,#+1
+   \   0000001C   F081BDE8           POP      {R4-R8,PC}
+    214            }
+    215            //
+    216            //  Check the short directory entry
+    217            //
+    218            if (Attributes != FS_FAT_ATTR_LONGNAME) {
+   \                     ??_CheckDirEntry_0:
+   \   00000020   0F0050E3           CMP      R0,#+15
+   \   00000024   2500000A           BEQ      ??_CheckDirEntry_2
+    219              if ((Attributes != FS_FAT_ATTR_DIRECTORY) && (pDirEntry->data[0] != '.')) {
+   \   00000028   100050E3           CMP      R0,#+16
+   \   0000002C   0000D415           LDRBNE   R0,[R4, #+0]
+   \   00000030   2E005013           CMPNE    R0,#+46
+   \   00000034   1300000A           BEQ      ??_CheckDirEntry_3
+    220                if (_CheckName(pDirEntry)) {
+   \   00000038   0460A0E1           MOV      R6,R4
+   \   0000003C   0B70A0E3           MOV      R7,#+11
+   \                     ??_CheckDirEntry_4:
+   \   00000040   0080D6E5           LDRB     R8,[R6, #+0]
+   \   00000044   050058E3           CMP      R8,#+5
+   \   00000048   0200000A           BEQ      ??_CheckDirEntry_5
+   \   0000004C   200058E3           CMP      R8,#+32
+   \   00000050   0100001A           BNE      ??_CheckDirEntry_6
+   \   00000054   040000EA           B        ??_CheckDirEntry_7
+   \                     ??_CheckDirEntry_5:
+   \   00000058   E580A0E3           MOV      R8,#+229
+   \                     ??_CheckDirEntry_6:
+   \   0000005C   0800A0E1           MOV      R0,R8
+   \   00000060   ........           BL       FS_FAT_IsValidShortNameChar
+   \   00000064   000050E3           CMP      R0,#+0
+   \   00000068   EAFFFF0A           BEQ      ??_CheckDirEntry_1
+   \                     ??_CheckDirEntry_7:
+   \   0000006C   610048E2           SUB      R0,R8,#+97
+   \   00000070   FF0000E2           AND      R0,R0,#0xFF
+   \   00000074   190050E3           CMP      R0,#+25
+   \   00000078   E6FFFF3A           BCC      ??_CheckDirEntry_1
+   \   0000007C   016086E2           ADD      R6,R6,#+1
+   \   00000080   017057E2           SUBS     R7,R7,#+1
+   \   00000084   EDFFFF1A           BNE      ??_CheckDirEntry_4
+    221                  return 1;
+    222                }
+    223              }
+    224              FirstCluster = FS_FAT_GetFirstCluster(pDirEntry);
+   \                     ??_CheckDirEntry_3:
+   \   00000088   0400A0E1           MOV      R0,R4
+   \   0000008C   ........           BL       FS_FAT_GetFirstCluster
+    225              if (FirstCluster > pFATInfo->NumClusters) {
+   \   00000090   203095E5           LDR      R3,[R5, #+32]
+   \   00000094   000053E1           CMP      R3,R0
+   \   00000098   DEFFFF3A           BCC      ??_CheckDirEntry_1
+    226                return 1;
+    227              }
+    228              TotalBytesOnDisk = FS__CalcSizeInBytes(pFATInfo->NumClusters, pFATInfo->SecPerClus, pFATInfo->BytesPerSec);
+   \   0000009C   B420D5E1           LDRH     R2,[R5, #+4]
+   \   000000A0   1C10D5E5           LDRB     R1,[R5, #+28]
+   \   000000A4   0300A0E1           MOV      R0,R3
+   \   000000A8   ........           BL       FS__CalcSizeInBytes
+   \   000000AC   0050A0E1           MOV      R5,R0
+    229              FileSize = FS_LoadU32LE(&pDirEntry->data[DIR_ENTRY_OFF_SIZE]);
+    230              if (FileSize > TotalBytesOnDisk) {
+   \   000000B0   1C0084E2           ADD      R0,R4,#+28
+   \   000000B4   ........           BL       FS_LoadU32LE
+   \   000000B8   000055E1           CMP      R5,R0
+   \   000000BC   D5FFFF3A           BCC      ??_CheckDirEntry_1
+    231                return 1;
+    232              }
+    233          
+    234            }
+    235            return 0;
+   \                     ??_CheckDirEntry_2:
+   \   000000C0   0000A0E3           MOV      R0,#+0
+   \   000000C4   F081BDE8           POP      {R4-R8,PC}       ;; return
+    236          }
+    237          
+    238          /*********************************************************************
+    239          *
+    240          *       _CreateFileName
+    241          *
+    242          */
+    243          static void _CreateFileName(char * pFileName) {
+    244            char * p;
+    245            p = pFileName;
+    246            FS_STRCPY(pFileName, "FILE");
+    247            p   += 4;
+    248            *p++ = (_FileIndex  / 1000)        + '0';
+    249            *p++ = ((_FileIndex % 1000) / 100) + '0';
+    250            *p++ = ((_FileIndex % 100)  /  10) + '0';
+    251            *p++ = ((_FileIndex % 10)        ) + '0';
+    252            *p = 0;
+    253            FS_STRCAT(p, ".CHK");
+    254            _FileIndex++;
+    255          }
+    256          
+    257          /*********************************************************************
+    258          *
+    259          *       _CreateDirName
+    260          *
+    261          */
+    262          static void _CreateDirName(char * pDirName) {
+    263            char * p;
+    264            p = pDirName;
+    265            FS_STRCPY(pDirName, "FOUND");
+    266            p   += 5;
+    267            *p++ = '.';
+    268            *p++ = ((_LastDirIndex % 1000) / 100) + '0';
+    269            *p++ = ((_LastDirIndex % 100)  /  10) + '0';
+    270            *p++ = ((_LastDirIndex % 10)        ) + '0';
+    271            *p = 0;
+    272          }
+    273           
+    274          /*********************************************************************
+    275          *
+    276          *       _IsClusterEOC
+    277          *
+    278          */
+    279          static U32 _IsClusterEOC(FS_VOLUME * pVolume, FS_SB * pSB, U32 Cluster) {
+    280            Cluster = FS_FAT_ReadFATEntry(pVolume, pSB, Cluster);
+    281            switch (pVolume->FSInfo.FATInfo.FATType) {
+    282            case FS_FAT_TYPE_FAT12:
+    283              return ((Cluster & 0xFFF) == 0xFFF);
+    284            case FS_FAT_TYPE_FAT16:
+    285              return ((Cluster & 0xFFFF) == 0xFFFF);
+    286            }
+    287            return ((Cluster & 0xFFFFFFFUL) == 0xFFFFFFFUL);
+    288          }
+    289          
+    290          /*********************************************************************
+    291          *
+    292          *       _SetFileLen
+    293          *
+    294          */
+    295          static void _SetFileLen(FS_VOLUME * pVolume, FS_DIR_POS * pDirPos, U32 Size, FS_SB * pSB) {
+    296            FS_FAT_DENTRY  * pDirEntry;
+    297          
+    298            pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, pDirPos);
+    299            FS_StoreU32LE(&pDirEntry->data[DIR_ENTRY_OFF_SIZE], Size);
+    300            if (Size == 0) {
+    301              FS_FAT_WriteDirEntryCluster(pDirEntry, 0);
+    302            }
+    303            FS__SB_MarkDirty(pSB);
+    304          }
+    305          
+    306          
+    307          /*********************************************************************
+    308          *
+    309          *       _ConvertLostClusters2File
+    310          *
+    311          */
+
+   \                                 In section .text, align 4, keep-with-next
+    312          static int _ConvertLostClusterChain2File(FS_VOLUME * pVolume, U32 DirStart, U32 FirstCluster, char * sFileName, FS_SB * pSB) {
+   \                     _ConvertLostClusterChain2File:
+   \   00000000   F44F2DE9           PUSH     {R2,R4-R11,LR}
+   \   00000004   20D04DE2           SUB      SP,SP,#+32
+   \   00000008   48709DE5           LDR      R7,[SP, #+72]
+   \   0000000C   0040A0E1           MOV      R4,R0
+   \   00000010   0150A0E1           MOV      R5,R1
+   \   00000014   0360A0E1           MOV      R6,R3
+    313            U32             NumClusters;
+    314            U32             FileSize;
+    315            U32             LastCluster;
+    316            FS_FAT_INFO   * pFATInfo;
+    317            FS_FAT_DENTRY * pDirEntry;
+    318            U32             DateTime;
+    319          
+    320            pFATInfo = &pVolume->FSInfo.FATInfo;
+   \   00000018   1C8084E2           ADD      R8,R4,#+28
+    321            LastCluster = FS_FAT_FindLastCluster(pVolume, pSB, FirstCluster, &NumClusters);
+   \   0000001C   14308DE2           ADD      R3,SP,#+20
+   \   00000020   0710A0E1           MOV      R1,R7
+   \   00000024   ........           BL       FS_FAT_FindLastCluster
+   \   00000028   0090B0E1           MOVS     R9,R0
+    322            /*
+    323             * Check if the last cluster in the chain otherwise it will be corrected.
+    324             */
+    325            if (LastCluster == 0) {
+   \   0000002C   0300001A           BNE      ??_ConvertLostClusterChain2File_0
+    326              FS_FAT_MarkClusterEOC(pVolume, pSB, LastCluster);
+   \   00000030   0020A0E3           MOV      R2,#+0
+   \   00000034   0710A0E1           MOV      R1,R7
+   \   00000038   0400A0E1           MOV      R0,R4
+   \   0000003C   ........           BL       FS_FAT_MarkClusterEOC
+    327            }
+    328            if (NumClusters == 0) {
+   \                     ??_ConvertLostClusterChain2File_0:
+   \   00000040   14009DE5           LDR      R0,[SP, #+20]
+   \   00000044   000050E3           CMP      R0,#+0
+   \   00000048   0300001A           BNE      ??_ConvertLostClusterChain2File_1
+    329              FS_FAT_MarkClusterEOC(pVolume, pSB, LastCluster);
+   \   0000004C   0920A0E1           MOV      R2,R9
+   \   00000050   0710A0E1           MOV      R1,R7
+   \   00000054   0400A0E1           MOV      R0,R4
+   \   00000058   ........           BL       FS_FAT_MarkClusterEOC
+    330            }
+    331            FileSize = (NumClusters + 1) * (pFATInfo->BytesPerCluster);
+   \                     ??_ConvertLostClusterChain2File_1:
+   \   0000005C   14009DE5           LDR      R0,[SP, #+20]
+   \   00000060   0C1098E5           LDR      R1,[R8, #+12]
+   \   00000064   010080E2           ADD      R0,R0,#+1
+   \   00000068   910000E0           MUL      R0,R1,R0
+   \   0000006C   ............       ADRL     R8,`?<Constant ".CHK">`
+   \              ....        
+   \   00000074   18008DE5           STR      R0,[SP, #+24]
+   \   00000078   ........           LDR      R9,??_CheckFAT_0
+   \   0000007C   ............       ADRL     R10,`?<Constant "FILE">`
+   \              ....        
+   \   00000084   ........           LDR      R11,??DataTable8
+   \   00000088   320000EA           B        ??_ConvertLostClusterChain2File_2
+    332            do {
+    333              pDirEntry = FAT_pDirEntryAPI->pfFindDirEntry(pVolume, pSB, sFileName, strlen(sFileName), DirStart, 0, NULL);
+    334              if (pDirEntry == (FS_FAT_DENTRY *)NULL) {
+    335                break;
+    336              }
+    337              _CreateFileName(sFileName);
+   \                     ??_ConvertLostClusterChain2File_3:
+   \   0000008C   0520A0E3           MOV      R2,#+5
+   \   00000090   0A10A0E1           MOV      R1,R10
+   \   00000094   0600A0E1           MOV      R0,R6
+   \   00000098   ........           BL       __aeabi_memcpy
+   \   0000009C   001099E5           LDR      R1,[R9, #+0]
+   \   000000A0   ........           LDR      R2,??_CheckFAT_0+0x4  ;; 0x10624dd3
+   \   000000A4   040086E2           ADD      R0,R6,#+4
+   \   000000A8   9132C2E0           SMULL    R3,R2,R1,R2
+   \   000000AC   4223B0E1           ASRS     R2,R2,#+6
+   \   000000B0   01208242           ADDMI    R2,R2,#+1
+   \   000000B4   303082E2           ADD      R3,R2,#+48
+   \   000000B8   0030C0E5           STRB     R3,[R0, #+0]
+   \   000000BC   FA3FA0E3           MOV      R3,#+1000
+   \   000000C0   930202E0           MUL      R2,R3,R2
+   \   000000C4   ........           LDR      R3,??_CheckFAT_0+0x8  ;; 0x51eb851f
+   \   000000C8   022041E0           SUB      R2,R1,R2
+   \   000000CC   92C3C3E0           SMULL    R12,R3,R2,R3
+   \   000000D0   C322B0E1           ASRS     R2,R3,#+5
+   \   000000D4   01208242           ADDMI    R2,R2,#+1
+   \   000000D8   302082E2           ADD      R2,R2,#+48
+   \   000000DC   0120E0E5           STRB     R2,[R0, #+1]!
+   \   000000E0   ........           LDR      R2,??_CheckFAT_0+0x8  ;; 0x51eb851f
+   \   000000E4   9132C2E0           SMULL    R3,R2,R1,R2
+   \   000000E8   6430A0E3           MOV      R3,#+100
+   \   000000EC   C222B0E1           ASRS     R2,R2,#+5
+   \   000000F0   01208242           ADDMI    R2,R2,#+1
+   \   000000F4   930202E0           MUL      R2,R3,R2
+   \   000000F8   ........           LDR      R3,??DataTable8_1  ;; 0x66666667
+   \   000000FC   022041E0           SUB      R2,R1,R2
+   \   00000100   92C3C3E0           SMULL    R12,R3,R2,R3
+   \   00000104   4321B0E1           ASRS     R2,R3,#+2
+   \   00000108   ........           LDR      R3,??DataTable8_1  ;; 0x66666667
+   \   0000010C   01208242           ADDMI    R2,R2,#+1
+   \   00000110   91C3C3E0           SMULL    R12,R3,R1,R3
+   \   00000114   302082E2           ADD      R2,R2,#+48
+   \   00000118   0120E0E5           STRB     R2,[R0, #+1]!
+   \   0000011C   0120A0E1           MOV      R2,R1
+   \   00000120   4311B0E1           ASRS     R1,R3,#+2
+   \   00000124   01108142           ADDMI    R1,R1,#+1
+   \   00000128   0A30A0E3           MOV      R3,#+10
+   \   0000012C   810361E1           SMULBB   R1,R1,R3
+   \   00000130   011042E0           SUB      R1,R2,R1
+   \   00000134   301081E2           ADD      R1,R1,#+48
+   \   00000138   0110E0E5           STRB     R1,[R0, #+1]!
+   \   0000013C   0010A0E3           MOV      R1,#+0
+   \   00000140   0110E0E5           STRB     R1,[R0, #+1]!
+   \   00000144   0810A0E1           MOV      R1,R8
+   \   00000148   ........           BL       strcat
+   \   0000014C   000099E5           LDR      R0,[R9, #+0]
+   \   00000150   010080E2           ADD      R0,R0,#+1
+   \   00000154   000089E5           STR      R0,[R9, #+0]
+    338            } while(1);
+   \                     ??_ConvertLostClusterChain2File_2:
+   \   00000158   0600A0E1           MOV      R0,R6
+   \   0000015C   ........           BL       strlen
+   \   00000160   0010A0E3           MOV      R1,#+0
+   \   00000164   00C09BE5           LDR      R12,[R11, #+0]
+   \   00000168   08108DE5           STR      R1,[SP, #+8]
+   \   0000016C   04108DE5           STR      R1,[SP, #+4]
+   \   00000170   00508DE5           STR      R5,[SP, #+0]
+   \   00000174   0030A0E1           MOV      R3,R0
+   \   00000178   0620A0E1           MOV      R2,R6
+   \   0000017C   0710A0E1           MOV      R1,R7
+   \   00000180   0400A0E1           MOV      R0,R4
+   \   00000184   04C09CE5           LDR      R12,[R12, #+4]
+   \   00000188   3CFF2FE1           BLX      R12
+   \   0000018C   000050E3           CMP      R0,#+0
+   \   00000190   BDFFFF1A           BNE      ??_ConvertLostClusterChain2File_3
+    339            /*
+    340             * Create the directory entry for the lost cluster chain
+    341             */
+    342            DateTime = FS_X_GetTimeDate();
+   \   00000194   ........           BL       FS_X_GetTimeDate
+    343            pDirEntry = FAT_pDirEntryAPI->pfCreateDirEntry(pVolume, pSB, sFileName, DirStart, FirstCluster, FS_FAT_ATTR_ARCHIVE, FileSize, (U16)(DateTime & 0xffff), (U16)(DateTime >> 16));
+    344            if (pDirEntry == (FS_FAT_DENTRY *)NULL) {
+   \   00000198   2018A0E1           LSR      R1,R0,#+16
+   \   0000019C   0008A0E1           LSL      R0,R0,#+16
+   \   000001A0   2008A0E1           LSR      R0,R0,#+16
+   \   000001A4   0C008DE5           STR      R0,[SP, #+12]
+   \   000001A8   18009DE5           LDR      R0,[SP, #+24]
+   \   000001AC   00C09BE5           LDR      R12,[R11, #+0]
+   \   000001B0   08008DE5           STR      R0,[SP, #+8]
+   \   000001B4   2000A0E3           MOV      R0,#+32
+   \   000001B8   04008DE5           STR      R0,[SP, #+4]
+   \   000001BC   20009DE5           LDR      R0,[SP, #+32]
+   \   000001C0   10108DE5           STR      R1,[SP, #+16]
+   \   000001C4   00008DE5           STR      R0,[SP, #+0]
+   \   000001C8   0530A0E1           MOV      R3,R5
+   \   000001CC   0620A0E1           MOV      R2,R6
+   \   000001D0   0710A0E1           MOV      R1,R7
+   \   000001D4   0400A0E1           MOV      R0,R4
+   \   000001D8   08C09CE5           LDR      R12,[R12, #+8]
+   \   000001DC   3CFF2FE1           BLX      R12
+   \   000001E0   000050E3           CMP      R0,#+0
+    345              FS_DEBUG_ERROROUT((FS_MTYPE_FS, "Failed to create directory entry, no space available"));
+    346              return 2;
+   \   000001E4   0200A003           MOVEQ    R0,#+2
+    347            }
+    348            return 0;
+   \   000001E8   0000A013           MOVNE    R0,#+0
+   \   000001EC   24D08DE2           ADD      SP,SP,#+36
+   \   000001F0   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    349          }
+    350          
+    351          /*********************************************************************
+    352          *
+    353          *       _CheckFileName
+    354          *
+    355          */
+
+   \                                 In section .text, align 4, keep-with-next
+    356          static void _CheckFileName(FS_VOLUME * pVolume, FS_SB * pSB, FS_DIR_POS * pDirPos, U32 DirCluster) {
+   \                     _CheckFileName:
+   \   00000000   FA4F2DE9           PUSH     {R1,R3-R11,LR}
+   \   00000004   3CD04DE2           SUB      SP,SP,#+60
+   \   00000008   0050A0E1           MOV      R5,R0
+    357            FS_FAT_DENTRY  * pDirEntry;
+    358          
+    359            pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, pDirPos);
+   \   0000000C   ........           BL       FS_FAT_GetDirEntry
+   \   00000010   0040A0E1           MOV      R4,R0
+    360            if (_CheckName(pDirEntry)) {
+   \   00000014   0460A0E1           MOV      R6,R4
+   \   00000018   0B70A0E3           MOV      R7,#+11
+   \                     ??_CheckFileName_0:
+   \   0000001C   0080D6E5           LDRB     R8,[R6, #+0]
+   \   00000020   050058E3           CMP      R8,#+5
+   \   00000024   0200000A           BEQ      ??_CheckFileName_1
+   \   00000028   200058E3           CMP      R8,#+32
+   \   0000002C   0100001A           BNE      ??_CheckFileName_2
+   \   00000030   040000EA           B        ??_CheckFileName_3
+   \                     ??_CheckFileName_1:
+   \   00000034   E580A0E3           MOV      R8,#+229
+   \                     ??_CheckFileName_2:
+   \   00000038   0800A0E1           MOV      R0,R8
+   \   0000003C   ........           BL       FS_FAT_IsValidShortNameChar
+   \   00000040   000050E3           CMP      R0,#+0
+   \   00000044   0700000A           BEQ      ??_CheckFileName_4
+   \                     ??_CheckFileName_3:
+   \   00000048   610048E2           SUB      R0,R8,#+97
+   \   0000004C   FF0000E2           AND      R0,R0,#0xFF
+   \   00000050   190050E3           CMP      R0,#+25
+   \   00000054   0300003A           BCC      ??_CheckFileName_4
+   \   00000058   016086E2           ADD      R6,R6,#+1
+   \   0000005C   017057E2           SUBS     R7,R7,#+1
+   \   00000060   EDFFFF1A           BNE      ??_CheckFileName_0
+   \   00000064   570000EA           B        ??_CheckFileName_5
+    361              char       acFileName[13];
+    362              FS_83NAME  Name;
+    363              FS_SB      SB;
+    364          
+    365              FS__SB_Create(&SB, &pVolume->Partition);
+   \                     ??_CheckFileName_4:
+   \   00000068   0510A0E1           MOV      R1,R5
+   \   0000006C   1C008DE2           ADD      R0,SP,#+28
+   \   00000070   ........           BL       FS__SB_Create
+   \   00000074   ............       ADRL     R6,`?<Constant ".CHK">`
+   \              ....        
+   \   0000007C   6470A0E3           MOV      R7,#+100
+   \   00000080   FA8FA0E3           MOV      R8,#+1000
+   \   00000084   ........           LDR      R9,??_CheckFAT_0
+   \   00000088   ............       ADRL     R10,`?<Constant "FILE">`
+   \              ....        
+   \   00000090   0CB08DE2           ADD      R11,SP,#+12
+    366              do {
+    367                FS_FAT_DENTRY  * pDirEntryNew;
+    368          
+    369                _CreateFileName(acFileName);
+   \                     ??_CheckFileName_6:
+   \   00000094   0520A0E3           MOV      R2,#+5
+   \   00000098   0A10A0E1           MOV      R1,R10
+   \   0000009C   0C008DE2           ADD      R0,SP,#+12
+   \   000000A0   ........           BL       __aeabi_memcpy4
+   \   000000A4   000099E5           LDR      R0,[R9, #+0]
+   \   000000A8   ........           LDR      R1,??_CheckFAT_0+0x4  ;; 0x10624dd3
+   \   000000AC   9021C1E0           SMULL    R2,R1,R0,R1
+   \   000000B0   4113B0E1           ASRS     R1,R1,#+6
+   \   000000B4   01108142           ADDMI    R1,R1,#+1
+   \   000000B8   302081E2           ADD      R2,R1,#+48
+   \   000000BC   980101E0           MUL      R1,R8,R1
+   \   000000C0   0420CBE5           STRB     R2,[R11, #+4]
+   \   000000C4   ........           LDR      R2,??_CheckFAT_0+0x8  ;; 0x51eb851f
+   \   000000C8   011040E0           SUB      R1,R0,R1
+   \   000000CC   9132C2E0           SMULL    R3,R2,R1,R2
+   \   000000D0   C212B0E1           ASRS     R1,R2,#+5
+   \   000000D4   01108142           ADDMI    R1,R1,#+1
+   \   000000D8   301081E2           ADD      R1,R1,#+48
+   \   000000DC   0510CBE5           STRB     R1,[R11, #+5]
+   \   000000E0   ........           LDR      R1,??_CheckFAT_0+0x8  ;; 0x51eb851f
+   \   000000E4   9021C1E0           SMULL    R2,R1,R0,R1
+   \   000000E8   ........           LDR      R2,??DataTable8_1  ;; 0x66666667
+   \   000000EC   C112B0E1           ASRS     R1,R1,#+5
+   \   000000F0   01108142           ADDMI    R1,R1,#+1
+   \   000000F4   970101E0           MUL      R1,R7,R1
+   \   000000F8   011040E0           SUB      R1,R0,R1
+   \   000000FC   9132C2E0           SMULL    R3,R2,R1,R2
+   \   00000100   4211B0E1           ASRS     R1,R2,#+2
+   \   00000104   ........           LDR      R2,??DataTable8_1  ;; 0x66666667
+   \   00000108   01108142           ADDMI    R1,R1,#+1
+   \   0000010C   9032C2E0           SMULL    R3,R2,R0,R2
+   \   00000110   301081E2           ADD      R1,R1,#+48
+   \   00000114   0610CBE5           STRB     R1,[R11, #+6]
+   \   00000118   0010A0E1           MOV      R1,R0
+   \   0000011C   4201B0E1           ASRS     R0,R2,#+2
+   \   00000120   01008042           ADDMI    R0,R0,#+1
+   \   00000124   0A20A0E3           MOV      R2,#+10
+   \   00000128   800260E1           SMULBB   R0,R0,R2
+   \   0000012C   000041E0           SUB      R0,R1,R0
+   \   00000130   300080E2           ADD      R0,R0,#+48
+   \   00000134   0700CBE5           STRB     R0,[R11, #+7]
+   \   00000138   0000A0E3           MOV      R0,#+0
+   \   0000013C   0800CBE5           STRB     R0,[R11, #+8]
+   \   00000140   0610A0E1           MOV      R1,R6
+   \   00000144   14008DE2           ADD      R0,SP,#+20
+   \   00000148   ........           BL       strcat
+   \   0000014C   000099E5           LDR      R0,[R9, #+0]
+   \   00000150   010080E2           ADD      R0,R0,#+1
+   \   00000154   000089E5           STR      R0,[R9, #+0]
+    370                pDirEntryNew = FS_FAT_FindDirEntry(pVolume, &SB, acFileName, strlen(acFileName), DirCluster, 0, NULL);
+    371                if (pDirEntryNew == (FS_FAT_DENTRY *)NULL) {
+   \   00000158   0C008DE2           ADD      R0,SP,#+12
+   \   0000015C   ........           BL       strlen
+   \   00000160   0010A0E3           MOV      R1,#+0
+   \   00000164   08108DE5           STR      R1,[SP, #+8]
+   \   00000168   04108DE5           STR      R1,[SP, #+4]
+   \   0000016C   40109DE5           LDR      R1,[SP, #+64]
+   \   00000170   0030A0E1           MOV      R3,R0
+   \   00000174   00108DE5           STR      R1,[SP, #+0]
+   \   00000178   0C208DE2           ADD      R2,SP,#+12
+   \   0000017C   1C108DE2           ADD      R1,SP,#+28
+   \   00000180   0500A0E1           MOV      R0,R5
+   \   00000184   ........           BL       FS_FAT_FindDirEntry
+   \   00000188   000050E3           CMP      R0,#+0
+   \   0000018C   C0FFFF1A           BNE      ??_CheckFileName_6
+    372                  break;
+    373                }
+    374              } while(1);
+    375              FS__SB_Delete(&SB);
+   \   00000190   1C008DE2           ADD      R0,SP,#+28
+   \   00000194   ........           BL       FS__SB_Delete
+    376              FS_FAT_Make83Name(&Name, acFileName, strlen(acFileName));
+   \   00000198   0C008DE2           ADD      R0,SP,#+12
+   \   0000019C   ........           BL       strlen
+   \   000001A0   0020A0E1           MOV      R2,R0
+   \   000001A4   0C108DE2           ADD      R1,SP,#+12
+   \   000001A8   2C008DE2           ADD      R0,SP,#+44
+   \   000001AC   ........           BL       FS_FAT_Make83Name
+    377              FS_MEMCPY(pDirEntry->data, Name.ac, sizeof(Name.ac));
+   \   000001B0   0B20A0E3           MOV      R2,#+11
+   \   000001B4   2C108DE2           ADD      R1,SP,#+44
+   \   000001B8   0400A0E1           MOV      R0,R4
+   \   000001BC   ........           BL       FS_memcpy
+    378              FS__SB_MarkDirty(pSB);
+   \   000001C0   3C009DE5           LDR      R0,[SP, #+60]
+   \   000001C4   ........           BL       FS__SB_MarkDirty
+    379            }
+    380          }
+   \                     ??_CheckFileName_5:
+   \   000001C8   44D08DE2           ADD      SP,SP,#+68       ;; stack cleaning
+   \   000001CC   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    381          
+    382          /*********************************************************************
+    383          *
+    384          *       _GetFixDir
+    385          *
+    386          */
+
+   \                                 In section .text, align 4, keep-with-next
+    387          static U32 _GetFixDir(FS_VOLUME * pVolume, U32 DirStart, FS_SB * pSB, int UseSameDir) {
+   \                     _GetFixDir:
+   \   00000000   F84F2DE9           PUSH     {R3-R11,LR}
+    388            char             acDirName[13];
+    389            FS_FAT_DENTRY  * pDirEntry;
+    390            U32              r;
+    391          
+    392            _CreateDirName(acDirName);
+   \   00000004   ............       ADRL     R7,`?<Constant "FOUND">`
+   \              ....        
+   \   0000000C   20D04DE2           SUB      SP,SP,#+32
+   \   00000010   0040A0E1           MOV      R4,R0
+   \   00000014   0150A0E1           MOV      R5,R1
+   \   00000018   0260A0E1           MOV      R6,R2
+   \   0000001C   0620A0E3           MOV      R2,#+6
+   \   00000020   0710A0E1           MOV      R1,R7
+   \   00000024   0C008DE2           ADD      R0,SP,#+12
+   \   00000028   ........           BL       __aeabi_memcpy4
+   \   0000002C   0C808DE2           ADD      R8,SP,#+12
+   \   00000030   2E00A0E3           MOV      R0,#+46
+   \   00000034   ........           LDR      R9,??DataTable11
+   \   00000038   0500C8E5           STRB     R0,[R8, #+5]
+   \   0000003C   000099E5           LDR      R0,[R9, #+0]
+   \   00000040   ........           LDR      R1,??_CheckFAT_0+0x4  ;; 0x10624dd3
+   \   00000044   0AA0A0E3           MOV      R10,#+10
+   \   00000048   9021C1E0           SMULL    R2,R1,R0,R1
+   \   0000004C   FA2FA0E3           MOV      R2,#+1000
+   \   00000050   4113B0E1           ASRS     R1,R1,#+6
+   \   00000054   01108142           ADDMI    R1,R1,#+1
+   \   00000058   920101E0           MUL      R1,R2,R1
+   \   0000005C   ........           LDR      R2,??_CheckFAT_0+0x8  ;; 0x51eb851f
+   \   00000060   011040E0           SUB      R1,R0,R1
+   \   00000064   9132C2E0           SMULL    R3,R2,R1,R2
+   \   00000068   00B0A0E3           MOV      R11,#+0
+   \   0000006C   C212B0E1           ASRS     R1,R2,#+5
+   \   00000070   01108142           ADDMI    R1,R1,#+1
+   \   00000074   301081E2           ADD      R1,R1,#+48
+   \   00000078   0610C8E5           STRB     R1,[R8, #+6]
+   \   0000007C   ........           LDR      R1,??_CheckFAT_0+0x8  ;; 0x51eb851f
+   \   00000080   09B0C8E5           STRB     R11,[R8, #+9]
+   \   00000084   9021C1E0           SMULL    R2,R1,R0,R1
+   \   00000088   6420A0E3           MOV      R2,#+100
+   \   0000008C   C112B0E1           ASRS     R1,R1,#+5
+   \   00000090   01108142           ADDMI    R1,R1,#+1
+   \   00000094   920101E0           MUL      R1,R2,R1
+   \   00000098   ........           LDR      R2,??DataTable8_1  ;; 0x66666667
+   \   0000009C   011040E0           SUB      R1,R0,R1
+   \   000000A0   9132C2E0           SMULL    R3,R2,R1,R2
+   \   000000A4   4211B0E1           ASRS     R1,R2,#+2
+   \   000000A8   ........           LDR      R2,??DataTable8_1  ;; 0x66666667
+   \   000000AC   01108142           ADDMI    R1,R1,#+1
+   \   000000B0   9032C2E0           SMULL    R3,R2,R0,R2
+   \   000000B4   301081E2           ADD      R1,R1,#+48
+   \   000000B8   0710C8E5           STRB     R1,[R8, #+7]
+   \   000000BC   0010A0E1           MOV      R1,R0
+   \   000000C0   4201B0E1           ASRS     R0,R2,#+2
+   \   000000C4   01008042           ADDMI    R0,R0,#+1
+   \   000000C8   800A60E1           SMULBB   R0,R0,R10
+   \   000000CC   000041E0           SUB      R0,R1,R0
+   \   000000D0   300080E2           ADD      R0,R0,#+48
+   \   000000D4   0800C8E5           STRB     R0,[R8, #+8]
+    393            if (UseSameDir == 0) {
+   \   000000D8   20009DE5           LDR      R0,[SP, #+32]
+   \   000000DC   000050E3           CMP      R0,#+0
+   \   000000E0   4000001A           BNE      ??_GetFixDir_0
+    394              do {
+    395                _LastDirIndex++;
+   \                     ??_GetFixDir_1:
+   \   000000E4   000099E5           LDR      R0,[R9, #+0]
+    396                _CreateDirName(acDirName);
+   \   000000E8   0620A0E3           MOV      R2,#+6
+   \   000000EC   010080E2           ADD      R0,R0,#+1
+   \   000000F0   000089E5           STR      R0,[R9, #+0]
+   \   000000F4   0710A0E1           MOV      R1,R7
+   \   000000F8   0C008DE2           ADD      R0,SP,#+12
+   \   000000FC   ........           BL       __aeabi_memcpy4
+   \   00000100   2E00A0E3           MOV      R0,#+46
+   \   00000104   0500C8E5           STRB     R0,[R8, #+5]
+   \   00000108   000099E5           LDR      R0,[R9, #+0]
+   \   0000010C   ........           LDR      R1,??_CheckFAT_0+0x4  ;; 0x10624dd3
+   \   00000110   09B0C8E5           STRB     R11,[R8, #+9]
+   \   00000114   9021C1E0           SMULL    R2,R1,R0,R1
+   \   00000118   FA2FA0E3           MOV      R2,#+1000
+   \   0000011C   4113B0E1           ASRS     R1,R1,#+6
+   \   00000120   01108142           ADDMI    R1,R1,#+1
+   \   00000124   920101E0           MUL      R1,R2,R1
+   \   00000128   ........           LDR      R2,??_CheckFAT_0+0x8  ;; 0x51eb851f
+   \   0000012C   011040E0           SUB      R1,R0,R1
+   \   00000130   9132C2E0           SMULL    R3,R2,R1,R2
+   \   00000134   C212B0E1           ASRS     R1,R2,#+5
+   \   00000138   01108142           ADDMI    R1,R1,#+1
+   \   0000013C   301081E2           ADD      R1,R1,#+48
+   \   00000140   0610C8E5           STRB     R1,[R8, #+6]
+   \   00000144   ........           LDR      R1,??_CheckFAT_0+0x8  ;; 0x51eb851f
+   \   00000148   9021C1E0           SMULL    R2,R1,R0,R1
+   \   0000014C   6420A0E3           MOV      R2,#+100
+   \   00000150   C112B0E1           ASRS     R1,R1,#+5
+   \   00000154   01108142           ADDMI    R1,R1,#+1
+   \   00000158   920101E0           MUL      R1,R2,R1
+   \   0000015C   ........           LDR      R2,??DataTable8_1  ;; 0x66666667
+   \   00000160   011040E0           SUB      R1,R0,R1
+   \   00000164   9132C2E0           SMULL    R3,R2,R1,R2
+   \   00000168   4211B0E1           ASRS     R1,R2,#+2
+   \   0000016C   ........           LDR      R2,??DataTable8_1  ;; 0x66666667
+   \   00000170   01108142           ADDMI    R1,R1,#+1
+   \   00000174   9032C2E0           SMULL    R3,R2,R0,R2
+   \   00000178   301081E2           ADD      R1,R1,#+48
+   \   0000017C   0710C8E5           STRB     R1,[R8, #+7]
+   \   00000180   0010A0E1           MOV      R1,R0
+   \   00000184   4201B0E1           ASRS     R0,R2,#+2
+   \   00000188   01008042           ADDMI    R0,R0,#+1
+   \   0000018C   800A60E1           SMULBB   R0,R0,R10
+   \   00000190   000041E0           SUB      R0,R1,R0
+   \   00000194   300080E2           ADD      R0,R0,#+48
+   \   00000198   0800C8E5           STRB     R0,[R8, #+8]
+    397                pDirEntry = FS_FAT_FindDirEntry(pVolume, pSB, acDirName, strlen(acDirName), DirStart, 0, NULL);
+    398                if (pDirEntry == (FS_FAT_DENTRY *)NULL) {
+   \   0000019C   0C008DE2           ADD      R0,SP,#+12
+   \   000001A0   ........           BL       strlen
+   \   000001A4   0030A0E1           MOV      R3,R0
+   \   000001A8   08B08DE5           STR      R11,[SP, #+8]
+   \   000001AC   04B08DE5           STR      R11,[SP, #+4]
+   \   000001B0   00508DE5           STR      R5,[SP, #+0]
+   \   000001B4   0C208DE2           ADD      R2,SP,#+12
+   \   000001B8   0610A0E1           MOV      R1,R6
+   \   000001BC   0400A0E1           MOV      R0,R4
+   \   000001C0   ........           BL       FS_FAT_FindDirEntry
+   \   000001C4   000050E3           CMP      R0,#+0
+   \   000001C8   C5FFFF1A           BNE      ??_GetFixDir_1
+    399                  if (FS_FAT_CreateDirEx(pVolume, acDirName, DirStart, pSB)) {
+   \   000001CC   0630A0E1           MOV      R3,R6
+   \   000001D0   0520A0E1           MOV      R2,R5
+   \   000001D4   0C108DE2           ADD      R1,SP,#+12
+   \   000001D8   0400A0E1           MOV      R0,R4
+   \   000001DC   ........           BL       FS_FAT_CreateDirEx
+   \   000001E0   000050E3           CMP      R0,#+0
+   \   000001E4   0E00001A           BNE      ??_GetFixDir_2
+    400                    return 0xFFFFFFUL;
+    401                  }
+    402                  break;
+    403                }
+    404              } while (1);
+    405            }
+    406            pDirEntry = FS_FAT_FindDirEntry(pVolume, pSB, acDirName, strlen(acDirName), DirStart, FS_FAT_ATTR_DIRECTORY, NULL);
+   \                     ??_GetFixDir_0:
+   \   000001E8   0C008DE2           ADD      R0,SP,#+12
+   \   000001EC   ........           BL       strlen
+   \   000001F0   0030A0E1           MOV      R3,R0
+   \   000001F4   1000A0E3           MOV      R0,#+16
+   \   000001F8   04008DE5           STR      R0,[SP, #+4]
+   \   000001FC   08B08DE5           STR      R11,[SP, #+8]
+   \   00000200   00508DE5           STR      R5,[SP, #+0]
+   \   00000204   0C208DE2           ADD      R2,SP,#+12
+   \   00000208   0610A0E1           MOV      R1,R6
+   \   0000020C   0400A0E1           MOV      R0,R4
+   \   00000210   ........           BL       FS_FAT_FindDirEntry
+    407            if (pDirEntry) {
+   \   00000214   000050E3           CMP      R0,#+0
+   \   00000218   0100000A           BEQ      ??_GetFixDir_2
+    408              r = FS_FAT_GetFirstCluster(pDirEntry);
+   \   0000021C   ........           BL       FS_FAT_GetFirstCluster
+   \   00000220   000000EA           B        ??_GetFixDir_3
+    409            } else {
+    410              r = 0xFFFFFFUL;
+   \                     ??_GetFixDir_2:
+   \   00000224   FF04E0E3           MVN      R0,#-16777216
+    411            }
+    412            return r;
+   \                     ??_GetFixDir_3:
+   \   00000228   24D08DE2           ADD      SP,SP,#+36       ;; stack cleaning
+   \   0000022C   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    413          }
+    414          
+    415          /*********************************************************************
+    416          *
+    417          *       _CheckFile
+    418          *
+    419          *  Return value
+    420          *    0    O.K.
+    421          *    1    Error -> an error has be found and repaired, retry is required.
+    422          *    2    User specified an abort of checkdisk operation thru callback.
+    423          */
+
+   \                                 In section .text, align 4, keep-with-next
+    424          static int _CheckFile(FS_VOLUME * pVolume,
+    425                         U32                FirstFileCluster,
+    426                         U32                FileSize,
+    427                         CLUSTER_INFO     * paClusterInfo,
+    428                         U32                FirstClusterInArray,
+    429                         I32                NumClustersInArray,
+    430                         FS_SB            * pSB,
+    431                         U32                DirCluster,
+    432                         FS_DIR_POS       * pDirPos,
+    433                         FS_QUERY_F_TYPE  * pfOnError)
+    434          {
+   \                     _CheckFile:
+   \   00000000   F84F2DE9           PUSH     {R3-R11,LR}
+   \   00000004   20D04DE2           SUB      SP,SP,#+32
+   \   00000008   50709DE5           LDR      R7,[SP, #+80]
+   \   0000000C   58809DE5           LDR      R8,[SP, #+88]
+   \   00000010   0150A0E1           MOV      R5,R1
+   \   00000014   0260A0E1           MOV      R6,R2
+   \   00000018   0040A0E1           MOV      R4,R0
+   \   0000001C   54309DE5           LDR      R3,[SP, #+84]
+   \   00000020   5C909DE5           LDR      R9,[SP, #+92]
+    435            FS_FAT_INFO    * pFATInfo;
+    436            FS_SB            SBFat;
+    437            FS_SB          * pSBFat;
+    438            CLUSTER_INFO   * pClusterInfo;
+    439            U32           NumClustersUsed;
+    440            U32           Cluster;
+    441            U32           LastCluster;
+    442            int           r;
+    443            U32           i;
+    444          
+    445            
+    446            _CheckFileName(pVolume, pSB, pDirPos, DirCluster);
+   \   00000024   0820A0E1           MOV      R2,R8
+   \   00000028   0710A0E1           MOV      R1,R7
+   \   0000002C   ........           BL       _CheckFileName
+    447          
+    448            if (FS__SB_Create(&SBFat, &pVolume->Partition) == 0) {
+   \   00000030   0410A0E1           MOV      R1,R4
+   \   00000034   10008DE2           ADD      R0,SP,#+16
+   \   00000038   ........           BL       FS__SB_Create
+   \   0000003C   000050E3           CMP      R0,#+0
+    449              pSBFat = &SBFat;
+   \   00000040   10108D02           ADDEQ    R1,SP,#+16
+   \   00000044   00108D05           STREQ    R1,[SP, #+0]
+    450            } else {
+    451              pSBFat = pSB;
+   \   00000048   00708D15           STRNE    R7,[SP, #+0]
+    452            }
+    453            if (FileSize == 0) {
+   \   0000004C   000056E3           CMP      R6,#+0
+   \   00000050   1C00001A           BNE      ??_CheckFile_0
+    454              if (FirstFileCluster == 0) {
+   \   00000054   000055E3           CMP      R5,#+0
+    455                r = 0;
+   \   00000058   00A0A003           MOVEQ    R10,#+0
+    456                goto OnExit;
+   \   0000005C   BE00000A           BEQ      ??_CheckFile_1
+    457              } else {
+    458                r = pfOnError(FS_ERRCODE_0FILE, FirstFileCluster);
+   \   00000060   0510A0E1           MOV      R1,R5
+   \   00000064   1000A0E3           MOV      R0,#+16
+   \   00000068   39FF2FE1           BLX      R9
+   \   0000006C   00A0A0E1           MOV      R10,R0
+    459                if (r > 0) {
+   \   00000070   01005AE3           CMP      R10,#+1
+   \   00000074   130000BA           BLT      ??_CheckFile_0
+    460                  if (r == 1) {
+   \   00000078   B700001A           BNE      ??_CheckFile_1
+    461                    _SetFileLen(pVolume, pDirPos, 0, pSB);
+   \   0000007C   0820A0E1           MOV      R2,R8
+   \   00000080   0710A0E1           MOV      R1,R7
+   \   00000084   0400A0E1           MOV      R0,R4
+   \   00000088   ........           BL       FS_FAT_GetDirEntry
+   \   0000008C   0060A0E1           MOV      R6,R0
+   \   00000090   0010A0E3           MOV      R1,#+0
+   \   00000094   1C0086E2           ADD      R0,R6,#+28
+   \   00000098   ........           BL       FS_StoreU32LE
+   \   0000009C   0010A0E3           MOV      R1,#+0
+   \   000000A0   0600A0E1           MOV      R0,R6
+   \   000000A4   ........           BL       FS_FAT_WriteDirEntryCluster
+   \   000000A8   0700A0E1           MOV      R0,R7
+   \   000000AC   ........           BL       FS__SB_MarkDirty
+    462                    FS_FAT_FreeClusterChain(pVolume, pSBFat, FirstFileCluster, 0xFFFFFFFFUL);
+   \                     ??_CheckFile_2:
+   \   000000B0   0030E0E3           MVN      R3,#+0
+   \   000000B4   0520A0E1           MOV      R2,R5
+   \   000000B8   00109DE5           LDR      R1,[SP, #+0]
+   \   000000BC   0400A0E1           MOV      R0,R4
+   \   000000C0   ........           BL       FS_FAT_FreeClusterChain
+   \   000000C4   A40000EA           B        ??_CheckFile_1
+    463                  } 
+    464                  goto OnExit;
+    465                }
+    466              }
+    467            }
+    468            r = 0;
+    469            LastCluster = 0;
+    470            pFATInfo = &pVolume->FSInfo.FATInfo;
+   \                     ??_CheckFile_0:
+   \   000000C8   1C0084E2           ADD      R0,R4,#+28
+   \   000000CC   04008DE5           STR      R0,[SP, #+4]
+    471            NumClustersUsed = (FileSize + pFATInfo->BytesPerCluster - 1) / pFATInfo->BytesPerCluster;
+   \   000000D0   0C1090E5           LDR      R1,[R0, #+12]
+   \   000000D4   00A0A0E3           MOV      R10,#+0
+   \   000000D8   060081E0           ADD      R0,R1,R6
+   \   000000DC   010040E2           SUB      R0,R0,#+1
+   \   000000E0   ........           BL       __aeabi_uidiv
+   \   000000E4   0C008DE5           STR      R0,[SP, #+12]
+    472            Cluster = FirstFileCluster;
+    473            for (i = 0; Cluster; i++) {
+   \   000000E8   010040E2           SUB      R0,R0,#+1
+   \   000000EC   00B0A0E3           MOV      R11,#+0
+   \   000000F0   0060A0E3           MOV      R6,#+0
+   \   000000F4   08008DE5           STR      R0,[SP, #+8]
+   \   000000F8   660000EA           B        ??_CheckFile_3
+    474              I32 Off;
+    475              /* Check if max. size has been exceeded */
+    476              if (i > (NumClustersUsed - 1)) {
+    477                r = pfOnError(FS_ERRCODE_SHORTEN_CLUSTER, Cluster);
+    478                if (r > 0) {
+    479                  if (r == 1) {
+    480                    FS_FAT_MarkClusterEOC(pVolume, pSBFat, LastCluster);
+    481                    FS_FAT_FreeClusterChain(pVolume, pSBFat, Cluster, 0xFFFFFFFFUL);
+    482                    // Need to shorten cluster chain
+    483                  }
+    484                  goto OnExit;
+    485                }
+    486              }
+    487              /* Add it to the cluster info array */
+    488              Off = (I32)Cluster - (I32)FirstClusterInArray;
+   \                     ??_CheckFile_4:
+   \   000000FC   48009DE5           LDR      R0,[SP, #+72]
+   \   00000100   000055E0           SUBS     R0,R5,R0
+    489              if ((Off >= 0) && (Off < NumClustersInArray)) {
+   \   00000104   0D00004A           BMI      ??_CheckFile_5
+   \   00000108   4C109DE5           LDR      R1,[SP, #+76]
+   \   0000010C   010050E1           CMP      R0,R1
+   \   00000110   0A0000AA           BGE      ??_CheckFile_5
+    490                pClusterInfo = paClusterInfo + Off;
+   \   00000114   0C10A0E3           MOV      R1,#+12
+   \   00000118   20209DE5           LDR      R2,[SP, #+32]
+   \   0000011C   912020E0           MLA      R0,R1,R0,R2
+    491                if (pClusterInfo->Value == 0xFFFFFFFFUL) {
+   \   00000120   001090E5           LDR      R1,[R0, #+0]
+   \   00000124   010071E3           CMN      R1,#+1
+   \   00000128   1E00001A           BNE      ??_CheckFile_6
+    492                  pClusterInfo->Value           = Cluster;
+   \   0000012C   005080E5           STR      R5,[R0, #+0]
+    493                  pClusterInfo->DirEntryIndex   = pDirPos->DirEntryIndex;
+   \   00000130   081098E5           LDR      R1,[R8, #+8]
+   \   00000134   081080E5           STR      R1,[R0, #+8]
+    494                  pClusterInfo->DirFirstCluster = pDirPos->FirstCluster;
+   \   00000138   041098E5           LDR      R1,[R8, #+4]
+   \   0000013C   041080E5           STR      R1,[R0, #+4]
+    495                } else {
+    496                  r = pfOnError(FS_ERRCODE_CROSSLINKED_CLUSTER, Cluster, pDirPos->FirstCluster, pDirPos->DirEntryIndex);
+    497                  if (r > 0) {
+    498                    if (r == 1) {
+    499                      /* Fix it ! */
+    500                      _SetFileLen(pVolume, pDirPos, i * pFATInfo->BytesPerCluster, pSB);
+    501                    }
+    502                    goto OnExit;
+    503                  }
+    504                }
+    505              }
+    506              //
+    507              //  Check if cluster is beyond the number of clusters
+    508              // 
+    509              if ((Cluster - 2) >= pVolume->FSInfo.FATInfo.NumClusters) {
+   \                     ??_CheckFile_5:
+   \   00000140   3C1094E5           LDR      R1,[R4, #+60]
+   \   00000144   020045E2           SUB      R0,R5,#+2
+   \   00000148   010050E1           CMP      R0,R1
+   \   0000014C   2C00003A           BCC      ??_CheckFile_7
+    510                r = pfOnError(FS_ERRCODE_INVALID_CLUSTER, Cluster);
+   \   00000150   0510A0E1           MOV      R1,R5
+   \   00000154   1600A0E3           MOV      R0,#+22
+   \   00000158   39FF2FE1           BLX      R9
+   \   0000015C   00A0A0E1           MOV      R10,R0
+    511                if (r > 0) {
+   \   00000160   01005AE3           CMP      R10,#+1
+   \   00000164   260000BA           BLT      ??_CheckFile_7
+    512                  if (r == 1) {
+   \                     ??_CheckFile_8:
+   \   00000168   7B00001A           BNE      ??_CheckFile_1
+    513                    if (FS_FAT_MarkClusterEOC(pVolume, pSBFat, LastCluster)) {
+   \   0000016C   0B20A0E1           MOV      R2,R11
+   \   00000170   00109DE5           LDR      R1,[SP, #+0]
+   \   00000174   0400A0E1           MOV      R0,R4
+   \   00000178   ........           BL       FS_FAT_MarkClusterEOC
+   \   0000017C   000050E3           CMP      R0,#+0
+   \   00000180   7500000A           BEQ      ??_CheckFile_1
+    514                      _SetFileLen(pVolume, pDirPos, 0, pSB);
+   \   00000184   0820A0E1           MOV      R2,R8
+   \   00000188   0710A0E1           MOV      R1,R7
+   \   0000018C   0400A0E1           MOV      R0,R4
+   \   00000190   ........           BL       FS_FAT_GetDirEntry
+   \   00000194   0040A0E1           MOV      R4,R0
+   \   00000198   0010A0E3           MOV      R1,#+0
+   \   0000019C   1C0084E2           ADD      R0,R4,#+28
+   \   000001A0   ........           BL       FS_StoreU32LE
+   \   000001A4   670000EA           B        ??_CheckFile_9
+    515                    }
+    516                  }
+    517                  goto OnExit;
+    518                }
+    519              }
+   \                     ??_CheckFile_6:
+   \   000001A8   083098E5           LDR      R3,[R8, #+8]
+   \   000001AC   042098E5           LDR      R2,[R8, #+4]
+   \   000001B0   0510A0E1           MOV      R1,R5
+   \   000001B4   1200A0E3           MOV      R0,#+18
+   \   000001B8   39FF2FE1           BLX      R9
+   \   000001BC   00A0A0E1           MOV      R10,R0
+   \   000001C0   01005AE3           CMP      R10,#+1
+   \   000001C4   DDFFFFBA           BLT      ??_CheckFile_5
+   \   000001C8   6300001A           BNE      ??_CheckFile_1
+   \   000001CC   04009DE5           LDR      R0,[SP, #+4]
+   \   000001D0   0820A0E1           MOV      R2,R8
+   \   000001D4   0C0090E5           LDR      R0,[R0, #+12]
+   \   000001D8   0710A0E1           MOV      R1,R7
+   \   000001DC   900605E0           MUL      R5,R0,R6
+   \   000001E0   0400A0E1           MOV      R0,R4
+   \   000001E4   ........           BL       FS_FAT_GetDirEntry
+   \   000001E8   0040A0E1           MOV      R4,R0
+   \   000001EC   0510A0E1           MOV      R1,R5
+   \   000001F0   1C0084E2           ADD      R0,R4,#+28
+   \   000001F4   ........           BL       FS_StoreU32LE
+   \   000001F8   000055E3           CMP      R5,#+0
+   \   000001FC   5400001A           BNE      ??_CheckFile_10
+   \   00000200   500000EA           B        ??_CheckFile_9
+    520              LastCluster = Cluster;
+   \                     ??_CheckFile_7:
+   \   00000204   05B0A0E1           MOV      R11,R5
+    521              Cluster = FS_FAT_WalkCluster(pVolume, pSBFat, Cluster, 1);
+   \   00000208   0130A0E3           MOV      R3,#+1
+   \   0000020C   0520A0E1           MOV      R2,R5
+   \   00000210   00109DE5           LDR      R1,[SP, #+0]
+   \   00000214   0400A0E1           MOV      R0,R4
+   \   00000218   ........           BL       FS_FAT_WalkCluster
+   \   0000021C   0050A0E1           MOV      R5,R0
+    522              /* Check if the last cluster is marked as end-of-chain */
+    523              if (i == (NumClustersUsed - 1)) {
+   \   00000220   08009DE5           LDR      R0,[SP, #+8]
+   \   00000224   000056E1           CMP      R6,R0
+   \   00000228   1900001A           BNE      ??_CheckFile_11
+    524                if ((_IsClusterEOC(pVolume, pSB, LastCluster) == 0)) {
+   \   0000022C   0B20A0E1           MOV      R2,R11
+   \   00000230   0710A0E1           MOV      R1,R7
+   \   00000234   0400A0E1           MOV      R0,R4
+   \   00000238   ........           BL       FS_FAT_ReadFATEntry
+   \   0000023C   3A10D4E5           LDRB     R1,[R4, #+58]
+   \   00000240   0C1051E2           SUBS     R1,R1,#+12
+   \   00000244   0D00000A           BEQ      ??_CheckFile_12
+   \   00000248   041051E2           SUBS     R1,R1,#+4
+   \   0000024C   2200001A           BNE      ??_CheckFile_13
+   \   00000250   FF10A0E3           MOV      R1,#+255
+   \   00000254   0008A0E1           LSL      R0,R0,#+16
+   \   00000258   FF1C81E3           ORR      R1,R1,#0xFF00
+   \   0000025C   200851E1           CMP      R1,R0, LSR #+16
+   \   00000260   0B00000A           BEQ      ??_CheckFile_11
+    525                  r = pfOnError(FS_ERRCODE_CLUSTER_NOT_EOC, LastCluster);
+   \                     ??_CheckFile_14:
+   \   00000264   0B10A0E1           MOV      R1,R11
+   \   00000268   1500A0E3           MOV      R0,#+21
+   \   0000026C   39FF2FE1           BLX      R9
+   \   00000270   00A0A0E1           MOV      R10,R0
+    526                  if (r > 0) {
+   \   00000274   01005AE3           CMP      R10,#+1
+   \   00000278   050000BA           BLT      ??_CheckFile_11
+    527                    if (r == 1) {
+   \   0000027C   B9FFFFEA           B        ??_CheckFile_8
+    528                      if (FS_FAT_MarkClusterEOC(pVolume, pSBFat, LastCluster)) {
+    529                        _SetFileLen(pVolume, pDirPos, 0, pSB);
+    530                      }
+    531                    }
+    532                    goto OnExit;
+    533                  }
+    534                }
+    535              }
+   \                     ??_CheckFile_12:
+   \   00000280   FF10A0E3           MOV      R1,#+255
+   \   00000284   000AA0E1           LSL      R0,R0,#+20
+   \   00000288   F01E81E3           ORR      R1,R1,#0xF00
+   \   0000028C   200A51E1           CMP      R1,R0, LSR #+20
+   \   00000290   F3FFFF1A           BNE      ??_CheckFile_14
+   \                     ??_CheckFile_11:
+   \   00000294   016086E2           ADD      R6,R6,#+1
+   \                     ??_CheckFile_3:
+   \   00000298   000055E3           CMP      R5,#+0
+   \   0000029C   1300000A           BEQ      ??_CheckFile_15
+   \   000002A0   08009DE5           LDR      R0,[SP, #+8]
+   \   000002A4   060050E1           CMP      R0,R6
+   \   000002A8   93FFFF2A           BCS      ??_CheckFile_4
+   \   000002AC   0510A0E1           MOV      R1,R5
+   \   000002B0   1100A0E3           MOV      R0,#+17
+   \   000002B4   39FF2FE1           BLX      R9
+   \   000002B8   00A0A0E1           MOV      R10,R0
+   \   000002BC   01005AE3           CMP      R10,#+1
+   \   000002C0   8DFFFFBA           BLT      ??_CheckFile_4
+   \   000002C4   2400001A           BNE      ??_CheckFile_1
+   \   000002C8   0B20A0E1           MOV      R2,R11
+   \   000002CC   00109DE5           LDR      R1,[SP, #+0]
+   \   000002D0   0400A0E1           MOV      R0,R4
+   \   000002D4   ........           BL       FS_FAT_MarkClusterEOC
+   \   000002D8   74FFFFEA           B        ??_CheckFile_2
+    536            }
+   \                     ??_CheckFile_13:
+   \   000002DC   0002A0E1           LSL      R0,R0,#+4
+   \   000002E0   F014E0E3           MVN      R1,#-268435456
+   \   000002E4   200251E1           CMP      R1,R0, LSR #+4
+   \   000002E8   DDFFFF1A           BNE      ??_CheckFile_14
+   \   000002EC   E8FFFFEA           B        ??_CheckFile_11
+    537            if (i != NumClustersUsed) {
+   \                     ??_CheckFile_15:
+   \   000002F0   0C009DE5           LDR      R0,[SP, #+12]
+   \   000002F4   000056E1           CMP      R6,R0
+   \   000002F8   1700000A           BEQ      ??_CheckFile_1
+    538              r = pfOnError(FS_ERRCODE_FEW_CLUSTER);
+   \   000002FC   1300A0E3           MOV      R0,#+19
+   \   00000300   39FF2FE1           BLX      R9
+   \   00000304   00A0A0E1           MOV      R10,R0
+    539              if (r > 0) {
+   \   00000308   01005AE3           CMP      R10,#+1
+   \   0000030C   120000BA           BLT      ??_CheckFile_1
+    540                if (r == 1) {
+   \   00000310   1100001A           BNE      ??_CheckFile_1
+    541                  _SetFileLen(pVolume, pDirPos, i * pFATInfo->BytesPerCluster, pSB);
+   \   00000314   04009DE5           LDR      R0,[SP, #+4]
+   \   00000318   0820A0E1           MOV      R2,R8
+   \   0000031C   0C0090E5           LDR      R0,[R0, #+12]
+   \   00000320   0710A0E1           MOV      R1,R7
+   \   00000324   900605E0           MUL      R5,R0,R6
+   \   00000328   0400A0E1           MOV      R0,R4
+   \   0000032C   ........           BL       FS_FAT_GetDirEntry
+   \   00000330   0040A0E1           MOV      R4,R0
+   \   00000334   0510A0E1           MOV      R1,R5
+   \   00000338   1C0084E2           ADD      R0,R4,#+28
+   \   0000033C   ........           BL       FS_StoreU32LE
+   \   00000340   000055E3           CMP      R5,#+0
+   \   00000344   0200001A           BNE      ??_CheckFile_10
+   \                     ??_CheckFile_9:
+   \   00000348   0010A0E3           MOV      R1,#+0
+   \   0000034C   0400A0E1           MOV      R0,R4
+   \   00000350   ........           BL       FS_FAT_WriteDirEntryCluster
+   \                     ??_CheckFile_10:
+   \   00000354   0700A0E1           MOV      R0,R7
+   \   00000358   ........           BL       FS__SB_MarkDirty
+    542                }
+    543                goto OnExit;
+    544              }
+    545            }
+    546          OnExit:
+    547            FS__SB_Delete(&SBFat);
+   \                     ??_CheckFile_1:
+   \   0000035C   10008DE2           ADD      R0,SP,#+16
+   \   00000360   ........           BL       FS__SB_Delete
+    548            return r;
+   \   00000364   0A00A0E1           MOV      R0,R10
+   \   00000368   24D08DE2           ADD      SP,SP,#+36
+   \   0000036C   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    549          }
+    550          
+    551          /*********************************************************************
+    552          *
+    553          *       _IsDotFolderEntryValid
+    554          *
+    555          *  Return value:
+    556          *    0       -  Entry is O.K.
+    557          *    1       -  Error.
+    558          *
+    559          */
+    560          static int _IsDotFolderEntryValid(FS_FAT_DENTRY * pDirEntry, FS_DIR_POS * pDirPos, const char * sDirEntryName, U32 ClusterId) {
+    561            FS_USE_PARA(pDirPos);
+    562            if (!pDirEntry) {
+    563              goto OnError;
+    564            }
+    565            if (memcmp(&pDirEntry->data[0], sDirEntryName, 11) != 0) {
+    566              goto OnError;
+    567            }
+    568            if ((pDirEntry->data[DIR_ENTRY_OFF_ATTRIBUTES] & FS_FAT_ATTR_DIRECTORY) == 0) {
+    569              goto OnError;
+    570            }
+    571            if (FS_FAT_GetFirstCluster(pDirEntry) != ClusterId) {
+    572              goto OnError;
+    573            }
+    574            return 0;
+    575          OnError:
+    576            return 1;
+    577          }
+    578          
+    579          /*********************************************************************
+    580          *
+    581          *       _CheckDir
+    582          *
+    583          *  Return value
+    584          *    0    O.K.
+    585          *    1    Error -> an error has be found and repaired, retry is required.
+    586          *    2    User specified an abort of checkdisk operation thru callback.
+    587          */
+
+   \                                 In section .text, align 4, keep-with-next
+    588          static int _CheckDir(FS_VOLUME * pVolume, U32 DirCluster, CLUSTER_INFO * paClusterInfo, U32 FirstClusterInArray, I32 NumClustersInArray, int MaxRecursionLevel, FS_SB * pSB, FS_QUERY_F_TYPE * pfOnError) {
+   \                     _CheckDir:
+   \   00000000   F84F2DE9           PUSH     {R3-R11,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   40D04DE2           SUB      SP,SP,#+64
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0260A0E1           MOV      R6,R2
+    589            FS_DIR_POS       DirPos;
+    590            FS_FAT_INFO    * pFATInfo;
+    591            FS_FAT_DENTRY  * pDirEntry;
+    592            int              r;
+    593            U8               Attributes;
+    594            FS_DIR_POS       DirPos2Check;
+    595            FS_FAT_DENTRY  * pDirEntry2Check;
+    596            U32              RootDirCluster;
+    597          
+    598            pFATInfo = &pVolume->FSInfo.FATInfo;
+   \   00000014   1C9084E2           ADD      R9,R4,#+28
+   \   00000018   70709DE5           LDR      R7,[SP, #+112]
+   \   0000001C   74809DE5           LDR      R8,[SP, #+116]
+    599            /* Iterate over directory entries */
+    600            RootDirCluster = DirCluster;
+   \   00000020   2C508DE5           STR      R5,[SP, #+44]
+    601            FS_FAT_InitDirEntryScan(pFATInfo, &DirPos, DirCluster);
+   \   00000024   0520A0E1           MOV      R2,R5
+   \   00000028   18108DE2           ADD      R1,SP,#+24
+   \   0000002C   0900A0E1           MOV      R0,R9
+   \   00000030   ........           BL       FS_FAT_InitDirEntryScan
+    602            r = 1;
+   \   00000034   6C009DE5           LDR      R0,[SP, #+108]
+   \   00000038   010040E2           SUB      R0,R0,#+1
+   \   0000003C   28008DE5           STR      R0,[SP, #+40]
+   \   00000040   110000EA           B        ??_CheckDir_0
+    603            do {
+    604              pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &DirPos);
+    605              if (!pDirEntry) {
+    606                break;
+    607              }
+    608              if (pDirEntry->data[0] == 0x00) {         /* Last entry found ? */
+    609                break;
+    610              }
+    611              if (pDirEntry->data[0] != (U8)0xE5) {     /* not a deleted file */
+    612                //
+    613                // Check the entry for validity
+    614                //
+    615                if (_CheckDirEntry(pFATInfo, pDirEntry)) {
+    616                  //
+    617                  // invalid entry, mark it as deleted
+    618                  //
+    619                  pDirEntry->data[0] = 0xe5;
+    620                  FS__SB_MarkDirty(pSB);
+    621                  return 1;
+    622                }
+    623                //
+    624                // Check if the directory entry has the directory attribute set
+    625                //
+    626                Attributes = pDirEntry->data[DIR_ENTRY_OFF_ATTRIBUTES];
+    627                if ((Attributes & FS_FAT_ATTR_LONGNAME) != FS_FAT_ATTR_LONGNAME) {
+    628                  if ((Attributes & FS_FAT_ATTR_DIRECTORY) == FS_FAT_ATTR_DIRECTORY) {
+    629                    if (pDirEntry->data[0] != '.') {
+    630                      if (MaxRecursionLevel) {
+    631                        I32            Off;
+    632                        CLUSTER_INFO * pClusterInfo;
+    633          
+    634                        DirCluster     = FS_FAT_GetFirstCluster(pDirEntry);
+    635                        //
+    636                        // Check if cluster FAT entry is not empty.
+    637                        //
+    638                        if (FS_FAT_ReadFATEntry(pVolume, pSB, DirCluster) == 0) {
+    639                          FS_FAT_InitDirEntryScan(pFATInfo, &DirPos2Check, DirCluster);
+    640                          pDirEntry2Check = FS_FAT_GetDirEntry(pVolume, pSB, &DirPos2Check);
+    641                          
+    642                          //
+    643                          //  Check if directory match to directory entry
+    644                          //
+    645                          if ((pDirEntry2Check->data[0] != '.') || (FS_FAT_GetFirstCluster(pDirEntry) != DirCluster)) {
+    646                            //
+    647                            //  Retrieve the directory entry and mark it as deleted
+    648                            //  since the directory entry does not point to a valid directory.
+    649                            //
+    650                            pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &DirPos);
+    651                            pDirEntry->data[0] = 0xe5;
+    652                            FS__SB_MarkDirty(pSB);
+    653                            return 1;
+    654                          } else {
+    655                            //
+    656                            // Repair  the FAT entry, since the directory is valid.
+    657                            r = pfOnError(FS_ERRCODE_CLUSTER_NOT_EOC);
+    658                            if (r > 0) {
+    659                              if (r == 1) {
+    660                                FS_FAT_MarkClusterEOC(pVolume, pSB, DirCluster);
+    661                              } else {
+    662                                return 2;
+    663                              }
+    664                            }
+    665                          }
+    666                        }
+    667                        pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &DirPos);
+    668                        if (FS_LoadU32LE(&pDirEntry ->data[DIR_ENTRY_OFF_SIZE]) != 0) {
+    669                          //
+    670                          // Directory is not a valid directory
+    671                          // we convert it into a file.
+    672                          //
+    673                          pDirEntry->data[DIR_ENTRY_OFF_ATTRIBUTES] &= ~(FS_FAT_ATTR_DIRECTORY);
+    674                          FS__SB_MarkDirty(pSB);
+    675                          return 1;
+    676                        }
+    677                        //
+    678                        // If we have a directory and it is not a root directory.
+    679                        // We need to check whether there are '..' and '.' directory entries
+    680                        // otherwise we convert the directory into a file.
+    681                        //
+    682                        FS_FAT_InitDirEntryScan(pFATInfo, &DirPos2Check, DirCluster);
+    683                        pDirEntry2Check = FS_FAT_GetDirEntry(pVolume, pSB, &DirPos2Check);
+    684                        //
+    685                        // Check the "." Entry
+    686                        //
+    687                        r = _IsDotFolderEntryValid(pDirEntry2Check, &DirPos, ".          ", DirPos2Check.FirstCluster);
+    688                        if (r != 0) {
+    689                          pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &DirPos);
+    690                          pDirEntry->data[DIR_ENTRY_OFF_ATTRIBUTES] &= ~(FS_FAT_ATTR_DIRECTORY);
+    691                          FS__SB_MarkDirty(pSB);
+    692                          return r;
+    693                        }
+    694                        //
+    695                        // Check the ".." Entry
+    696                        //
+    697                        FS_FAT_IncDirPos(&DirPos2Check);
+    698                        pDirEntry2Check = FS_FAT_GetDirEntry(pVolume, pSB, &DirPos2Check);
+    699                        r = _IsDotFolderEntryValid(pDirEntry2Check, &DirPos2Check, "..         ", RootDirCluster);
+    700                        if (r != 0) {
+    701                          pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &DirPos);
+    702                          pDirEntry->data[DIR_ENTRY_OFF_ATTRIBUTES] &= ~(FS_FAT_ATTR_DIRECTORY);
+    703                          FS__SB_MarkDirty(pSB);
+    704                          return r;
+    705                        }
+    706                        /* Add it to the cluster info array */
+    707                        Off = (I32)DirCluster - (I32)FirstClusterInArray;
+    708                        if ((Off >= 0) && (Off < NumClustersInArray)) {
+    709                          pClusterInfo = paClusterInfo + Off;
+    710                          if (pClusterInfo->Value == 0xFFFFFFFFUL) {
+    711                            pClusterInfo->Value           = DirCluster;
+    712                            pClusterInfo->DirEntryIndex   = DirPos.DirEntryIndex;
+    713                            pClusterInfo->DirFirstCluster = DirPos.FirstCluster;
+    714                          }
+    715                        }
+    716                        r = _CheckDir(pVolume, DirCluster, paClusterInfo, FirstClusterInArray, NumClustersInArray, MaxRecursionLevel - 1, pSB, pfOnError);
+    717                        if (r) {
+    718                          return r;                 // Error
+    719                        }
+    720                      } else {
+    721                        return 2;  // Abort -> Max recursion level limit reached.
+    722                      }
+    723                    }
+    724                  } else {
+    725                    U32 FileSize;
+    726                    U32 FirstFileCluster;
+    727          
+    728                    FirstFileCluster = FS_FAT_GetFirstCluster(pDirEntry);
+    729                    FileSize         = FS_LoadU32LE(&pDirEntry->data[DIR_ENTRY_OFF_SIZE]);
+    730                    r = _CheckFile(pVolume, FirstFileCluster, FileSize, paClusterInfo, FirstClusterInArray, NumClustersInArray, pSB, DirCluster, &DirPos, pfOnError);
+    731                    if (r) {
+    732                      return r;
+    733                    }
+    734                  }
+    735                } else {
+    736                  //
+    737                  // Check Long file name entry
+    738                  //
+    739                  if (_CheckLongDirEntry(pVolume, &DirPos, pDirEntry, pSB)) {
+    740                    return 1;
+    741                  }
+    742                }
+    743          
+    744              }
+    745              FS_FAT_IncDirPos(&DirPos);
+    746              /* Moved to another cluster to check the directory entries ? */
+    747              if (DirPos.Cluster != DirCluster) {
+    748                I32            Off;
+    749                CLUSTER_INFO * pClusterInfo;
+    750          
+    751                if (FS_FAT_ReadFATEntry(pVolume, pSB, DirPos.Cluster) == 0) {
+    752                  // Repair  the FAT entry, since the directory is valid.
+    753                  r = pfOnError(FS_ERRCODE_CLUSTER_NOT_EOC);
+    754                  if (r > 0) {
+    755                    if (r == 1) {
+    756                      FS_FAT_MarkClusterEOC(pVolume, pSB, DirCluster);
+    757                      return 1;
+    758                    } else {
+    759                      return 2;
+    760                    }
+    761                  }
+    762                }
+    763                /* Add it to the cluster info array */
+    764                Off = (I32)DirPos.Cluster  - (I32)FirstClusterInArray;
+   \                     ??_CheckDir_1:
+   \   00000044   18009DE5           LDR      R0,[SP, #+24]
+   \   00000048   40109DE5           LDR      R1,[SP, #+64]
+   \   0000004C   010050E0           SUBS     R0,R0,R1
+    765                if ((Off >= 0) && (Off < NumClustersInArray)) {
+   \   00000050   0D00004A           BMI      ??_CheckDir_0
+   \   00000054   68109DE5           LDR      R1,[SP, #+104]
+   \   00000058   010050E1           CMP      R0,R1
+   \   0000005C   0A0000AA           BGE      ??_CheckDir_0
+    766                  pClusterInfo = paClusterInfo + Off;
+   \   00000060   0C10A0E3           MOV      R1,#+12
+   \   00000064   916020E0           MLA      R0,R1,R0,R6
+    767                  if (pClusterInfo->Value == 0xFFFFFFFFUL) {
+   \   00000068   001090E5           LDR      R1,[R0, #+0]
+   \   0000006C   010071E3           CMN      R1,#+1
+   \   00000070   0500001A           BNE      ??_CheckDir_0
+    768                    pClusterInfo->Value           = DirPos.Cluster;
+   \   00000074   18109DE5           LDR      R1,[SP, #+24]
+   \   00000078   001080E5           STR      R1,[R0, #+0]
+    769                    pClusterInfo->DirEntryIndex   = DirPos.DirEntryIndex;
+   \   0000007C   20109DE5           LDR      R1,[SP, #+32]
+   \   00000080   081080E5           STR      R1,[R0, #+8]
+    770                    pClusterInfo->DirFirstCluster = DirPos.FirstCluster;
+   \   00000084   1C109DE5           LDR      R1,[SP, #+28]
+   \   00000088   041080E5           STR      R1,[R0, #+4]
+    771                  }
+    772                }    
+   \                     ??_CheckDir_0:
+   \   0000008C   18208DE2           ADD      R2,SP,#+24
+   \   00000090   0710A0E1           MOV      R1,R7
+   \   00000094   0400A0E1           MOV      R0,R4
+   \   00000098   ........           BL       FS_FAT_GetDirEntry
+   \   0000009C   00A0B0E1           MOVS     R10,R0
+   \   000000A0   E100000A           BEQ      ??_CheckDir_2
+   \   000000A4   0000DAE5           LDRB     R0,[R10, #+0]
+   \   000000A8   000050E3           CMP      R0,#+0
+   \   000000AC   DF00000A           BEQ      ??_CheckDir_3
+   \   000000B0   E50050E3           CMP      R0,#+229
+   \   000000B4   BF00000A           BEQ      ??_CheckDir_4
+   \   000000B8   0A10A0E1           MOV      R1,R10
+   \   000000BC   0900A0E1           MOV      R0,R9
+   \   000000C0   ........           BL       _CheckDirEntry
+   \   000000C4   000050E3           CMP      R0,#+0
+   \   000000C8   0500000A           BEQ      ??_CheckDir_5
+   \   000000CC   E500A0E3           MOV      R0,#+229
+   \   000000D0   0000CAE5           STRB     R0,[R10, #+0]
+   \                     ??_CheckDir_6:
+   \   000000D4   0700A0E1           MOV      R0,R7
+   \   000000D8   ........           BL       FS__SB_MarkDirty
+   \                     ??_CheckDir_7:
+   \   000000DC   0100A0E3           MOV      R0,#+1
+   \   000000E0   D20000EA           B        ??_CheckDir_3
+   \                     ??_CheckDir_5:
+   \   000000E4   0B00DAE5           LDRB     R0,[R10, #+11]
+   \   000000E8   0F1000E2           AND      R1,R0,#0xF
+   \   000000EC   0F0051E3           CMP      R1,#+15
+   \   000000F0   C500000A           BEQ      ??_CheckDir_8
+   \   000000F4   100010E3           TST      R0,#0x10
+   \   000000F8   9900000A           BEQ      ??_CheckDir_9
+   \   000000FC   0000DAE5           LDRB     R0,[R10, #+0]
+   \   00000100   2E0050E3           CMP      R0,#+46
+   \   00000104   AB00000A           BEQ      ??_CheckDir_4
+   \   00000108   6C009DE5           LDR      R0,[SP, #+108]
+   \   0000010C   000050E3           CMP      R0,#+0
+   \   00000110   3600000A           BEQ      ??_CheckDir_10
+   \   00000114   0A00A0E1           MOV      R0,R10
+   \   00000118   ........           BL       FS_FAT_GetFirstCluster
+   \   0000011C   0050A0E1           MOV      R5,R0
+   \   00000120   0520A0E1           MOV      R2,R5
+   \   00000124   0710A0E1           MOV      R1,R7
+   \   00000128   0400A0E1           MOV      R0,R4
+   \   0000012C   ........           BL       FS_FAT_ReadFATEntry
+   \   00000130   000050E3           CMP      R0,#+0
+   \   00000134   1E00001A           BNE      ??_CheckDir_11
+   \   00000138   0520A0E1           MOV      R2,R5
+   \   0000013C   30108DE2           ADD      R1,SP,#+48
+   \   00000140   0900A0E1           MOV      R0,R9
+   \   00000144   ........           BL       FS_FAT_InitDirEntryScan
+   \   00000148   30208DE2           ADD      R2,SP,#+48
+   \   0000014C   0710A0E1           MOV      R1,R7
+   \   00000150   0400A0E1           MOV      R0,R4
+   \   00000154   ........           BL       FS_FAT_GetDirEntry
+   \   00000158   0000D0E5           LDRB     R0,[R0, #+0]
+   \   0000015C   2E0050E3           CMP      R0,#+46
+   \   00000160   0300001A           BNE      ??_CheckDir_12
+   \   00000164   0A00A0E1           MOV      R0,R10
+   \   00000168   ........           BL       FS_FAT_GetFirstCluster
+   \   0000016C   050050E1           CMP      R0,R5
+   \   00000170   0600000A           BEQ      ??_CheckDir_13
+   \                     ??_CheckDir_12:
+   \   00000174   18208DE2           ADD      R2,SP,#+24
+   \   00000178   0710A0E1           MOV      R1,R7
+   \   0000017C   0400A0E1           MOV      R0,R4
+   \   00000180   ........           BL       FS_FAT_GetDirEntry
+   \   00000184   E510A0E3           MOV      R1,#+229
+   \   00000188   0010C0E5           STRB     R1,[R0, #+0]
+   \   0000018C   D0FFFFEA           B        ??_CheckDir_6
+   \                     ??_CheckDir_13:
+   \   00000190   1500A0E3           MOV      R0,#+21
+   \   00000194   38FF2FE1           BLX      R8
+   \   00000198   010050E3           CMP      R0,#+1
+   \   0000019C   040000BA           BLT      ??_CheckDir_11
+   \   000001A0   1200001A           BNE      ??_CheckDir_10
+   \   000001A4   0520A0E1           MOV      R2,R5
+   \   000001A8   0710A0E1           MOV      R1,R7
+   \   000001AC   0400A0E1           MOV      R0,R4
+   \   000001B0   ........           BL       FS_FAT_MarkClusterEOC
+   \                     ??_CheckDir_11:
+   \   000001B4   18208DE2           ADD      R2,SP,#+24
+   \   000001B8   0710A0E1           MOV      R1,R7
+   \   000001BC   0400A0E1           MOV      R0,R4
+   \   000001C0   ........           BL       FS_FAT_GetDirEntry
+   \   000001C4   00A0A0E1           MOV      R10,R0
+   \   000001C8   1C008AE2           ADD      R0,R10,#+28
+   \   000001CC   ........           BL       FS_LoadU32LE
+   \   000001D0   000050E3           CMP      R0,#+0
+   \   000001D4   0700000A           BEQ      ??_CheckDir_14
+   \                     ??_CheckDir_15:
+   \   000001D8   0B00DAE5           LDRB     R0,[R10, #+11]
+   \   000001DC   1000C0E3           BIC      R0,R0,#0x10
+   \   000001E0   0B00CAE5           STRB     R0,[R10, #+11]
+   \   000001E4   0700A0E1           MOV      R0,R7
+   \   000001E8   ........           BL       FS__SB_MarkDirty
+   \   000001EC   BAFFFFEA           B        ??_CheckDir_7
+   \                     ??_CheckDir_10:
+   \   000001F0   0200A0E3           MOV      R0,#+2
+   \   000001F4   8D0000EA           B        ??_CheckDir_3
+   \                     ??_CheckDir_14:
+   \   000001F8   0520A0E1           MOV      R2,R5
+   \   000001FC   30108DE2           ADD      R1,SP,#+48
+   \   00000200   0900A0E1           MOV      R0,R9
+   \   00000204   ........           BL       FS_FAT_InitDirEntryScan
+   \   00000208   30208DE2           ADD      R2,SP,#+48
+   \   0000020C   0710A0E1           MOV      R1,R7
+   \   00000210   0400A0E1           MOV      R0,R4
+   \   00000214   ........           BL       FS_FAT_GetDirEntry
+   \   00000218   00A0B0E1           MOVS     R10,R0
+   \   0000021C   34B09DE5           LDR      R11,[SP, #+52]
+   \   00000220   2B00000A           BEQ      ??_CheckDir_16
+   \   00000224   0B20A0E3           MOV      R2,#+11
+   \   00000228   ............       ADRL     R1,`?<Constant ".          ">`
+   \              ....        
+   \   00000230   ........           BL       memcmp
+   \   00000234   000050E3           CMP      R0,#+0
+   \   00000238   2500001A           BNE      ??_CheckDir_16
+   \   0000023C   0B00DAE5           LDRB     R0,[R10, #+11]
+   \   00000240   100010E3           TST      R0,#0x10
+   \   00000244   2200000A           BEQ      ??_CheckDir_16
+   \   00000248   0A00A0E1           MOV      R0,R10
+   \   0000024C   ........           BL       FS_FAT_GetFirstCluster
+   \   00000250   0B0050E1           CMP      R0,R11
+   \   00000254   1E00001A           BNE      ??_CheckDir_16
+   \   00000258   30008DE2           ADD      R0,SP,#+48
+   \   0000025C   ........           BL       FS_FAT_IncDirPos
+   \   00000260   30208DE2           ADD      R2,SP,#+48
+   \   00000264   0710A0E1           MOV      R1,R7
+   \   00000268   0400A0E1           MOV      R0,R4
+   \   0000026C   ........           BL       FS_FAT_GetDirEntry
+   \   00000270   00A0B0E1           MOVS     R10,R0
+   \   00000274   0D00000A           BEQ      ??_CheckDir_17
+   \   00000278   0B20A0E3           MOV      R2,#+11
+   \   0000027C   ............       ADRL     R1,`?<Constant "..         ">`
+   \              ....        
+   \   00000284   ........           BL       memcmp
+   \   00000288   000050E3           CMP      R0,#+0
+   \   0000028C   0700001A           BNE      ??_CheckDir_17
+   \   00000290   0B00DAE5           LDRB     R0,[R10, #+11]
+   \   00000294   100010E3           TST      R0,#0x10
+   \   00000298   0400000A           BEQ      ??_CheckDir_17
+   \   0000029C   0A00A0E1           MOV      R0,R10
+   \   000002A0   ........           BL       FS_FAT_GetFirstCluster
+   \   000002A4   2C109DE5           LDR      R1,[SP, #+44]
+   \   000002A8   010050E1           CMP      R0,R1
+   \   000002AC   0E00000A           BEQ      ??_CheckDir_18
+   \                     ??_CheckDir_17:
+   \   000002B0   18208DE2           ADD      R2,SP,#+24
+   \   000002B4   0710A0E1           MOV      R1,R7
+   \   000002B8   0400A0E1           MOV      R0,R4
+   \   000002BC   ........           BL       FS_FAT_GetDirEntry
+   \   000002C0   00A0A0E1           MOV      R10,R0
+   \   000002C4   0B00DAE5           LDRB     R0,[R10, #+11]
+   \   000002C8   1000C0E3           BIC      R0,R0,#0x10
+   \   000002CC   0B00CAE5           STRB     R0,[R10, #+11]
+   \   000002D0   7FFFFFEA           B        ??_CheckDir_6
+   \                     ??_CheckDir_16:
+   \   000002D4   18208DE2           ADD      R2,SP,#+24
+   \   000002D8   0710A0E1           MOV      R1,R7
+   \   000002DC   0400A0E1           MOV      R0,R4
+   \   000002E0   ........           BL       FS_FAT_GetDirEntry
+   \   000002E4   00A0A0E1           MOV      R10,R0
+   \   000002E8   BAFFFFEA           B        ??_CheckDir_15
+   \                     ??_CheckDir_18:
+   \   000002EC   40009DE5           LDR      R0,[SP, #+64]
+   \   000002F0   000055E0           SUBS     R0,R5,R0
+   \   000002F4   0C00004A           BMI      ??_CheckDir_19
+   \   000002F8   68109DE5           LDR      R1,[SP, #+104]
+   \   000002FC   010050E1           CMP      R0,R1
+   \   00000300   090000AA           BGE      ??_CheckDir_19
+   \   00000304   0C10A0E3           MOV      R1,#+12
+   \   00000308   916020E0           MLA      R0,R1,R0,R6
+   \   0000030C   001090E5           LDR      R1,[R0, #+0]
+   \   00000310   010071E3           CMN      R1,#+1
+   \   00000314   0400001A           BNE      ??_CheckDir_19
+   \   00000318   005080E5           STR      R5,[R0, #+0]
+   \   0000031C   20109DE5           LDR      R1,[SP, #+32]
+   \   00000320   081080E5           STR      R1,[R0, #+8]
+   \   00000324   1C109DE5           LDR      R1,[SP, #+28]
+   \   00000328   041080E5           STR      R1,[R0, #+4]
+   \                     ??_CheckDir_19:
+   \   0000032C   28009DE5           LDR      R0,[SP, #+40]
+   \   00000330   0C808DE5           STR      R8,[SP, #+12]
+   \   00000334   04008DE5           STR      R0,[SP, #+4]
+   \   00000338   68009DE5           LDR      R0,[SP, #+104]
+   \   0000033C   08708DE5           STR      R7,[SP, #+8]
+   \   00000340   00008DE5           STR      R0,[SP, #+0]
+   \   00000344   40309DE5           LDR      R3,[SP, #+64]
+   \   00000348   0620A0E1           MOV      R2,R6
+   \   0000034C   0510A0E1           MOV      R1,R5
+   \   00000350   0400A0E1           MOV      R0,R4
+   \   00000354   ........           BL       _CheckDir
+   \   00000358   000050E3           CMP      R0,#+0
+   \   0000035C   1500000A           BEQ      ??_CheckDir_4
+   \   00000360   320000EA           B        ??_CheckDir_3
+   \                     ??_CheckDir_9:
+   \   00000364   0A00A0E1           MOV      R0,R10
+   \   00000368   ........           BL       FS_FAT_GetFirstCluster
+   \   0000036C   00B0A0E1           MOV      R11,R0
+   \   00000370   1C008AE2           ADD      R0,R10,#+28
+   \   00000374   ........           BL       FS_LoadU32LE
+   \   00000378   0020A0E1           MOV      R2,R0
+   \   0000037C   18008DE2           ADD      R0,SP,#+24
+   \   00000380   10008DE5           STR      R0,[SP, #+16]
+   \   00000384   68009DE5           LDR      R0,[SP, #+104]
+   \   00000388   14808DE5           STR      R8,[SP, #+20]
+   \   0000038C   04008DE5           STR      R0,[SP, #+4]
+   \   00000390   40009DE5           LDR      R0,[SP, #+64]
+   \   00000394   0C508DE5           STR      R5,[SP, #+12]
+   \   00000398   00008DE5           STR      R0,[SP, #+0]
+   \   0000039C   08708DE5           STR      R7,[SP, #+8]
+   \   000003A0   0630A0E1           MOV      R3,R6
+   \   000003A4   0B10A0E1           MOV      R1,R11
+   \   000003A8   0400A0E1           MOV      R0,R4
+   \   000003AC   ........           BL       _CheckFile
+   \   000003B0   000050E3           CMP      R0,#+0
+   \   000003B4   1D00001A           BNE      ??_CheckDir_3
+   \                     ??_CheckDir_4:
+   \   000003B8   18008DE2           ADD      R0,SP,#+24
+   \   000003BC   ........           BL       FS_FAT_IncDirPos
+   \   000003C0   18009DE5           LDR      R0,[SP, #+24]
+   \   000003C4   050050E1           CMP      R0,R5
+   \   000003C8   2FFFFF0A           BEQ      ??_CheckDir_0
+   \   000003CC   0020A0E1           MOV      R2,R0
+   \   000003D0   0710A0E1           MOV      R1,R7
+   \   000003D4   0400A0E1           MOV      R0,R4
+   \   000003D8   ........           BL       FS_FAT_ReadFATEntry
+   \   000003DC   000050E3           CMP      R0,#+0
+   \   000003E0   17FFFF1A           BNE      ??_CheckDir_1
+   \   000003E4   1500A0E3           MOV      R0,#+21
+   \   000003E8   38FF2FE1           BLX      R8
+   \   000003EC   010050E3           CMP      R0,#+1
+   \   000003F0   13FFFFBA           BLT      ??_CheckDir_1
+   \   000003F4   7DFFFF1A           BNE      ??_CheckDir_10
+   \   000003F8   0520A0E1           MOV      R2,R5
+   \   000003FC   0710A0E1           MOV      R1,R7
+   \   00000400   0400A0E1           MOV      R0,R4
+   \   00000404   ........           BL       FS_FAT_MarkClusterEOC
+   \   00000408   33FFFFEA           B        ??_CheckDir_7
+   \                     ??_CheckDir_8:
+   \   0000040C   0730A0E1           MOV      R3,R7
+   \   00000410   0A20A0E1           MOV      R2,R10
+   \   00000414   18108DE2           ADD      R1,SP,#+24
+   \   00000418   0400A0E1           MOV      R0,R4
+   \   0000041C   ........           BL       _CheckLongDirEntry
+   \   00000420   000050E3           CMP      R0,#+0
+   \   00000424   E3FFFF0A           BEQ      ??_CheckDir_4
+   \   00000428   2BFFFFEA           B        ??_CheckDir_7
+    773              }
+    774          
+    775            } while (1);
+    776            return 0;
+   \                     ??_CheckDir_2:
+   \   0000042C   0000A0E3           MOV      R0,#+0
+   \                     ??_CheckDir_3:
+   \   00000430   44D08DE2           ADD      SP,SP,#+68       ;; stack cleaning
+   \   00000434   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    777          }
+    778          
+    779          
+    780          /*********************************************************************
+    781          *
+    782          *       _CheckFAT
+    783          *
+    784          *  Return value
+    785          *    0    O.K.
+    786          *    1    Error -> an error has be found and repaired, retry is required.
+    787          *    2    User specified an abort of checkdisk operation thru callback.
+    788          */
+
+   \                                 In section .text, align 4, keep-with-next
+    789          static int _CheckFAT(FS_VOLUME * pVolume, void * pBuffer, U32 FirstClusterInArray, I32 NumClustersInArray, int MaxRecursionLevel, FS_SB * pSB, FS_QUERY_F_TYPE * pfOnError) {
+   \                     _CheckFAT:
+   \   00000000   FE4F2DE9           PUSH     {R1-R11,LR}
+   \   00000004   48D04DE2           SUB      SP,SP,#+72
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   7C509DE5           LDR      R5,[SP, #+124]
+    790            I32              i;
+    791            U32              DirStart;
+    792            CLUSTER_INFO   * paClusterInfo;
+    793            const char     * sFileName;
+    794            FS_FAT_INFO    * pFATInfo;
+    795            int              r;
+    796          
+    797          
+    798            /*
+    799             * Search directory
+    800             */
+    801            if (FS_FAT_FindPath(pVolume, pSB, "", &sFileName, &DirStart) == 0) {
+   \   00000010   18008DE2           ADD      R0,SP,#+24
+   \   00000014   00008DE5           STR      R0,[SP, #+0]
+   \   00000018   78609DE5           LDR      R6,[SP, #+120]
+   \   0000001C   20308DE2           ADD      R3,SP,#+32
+   \   00000020   802F8FE2           ADR      R2,??_CheckFAT_0+0xC  ;; ""
+   \   00000024   0510A0E1           MOV      R1,R5
+   \   00000028   0400A0E1           MOV      R0,R4
+   \   0000002C   ........           BL       FS_FAT_FindPath
+   \   00000030   000050E3           CMP      R0,#+0
+    802              return 2;  /* Directory not found */
+   \   00000034   0200A003           MOVEQ    R0,#+2
+   \   00000038   C200000A           BEQ      ??_CheckFAT_1
+    803            }
+    804            pFATInfo = &pVolume->FSInfo.FATInfo;
+    805            paClusterInfo = (CLUSTER_INFO *) pBuffer;
+    806            FS_MEMSET(paClusterInfo, 0xFF, NumClustersInArray * sizeof(CLUSTER_INFO));
+   \   0000003C   50009DE5           LDR      R0,[SP, #+80]
+   \   00000040   0C70A0E3           MOV      R7,#+12
+   \   00000044   970001E0           MUL      R1,R7,R0
+   \   00000048   1C8084E2           ADD      R8,R4,#+28
+   \   0000004C   FF20A0E3           MOV      R2,#+255
+   \   00000050   48009DE5           LDR      R0,[SP, #+72]
+   \   00000054   ........           BL       __aeabi_memset
+    807            if (pFATInfo->FATType == FS_FAT_TYPE_FAT32) {
+   \   00000058   1E00D8E5           LDRB     R0,[R8, #+30]
+   \   0000005C   200050E3           CMP      R0,#+32
+    808              if (DirStart == 0) {
+   \   00000060   18009D05           LDREQ    R0,[SP, #+24]
+   \   00000064   00005003           CMPEQ    R0,#+0
+   \   00000068   0F00001A           BNE      ??_CheckFAT_2
+    809                I32            Off;
+    810                U32            DirCluster;
+    811                CLUSTER_INFO * pClusterInfo;
+    812          
+    813                DirCluster = pFATInfo->RootDirPos;
+   \   0000006C   140098E5           LDR      R0,[R8, #+20]
+    814                /* Add it to the cluster info array */
+    815                Off = (I32)DirCluster - (I32)FirstClusterInArray;
+   \   00000070   4C109DE5           LDR      R1,[SP, #+76]
+   \   00000074   011050E0           SUBS     R1,R0,R1
+    816                if ((Off >= 0) && (Off < NumClustersInArray)) {
+   \   00000078   0B00004A           BMI      ??_CheckFAT_2
+   \   0000007C   50209DE5           LDR      R2,[SP, #+80]
+   \   00000080   020051E1           CMP      R1,R2
+   \   00000084   080000AA           BGE      ??_CheckFAT_2
+    817                  pClusterInfo = paClusterInfo + Off;
+   \   00000088   48209DE5           LDR      R2,[SP, #+72]
+   \   0000008C   972121E0           MLA      R1,R7,R1,R2
+    818                  if (pClusterInfo->Value == 0xFFFFFFFFUL) {
+   \   00000090   002091E5           LDR      R2,[R1, #+0]
+   \   00000094   010072E3           CMN      R2,#+1
+   \   00000098   0300001A           BNE      ??_CheckFAT_2
+    819                    pClusterInfo->Value           = DirCluster;
+   \   0000009C   000081E5           STR      R0,[R1, #+0]
+    820                    pClusterInfo->DirEntryIndex   = 0;
+   \   000000A0   0000A0E3           MOV      R0,#+0
+   \   000000A4   080081E5           STR      R0,[R1, #+8]
+    821                    pClusterInfo->DirFirstCluster = 0;
+   \   000000A8   040081E5           STR      R0,[R1, #+4]
+    822                  }
+    823                }
+    824              }
+    825            }
+    826            r = _CheckDir(pVolume, DirStart, paClusterInfo, FirstClusterInArray, NumClustersInArray, MaxRecursionLevel, pSB, pfOnError);
+   \                     ??_CheckFAT_2:
+   \   000000AC   80009DE5           LDR      R0,[SP, #+128]
+   \   000000B0   08508DE5           STR      R5,[SP, #+8]
+   \   000000B4   0C008DE5           STR      R0,[SP, #+12]
+   \   000000B8   50009DE5           LDR      R0,[SP, #+80]
+   \   000000BC   04608DE5           STR      R6,[SP, #+4]
+   \   000000C0   00008DE5           STR      R0,[SP, #+0]
+   \   000000C4   4C309DE5           LDR      R3,[SP, #+76]
+   \   000000C8   48209DE5           LDR      R2,[SP, #+72]
+   \   000000CC   18109DE5           LDR      R1,[SP, #+24]
+   \   000000D0   0400A0E1           MOV      R0,R4
+   \   000000D4   ........           BL       _CheckDir
+    827            if (r) {
+   \   000000D8   000050E3           CMP      R0,#+0
+   \   000000DC   9900001A           BNE      ??_CheckFAT_1
+    828              return r;
+    829            }
+    830            //
+    831            // Check Fat entries
+    832            //
+    833            for (i = 0; i < NumClustersInArray; i++) {
+   \   000000E0   50009DE5           LDR      R0,[SP, #+80]
+   \   000000E4   0060A0E3           MOV      R6,#+0
+   \   000000E8   010050E3           CMP      R0,#+1
+   \   000000EC   940000BA           BLT      ??_CheckFAT_3
+   \   000000F0   48109DE5           LDR      R1,[SP, #+72]
+   \   000000F4   24708DE2           ADD      R7,SP,#+36
+   \   000000F8   1C108DE5           STR      R1,[SP, #+28]
+   \   000000FC   0680E0E1           MVN      R8,R6
+    834              CLUSTER_INFO * pClusterInfo;
+    835              int            UseSameDir;
+    836          
+    837              UseSameDir   = _UseSameDir;
+   \                     ??_CheckFAT_4:
+   \   00000100   14019FE5           LDR      R0,??_CheckFAT_0
+    838              pClusterInfo = paClusterInfo + i;
+   \   00000104   1CA09DE5           LDR      R10,[SP, #+28]
+   \   00000108   049090E5           LDR      R9,[R0, #+4]
+    839              if (pClusterInfo->Value == 0xFFFFFFFFUL) {
+   \   0000010C   00009AE5           LDR      R0,[R10, #+0]
+   \   00000110   080050E1           CMP      R0,R8
+   \   00000114   0600001A           BNE      ??_CheckFAT_5
+    840                U32 FATEntry;
+    841          
+    842                FATEntry = FS_FAT_ReadFATEntry(pVolume, pSB, i + FirstClusterInArray);
+   \   00000118   4C009DE5           LDR      R0,[SP, #+76]
+   \   0000011C   0510A0E1           MOV      R1,R5
+   \   00000120   062080E0           ADD      R2,R0,R6
+   \   00000124   0400A0E1           MOV      R0,R4
+   \   00000128   ........           BL       FS_FAT_ReadFATEntry
+    843                if ((FATEntry)) {
+   \   0000012C   000050E3           CMP      R0,#+0
+    844                  pClusterInfo->Value = FATEntry;
+   \   00000130   00008A15           STRNE    R0,[R10, #+0]
+    845                }
+    846              }
+    847              if ((pClusterInfo->Value           != 0xFFFFFFFFUL) &&
+    848                  (pClusterInfo->DirFirstCluster == 0xFFFFFFFFUL) &&
+    849                  (pClusterInfo->DirEntryIndex   == 0xFFFFFFFFUL)) {
+   \                     ??_CheckFAT_5:
+   \   00000134   00009AE5           LDR      R0,[R10, #+0]
+   \   00000138   080050E1           CMP      R0,R8
+   \   0000013C   7900000A           BEQ      ??_CheckFAT_6
+   \   00000140   04009AE5           LDR      R0,[R10, #+4]
+   \   00000144   080050E1           CMP      R0,R8
+   \   00000148   08009A05           LDREQ    R0,[R10, #+8]
+   \   0000014C   08005001           CMPEQ    R0,R8
+   \   00000150   7400001A           BNE      ??_CheckFAT_6
+    850                r = pfOnError(FS_ERRCODE_CLUSTER_UNUSED, i + FirstClusterInArray);
+   \   00000154   4C009DE5           LDR      R0,[SP, #+76]
+   \   00000158   80209DE5           LDR      R2,[SP, #+128]
+   \   0000015C   06B080E0           ADD      R11,R0,R6
+   \   00000160   0B10A0E1           MOV      R1,R11
+   \   00000164   1400A0E3           MOV      R0,#+20
+   \   00000168   32FF2FE1           BLX      R2
+    851                if (r > 0) {
+   \   0000016C   010050E3           CMP      R0,#+1
+   \   00000170   6C0000BA           BLT      ??_CheckFAT_6
+    852                  if (r == 1) {
+   \   00000174   7500001A           BNE      ??_CheckFAT_7
+    853                    FS_DIR_POS       DirPos;
+    854                    char             acFileName[13];
+    855                    FS_FAT_DENTRY  * pDirEntry;
+    856                    U32              FileSize;
+    857                    U32              FirstCluster;
+    858                    U32              FixDirStart;
+    859          
+    860                    FixDirStart = _GetFixDir(pVolume, 0, pSB, UseSameDir);
+   \   00000178   0930A0E1           MOV      R3,R9
+   \   0000017C   0520A0E1           MOV      R2,R5
+   \   00000180   0010A0E3           MOV      R1,#+0
+   \   00000184   0400A0E1           MOV      R0,R4
+   \   00000188   ........           BL       _GetFixDir
+   \   0000018C   0090A0E1           MOV      R9,R0
+    861                    UseSameDir  = 1;
+    862                    pClusterInfo->Value = 0xFFFFFFFFUL;
+   \   00000190   00808AE5           STR      R8,[R10, #+0]
+    863                    /* Fix it ! */
+    864                    _CreateFileName(acFileName);
+   \   00000194   0520A0E3           MOV      R2,#+5
+   \   00000198   ............       ADRL     R1,`?<Constant "FILE">`
+   \              ....        
+   \   000001A0   24008DE2           ADD      R0,SP,#+36
+   \   000001A4   ........           BL       __aeabi_memcpy4
+   \   000001A8   6C009FE5           LDR      R0,??_CheckFAT_0
+   \   000001AC   6C109FE5           LDR      R1,??_CheckFAT_0+0x4  ;; 0x10624dd3
+   \   000001B0   000090E5           LDR      R0,[R0, #+0]
+   \   000001B4   9021C1E0           SMULL    R2,R1,R0,R1
+   \   000001B8   4113B0E1           ASRS     R1,R1,#+6
+   \   000001BC   01108142           ADDMI    R1,R1,#+1
+   \   000001C0   302081E2           ADD      R2,R1,#+48
+   \   000001C4   0420C7E5           STRB     R2,[R7, #+4]
+   \   000001C8   FA2FA0E3           MOV      R2,#+1000
+   \   000001CC   920101E0           MUL      R1,R2,R1
+   \   000001D0   4C209FE5           LDR      R2,??_CheckFAT_0+0x8  ;; 0x51eb851f
+   \   000001D4   011040E0           SUB      R1,R0,R1
+   \   000001D8   9132C2E0           SMULL    R3,R2,R1,R2
+   \   000001DC   C212B0E1           ASRS     R1,R2,#+5
+   \   000001E0   01108142           ADDMI    R1,R1,#+1
+   \   000001E4   301081E2           ADD      R1,R1,#+48
+   \   000001E8   0510C7E5           STRB     R1,[R7, #+5]
+   \   000001EC   30109FE5           LDR      R1,??_CheckFAT_0+0x8  ;; 0x51eb851f
+   \   000001F0   9021C1E0           SMULL    R2,R1,R0,R1
+   \   000001F4   6420A0E3           MOV      R2,#+100
+   \   000001F8   C112B0E1           ASRS     R1,R1,#+5
+   \   000001FC   01108142           ADDMI    R1,R1,#+1
+   \   00000200   920101E0           MUL      R1,R2,R1
+   \   00000204   ........           LDR      R2,??DataTable11_1  ;; 0x66666667
+   \   00000208   011040E0           SUB      R1,R0,R1
+   \   0000020C   9132C2E0           SMULL    R3,R2,R1,R2
+   \   00000210   4211B0E1           ASRS     R1,R2,#+2
+   \   00000214   ........           LDR      R2,??DataTable11_1  ;; 0x66666667
+   \   00000218   030000EA           B        ??_CheckFAT_8
+   \                     ??_CheckFAT_0:
+   \   0000021C   ........           DC32     _FileIndex
+   \   00000220   D34D6210           DC32     0x10624dd3
+   \   00000224   1F85EB51           DC32     0x51eb851f
+   \   00000228   00000000           DC8      "",0x0,0x0,0x0
+   \                     ??_CheckFAT_8:
+   \   0000022C   01108142           ADDMI    R1,R1,#+1
+   \   00000230   9032C2E0           SMULL    R3,R2,R0,R2
+   \   00000234   301081E2           ADD      R1,R1,#+48
+   \   00000238   0610C7E5           STRB     R1,[R7, #+6]
+   \   0000023C   0010A0E1           MOV      R1,R0
+   \   00000240   4201B0E1           ASRS     R0,R2,#+2
+   \   00000244   01008042           ADDMI    R0,R0,#+1
+   \   00000248   0A20A0E3           MOV      R2,#+10
+   \   0000024C   800260E1           SMULBB   R0,R0,R2
+   \   00000250   000041E0           SUB      R0,R1,R0
+   \   00000254   300080E2           ADD      R0,R0,#+48
+   \   00000258   0700C7E5           STRB     R0,[R7, #+7]
+   \   0000025C   0000A0E3           MOV      R0,#+0
+   \   00000260   0800C7E5           STRB     R0,[R7, #+8]
+   \   00000264   ........           ADR      R1,`?<Constant ".CHK">`
+   \   00000268   2C008DE2           ADD      R0,SP,#+44
+   \   0000026C   ........           BL       strcat
+   \   00000270   ........           LDR      R0,??DataTable11_2
+   \   00000274   ........           LDR      R1,??DataTable11_2
+   \   00000278   000090E5           LDR      R0,[R0, #+0]
+    865                    r = _ConvertLostClusterChain2File(pVolume, FixDirStart, i + FirstClusterInArray, acFileName, pSB);
+   \   0000027C   00508DE5           STR      R5,[SP, #+0]
+   \   00000280   010080E2           ADD      R0,R0,#+1
+   \   00000284   000081E5           STR      R0,[R1, #+0]
+   \   00000288   24308DE2           ADD      R3,SP,#+36
+   \   0000028C   0B20A0E1           MOV      R2,R11
+   \   00000290   0910A0E1           MOV      R1,R9
+   \   00000294   0400A0E1           MOV      R0,R4
+   \   00000298   ........           BL       _ConvertLostClusterChain2File
+    866                    if (r) {
+   \   0000029C   000050E3           CMP      R0,#+0
+   \   000002A0   2800001A           BNE      ??_CheckFAT_1
+    867                      return r;
+    868                    }
+    869                    //
+    870                    //  Check the newly created file for validity
+    871                    //
+    872                    FS_FAT_InitDirEntryScan(&pVolume->FSInfo.FATInfo, &DirPos, FixDirStart);
+   \   000002A4   0920A0E1           MOV      R2,R9
+   \   000002A8   34108DE2           ADD      R1,SP,#+52
+   \   000002AC   1C0084E2           ADD      R0,R4,#+28
+   \   000002B0   ........           BL       FS_FAT_InitDirEntryScan
+    873                    pDirEntry    = FS_FAT_FindDirEntryShortEx(pVolume, pSB, acFileName, sizeof(acFileName), &DirPos, 0);
+   \   000002B4   0000A0E3           MOV      R0,#+0
+   \   000002B8   04008DE5           STR      R0,[SP, #+4]
+   \   000002BC   34008DE2           ADD      R0,SP,#+52
+   \   000002C0   00008DE5           STR      R0,[SP, #+0]
+   \   000002C4   0D30A0E3           MOV      R3,#+13
+   \   000002C8   24208DE2           ADD      R2,SP,#+36
+   \   000002CC   0510A0E1           MOV      R1,R5
+   \   000002D0   0400A0E1           MOV      R0,R4
+   \   000002D4   ........           BL       FS_FAT_FindDirEntryShortEx
+    874                    FileSize     = FS_LoadU32LE(&pDirEntry->data[DIR_ENTRY_OFF_SIZE]);
+   \   000002D8   1C0080E2           ADD      R0,R0,#+28
+   \   000002DC   ........           BL       FS_LoadU32LE
+   \   000002E0   0020A0E1           MOV      R2,R0
+    875                    FirstCluster =  i + FirstClusterInArray;
+    876                    r = _CheckFile(pVolume, FirstCluster, FileSize, paClusterInfo, FirstClusterInArray, NumClustersInArray, pSB, DirStart, &DirPos, pfOnError);
+   \   000002E4   80009DE5           LDR      R0,[SP, #+128]
+   \   000002E8   08508DE5           STR      R5,[SP, #+8]
+   \   000002EC   14008DE5           STR      R0,[SP, #+20]
+   \   000002F0   34008DE2           ADD      R0,SP,#+52
+   \   000002F4   10008DE5           STR      R0,[SP, #+16]
+   \   000002F8   18009DE5           LDR      R0,[SP, #+24]
+   \   000002FC   48309DE5           LDR      R3,[SP, #+72]
+   \   00000300   0C008DE5           STR      R0,[SP, #+12]
+   \   00000304   50009DE5           LDR      R0,[SP, #+80]
+   \   00000308   0B10A0E1           MOV      R1,R11
+   \   0000030C   04008DE5           STR      R0,[SP, #+4]
+   \   00000310   4C009DE5           LDR      R0,[SP, #+76]
+   \   00000314   00008DE5           STR      R0,[SP, #+0]
+   \   00000318   0400A0E1           MOV      R0,R4
+   \   0000031C   ........           BL       _CheckFile
+    877                    if (r) {
+   \   00000320   000050E3           CMP      R0,#+0
+   \   00000324   0700001A           BNE      ??_CheckFAT_1
+    878                      return r;
+    879                    }
+    880                  } else if (r == 3) {
+   \                     ??_CheckFAT_6:
+   \   00000328   1C009DE5           LDR      R0,[SP, #+28]
+   \   0000032C   016086E2           ADD      R6,R6,#+1
+   \   00000330   0C0080E2           ADD      R0,R0,#+12
+   \   00000334   1C008DE5           STR      R0,[SP, #+28]
+   \   00000338   50009DE5           LDR      R0,[SP, #+80]
+   \   0000033C   000056E1           CMP      R6,R0
+   \   00000340   6EFFFFBA           BLT      ??_CheckFAT_4
+    881                      U32 FirstCluster;
+    882                      U32 LastCluster;
+    883                      U32 NumClusters;
+    884          
+    885                      FirstCluster = i + FirstClusterInArray;
+    886                      LastCluster = FS_FAT_FindLastCluster(pVolume, pSB, FirstCluster, &NumClusters);
+    887                      /*
+    888                       * Check if the last cluster in the chain otherwise it will be corrected.
+    889                       */
+    890                      if (LastCluster == 0) {
+    891                        FS_FAT_MarkClusterEOC(pVolume, pSB, LastCluster);
+    892                      }
+    893                      if (NumClusters == 0) {
+    894                        FS_FAT_MarkClusterEOC(pVolume, pSB, LastCluster);
+    895                      }
+    896                      if (_IsClusterEOC(pVolume, pSB, LastCluster) == 0) {
+    897                        FS_FAT_MarkClusterEOC(pVolume, pSB, LastCluster);
+    898                      }
+    899                      FS_FAT_FreeClusterChain(pVolume, pSB, FirstCluster, NumClusters + 1);
+    900                      return 1;
+    901          
+    902                  } else {
+    903                    return r;
+    904                  }
+    905          
+    906                }
+    907              }
+    908            }
+    909            return 0;
+   \                     ??_CheckFAT_3:
+   \   00000344   0000A0E3           MOV      R0,#+0
+   \                     ??_CheckFAT_1:
+   \   00000348   54D08DE2           ADD      SP,SP,#+84       ;; stack cleaning
+   \   0000034C   F08FBDE8           POP      {R4-R11,PC}      ;; return
+   \                     ??_CheckFAT_7:
+   \   00000350   030050E3           CMP      R0,#+3
+   \   00000354   FBFFFF1A           BNE      ??_CheckFAT_1
+   \   00000358   0D30A0E1           MOV      R3,SP
+   \   0000035C   0B20A0E1           MOV      R2,R11
+   \   00000360   0510A0E1           MOV      R1,R5
+   \   00000364   0400A0E1           MOV      R0,R4
+   \   00000368   ........           BL       FS_FAT_FindLastCluster
+   \   0000036C   0060B0E1           MOVS     R6,R0
+   \   00000370   0300001A           BNE      ??_CheckFAT_9
+   \   00000374   0020A0E3           MOV      R2,#+0
+   \   00000378   0510A0E1           MOV      R1,R5
+   \   0000037C   0400A0E1           MOV      R0,R4
+   \   00000380   ........           BL       FS_FAT_MarkClusterEOC
+   \                     ??_CheckFAT_9:
+   \   00000384   00009DE5           LDR      R0,[SP, #+0]
+   \   00000388   000050E3           CMP      R0,#+0
+   \   0000038C   0300001A           BNE      ??_CheckFAT_10
+   \   00000390   0620A0E1           MOV      R2,R6
+   \   00000394   0510A0E1           MOV      R1,R5
+   \   00000398   0400A0E1           MOV      R0,R4
+   \   0000039C   ........           BL       FS_FAT_MarkClusterEOC
+   \                     ??_CheckFAT_10:
+   \   000003A0   0620A0E1           MOV      R2,R6
+   \   000003A4   0510A0E1           MOV      R1,R5
+   \   000003A8   0400A0E1           MOV      R0,R4
+   \   000003AC   ........           BL       FS_FAT_ReadFATEntry
+   \   000003B0   3A10D4E5           LDRB     R1,[R4, #+58]
+   \   000003B4   0C1051E2           SUBS     R1,R1,#+12
+   \   000003B8   0A00000A           BEQ      ??_CheckFAT_11
+   \   000003BC   041051E2           SUBS     R1,R1,#+4
+   \   000003C0   0D00001A           BNE      ??_CheckFAT_12
+   \   000003C4   2818A0E1           MOV      R1,R8, LSR #+16
+   \   000003C8   000001E0           AND      R0,R1,R0
+   \   000003CC   010050E1           CMP      R0,R1
+   \   000003D0   0D00000A           BEQ      ??_CheckFAT_13
+   \                     ??_CheckFAT_14:
+   \   000003D4   0620A0E1           MOV      R2,R6
+   \   000003D8   0510A0E1           MOV      R1,R5
+   \   000003DC   0400A0E1           MOV      R0,R4
+   \   000003E0   ........           BL       FS_FAT_MarkClusterEOC
+   \   000003E4   080000EA           B        ??_CheckFAT_13
+   \                     ??_CheckFAT_11:
+   \   000003E8   281AA0E1           MOV      R1,R8, LSR #+20
+   \   000003EC   000001E0           AND      R0,R1,R0
+   \   000003F0   010050E1           CMP      R0,R1
+   \   000003F4   F6FFFF1A           BNE      ??_CheckFAT_14
+   \   000003F8   030000EA           B        ??_CheckFAT_13
+   \                     ??_CheckFAT_12:
+   \   000003FC   0002A0E1           LSL      R0,R0,#+4
+   \   00000400   F014C8E3           BIC      R1,R8,#0xF0000000
+   \   00000404   200251E1           CMP      R1,R0, LSR #+4
+   \   00000408   F1FFFF1A           BNE      ??_CheckFAT_14
+   \                     ??_CheckFAT_13:
+   \   0000040C   00009DE5           LDR      R0,[SP, #+0]
+   \   00000410   0B20A0E1           MOV      R2,R11
+   \   00000414   013080E2           ADD      R3,R0,#+1
+   \   00000418   0510A0E1           MOV      R1,R5
+   \   0000041C   0400A0E1           MOV      R0,R4
+   \   00000420   ........           BL       FS_FAT_FreeClusterChain
+   \   00000424   0100A0E3           MOV      R0,#+1
+   \   00000428   C6FFFFEA           B        ??_CheckFAT_1
+    910          }
+    911          
+    912          
+    913          /*********************************************************************
+    914          *
+    915          *       Public code
+    916          *
+    917          **********************************************************************
+    918          */
+    919          
+    920          /*********************************************************************
+    921          *
+    922          *       FS_FAT__CheckDisk
+    923          *
+    924          *  Return value
+    925          *    0    O.K.
+    926          *    1    Error -> an error has be found and repaired, retry is required.
+    927          *    2    User specified an abort of checkdisk operation thru callback.
+    928          */
+
+   \                                 In section .text, align 4, keep-with-next
+    929          int FS_FAT__CheckDisk(FS_VOLUME * pVolume, FS_DISK_INFO * pDiskInfo, void * pBuffer, U32 BufferSize, int MaxRecursionLevel, FS_QUERY_F_TYPE * pfOnError) {
+   \                     FS_FAT__CheckDisk:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   1CD04DE2           SUB      SP,SP,#+28
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0190A0E1           MOV      R9,R1
+   \   00000010   0250A0E1           MOV      R5,R2
+   \   00000014   03A0A0E1           MOV      R10,R3
+   \   00000018   40609DE5           LDR      R6,[SP, #+64]
+   \   0000001C   44709DE5           LDR      R7,[SP, #+68]
+    930            U32            NumClusters;
+    931            U32            iCluster;
+    932            U32            NumClustersAtOnce;
+    933            U32            NumClustersPerSector;
+    934            FS_SB          SB;
+    935            int            r = 2;
+   \   00000020   0280A0E3           MOV      R8,#+2
+    936          
+    937            FS__SB_Create(&SB, &pVolume->Partition);
+   \   00000024   0410A0E1           MOV      R1,R4
+   \   00000028   0C008DE2           ADD      R0,SP,#+12
+   \   0000002C   ........           BL       FS__SB_Create
+    938            NumClusters           = pDiskInfo->NumTotalClusters;
+    939            NumClustersAtOnce     = BufferSize / sizeof(CLUSTER_INFO);
+    940            NumClustersPerSector  = pVolume->FSInfo.FATInfo.BytesPerSec / pVolume->FSInfo.FATInfo.FATType;
+    941            NumClustersAtOnce    &= ~(NumClustersPerSector - 1);
+   \   00000030   ........           LDR      R0,??DataTable11_3  ;; 0xaaaaaaab
+   \   00000034   3A10D4E5           LDRB     R1,[R4, #+58]
+   \   00000038   9A008BE0           UMULL    R0,R11,R10,R0
+   \   0000003C   B002D4E1           LDRH     R0,[R4, #+32]
+   \   00000040   ........           BL       __aeabi_idiv
+   \   00000044   010040E2           SUB      R0,R0,#+1
+   \   00000048   009099E5           LDR      R9,[R9, #+0]
+   \   0000004C   0000E0E1           MVN      R0,R0
+   \   00000050   ABB100E0           AND      R11,R0,R11, LSR #+3
+    942            NumClustersAtOnce     = MIN(NumClustersAtOnce, NumClusters);
+   \   00000054   09005BE1           CMP      R11,R9
+   \   00000058   09B0A081           MOVHI    R11,R9
+    943            for (iCluster = FAT_FIRST_CLUSTER; NumClusters;) {
+   \   0000005C   02A0A0E3           MOV      R10,#+2
+   \   00000060   030000EA           B        ??FS_FAT__CheckDisk_0
+    944              r = _CheckFAT(pVolume, pBuffer, iCluster, NumClustersAtOnce, MaxRecursionLevel, &SB, pfOnError);
+    945              if (_AbortRequested) {
+    946                //
+    947                // Reset the internal variable.
+    948                //
+    949                _AbortRequested = 0;
+    950                //
+    951                // Return 2 in order to abort checkdisk.
+    952                //
+    953                r = 2;
+    954              }
+    955              if (r) {
+    956                break;
+    957              }
+    958              iCluster         += NumClustersAtOnce;
+    959              NumClusters      -= NumClustersAtOnce;
+   \                     ??FS_FAT__CheckDisk_1:
+   \   00000064   0B9049E0           SUB      R9,R9,R11
+   \   00000068   0AA08BE0           ADD      R10,R11,R10
+    960              NumClustersAtOnce = MIN(NumClustersAtOnce, NumClusters);
+   \   0000006C   09005BE1           CMP      R11,R9
+   \   00000070   09B0A081           MOVHI    R11,R9
+   \                     ??FS_FAT__CheckDisk_0:
+   \   00000074   000059E3           CMP      R9,#+0
+   \   00000078   1300000A           BEQ      ??FS_FAT__CheckDisk_2
+   \   0000007C   0C008DE2           ADD      R0,SP,#+12
+   \   00000080   04008DE5           STR      R0,[SP, #+4]
+   \   00000084   08708DE5           STR      R7,[SP, #+8]
+   \   00000088   00608DE5           STR      R6,[SP, #+0]
+   \   0000008C   0B30A0E1           MOV      R3,R11
+   \   00000090   0A20A0E1           MOV      R2,R10
+   \   00000094   0510A0E1           MOV      R1,R5
+   \   00000098   0400A0E1           MOV      R0,R4
+   \   0000009C   ........           BL       _CheckFAT
+   \   000000A0   0080A0E1           MOV      R8,R0
+   \   000000A4   ........           LDR      R0,??DataTable11_2
+   \   000000A8   081090E5           LDR      R1,[R0, #+8]
+   \   000000AC   000051E3           CMP      R1,#+0
+   \   000000B0   0300000A           BEQ      ??FS_FAT__CheckDisk_3
+   \   000000B4   0010A0E3           MOV      R1,#+0
+   \   000000B8   081080E5           STR      R1,[R0, #+8]
+   \   000000BC   0280A0E3           MOV      R8,#+2
+   \   000000C0   010000EA           B        ??FS_FAT__CheckDisk_2
+   \                     ??FS_FAT__CheckDisk_3:
+   \   000000C4   000058E3           CMP      R8,#+0
+   \   000000C8   E5FFFF0A           BEQ      ??FS_FAT__CheckDisk_1
+    961            }
+    962            FS__SB_Delete(&SB);
+   \                     ??FS_FAT__CheckDisk_2:
+   \   000000CC   0C008DE2           ADD      R0,SP,#+12
+   \   000000D0   ........           BL       FS__SB_Delete
+    963            if (r == 0) {
+   \   000000D4   000058E3           CMP      R8,#+0
+    964              _UseSameDir = 0;
+    965            } else {
+    966              _UseSameDir = 1;
+   \   000000D8   ........           LDR      R1,??DataTable11_2
+   \   000000DC   0000A003           MOVEQ    R0,#+0
+   \   000000E0   0100A013           MOVNE    R0,#+1
+   \   000000E4   040081E5           STR      R0,[R1, #+4]
+    967            }
+    968            return r;
+   \   000000E8   0800A0E1           MOV      R0,R8
+   \   000000EC   1CD08DE2           ADD      SP,SP,#+28
+   \   000000F0   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    969          }
+    970          
+    971          /*********************************************************************
+    972          *
+    973          *       FS_FAT_AbortCheckDisk
+    974          *
+    975          */
+
+   \                                 In section .text, align 4, keep-with-next
+    976          void FS_FAT_AbortCheckDisk(void) {
+    977            _AbortRequested = 1;
+   \                     FS_FAT_AbortCheckDisk:
+   \   00000000   ........           LDR      R0,??DataTable11_2
+   \   00000004   0110A0E3           MOV      R1,#+1
+   \   00000008   081080E5           STR      R1,[R0, #+8]
+    978          }
+   \   0000000C   1EFF2FE1           BX       LR               ;; return
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable8:
+   \   00000000   ........           DC32     FAT_pDirEntryAPI
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable8_1:
+   \   00000000   67666666           DC32     0x66666667
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable11:
+   \   00000000   ........           DC32     _LastDirIndex
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable11_1:
+   \   00000000   67666666           DC32     0x66666667
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable11_2:
+   \   00000000   ........           DC32     _FileIndex
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable11_3:
+   \   00000000   ABAAAAAA           DC32     0xaaaaaaab
+
+   \                                 In section .rodata, align 1, keep-with-next
+   \                     `?<Constant "">`:
+   \   00000000                      ; Initializer data, 1 bytes
+   \   00000000   00                 DC8 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "FILE">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   46494C450000       DC8 70, 73, 76, 69, 0, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant ".CHK">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   2E43484B0000       DC8 46, 67, 72, 75, 0, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "FOUND">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   464F554E4400       DC8 70, 79, 85, 78, 68, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant ".          ">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   2E2020202020       DC8 46, 32, 32, 32, 32, 32, 32, 32, 32, 32
+   \              20202020    
+   \   0000000A   2000               DC8 32, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "..         ">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   2E2E20202020       DC8 46, 46, 32, 32, 32, 32, 32, 32, 32, 32
+   \              20202020    
+   \   0000000A   2000               DC8 32, 0
+    979          
+    980          /*************************** End of file ****************************/
+    981          
+
+   Maximum stack usage in bytes:
+
+     Function                      .cstack
+     --------                      -------
+     FS_FAT_AbortCheckDisk              0
+     FS_FAT__CheckDisk                 64
+     _CheckDir                        104
+     _CheckDirEntry                    24
+     _CheckFAT                        120
+     _CheckFile                        72
+     _CheckFileName                   104
+     _CheckLongDirEntry                56
+     _ConvertLostClusterChain2File     72
+     _GetFixDir                        72
+
+
+   Section sizes:
+
+     Function/Label                Bytes
+     --------------                -----
+     _FileIndex                      12
+     _UseSameDir
+     _AbortRequested
+     _LastDirIndex                    4
+     _CheckLongDirEntry             352
+     _CheckDirEntry                 200
+     _ConvertLostClusterChain2File  500
+     _CheckFileName                 464
+     _GetFixDir                     560
+     _CheckFile                     880
+     _CheckDir                     1080
+     _CheckFAT                     1068
+     FS_FAT__CheckDisk              244
+     FS_FAT_AbortCheckDisk           16
+     ??DataTable8                     4
+     ??DataTable8_1                   4
+     ??DataTable11                    4
+     ??DataTable11_1                  4
+     ??DataTable11_2                  4
+     ??DataTable11_3                  4
+     ?<Constant "">                   1
+     ?<Constant "FILE">               8
+     ?<Constant ".CHK">               8
+     ?<Constant "FOUND">              8
+     ?<Constant ".          ">       12
+     ?<Constant "..         ">       12
+
+ 
+    16 bytes in section .bss
+     1 byte  in section .rodata
+ 5 436 bytes in section .text
+ 
+ 5 436 bytes of CODE  memory
+     1 byte  of CONST memory
+    16 bytes of DATA  memory
+
+Errors: none
+Warnings: none

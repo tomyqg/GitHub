@@ -1,0 +1,845 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:13:38 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\GUI\GUI_GetBlankCols.c                  #
+#    Command line =  C:\DUII\TargetHW\GUI\GUI_GetBlankCols.c -D DEBUG=1 -D    #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\GUI_GetBlankCols.lst       #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\GUI_GetBlankCols.o          #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\GUI\GUI_GetBlankCols.c
+      1          /*********************************************************************
+      2          *                SEGGER Microcontroller GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 1996 - 2010  SEGGER Microcontroller GmbH & Co. KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          ** emWin V5.06 - Graphical user interface for embedded applications **
+     13          emWin is protected by international copyright laws.   Knowledge of the
+     14          source code may not be used to write a similar product.  This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : GUI_GetBlankCols
+     19          Purpose     : Calculating of leading and trailing blank columns
+     20                        of a character
+     21          ---------------------------END-OF-HEADER------------------------------
+     22          */
+     23          
+     24          #include <stddef.h>
+     25          
+     26          #include "GUI_Private.h"
+     27          
+     28          /*********************************************************************
+     29          *
+     30          *       Types
+     31          *
+     32          **********************************************************************
+     33          */
+     34          typedef struct {
+     35            int xSize;
+     36          } DRIVER_CONTEXT;
+     37          
+     38          /*********************************************************************
+     39          *
+     40          *       Static code, _DeviceAPI functions
+     41          *
+     42          **********************************************************************
+     43          */
+     44          /*********************************************************************
+     45          *
+     46          *       _XY2PTR
+     47          */
+     48          static LCD_PIXELINDEX * _XY2PTR(int x, int y, DRIVER_CONTEXT * pContext) {
+     49            return ((LCD_PIXELINDEX *)(pContext + 1)) + y * pContext->xSize + x;
+     50          }
+     51          
+     52          /*********************************************************************
+     53          *
+     54          *       _DrawBitLine1BPP
+     55          */
+     56          static void _DrawBitLine1BPP(const U8 GUI_UNI_PTR * p, int Diff, unsigned int xsize,
+     57                                       const LCD_PIXELINDEX * pTrans, LCD_PIXELINDEX * pDest)
+     58          {
+     59            unsigned Pixels;
+     60            unsigned PixelCnt;
+     61            PixelCnt = 8 - Diff;
+     62            Pixels = LCD_aMirror[*p] >> Diff;
+     63          
+     64            do {
+     65              //
+     66              // Prepare loop
+     67              //
+     68              if (PixelCnt > xsize) {
+     69                PixelCnt = xsize;
+     70              }
+     71              xsize -= PixelCnt;
+     72              //
+     73              // Write as many pixels as we are allowed to and have loaded in this inner loop
+     74              //
+     75              do {
+     76                *pDest++ = *(pTrans + (Pixels & 1));
+     77                Pixels >>= 1;
+     78              } while (--PixelCnt);
+     79              //
+     80              // Check if an other Source byte needs to be loaded
+     81              //
+     82              if (xsize == 0) {
+     83                return;
+     84              }
+     85              PixelCnt = 8;
+     86              Pixels = LCD_aMirror[*++p];
+     87            } while (1);
+     88          }
+     89          
+     90          /*********************************************************************
+     91          *
+     92          *       _DrawBitLine2BPP
+     93          */
+     94          static void _DrawBitLine2BPP(const U8 GUI_UNI_PTR * p, int Diff, unsigned int xsize,
+     95                                       const LCD_PIXELINDEX * pTrans, LCD_PIXELINDEX * pDest)
+     96          {
+     97            U8 pixels;
+     98            U8  PixelCnt;
+     99            PixelCnt = 4 - Diff;
+    100            pixels = (*p) << (Diff << 1);
+    101            do {
+    102              if ((unsigned)PixelCnt > xsize) {
+    103                PixelCnt = xsize;
+    104              }
+    105              xsize -= PixelCnt;
+    106              do {
+    107                *pDest++ = *(pTrans + (pixels >> 6));
+    108                pixels <<= 2;
+    109              } while (--PixelCnt);
+    110              if (xsize == 0) {
+    111                break;
+    112              }
+    113              PixelCnt = 4;
+    114              pixels = *(++p);
+    115            } while (xsize);
+    116          }
+    117          
+    118          /*********************************************************************
+    119          *
+    120          *       _DrawBitLine4BPP
+    121          */
+    122          static void _DrawBitLine4BPP(const U8 GUI_UNI_PTR * p, int Diff, unsigned int xsize,
+    123                                       const LCD_PIXELINDEX * pTrans, LCD_PIXELINDEX * pDest)
+    124          {
+    125            U8 pixels;
+    126            U8  PixelCnt;
+    127            PixelCnt = 2 - Diff;
+    128            pixels = (*p) << (Diff << 2);
+    129            do {
+    130              if ((unsigned)PixelCnt > xsize) {
+    131                PixelCnt = xsize;
+    132              }
+    133              xsize -= PixelCnt;
+    134              do {
+    135                *pDest++ = *(pTrans + (pixels >> 4));
+    136                pixels <<= 4;
+    137              } while (--PixelCnt);
+    138              if (xsize == 0) {
+    139                break;
+    140              }
+    141              PixelCnt = 2;
+    142              pixels = *(++p);
+    143            } while (xsize);
+    144          }
+    145          
+    146          /*********************************************************************
+    147          *
+    148          *             _DrawBitmap
+    149          */
+
+   \                                 In section .text, align 4, keep-with-next
+    150          static void _DrawBitmap(GUI_DEVICE * pDevice, int x0, int y0, int xsize, int ysize,
+    151                                 int BitsPerPixel, int BytesPerLine,
+    152                                 const U8 GUI_UNI_PTR * pData, int Diff,
+    153                                 const LCD_PIXELINDEX * pTrans)
+    154          {
+   \                     _DrawBitmap:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0190A0E1           MOV      R9,R1
+   \   0000000C   02A0A0E1           MOV      R10,R2
+   \   00000010   0350A0E1           MOV      R5,R3
+   \   00000014   28409DE5           LDR      R4,[SP, #+40]
+   \   00000018   34609DE5           LDR      R6,[SP, #+52]
+   \   0000001C   38709DE5           LDR      R7,[SP, #+56]
+   \   00000020   3C809DE5           LDR      R8,[SP, #+60]
+    155            int i;
+    156            LCD_PIXELINDEX * pDest;
+    157            DRIVER_CONTEXT * pContext;
+    158          
+    159            pContext = (DRIVER_CONTEXT *)GUI_LOCK_H(pDevice->u.hContext); {
+   \   00000024   080090E5           LDR      R0,[R0, #+8]
+   \   00000028   ........           BL       GUI_ALLOC_LockH
+    160              x0 += Diff;
+    161              pDest = _XY2PTR(x0, y0, pContext);
+   \   0000002C   002090E5           LDR      R2,[R0, #+0]
+   \   00000030   091087E0           ADD      R1,R7,R9
+   \   00000034   920A03E0           MUL      R3,R2,R10
+    162              for (i = 0; i < ysize; i++) {
+   \   00000038   010054E3           CMP      R4,#+1
+   \   0000003C   032180E0           ADD      R2,R0,R3, LSL #+2
+   \   00000040   011182E0           ADD      R1,R2,R1, LSL #+2
+   \   00000044   041081E2           ADD      R1,R1,#+4
+   \   00000048   5E0000BA           BLT      ??_DrawBitmap_0
+   \   0000004C   8720A0E1           LSL      R2,R7,#+1
+   \   00000050   0320CDE5           STRB     R2,[SP, #+3]
+   \   00000054   0720A0E1           MOV      R2,R7
+   \   00000058   042062E2           RSB      R2,R2,#+4
+   \   0000005C   0220CDE5           STRB     R2,[SP, #+2]
+   \   00000060   0721A0E1           LSL      R2,R7,#+2
+   \   00000064   0120CDE5           STRB     R2,[SP, #+1]
+   \   00000068   0720A0E1           MOV      R2,R7
+   \   0000006C   022062E2           RSB      R2,R2,#+2
+   \   00000070   0020CDE5           STRB     R2,[SP, #+0]
+   \   00000074   ........           LDR      R2,??DataTable3
+    163                switch (BitsPerPixel) {
+   \                     ??_DrawBitmap_1:
+   \   00000078   2C309DE5           LDR      R3,[SP, #+44]
+   \   0000007C   013053E2           SUBS     R3,R3,#+1
+   \   00000080   0400000A           BEQ      ??_DrawBitmap_2
+   \   00000084   013053E2           SUBS     R3,R3,#+1
+   \   00000088   1800000A           BEQ      ??_DrawBitmap_3
+   \   0000008C   023053E2           SUBS     R3,R3,#+2
+   \   00000090   2E00000A           BEQ      ??_DrawBitmap_4
+   \   00000094   450000EA           B        ??_DrawBitmap_5
+    164                case 1:
+    165                  _DrawBitLine1BPP(pData, Diff, xsize, pTrans, pDest);
+   \                     ??_DrawBitmap_2:
+   \   00000098   06E0A0E1           MOV      LR,R6
+   \   0000009C   00A0DEE5           LDRB     R10,[LR, #+0]
+   \   000000A0   0130A0E1           MOV      R3,R1
+   \   000000A4   05C0A0E1           MOV      R12,R5
+   \   000000A8   02A0DAE7           LDRB     R10,[R10, +R2]
+   \   000000AC   089067E2           RSB      R9,R7,#+8
+   \   000000B0   5AA7A0E1           ASR      R10,R10,R7
+   \                     ??_DrawBitmap_6:
+   \   000000B4   09005CE1           CMP      R12,R9
+   \   000000B8   0C90A091           MOVLS    R9,R12
+   \   000000BC   09C04CE0           SUB      R12,R12,R9
+   \                     ??_DrawBitmap_7:
+   \   000000C0   01B00AE2           AND      R11,R10,#0x1
+   \   000000C4   0BB198E7           LDR      R11,[R8, +R11, LSL #+2]
+   \   000000C8   AAA0A0E1           LSR      R10,R10,#+1
+   \   000000CC   04B083E4           STR      R11,[R3], #+4
+   \   000000D0   019059E2           SUBS     R9,R9,#+1
+   \   000000D4   F9FFFF1A           BNE      ??_DrawBitmap_7
+   \   000000D8   00005CE3           CMP      R12,#+0
+   \   000000DC   3300000A           BEQ      ??_DrawBitmap_5
+   \   000000E0   01A0FEE5           LDRB     R10,[LR, #+1]!
+   \   000000E4   0890A0E3           MOV      R9,#+8
+   \   000000E8   02A0DAE7           LDRB     R10,[R10, +R2]
+   \   000000EC   F0FFFFEA           B        ??_DrawBitmap_6
+    166                  break;
+    167                case 2:
+    168                  _DrawBitLine2BPP(pData, Diff, xsize, pTrans, pDest);
+   \                     ??_DrawBitmap_3:
+   \   000000F0   06E0A0E1           MOV      LR,R6
+   \   000000F4   00A0DEE5           LDRB     R10,[LR, #+0]
+   \   000000F8   D3B0DDE1           LDRSB    R11,[SP, #+3]
+   \   000000FC   0130A0E1           MOV      R3,R1
+   \   00000100   05C0A0E1           MOV      R12,R5
+   \   00000104   0290DDE5           LDRB     R9,[SP, #+2]
+   \   00000108   1AABA0E1           LSL      R10,R10,R11
+   \                     ??_DrawBitmap_8:
+   \   0000010C   09005CE1           CMP      R12,R9
+   \   00000110   0C90A031           MOVCC    R9,R12
+   \   00000114   FFB009E2           AND      R11,R9,#0xFF
+   \   00000118   0BC04CE0           SUB      R12,R12,R11
+   \                     ??_DrawBitmap_9:
+   \   0000011C   FFB00AE2           AND      R11,R10,#0xFF
+   \   00000120   4BB3A0E1           ASR      R11,R11,#+6
+   \   00000124   0BB198E7           LDR      R11,[R8, +R11, LSL #+2]
+   \   00000128   019049E2           SUB      R9,R9,#+1
+   \   0000012C   04B083E4           STR      R11,[R3], #+4
+   \   00000130   0AA1A0E1           LSL      R10,R10,#+2
+   \   00000134   FF9019E2           ANDS     R9,R9,#0xFF
+   \   00000138   F7FFFF1A           BNE      ??_DrawBitmap_9
+   \   0000013C   00005CE3           CMP      R12,#+0
+   \   00000140   1A00000A           BEQ      ??_DrawBitmap_5
+   \   00000144   0490A0E3           MOV      R9,#+4
+   \   00000148   01A0FEE5           LDRB     R10,[LR, #+1]!
+   \   0000014C   EEFFFFEA           B        ??_DrawBitmap_8
+    169                  break;
+    170                case 4:
+    171                  _DrawBitLine4BPP(pData, Diff, xsize, pTrans, pDest);
+   \                     ??_DrawBitmap_4:
+   \   00000150   06E0A0E1           MOV      LR,R6
+   \   00000154   00A0DEE5           LDRB     R10,[LR, #+0]
+   \   00000158   D1B0DDE1           LDRSB    R11,[SP, #+1]
+   \   0000015C   0130A0E1           MOV      R3,R1
+   \   00000160   05C0A0E1           MOV      R12,R5
+   \   00000164   0090DDE5           LDRB     R9,[SP, #+0]
+   \   00000168   1AABA0E1           LSL      R10,R10,R11
+   \   0000016C   010000EA           B        ??_DrawBitmap_10
+   \                     ??_DrawBitmap_11:
+   \   00000170   0290A0E3           MOV      R9,#+2
+   \   00000174   01A0FEE5           LDRB     R10,[LR, #+1]!
+   \                     ??_DrawBitmap_10:
+   \   00000178   09005CE1           CMP      R12,R9
+   \   0000017C   0C90A031           MOVCC    R9,R12
+   \   00000180   FFB009E2           AND      R11,R9,#0xFF
+   \   00000184   0BC04CE0           SUB      R12,R12,R11
+   \                     ??_DrawBitmap_12:
+   \   00000188   FFB00AE2           AND      R11,R10,#0xFF
+   \   0000018C   4BB2A0E1           ASR      R11,R11,#+4
+   \   00000190   0BB198E7           LDR      R11,[R8, +R11, LSL #+2]
+   \   00000194   019049E2           SUB      R9,R9,#+1
+   \   00000198   04B083E4           STR      R11,[R3], #+4
+   \   0000019C   0AA2A0E1           LSL      R10,R10,#+4
+   \   000001A0   FF9019E2           ANDS     R9,R9,#0xFF
+   \   000001A4   F7FFFF1A           BNE      ??_DrawBitmap_12
+   \   000001A8   00005CE3           CMP      R12,#+0
+   \   000001AC   EFFFFF1A           BNE      ??_DrawBitmap_11
+    172                  break;
+    173                }
+    174                pData += BytesPerLine;
+   \                     ??_DrawBitmap_5:
+   \   000001B0   30309DE5           LDR      R3,[SP, #+48]
+    175                pDest += pContext->xSize; 
+    176              }
+   \   000001B4   014054E2           SUBS     R4,R4,#+1
+   \   000001B8   066083E0           ADD      R6,R3,R6
+   \   000001BC   003090E5           LDR      R3,[R0, #+0]
+   \   000001C0   031181E0           ADD      R1,R1,R3, LSL #+2
+   \   000001C4   ABFFFF1A           BNE      ??_DrawBitmap_1
+    177            } GUI_UNLOCK_H(pContext);
+   \                     ??_DrawBitmap_0:
+   \   000001C8   04D08DE2           ADD      SP,SP,#+4
+   \   000001CC   F04FBDE8           POP      {R4-R11,LR}
+   \   000001D0   ........           B        GUI_ALLOC_UnlockH  ;; tailcall
+    178          }
+    179          
+    180          /*********************************************************************
+    181          *
+    182          *       _FillRect
+    183          */
+
+   \                                 In section .text, align 4, keep-with-next
+    184          static void _FillRect(GUI_DEVICE * pDevice, int x0, int y0, int x1, int y1) {
+   \                     _FillRect:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0140A0E1           MOV      R4,R1
+   \   0000000C   0250A0E1           MOV      R5,R2
+   \   00000010   0370A0E1           MOV      R7,R3
+   \   00000014   18609DE5           LDR      R6,[SP, #+24]
+    185            int i;
+    186            LCD_PIXELINDEX * pDest;
+    187            DRIVER_CONTEXT * pContext;
+    188          
+    189            pContext = (DRIVER_CONTEXT *)GUI_LOCK_H(pDevice->u.hContext); {
+   \   00000018   080090E5           LDR      R0,[R0, #+8]
+   \   0000001C   ........           BL       GUI_ALLOC_LockH
+   \   00000020   041047E0           SUB      R1,R7,R4
+   \   00000024   011081E2           ADD      R1,R1,#+1
+   \   00000028   ........           LDR      R2,??DataTable3_1
+    190              do {
+    191                pDest = _XY2PTR(x0, y0, pContext);
+   \                     ??_FillRect_0:
+   \   0000002C   003090E5           LDR      R3,[R0, #+0]
+   \   00000030   93050CE0           MUL      R12,R3,R5
+   \   00000034   043180E0           ADD      R3,R0,R4, LSL #+2
+   \   00000038   0C3183E0           ADD      R3,R3,R12, LSL #+2
+   \   0000003C   043083E2           ADD      R3,R3,#+4
+    192                for (i = x1 - x0 + 1; i; --i) {
+   \   00000040   01C0B0E1           MOVS     R12,R1
+   \   00000044   0400000A           BEQ      ??_FillRect_1
+    193                  *pDest++ = LCD_COLORINDEX;
+   \                     ??_FillRect_2:
+   \   00000048   00E092E5           LDR      LR,[R2, #+0]
+    194                }
+   \   0000004C   01C05CE2           SUBS     R12,R12,#+1
+   \   00000050   00E09EE5           LDR      LR,[LR, #+0]
+   \   00000054   04E083E4           STR      LR,[R3], #+4
+   \   00000058   FAFFFF1A           BNE      ??_FillRect_2
+    195              } while (++y0 <= y1);
+   \                     ??_FillRect_1:
+   \   0000005C   015085E2           ADD      R5,R5,#+1
+   \   00000060   050056E1           CMP      R6,R5
+   \   00000064   F0FFFFAA           BGE      ??_FillRect_0
+    196            } GUI_UNLOCK_H(pContext);
+   \   00000068   04D08DE2           ADD      SP,SP,#+4
+   \   0000006C   F040BDE8           POP      {R4-R7,LR}
+   \   00000070   ........           B        GUI_ALLOC_UnlockH  ;; tailcall
+    197          }
+    198          
+    199          /*********************************************************************
+    200          *
+    201          *       _GetRect
+    202          */
+
+   \                                 In section .text, align 4, keep-with-next
+    203          static void _GetRect(GUI_DEVICE * pDevice, LCD_RECT * pRect) {
+    204            GUI_USE_PARA(pDevice);
+    205            pRect->x0 = pRect->y0 = -4095;
+   \                     _GetRect:
+   \   00000000   FE00E0E3           MVN      R0,#+254
+   \   00000004   F00EC0E3           BIC      R0,R0,#0xF00
+   \   00000008   B200C1E1           STRH     R0,[R1, #+2]
+   \   0000000C   B000C1E1           STRH     R0,[R1, #+0]
+    206            pRect->x1 = pRect->y1 =  4095;
+   \   00000010   000060E2           RSB      R0,R0,#+0
+   \   00000014   B600C1E1           STRH     R0,[R1, #+6]
+   \   00000018   B400C1E1           STRH     R0,[R1, #+4]
+    207          }
+   \   0000001C   1EFF2FE1           BX       LR               ;; return
+    208          
+    209          /*********************************************************************
+    210          *
+    211          *       _SetPixelIndex
+    212          */
+
+   \                                 In section .text, align 4, keep-with-next
+    213          static void _SetPixelIndex(GUI_DEVICE * pDevice, int x, int y, int Index) {
+   \                     _SetPixelIndex:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0140A0E1           MOV      R4,R1
+   \   00000008   0250A0E1           MOV      R5,R2
+   \   0000000C   0360A0E1           MOV      R6,R3
+    214            LCD_PIXELINDEX * pDest;
+    215            DRIVER_CONTEXT * pContext;
+    216          
+    217            pContext = (DRIVER_CONTEXT *)GUI_LOCK_H(pDevice->u.hContext); {
+   \   00000010   080090E5           LDR      R0,[R0, #+8]
+   \   00000014   ........           BL       GUI_ALLOC_LockH
+    218              pDest = _XY2PTR(x, y, pContext);
+    219              *pDest = Index;
+   \   00000018   001090E5           LDR      R1,[R0, #+0]
+   \   0000001C   910502E0           MUL      R2,R1,R5
+   \   00000020   020180E0           ADD      R0,R0,R2, LSL #+2
+   \   00000024   040180E0           ADD      R0,R0,R4, LSL #+2
+   \   00000028   046080E5           STR      R6,[R0, #+4]
+    220            } GUI_UNLOCK_H(pContext);
+   \   0000002C   7040BDE8           POP      {R4-R6,LR}
+   \   00000030   ........           B        GUI_ALLOC_UnlockH  ;; tailcall
+    221          }
+    222          
+    223          /*********************************************************************
+    224          *
+    225          *       GUI_DEVICE_API structure
+    226          */
+
+   \                                 In section .text, align 4, keep-with-next
+    227          static const GUI_DEVICE_API _DeviceAPI = {
+   \                     _DeviceAPI:
+   \   00000000                      ; Initializer data, 52 bytes
+   \   00000000   04000000....       DC32 4, _DrawBitmap, 0, 0, _FillRect, 0, _SetPixelIndex, 0, 0, 0
+   \              ....00000000
+   \              00000000....
+   \              ....00000000
+   \              ........0000
+   \              000000000000
+   \              00000000    
+   \   00000028   000000000000       DC32 0, 0, _GetRect
+   \              0000........
+    228            //
+    229            // Data
+    230            //
+    231            DEVICE_CLASS_MEMDEV,
+    232            //
+    233            // Drawing functions
+    234            //
+    235            _DrawBitmap   ,
+    236            NULL          ,
+    237            NULL          ,
+    238            _FillRect     ,
+    239            NULL          ,
+    240            _SetPixelIndex,
+    241            NULL          ,
+    242            //
+    243            // Set origin
+    244            //
+    245            NULL          ,
+    246            //
+    247            // Request information
+    248            //
+    249            NULL          ,
+    250            NULL          ,
+    251            NULL          ,
+    252            _GetRect      ,
+    253          };
+    254          
+    255          /*********************************************************************
+    256          *
+    257          *       Static code, common
+    258          *
+    259          **********************************************************************
+    260          */
+    261          /*********************************************************************
+    262          *
+    263          *       _DeviceCreate
+    264          *
+    265          * Purpose:
+    266          *   Creates a new device and selects it for drawing operations
+    267          */
+    268          static GUI_DEVICE * _DeviceCreate(int xSize, int ySize) {
+    269            DRIVER_CONTEXT * pContext;
+    270            GUI_DEVICE * pDevice;
+    271            GUI_DEVICE * pDeviceCurrent;
+    272            const LCD_API_COLOR_CONV * pColorConvAPI;
+    273          
+    274            pDeviceCurrent = GUI_DEVICE__GetpDriver(GUI_Context.SelLayer);
+    275            pColorConvAPI = pDeviceCurrent->pColorConvAPI;
+    276            //
+    277            // Create device object
+    278            //
+    279            pDevice = GUI_DEVICE_CreateAndLink(&_DeviceAPI, pColorConvAPI, 0, GUI_Context.SelLayer);
+    280            if (pDevice) {
+    281              //
+    282              // Create context containing private data
+    283              //
+    284              pDevice->u.hContext = GUI_ALLOC_AllocZero(sizeof(DRIVER_CONTEXT) + sizeof(LCD_PIXELINDEX) * xSize * ySize);
+    285          
+    286              if (pDevice->u.hContext) {
+    287                pContext = (DRIVER_CONTEXT *)GUI_LOCK_H(pDevice->u.hContext); {
+    288                  pContext->xSize = xSize;
+    289                } GUI_UNLOCK_H(pContext);
+    290              } else {
+    291                GUI_DEVICE_Delete(pDevice); // Delete on error
+    292              }
+    293            }
+    294            return pDevice;
+    295          }
+    296          
+    297          /*********************************************************************
+    298          *
+    299          *       _DeviceDelete
+    300          *
+    301          * Purpose:
+    302          *   Deletes the device and restores the previous settings
+    303          */
+    304          static void _DeviceDelete(GUI_DEVICE * pDevice) {
+    305            //
+    306            // Remove from device chain
+    307            //
+    308            GUI_DEVICE_Unlink(pDevice);
+    309            //
+    310            // Free payload data
+    311            //
+    312            GUI_ALLOC_Free(pDevice->u.hContext);
+    313            //
+    314            // Delete device
+    315            //
+    316            GUI_DEVICE_Delete(pDevice);
+    317          }
+    318          
+    319          /*********************************************************************
+    320          *
+    321          *       _GetBlanks
+    322          *
+    323          * Purpose:
+    324          *   Returns the leading or trailing blank columns of the given character.
+    325          *
+    326          * Parameters:
+    327          *   c        - Character
+    328          *   Trailing - 1 for trailing columns, 1 for leading columns
+    329          *
+    330          * Return value:
+    331          *   >= 0 - Number of blank columns
+    332          *   -1   - Error
+    333          */
+
+   \                                 In section .text, align 4, keep-with-next
+    334          static int _GetBlanks(U16 c, unsigned Trailing) {
+   \                     _GetBlanks:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   0CD04DE2           SUB      SP,SP,#+12
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0150A0E1           MOV      R5,R1
+    335            GUI_DEVICE * pDevice;
+    336            int xSize, ySize, i, j, r, DispPosX, DispPosY;
+    337            LCD_PIXELINDEX BkColorIndex;
+    338            LCD_PIXELINDEX * pData;
+    339            LCD_PIXELINDEX * pDataOld;
+    340            DRIVER_CONTEXT * pContext;
+    341          
+    342            GUI_LOCK();
+   \   00000010   ........           BL       GUI_Lock
+    343            r = -1;
+   \   00000014   0060E0E3           MVN      R6,#+0
+    344            //
+    345            // Calculate required dimension of device
+    346            //
+    347            xSize = GUI_GetCharDistX(c);
+   \   00000018   0400A0E1           MOV      R0,R4
+   \   0000001C   ........           BL       GUI_GetCharDistX
+   \   00000020   0070A0E1           MOV      R7,R0
+    348            ySize = GUI_GetFontSizeY();
+   \   00000024   ........           BL       GUI_GetFontSizeY
+    349            //
+    350            // Create and select device
+    351            //
+    352            pDevice = _DeviceCreate(xSize, ySize);
+   \   00000028   ........           LDR      R9,??DataTable3_2
+   \   0000002C   0080A0E1           MOV      R8,R0
+   \   00000030   1100D9E5           LDRB     R0,[R9, #+17]
+   \   00000034   ........           BL       GUI_DEVICE__GetpDriver
+   \   00000038   101090E5           LDR      R1,[R0, #+16]
+   \   0000003C   1130D9E5           LDRB     R3,[R9, #+17]
+   \   00000040   0020A0E3           MOV      R2,#+0
+   \   00000044   ........           ADR      R0,_DeviceAPI
+   \   00000048   ........           BL       GUI_DEVICE_CreateAndLink
+   \   0000004C   00A0B0E1           MOVS     R10,R0
+   \   00000050   3D00000A           BEQ      ??_GetBlanks_0
+   \   00000054   980700E0           MUL      R0,R8,R7
+   \   00000058   0410A0E3           MOV      R1,#+4
+   \   0000005C   000181E0           ADD      R0,R1,R0, LSL #+2
+   \   00000060   ........           BL       GUI_ALLOC_AllocZero
+   \   00000064   08008AE5           STR      R0,[R10, #+8]
+   \   00000068   000050E3           CMP      R0,#+0
+   \   0000006C   0300000A           BEQ      ??_GetBlanks_1
+   \   00000070   ........           BL       GUI_ALLOC_LockH
+   \   00000074   007080E5           STR      R7,[R0, #+0]
+   \   00000078   ........           BL       GUI_ALLOC_UnlockH
+   \   0000007C   010000EA           B        ??_GetBlanks_2
+   \                     ??_GetBlanks_1:
+   \   00000080   0A00A0E1           MOV      R0,R10
+   \   00000084   ........           BL       GUI_DEVICE_Delete
+    353            if (pDevice) {
+    354              DispPosX = GUI_Context.DispPosX;
+   \                     ??_GetBlanks_2:
+   \   00000088   F212D9E1           LDRSH    R1,[R9, #+34]
+   \   0000008C   04108DE5           STR      R1,[SP, #+4]
+    355              DispPosY = GUI_Context.DispPosY;
+   \   00000090   F412D9E1           LDRSH    R1,[R9, #+36]
+   \   00000094   00108DE5           STR      R1,[SP, #+0]
+    356              pContext = (DRIVER_CONTEXT *)GUI_LOCK_H(pDevice->u.hContext); {
+    357                //
+    358                // Get the data pointer to the device
+    359                //
+    360                pData = (LCD_PIXELINDEX *)(pContext + 1);
+   \   00000098   08009AE5           LDR      R0,[R10, #+8]
+   \   0000009C   ........           BL       GUI_ALLOC_LockH
+   \   000000A0   04B090E2           ADDS     R11,R0,#+4
+    361                if (pData) {
+   \   000000A4   1D00000A           BEQ      ??_GetBlanks_3
+    362                  //
+    363                  // Draw character (into device)
+    364                  //
+    365                  GUI_DispCharAt(c, 0, 0);
+   \   000000A8   0020A0E3           MOV      R2,#+0
+   \   000000AC   0010A0E3           MOV      R1,#+0
+   \   000000B0   0400A0E1           MOV      R0,R4
+   \   000000B4   ........           BL       GUI_DispCharAt
+    366                  BkColorIndex = GUI_GetBkColorIndex();
+   \   000000B8   ........           BL       GUI_GetBkColorIndex
+    367                  if (Trailing) {
+   \   000000BC   000055E3           CMP      R5,#+0
+    368                    pData += xSize - 1;
+   \   000000C0   07118B10           ADDNE    R1,R11,R7, LSL #+2
+   \   000000C4   04B04112           SUBNE    R11,R1,#+4
+    369                  }
+    370                  r = -1;
+    371                  //
+    372                  // Iterate over columns
+    373                  //
+    374                  for (i = 0; i < xSize; i++) {
+   \   000000C8   0010A0E3           MOV      R1,#+0
+   \   000000CC   010057E3           CMP      R7,#+1
+   \   000000D0   120000BA           BLT      ??_GetBlanks_3
+    375                    pDataOld = pData;
+   \                     ??_GetBlanks_4:
+   \   000000D4   0B20A0E1           MOV      R2,R11
+    376                    //
+    377                    // Iterate over rows
+    378                    //
+    379                    for (j = 0; j < ySize; j++) {
+   \   000000D8   010058E3           CMP      R8,#+1
+   \   000000DC   070000BA           BLT      ??_GetBlanks_5
+   \   000000E0   0830A0E1           MOV      R3,R8
+    380                      if (*pData != BkColorIndex) {
+   \                     ??_GetBlanks_6:
+   \   000000E4   00C09BE5           LDR      R12,[R11, #+0]
+   \   000000E8   00005CE1           CMP      R12,R0
+    381                        //
+    382                        // If one pixel has been found, remember column and break
+    383                        //
+    384                        r = i;
+   \   000000EC   0160A011           MOVNE    R6,R1
+    385                        break;
+   \   000000F0   0200001A           BNE      ??_GetBlanks_5
+    386                      }
+    387                      pData += xSize;
+   \   000000F4   07B18BE0           ADD      R11,R11,R7, LSL #+2
+    388                    }
+   \   000000F8   013053E2           SUBS     R3,R3,#+1
+   \   000000FC   F8FFFF1A           BNE      ??_GetBlanks_6
+    389                    if (r >= 0) {
+   \                     ??_GetBlanks_5:
+   \   00000100   000056E3           CMP      R6,#+0
+   \   00000104   0500005A           BPL      ??_GetBlanks_3
+    390                      break;
+    391                    }
+    392                    pData = pDataOld;
+    393                    if (Trailing) {
+   \   00000108   000055E3           CMP      R5,#+0
+    394                      pData--;
+   \   0000010C   04B04212           SUBNE    R11,R2,#+4
+    395                    } else {
+    396                      pData++;
+   \   00000110   04B08202           ADDEQ    R11,R2,#+4
+    397                    }
+    398                  }
+   \   00000114   011081E2           ADD      R1,R1,#+1
+   \   00000118   070051E1           CMP      R1,R7
+   \   0000011C   ECFFFFBA           BLT      ??_GetBlanks_4
+    399                }
+    400                _DeviceDelete(pDevice);
+   \                     ??_GetBlanks_3:
+   \   00000120   0A00A0E1           MOV      R0,R10
+   \   00000124   ........           BL       GUI_DEVICE_Unlink
+   \   00000128   08009AE5           LDR      R0,[R10, #+8]
+   \   0000012C   ........           BL       GUI_ALLOC_Free
+   \   00000130   0A00A0E1           MOV      R0,R10
+   \   00000134   ........           BL       GUI_DEVICE_Delete
+    401              } GUI_UNLOCK_H(pContext);
+   \   00000138   ........           BL       GUI_ALLOC_UnlockH
+    402              GUI_Context.DispPosX = DispPosX;
+   \   0000013C   04009DE5           LDR      R0,[SP, #+4]
+   \   00000140   B202C9E1           STRH     R0,[R9, #+34]
+    403              GUI_Context.DispPosY = DispPosY;
+   \   00000144   00009DE5           LDR      R0,[SP, #+0]
+   \   00000148   B402C9E1           STRH     R0,[R9, #+36]
+    404            }
+    405            GUI_UNLOCK();
+   \                     ??_GetBlanks_0:
+   \   0000014C   ........           BL       GUI_Unlock
+    406            return r;
+   \   00000150   0600A0E1           MOV      R0,R6
+   \   00000154   0CD08DE2           ADD      SP,SP,#+12
+   \   00000158   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    407          }
+    408          
+    409          /*********************************************************************
+    410          *
+    411          *       Public code
+    412          *
+    413          **********************************************************************
+    414          */
+    415          /*********************************************************************
+    416          *
+    417          *       GUI_GetLeadingBlankCols
+    418          *
+    419          * Purpose:
+    420          *   Returns the leading blank columns of the given character.
+    421          *
+    422          * Parameters:
+    423          *   c - Character
+    424          *
+    425          * Return value:
+    426          *   >= 0 - Number of blank columns
+    427          *   -1   - Error
+    428          */
+
+   \                                 In section .text, align 4, keep-with-next
+    429          int GUI_GetLeadingBlankCols(U16 c) {
+    430            return _GetBlanks(c, 0);
+   \                     GUI_GetLeadingBlankCols:
+   \   00000000   0010A0E3           MOV      R1,#+0
+   \   00000004   ........           B        _GetBlanks       ;; tailcall
+    431          }
+    432          
+    433          /*********************************************************************
+    434          *
+    435          *       GUI_GetTrailingBlankCols
+    436          *
+    437          * Purpose:
+    438          *   Returns the leading blank columns of the given character.
+    439          *
+    440          * Parameters:
+    441          *   c - Character
+    442          *
+    443          * Return value:
+    444          *   >= 0 - Number of blank columns
+    445          *   -1   - Error
+    446          */
+
+   \                                 In section .text, align 4, keep-with-next
+    447          int GUI_GetTrailingBlankCols(U16 c) {
+    448            return _GetBlanks(c, 1);
+   \                     GUI_GetTrailingBlankCols:
+   \   00000000   0110A0E3           MOV      R1,#+1
+   \   00000004   ........           B        _GetBlanks       ;; tailcall
+    449          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3:
+   \   00000000   ........           DC32     LCD_aMirror
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_1:
+   \   00000000   ........           DC32     LCD_pColorIndex
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_2:
+   \   00000000   ........           DC32     GUI_Context
+    450          
+    451          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function                 .cstack
+     --------                 -------
+     GUI_GetLeadingBlankCols       8
+     GUI_GetTrailingBlankCols      8
+     _DrawBitmap                  40
+     _FillRect                    24
+     _GetBlanks                   48
+     _GetRect                      0
+     _SetPixelIndex               16
+
+
+   Section sizes:
+
+     Function/Label           Bytes
+     --------------           -----
+     _DrawBitmap               468
+     _FillRect                 116
+     _GetRect                   32
+     _SetPixelIndex             52
+     _DeviceAPI                 52
+     _GetBlanks                348
+     GUI_GetLeadingBlankCols     8
+     GUI_GetTrailingBlankCols    8
+     ??DataTable3                4
+     ??DataTable3_1              4
+     ??DataTable3_2              4
+
+ 
+ 1 096 bytes in section .text
+ 
+ 1 096 bytes of CODE memory
+
+Errors: none
+Warnings: none

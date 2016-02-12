@@ -1,0 +1,596 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:12:39 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\FS_Log.c                             #
+#    Command line =  C:\DUII\TargetHW\FS\FS_Log.c -D DEBUG=1 -D               #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\FS_Log.lst                 #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\FS_Log.o                    #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\FS_Log.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : FS_Logf.c
+     19          Purpose     : File system log routines
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          /*********************************************************************
+     24          *
+     25          *       #include Section
+     26          *
+     27          **********************************************************************
+     28          */
+     29          
+     30          #include <stdlib.h>
+     31          #include <stdarg.h>
+     32          
+     33          #include "FS_Int.h"
+     34          #include "FS_Debug.h"
+     35          
+     36          /*********************************************************************
+     37          *
+     38          *       #define constants
+     39          *
+     40          **********************************************************************
+     41          */
+     42          
+     43          /*********************************************************************
+     44          *
+     45          *       Local data types
+     46          *
+     47          **********************************************************************
+     48          */
+     49          
+     50          typedef struct {
+     51            char * pBuffer;
+     52            int BufferSize;
+     53            int Cnt;
+     54          } BUFFER_DESC;
+     55          
+     56          /*********************************************************************
+     57          *
+     58          *       Static data
+     59          *
+     60          **********************************************************************
+     61          */
+
+   \                                 In section .data, align 4
+     62          static U32  _LogFilter  = FS_LOG_MASK_DEFAULT;
+   \                     _LogFilter:
+   \   00000000   01000000           DC32 1
+     63          
+     64          /*********************************************************************
+     65          *
+     66          *       Static code
+     67          *
+     68          **********************************************************************
+     69          */
+     70          /*********************************************************************
+     71          *
+     72          *       Public code
+     73          *
+     74          **********************************************************************
+     75          */
+     76          
+     77          /*********************************************************************
+     78          *
+     79          *       _StoreChar
+     80          */
+     81          static void _StoreChar(BUFFER_DESC * p, char c) {
+     82            int Cnt;
+     83          
+     84            Cnt = p->Cnt;
+     85            if ((Cnt + 1) < p->BufferSize) {
+     86              *(p->pBuffer + Cnt) = c;
+     87              p->Cnt = Cnt + 1;
+     88            }
+     89          }
+     90          
+     91          /*********************************************************************
+     92          *
+     93          *       _PrintUnsigned
+     94          */
+     95          static void _PrintUnsigned(BUFFER_DESC * pBufferDesc, U32 v, unsigned Base, int NumDigits) {
+
+   \                                 In section .text, align 4, keep-with-next
+     96            static const char _aV2C[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
+   \                     ??_aV2C:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   303132333435       DC8 48, 49, 50, 51, 52, 53, 54, 55, 56, 57
+   \              36373839    
+   \   0000000A   414243444546       DC8 65, 66, 67, 68, 69, 70
+     97            unsigned Div;
+     98            U32 Digit = 1;
+     99            //
+    100            // Count how many digits are required
+    101            //
+    102            while (((v / Digit) >= Base) || (NumDigits > 1)) {
+    103              Digit *= Base;
+    104           	  NumDigits--;
+    105            }
+    106            //
+    107            // Output digits
+    108            //
+    109            do {
+    110              Div = v / Digit;
+    111              v -= Div * Digit;
+    112              _StoreChar(pBufferDesc, _aV2C[Div]);
+    113              Digit /= Base;
+    114            } while (Digit);
+    115          }
+    116          
+    117          
+    118          /*********************************************************************
+    119          *
+    120          *       _PrintInt
+    121          */
+
+   \                                 In section .text, align 4, keep-with-next
+    122          static void _PrintInt(BUFFER_DESC * pBufferDesc, I32 v, unsigned Base, unsigned NumDigits) {
+   \                     _PrintInt:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0160A0E1           MOV      R6,R1
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0250A0E1           MOV      R5,R2
+   \   00000010   0370A0E1           MOV      R7,R3
+    123            //
+    124            // Handle sign
+    125            //
+    126            if (v < 0) {
+   \   00000014   000056E3           CMP      R6,#+0
+   \   00000018   0900005A           BPL      ??_PrintInt_0
+    127              v = -v;
+    128              _StoreChar(pBufferDesc, '-');
+   \   0000001C   080094E5           LDR      R0,[R4, #+8]
+   \   00000020   042094E5           LDR      R2,[R4, #+4]
+   \   00000024   011080E2           ADD      R1,R0,#+1
+   \   00000028   006066E2           RSB      R6,R6,#+0
+   \   0000002C   020051E1           CMP      R1,R2
+   \   00000030   030000AA           BGE      ??_PrintInt_0
+   \   00000034   002094E5           LDR      R2,[R4, #+0]
+   \   00000038   2D30A0E3           MOV      R3,#+45
+   \   0000003C   0230C0E7           STRB     R3,[R0, +R2]
+   \   00000040   081084E5           STR      R1,[R4, #+8]
+    129            }
+    130            _PrintUnsigned(pBufferDesc, v, Base, NumDigits);
+   \                     ??_PrintInt_0:
+   \   00000044   0180A0E3           MOV      R8,#+1
+   \   00000048   010000EA           B        ??_PrintInt_1
+   \                     ??_PrintInt_2:
+   \   0000004C   950808E0           MUL      R8,R5,R8
+   \   00000050   017047E2           SUB      R7,R7,#+1
+   \                     ??_PrintInt_1:
+   \   00000054   0600A0E1           MOV      R0,R6
+   \   00000058   0810A0E1           MOV      R1,R8
+   \   0000005C   ........           BL       __aeabi_uidiv
+   \   00000060   050050E1           CMP      R0,R5
+   \   00000064   F8FFFF2A           BCS      ??_PrintInt_2
+   \   00000068   020057E3           CMP      R7,#+2
+   \   0000006C   F6FFFFAA           BGE      ??_PrintInt_2
+   \                     ??_PrintInt_3:
+   \   00000070   0600A0E1           MOV      R0,R6
+   \   00000074   0810A0E1           MOV      R1,R8
+   \   00000078   ........           BL       __aeabi_uidiv
+   \   0000007C   980001E0           MUL      R1,R8,R0
+   \   00000080   043094E5           LDR      R3,[R4, #+4]
+   \   00000084   016046E0           SUB      R6,R6,R1
+   \   00000088   081094E5           LDR      R1,[R4, #+8]
+   \   0000008C   012081E2           ADD      R2,R1,#+1
+   \   00000090   030052E1           CMP      R2,R3
+   \   00000094   040000AA           BGE      ??_PrintInt_4
+   \   00000098   ........           ADR      R12,??_aV2C
+   \   0000009C   003094E5           LDR      R3,[R4, #+0]
+   \   000000A0   0C00D0E7           LDRB     R0,[R0, +R12]
+   \   000000A4   0300C1E7           STRB     R0,[R1, +R3]
+   \   000000A8   082084E5           STR      R2,[R4, #+8]
+   \                     ??_PrintInt_4:
+   \   000000AC   0800A0E1           MOV      R0,R8
+   \   000000B0   0510A0E1           MOV      R1,R5
+   \   000000B4   ........           BL       __aeabi_uidiv
+   \   000000B8   0080B0E1           MOVS     R8,R0
+   \   000000BC   EBFFFF1A           BNE      ??_PrintInt_3
+    131          }
+   \   000000C0   F081BDE8           POP      {R4-R8,PC}       ;; return
+    132          
+    133          /*********************************************************************
+    134          *
+    135          *       FS_PrintfSafe
+    136          */
+
+   \                                 In section .text, align 4, keep-with-next
+    137          void FS_PrintfSafe(char * pBuffer, const char * sFormat, int BufferSize, va_list * pParamList) {
+   \                     FS_PrintfSafe:
+   \   00000000   F14F2DE9           PUSH     {R0,R4-R11,LR}
+   \   00000004   10D04DE2           SUB      SP,SP,#+16
+    138            char c;
+    139            BUFFER_DESC BufferDesc;
+    140            I32 v;
+    141            unsigned NumDigits;
+    142          
+    143            BufferDesc.pBuffer    = pBuffer;
+    144            BufferDesc.BufferSize = BufferSize;
+    145            BufferDesc.Cnt        = 0;
+   \   00000008   0060A0E3           MOV      R6,#+0
+   \   0000000C   0140A0E1           MOV      R4,R1
+   \   00000010   0350A0E1           MOV      R5,R3
+   \   00000014   00008DE5           STR      R0,[SP, #+0]
+   \   00000018   04208DE5           STR      R2,[SP, #+4]
+   \   0000001C   08608DE5           STR      R6,[SP, #+8]
+   \   00000020   ........           ADR      R7,??_aV2C
+   \   00000024   0A80A0E3           MOV      R8,#+10
+   \   00000028   020000EA           B        ??FS_PrintfSafe_0
+    146            do {
+    147              c = *sFormat++;
+    148              if (c == 0) {
+    149                break;
+    150              }
+    151              if (c == '%') {
+    152                //
+    153                // Filter out width specifier (number of digits)
+    154                //
+    155                NumDigits = 0;
+    156                do {
+    157                  c = *sFormat++;
+    158                  if (c < '0' || c > '9') {
+    159                    break;
+    160                  }
+    161                  NumDigits = NumDigits * 10 + (c - '0');
+    162                } while (1);
+    163                //
+    164                // Handle different qualifiers
+    165                //
+    166                do {
+    167                  if (c == 'l') {
+    168                    c = *sFormat++;
+    169                    continue;
+    170                  }
+    171                  break;
+    172                } while (1);
+    173                //
+    174                // handle different types
+    175                //
+    176                v = va_arg(*pParamList, int);
+    177                switch (c) {
+    178                case 'd':
+    179                  _PrintInt(&BufferDesc, v, 10, NumDigits);
+   \                     ??FS_PrintfSafe_1:
+   \   0000002C   0A20A0E3           MOV      R2,#+10
+   \   00000030   0D00A0E1           MOV      R0,SP
+   \   00000034   ........           BL       _PrintInt
+    180                  break;
+   \                     ??FS_PrintfSafe_0:
+   \   00000038   0100D4E4           LDRB     R0,[R4], #+1
+   \   0000003C   000050E3           CMP      R0,#+0
+   \   00000040   0400001A           BNE      ??FS_PrintfSafe_2
+    181                case 'u':
+    182                  _PrintUnsigned(&BufferDesc, v, 10, NumDigits);
+    183                  break;
+    184                case 'x':
+    185                  _PrintUnsigned(&BufferDesc, v, 16, NumDigits);
+    186                  break;
+    187                case 's':
+    188                  {
+    189                    const char * s = (const char *)v;
+    190                    do {
+    191                      c = *s++;
+    192                      if (c == 0) {
+    193                        break;
+    194                      }
+    195                     _StoreChar(&BufferDesc, c);
+    196                    } while (1);
+    197                  }
+    198                  break;
+    199                case 'p':
+    200                  _PrintUnsigned(&BufferDesc, v, 16, 8);
+    201                  break;
+    202                default:
+    203                  FS_X_Panic(FS_ERROR_ILLEGAL_FORMAT_STRING);
+    204                }
+    205              } else {
+    206                _StoreChar(&BufferDesc, c);
+    207              }
+    208            } while (1);
+    209            //
+    210            // Add trailing 0 to string
+    211            //
+    212            *(pBuffer + BufferDesc.Cnt) = 0;
+   \   00000044   08009DE5           LDR      R0,[SP, #+8]
+   \   00000048   10109DE5           LDR      R1,[SP, #+16]
+    213          }
+   \   0000004C   14D08DE2           ADD      SP,SP,#+20
+   \   00000050   0160C0E7           STRB     R6,[R0, +R1]
+   \   00000054   F08FBDE8           POP      {R4-R11,PC}      ;; return
+   \                     ??FS_PrintfSafe_2:
+   \   00000058   250050E3           CMP      R0,#+37
+   \   0000005C   6900001A           BNE      ??FS_PrintfSafe_3
+   \   00000060   0030A0E3           MOV      R3,#+0
+   \   00000064   010000EA           B        ??FS_PrintfSafe_4
+   \                     ??FS_PrintfSafe_5:
+   \   00000068   980320E0           MLA      R0,R8,R3,R0
+   \   0000006C   303040E2           SUB      R3,R0,#+48
+   \                     ??FS_PrintfSafe_4:
+   \   00000070   0100D4E4           LDRB     R0,[R4], #+1
+   \   00000074   301040E2           SUB      R1,R0,#+48
+   \   00000078   0A0051E3           CMP      R1,#+10
+   \   0000007C   F9FFFF3A           BCC      ??FS_PrintfSafe_5
+   \   00000080   6C0050E3           CMP      R0,#+108
+   \   00000084   0200001A           BNE      ??FS_PrintfSafe_6
+   \                     ??FS_PrintfSafe_7:
+   \   00000088   0100D4E4           LDRB     R0,[R4], #+1
+   \   0000008C   6C0050E3           CMP      R0,#+108
+   \   00000090   FCFFFF0A           BEQ      ??FS_PrintfSafe_7
+   \                     ??FS_PrintfSafe_6:
+   \   00000094   002095E5           LDR      R2,[R5, #+0]
+   \   00000098   640050E2           SUBS     R0,R0,#+100
+   \   0000009C   041092E4           LDR      R1,[R2], #+4
+   \   000000A0   002085E5           STR      R2,[R5, #+0]
+   \   000000A4   E0FFFF0A           BEQ      ??FS_PrintfSafe_1
+   \   000000A8   0C0050E2           SUBS     R0,R0,#+12
+   \   000000AC   5000000A           BEQ      ??FS_PrintfSafe_8
+   \   000000B0   030050E2           SUBS     R0,R0,#+3
+   \   000000B4   4200000A           BEQ      ??FS_PrintfSafe_9
+   \   000000B8   020050E2           SUBS     R0,R0,#+2
+   \   000000BC   0200000A           BEQ      ??FS_PrintfSafe_10
+   \   000000C0   030050E2           SUBS     R0,R0,#+3
+   \   000000C4   2000000A           BEQ      ??FS_PrintfSafe_11
+   \   000000C8   4B0000EA           B        ??FS_PrintfSafe_12
+   \                     ??FS_PrintfSafe_10:
+   \   000000CC   03B0A0E1           MOV      R11,R3
+   \   000000D0   0190A0E1           MOV      R9,R1
+   \   000000D4   01A0A0E3           MOV      R10,#+1
+   \   000000D8   010000EA           B        ??FS_PrintfSafe_13
+   \                     ??FS_PrintfSafe_14:
+   \   000000DC   980A0AE0           MUL      R10,R8,R10
+   \   000000E0   01B04BE2           SUB      R11,R11,#+1
+   \                     ??FS_PrintfSafe_13:
+   \   000000E4   0900A0E1           MOV      R0,R9
+   \   000000E8   0A10A0E1           MOV      R1,R10
+   \   000000EC   ........           BL       __aeabi_uidiv
+   \   000000F0   0A0050E3           CMP      R0,#+10
+   \   000000F4   F8FFFF2A           BCS      ??FS_PrintfSafe_14
+   \   000000F8   02005BE3           CMP      R11,#+2
+   \   000000FC   F6FFFFAA           BGE      ??FS_PrintfSafe_14
+   \                     ??FS_PrintfSafe_15:
+   \   00000100   0900A0E1           MOV      R0,R9
+   \   00000104   0A10A0E1           MOV      R1,R10
+   \   00000108   ........           BL       __aeabi_uidiv
+   \   0000010C   9A0001E0           MUL      R1,R10,R0
+   \   00000110   04309DE5           LDR      R3,[SP, #+4]
+   \   00000114   019049E0           SUB      R9,R9,R1
+   \   00000118   08109DE5           LDR      R1,[SP, #+8]
+   \   0000011C   012081E2           ADD      R2,R1,#+1
+   \   00000120   030052E1           CMP      R2,R3
+   \   00000124   030000AA           BGE      ??FS_PrintfSafe_16
+   \   00000128   0700D0E7           LDRB     R0,[R0, +R7]
+   \   0000012C   00309DE5           LDR      R3,[SP, #+0]
+   \   00000130   0300C1E7           STRB     R0,[R1, +R3]
+   \   00000134   08208DE5           STR      R2,[SP, #+8]
+   \                     ??FS_PrintfSafe_16:
+   \   00000138   ........           LDR      R1,??DataTable4  ;; 0xcccccccd
+   \   0000013C   9A1180E0           UMULL    R1,R0,R10,R1
+   \   00000140   A0A1B0E1           LSRS     R10,R0,#+3
+   \   00000144   EDFFFF1A           BNE      ??FS_PrintfSafe_15
+   \   00000148   BAFFFFEA           B        ??FS_PrintfSafe_0
+   \                     ??FS_PrintfSafe_11:
+   \   0000014C   03A0A0E1           MOV      R10,R3
+   \                     ??FS_PrintfSafe_17:
+   \   00000150   0190A0E1           MOV      R9,R1
+   \   00000154   01B0A0E3           MOV      R11,#+1
+   \   00000158   010000EA           B        ??FS_PrintfSafe_18
+   \                     ??FS_PrintfSafe_19:
+   \   0000015C   0BB2A0E1           LSL      R11,R11,#+4
+   \   00000160   01A04AE2           SUB      R10,R10,#+1
+   \                     ??FS_PrintfSafe_18:
+   \   00000164   0900A0E1           MOV      R0,R9
+   \   00000168   0B10A0E1           MOV      R1,R11
+   \   0000016C   ........           BL       __aeabi_uidiv
+   \   00000170   100050E3           CMP      R0,#+16
+   \   00000174   F8FFFF2A           BCS      ??FS_PrintfSafe_19
+   \   00000178   02005AE3           CMP      R10,#+2
+   \   0000017C   F6FFFFAA           BGE      ??FS_PrintfSafe_19
+   \                     ??FS_PrintfSafe_20:
+   \   00000180   0900A0E1           MOV      R0,R9
+   \   00000184   0B10A0E1           MOV      R1,R11
+   \   00000188   ........           BL       __aeabi_uidiv
+   \   0000018C   9B0001E0           MUL      R1,R11,R0
+   \   00000190   04309DE5           LDR      R3,[SP, #+4]
+   \   00000194   019049E0           SUB      R9,R9,R1
+   \   00000198   08109DE5           LDR      R1,[SP, #+8]
+   \   0000019C   012081E2           ADD      R2,R1,#+1
+   \   000001A0   030052E1           CMP      R2,R3
+   \   000001A4   030000AA           BGE      ??FS_PrintfSafe_21
+   \   000001A8   0700D0E7           LDRB     R0,[R0, +R7]
+   \   000001AC   00309DE5           LDR      R3,[SP, #+0]
+   \   000001B0   0300C1E7           STRB     R0,[R1, +R3]
+   \   000001B4   08208DE5           STR      R2,[SP, #+8]
+   \                     ??FS_PrintfSafe_21:
+   \   000001B8   2BB2B0E1           LSRS     R11,R11,#+4
+   \   000001BC   EFFFFF1A           BNE      ??FS_PrintfSafe_20
+   \   000001C0   9CFFFFEA           B        ??FS_PrintfSafe_0
+   \                     ??FS_PrintfSafe_9:
+   \   000001C4   0100D1E4           LDRB     R0,[R1], #+1
+   \   000001C8   000050E3           CMP      R0,#+0
+   \   000001CC   99FFFF0A           BEQ      ??FS_PrintfSafe_0
+   \   000001D0   08209DE5           LDR      R2,[SP, #+8]
+   \   000001D4   04C09DE5           LDR      R12,[SP, #+4]
+   \   000001D8   013082E2           ADD      R3,R2,#+1
+   \   000001DC   0C0053E1           CMP      R3,R12
+   \   000001E0   F7FFFFAA           BGE      ??FS_PrintfSafe_9
+   \   000001E4   00C09DE5           LDR      R12,[SP, #+0]
+   \   000001E8   0C00C2E7           STRB     R0,[R2, +R12]
+   \   000001EC   08308DE5           STR      R3,[SP, #+8]
+   \   000001F0   F3FFFFEA           B        ??FS_PrintfSafe_9
+   \                     ??FS_PrintfSafe_8:
+   \   000001F4   08A0A0E3           MOV      R10,#+8
+   \   000001F8   D4FFFFEA           B        ??FS_PrintfSafe_17
+   \                     ??FS_PrintfSafe_12:
+   \   000001FC   0300A0E3           MOV      R0,#+3
+   \   00000200   ........           BL       FS_X_Panic
+   \   00000204   8BFFFFEA           B        ??FS_PrintfSafe_0
+   \                     ??FS_PrintfSafe_3:
+   \   00000208   08109DE5           LDR      R1,[SP, #+8]
+   \   0000020C   04309DE5           LDR      R3,[SP, #+4]
+   \   00000210   012081E2           ADD      R2,R1,#+1
+   \   00000214   030052E1           CMP      R2,R3
+   \   00000218   86FFFFAA           BGE      ??FS_PrintfSafe_0
+   \   0000021C   00309DE5           LDR      R3,[SP, #+0]
+   \   00000220   0300C1E7           STRB     R0,[R1, +R3]
+   \   00000224   08208DE5           STR      R2,[SP, #+8]
+   \   00000228   82FFFFEA           B        ??FS_PrintfSafe_0
+    214          
+    215          
+    216          
+    217          /*********************************************************************
+    218          *
+    219          *       FS_Logf
+    220          */
+
+   \                                 In section .text, align 4, keep-with-next
+    221          void FS_Logf(U32 Type, const char * sFormat, ...) {
+   \                     FS_Logf:
+   \   00000000   0C002DE9           PUSH     {R2,R3}
+   \   00000004   00402DE9           PUSH     {LR}
+    222            va_list ParamList;
+    223            char acBuffer[100];
+    224          
+    225            //
+    226            // Filter message. If logging for this type of message is not enabled, do  nothing.
+    227            //
+    228            if ((Type & _LogFilter) == 0) {
+   \   00000008   ........           LDR      R2,??DataTable4_1
+   \   0000000C   6CD04DE2           SUB      SP,SP,#+108
+   \   00000010   002092E5           LDR      R2,[R2, #+0]
+   \   00000014   000012E1           TST      R2,R0
+   \   00000018   0700000A           BEQ      ??FS_Logf_0
+    229              return;
+    230            }
+    231            //
+    232            // Replace place holders (%d, %x etc) by values and call output routine.
+    233            //
+    234            va_start(ParamList, sFormat);
+   \   0000001C   70208DE2           ADD      R2,SP,#+112
+   \   00000020   00208DE5           STR      R2,[SP, #+0]
+    235            FS_PrintfSafe(acBuffer, sFormat, sizeof(acBuffer), &ParamList);
+   \   00000024   0D30A0E1           MOV      R3,SP
+   \   00000028   6420A0E3           MOV      R2,#+100
+   \   0000002C   04008DE2           ADD      R0,SP,#+4
+   \   00000030   ........           BL       FS_PrintfSafe
+    236            FS_X_Log(acBuffer);
+   \   00000034   04008DE2           ADD      R0,SP,#+4
+   \   00000038   ........           BL       FS_X_Log
+    237          }
+   \                     ??FS_Logf_0:
+   \   0000003C   6CD08DE2           ADD      SP,SP,#+108      ;; stack cleaning
+   \   00000040   0CF09DE4           LDR      PC,[SP], #+12    ;; return
+    238          
+    239          
+    240          /*********************************************************************
+    241          *
+    242          *       FS_SetLogFilter
+    243          */
+
+   \                                 In section .text, align 4, keep-with-next
+    244          void FS_SetLogFilter(U32 FilterMask) {
+    245            _LogFilter = FilterMask;
+   \                     FS_SetLogFilter:
+   \   00000000   ........           LDR      R1,??DataTable4_1
+   \   00000004   000081E5           STR      R0,[R1, #+0]
+    246          }
+   \   00000008   1EFF2FE1           BX       LR               ;; return
+    247          
+    248          /*********************************************************************
+    249          *
+    250          *       FS_AddLogFilter
+    251          */
+
+   \                                 In section .text, align 4, keep-with-next
+    252          void FS_AddLogFilter(U32 FilterMask) {
+    253            _LogFilter |= FilterMask;
+   \                     FS_AddLogFilter:
+   \   00000000   ........           LDR      R1,??DataTable4_1
+   \   00000004   002091E5           LDR      R2,[R1, #+0]
+   \   00000008   020080E1           ORR      R0,R0,R2
+   \   0000000C   000081E5           STR      R0,[R1, #+0]
+    254          }
+   \   00000010   1EFF2FE1           BX       LR               ;; return
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4:
+   \   00000000   CDCCCCCC           DC32     0xcccccccd
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_1:
+   \   00000000   ........           DC32     _LogFilter
+    255          
+    256          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function        .cstack
+     --------        -------
+     FS_AddLogFilter      0
+     FS_Logf            120
+     FS_PrintfSafe       56
+     FS_SetLogFilter      0
+     _PrintInt           24
+
+
+   Section sizes:
+
+     Function/Label  Bytes
+     --------------  -----
+     _LogFilter         4
+     _aV2C             16
+     _PrintInt        196
+     FS_PrintfSafe    556
+     FS_Logf           68
+     FS_SetLogFilter   12
+     FS_AddLogFilter   20
+     ??DataTable4       4
+     ??DataTable4_1     4
+
+ 
+   4 bytes in section .data
+ 876 bytes in section .text
+ 
+ 876 bytes of CODE memory
+   4 bytes of DATA memory
+
+Errors: none
+Warnings: none

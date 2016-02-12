@@ -1,0 +1,147 @@
+C51 COMPILER V8.02   MSGSTATEMACHINE                                                       03/04/2011 17:19:30 PAGE 1   
+
+
+C51 COMPILER V8.02, COMPILATION OF MODULE MSGSTATEMACHINE
+OBJECT MODULE PLACED IN .\msgstatemachine.obj
+COMPILER INVOKED BY: f:\Keil\C51\BIN\C51.EXE ..\CommonFiles\msgstatemachine.c OPTIMIZE(9,SIZE) BROWSE INCDIR(f:\Keil\C51
+                    -\INC\;f:\Keil\Traqmate\132micro\CommonFiles\) DB DEFINE(DISPLAY,EXTCLK6,NODEBUG,PACKMEM) DEBUG OBJECTEXTEND PRINT(.\msgs
+                    -tatemachine.lst) OBJECT(.\msgstatemachine.obj)
+
+line level    source
+
+*** WARNING C500 IN LINE 1 OF ..\COMMONFILES\MSGSTATEMACHINE.C: LICENSE ERROR (R208: RENEW LICENSE ID CODE (LIC))
+
+   1          // msgstatemachine.c
+   2          // part of traqmate
+   3          // included by cygfx020.c
+   4          // GAStephens, 16 SEP 2004
+   5          //
+   6          // this code will not compile on its own.
+   7          // it is included by the ISR routines in order to have a single instance of the code for
+   8          // maintainability.
+   9          //
+  10          // define COM as 0 or 1 depending on which ISR
+  11          //
+  12          // optimized with pointers, GAS 23-SEP-04
+  13          //
+  14                  u08 tempch;
+*** ERROR C129 IN LINE 14 OF ..\COMMONFILES\MSGSTATEMACHINE.C: missing ';' before 'tempch'
+  15                  static int msg_state = LOOKING_FOR_SYNC;        // init state machine variable
+  16                  static int msg_length ;                                         // variables to build message
+  17                  static u08 chk = 0;                                                     // init the checksum variable
+  18                  static int index = 0;                                           // init the receive character storage index
+  19                  static u08 *msgbuff;                                                    // for quicker access to buffer
+  20          
+  21          #if (COM == 0)
+*** WARNING C322 IN LINE 21 OF ..\CommonFiles\msgstatemachine.c: unknown identifier
+  22          #undef SCON
+  23          #undef SBUF
+  24          #define SCON SCON0
+  25          #define SBUF SBUF0
+  26          #elif (COM == 1)
+              #undef SCON
+              #undef SBUF
+              #define SCON SCON1
+              #define SBUF SBUF1
+              #endif // elif
+  32          
+  33                  // determine if tx or rx or both caused interrupt
+  34          
+  35                  if (SCON & 0x01) {                      // byte received
+  36                          tempch = SBUF;
+  37                          SCON &= ~0x01;                                          // clear receive interrupt flag
+  38          
+  39                          switch(msg_state) {                                     // based on the state of reception we are in
+  40                          case LOOKING_FOR_SYNC:                          // state = 1
+  41                                  index = 0;                                      // init the storage index
+  42                                  if (tempch==SOH) {                              // if start of header byte received
+  43                                          msgbuff = com[COM].rxbuff+(com[COM].rxnextidx*MSGSIZE); // for quicker access to buffer
+  44                                          msgbuff[index++]=tempch ;       // store SOH
+  45                                          chk ^= tempch ;                         // start checksum calc
+  46                                          msg_state = POSSIBLE_SYNC;      // update state
+  47                                  }
+  48                                  break ;
+  49                          
+  50                          case POSSIBLE_SYNC:                                     // state = 2
+C51 COMPILER V8.02   MSGSTATEMACHINE                                                       03/04/2011 17:19:30 PAGE 2   
+
+  51                                  msgbuff[index++] = tempch ;     // get the next byte
+  52                                  chk ^= tempch ;                         // continue checksum calc
+  53                                  if (index == CHECKSUM)                  // see if we should have
+  54                                          msg_state = DO_CHECKSUM;                // received the checksum
+  55                                  break ;
+  56          
+  57                          case DO_CHECKSUM:                                       // state = 3
+  58                                  msgbuff[index++]=tempch ;               // store rcv checksum
+  59                                  chk ^= 0xff ;                                   // final calculation exor
+  60                                  if (chk == tempch) {                    // check against rcv'd checksum
+  61                                                                                                  // if they match, get the message length
+  62                                          msg_length = msgbuff[UPPER_BYTE_COUNT];
+  63                                          msg_length = msg_length << 8 ;
+  64                                          msg_length += msgbuff[LOWER_BYTE_COUNT];
+  65          
+  66                                          if(msg_length) msg_state=FOUND_SYNC ;   // remainder of message
+  67                                          else msg_state=MESSAGE_COMPLETE;                // no message remaining
+  68                                  }
+  69                                  else {                                                  // if checksum failed, start looking again
+  70                                          index=0;                                        // discard all received data
+  71                                          msg_state=LOOKING_FOR_SYNC;             // set new state
+  72                                          chk = 0;                                        // re-init checksum byte
+  73                                  }
+  74                                  break ;
+  75                          
+  76                          case FOUND_SYNC:                                        // get remainder of message // state = 4
+  77          #if defined(SENSOR) && (COM == 0)
+                                      // turn on the COM LED
+                                      LED3 = 1;
+              #endif
+  81                                  msgbuff[index++]=tempch ;               // store the data
+  82                                  if (index == DATA_START+msg_length)             // see if finished
+  83                                          msg_state=MESSAGE_COMPLETE ;                    // set message complete
+  84                                  break;
+  85          
+  86                          default:            // should never get here if state machine works
+  87                                  break ;
+  88                          } // switch
+  89                                                                                  // state = 5
+  90                          if(msg_state==MESSAGE_COMPLETE) { // check to see if complete msg received
+  91          #if defined(SENSOR) && (COM == 0)
+                                      // turn off the COM LED
+                                      LED3 = 0;
+              #endif
+  95                                  msg_state=LOOKING_FOR_SYNC ; // if so, set up for new msg
+  96                                  index = 0 ;              // reset index
+  97                                  chk = 0;                 // reset checksum variable
+  98                                  if (NULL == com[COM].rxptr)     {       // if last buffer processed
+  99                                          com[COM].rxptr = msgbuff;               // set semaphore
+ 100                                          com[COM].rxnextidx = com[COM].rxnextidx ^ 1;    // swap buffers
+ 101                                  } // if
+ 102                          } // if
+ 103                  } // if
+ 104          
+ 105                  if (SCON & 0x02) {              // byte transmitted
+ 106                          if (0 != com[COM].txbytes) {
+ 107          #if defined(SENSOR) && (COM == 0)
+                                      // turn on the COM LED
+                                      LED3 = 1;
+              #endif
+ 111                                  SBUF = *(com[COM].txptr);
+ 112                                  (com[COM].txptr)++;
+C51 COMPILER V8.02   MSGSTATEMACHINE                                                       03/04/2011 17:19:30 PAGE 3   
+
+ 113                                  (com[COM].txbytes)--;
+ 114                          }
+ 115                          else {   
+ 116          #if defined(SENSOR) && (COM == 0)
+                                      // turn off the COM LED
+                                      LED3 = 0;
+              #endif
+ 120                                  com[COM].txptr = NULL;
+ 121                          }
+ 122                          SCON &= ~0x02;                                          // clear transmit interrupt flag
+ 123                  } // if
+ 124          
+ 125          #undef SCON
+ 126          #undef SBUF
+
+C51 COMPILATION COMPLETE.  2 WARNING(S),  1 ERROR(S)

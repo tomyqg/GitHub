@@ -1,0 +1,1437 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     02/Feb/2016  18:29:14 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\DUII\ChronoScreen.cpp                            #
+#    Command line =  C:\DUII\DUII\ChronoScreen.cpp -D DEBUG=1 -D              #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --eec++ --no_static_destruction                          #
+#    List file    =  C:\DUII\TargetHW\Release\List\ChronoScreen.lst           #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\ChronoScreen.o              #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\DUII\ChronoScreen.cpp
+      1          
+      2          /*********************************************************************
+      3          *                SEGGER Microcontroller GmbH & Co. KG                *
+      4          *        Solutions for real time microcontroller applications        *
+      5          **********************************************************************
+      6          *                                                                    *
+      7          *        (c) 1996 - 2009  SEGGER Microcontroller GmbH & Co. KG       *
+      8          *                                                                    *
+      9          *        Internet: www.segger.com    Support:  support@segger.com    *
+     10          *                                                                    *
+     11          **********************************************************************
+     12          
+     13          ** emWin V5.00 - Graphical user interface for embedded applications **
+     14          emWin is protected by international copyright laws.   Knowledge of the
+     15          source code may not be used to write a similar product.  This file may
+     16          only be used in accordance with a license and should not be re-
+     17          distributed in any way. We appreciate your understanding and fairness.
+     18          ----------------------------------------------------------------------
+     19          File        : MainTask.C
+     20          Purpose     : Main program, called from after main after initialisation
+     21          ---------------------------END-OF-HEADER------------------------------
+     22          */
+     23          
+     24          #include <stdio.h>
+     25          #include <stdlib.h>
+     26          #include <string.h>
+     27          #include "DUII.h"
+     28          #include "GUI.h"
+     29          #include "GeneralConfig.h"
+     30          #include "commondefs.h"
+     31          #include "ConfigScreens.h"
+     32          #include "ChronoScreen.h"
+     33          #include "ChronoGauge.hpp"
+     34          #include "RunningGauges.h"
+     35          #include "DataHandler.h"
+     36          #include "PredictiveLapTimer.hpp"
+     37          #include "DigitalStringOutput.hpp"
+     38          #include "Utilities.h"
+     39          #include "LEDHandler.h"
+     40          
+     41          
+     42          /*********************************************************************
+     43          *
+     44          *       Local Defines and Enumerations
+     45          *
+     46          **********************************************************************
+     47          */
+     48          #define	VERSION_5
+     49          
+     50          /*********************************************************************
+     51          *
+     52          *       External data and code
+     53          *
+     54          **********************************************************************
+     55          */
+     56          #ifdef __cplusplus
+     57          extern "C" {
+     58          extern char lockupSemaphore;
+     59          extern GUI_CONST_STORAGE GUI_BITMAP bmBestLapEver;
+     60          extern GUI_CONST_STORAGE GUI_BITMAP bmBestLapSession;
+     61          #ifdef VERSION_1
+     62          extern GUI_CONST_STORAGE GUI_BITMAP bmChronometric_wTrans;
+     63          extern GUI_CONST_STORAGE GUI_BITMAP bmTimeList;
+     64          #elif defined VERSION_2
+     65          extern GUI_CONST_STORAGE GUI_BITMAP bmChronometric_NoTrans;
+     66          extern GUI_CONST_STORAGE GUI_BITMAP bmTimeList;
+     67          #elif defined VERSION_3
+     68          extern GUI_CONST_STORAGE GUI_BITMAP bmChronometric_original;
+     69          extern GUI_CONST_STORAGE GUI_BITMAP bmTimeList;
+     70          #elif defined VERSION_4
+     71          extern GUI_CONST_STORAGE GUI_BITMAP bmChronometric_NoTrans_2;
+     72          extern GUI_CONST_STORAGE GUI_BITMAP bmTimeList;
+     73          extern GUI_CONST_STORAGE GUI_BITMAP bmYellowDigits;
+     74          #elif defined VERSION_5
+     75          extern GUI_CONST_STORAGE GUI_BITMAP bmChronometric_NoTrans_2;
+     76          extern GUI_CONST_STORAGE GUI_BITMAP bmTimeList;
+     77          extern GUI_CONST_STORAGE GUI_BITMAP bmYellowDigits;
+
+   \                                 In section .bss, align 4
+     78          static ChronoGauge *pChronoGauge = 0;
+   \                     pChronoGauge:
+   \   00000000                      DS8 4
+   \   00000004                      DS8 4
+   \   00000008                      DS8 4
+   \   0000000C                      DS8 4
+   \   00000010                      DS8 4
+   \   00000014                      DS8 4
+   \   00000018                      DS8 4
+   \   0000001C                      DS8 4
+     79          static Alarm *pYellow = 0;
+     80          static Alarm *pRed = 0;
+     81          extern GUI_CONST_STORAGE GUI_BITMAP bmYellow_0;
+     82          extern GUI_CONST_STORAGE GUI_BITMAP bmYellow_1;
+     83          extern GUI_CONST_STORAGE GUI_BITMAP bmYellow_2;
+     84          extern GUI_CONST_STORAGE GUI_BITMAP bmYellow_3;
+     85          extern GUI_CONST_STORAGE GUI_BITMAP bmYellow_4;
+     86          extern GUI_CONST_STORAGE GUI_BITMAP bmYellow_5;
+     87          extern GUI_CONST_STORAGE GUI_BITMAP bmYellow_6;
+     88          extern GUI_CONST_STORAGE GUI_BITMAP bmYellow_7;
+     89          extern GUI_CONST_STORAGE GUI_BITMAP bmYellow_8;
+     90          extern GUI_CONST_STORAGE GUI_BITMAP bmYellow_9;
+     91          #endif
+     92          }
+     93          #endif
+     94          
+     95          /*********************************************************************
+     96          *
+     97          *       Public code
+     98          *
+     99          **********************************************************************
+    100          */
+    101          
+    102          /*********************************************************************
+    103          *
+    104          *       Local Prototypes
+    105          *
+    106          **********************************************************************
+    107          */
+    108          
+    109          /*********************************************************************
+    110          *
+    111          *       Local Variables
+    112          *
+    113          **********************************************************************
+    114          */
+    115          static WM_HWIN hChronoScreen;
+    116          static WM_HTIMER hScreenTimer;
+    117          //static Gauge *pChrono = 0;
+    118          static bool firsttimethrough;
+    119          //static PredictiveLapTimer *pPredictiveLap = 0;
+    120          //static DigitalStringOutput *pLapTime = 0, *pLap = 0, *pSpeed = 0;
+    121          //
+    122          //static Alarm *pYellow = 0;
+    123          //static Alarm *pRed = 0;
+    124          //static Alarm *pGreen = 0;
+    125          //
+    126          
+    127          #ifdef	VERSION_2
+    128          static GUI_MEMDEV_Handle screen, timeList;
+    129          #elif defined	VERSION_3
+    130          static GUI_MEMDEV_Handle screen, timeList;
+    131          #elif defined	VERSION_4
+    132          static GUI_MEMDEV_Handle screen, timeList, yellowDigitsList;
+    133          #elif defined	VERSION_5
+    134          static GUI_MEMDEV_Handle screen, timeList, yellowDigitsList;
+    135          //static GUI_MEMDEV_Handle screen2;
+    136          #endif
+    137          //
+    138          //static const GUI_RECT ElapsedTimeRect = { 0, 155, 209, 220 };
+    139          //static const GUI_RECT VmaxRect = { 75, 68, 145, 108 };
+    140          
+    141          int time = 0;
+   \                     time:
+   \   00000020                      DS8 4
+    142          int time2 = 0;
+   \                     time2:
+   \   00000024                      DS8 4
+   \   00000028                      DS8 1
+    143          #define	GAUGE_SCREEN_REFRESHES_PER_SECOND	(1000 / GAUGE_SCREEN_REFRESH_TIME)
+    144          #define	SIZE_OF_TIME_STRIP_IN_PIXELS		2100
+    145          #define	NUMBER_OF_STEPS_ON_SECONDS_STRIP	68
+    146          #define	PIXEL_HEIGHT_OF_ONE_SECOND			(float)((float)SIZE_OF_TIME_STRIP_IN_PIXELS / (float)NUMBER_OF_STEPS_ON_SECONDS_STRIP)
+    147          #define	PIXEL_STEP_PER_REFRESH	(float)(PIXEL_HEIGHT_OF_ONE_SECOND / (float)GAUGE_SCREEN_REFRESHES_PER_SECOND)
+    148          //#define	SIZE_OF_TIMESLIP_LINE		
+    149          
+    150          #ifdef VERSION_5
+
+   \                                 In section .text, align 4, keep-with-next
+    151          GUI_CONST_STORAGE GUI_BITMAP *GetBitmapDigit(int digit)
+    152          {
+    153          	switch (digit)
+   \                     _Z14GetBitmapDigiti:
+   \   00000000   010040E2           SUB      R0,R0,#+1
+   \   00000004   080050E3           CMP      R0,#+8
+   \   00000008   00F18F90           ADDLS    PC,PC,R0, LSL #+2
+   \                     ??GetBitmapDigit_0:
+   \   0000000C   0800008A           BHI      ??GetBitmapDigit_1
+   \   00000010   090000EA           B        ??GetBitmapDigit_2
+   \   00000014   0A0000EA           B        ??GetBitmapDigit_3
+   \   00000018   0B0000EA           B        ??GetBitmapDigit_4
+   \   0000001C   0C0000EA           B        ??GetBitmapDigit_5
+   \   00000020   0D0000EA           B        ??GetBitmapDigit_6
+   \   00000024   0E0000EA           B        ??GetBitmapDigit_7
+   \   00000028   0F0000EA           B        ??GetBitmapDigit_8
+   \   0000002C   100000EA           B        ??GetBitmapDigit_9
+   \   00000030   110000EA           B        ??GetBitmapDigit_10
+    154          	{
+    155          	default:
+    156          	case 0:	return &bmYellow_0;
+   \                     ??GetBitmapDigit_1:
+   \   00000034   ........           LDR      R0,??DataTable3_1
+   \   00000038   1EFF2FE1           BX       LR
+    157          	case 1:	return &bmYellow_1;
+   \                     ??GetBitmapDigit_2:
+   \   0000003C   ........           LDR      R0,??DataTable3_2
+   \   00000040   1EFF2FE1           BX       LR
+    158          	case 2:	return &bmYellow_2;
+   \                     ??GetBitmapDigit_3:
+   \   00000044   ........           LDR      R0,??DataTable3_3
+   \   00000048   1EFF2FE1           BX       LR
+    159          	case 3:	return &bmYellow_3;
+   \                     ??GetBitmapDigit_4:
+   \   0000004C   ........           LDR      R0,??DataTable3_4
+   \   00000050   1EFF2FE1           BX       LR
+    160          	case 4:	return &bmYellow_4;
+   \                     ??GetBitmapDigit_5:
+   \   00000054   ........           LDR      R0,??DataTable3_5
+   \   00000058   1EFF2FE1           BX       LR
+    161          	case 5:	return &bmYellow_5;
+   \                     ??GetBitmapDigit_6:
+   \   0000005C   ........           LDR      R0,??DataTable3_6
+   \   00000060   1EFF2FE1           BX       LR
+    162          	case 6:	return &bmYellow_6;
+   \                     ??GetBitmapDigit_7:
+   \   00000064   ........           LDR      R0,??DataTable3_7
+   \   00000068   1EFF2FE1           BX       LR
+    163          	case 7:	return &bmYellow_7;
+   \                     ??GetBitmapDigit_8:
+   \   0000006C   ........           LDR      R0,??DataTable3_8
+   \   00000070   1EFF2FE1           BX       LR
+    164          	case 8:	return &bmYellow_8;
+   \                     ??GetBitmapDigit_9:
+   \   00000074   ........           LDR      R0,??DataTable3_9
+   \   00000078   1EFF2FE1           BX       LR
+    165          	case 9:	return &bmYellow_9;
+   \                     ??GetBitmapDigit_10:
+   \   0000007C   ........           LDR      R0,??DataTable3_10
+   \   00000080   1EFF2FE1           BX       LR               ;; return
+    166          	}
+    167          }
+    168          #endif
+    169          
+
+   \                                 In section .text, align 4, keep-with-next
+    170          void _cbChronoCallback(WM_MESSAGE * pMsg)
+    171          {
+   \                     _cbChronoCallback:
+   \   00000000   F0472DE9           PUSH     {R4-R10,LR}
+    172          //	int NCode, Id;
+    173          int offset;
+    174          
+    175          	switch(pMsg->MsgId)
+   \   00000004   001090E5           LDR      R1,[R0, #+0]
+   \   00000008   08D04DE2           SUB      SP,SP,#+8
+   \   0000000C   0B1051E2           SUBS     R1,R1,#+11
+   \   00000010   FC00000A           BEQ      ??_cbChronoCallback_2
+   \   00000014   041051E2           SUBS     R1,R1,#+4
+   \   00000018   0C00000A           BEQ      ??_cbChronoCallback_3
+   \   0000001C   411F51E2           SUBS     R1,R1,#+260
+   \   00000020   1301001A           BNE      ??_cbChronoCallback_4
+    176          	{
+    177          	case WM_TIMER:
+    178          		if (pMsg->Data.v == hScreenTimer)
+   \   00000024   ........           LDR      R4,??DataTable3_11
+   \   00000028   0C0090E5           LDR      R0,[R0, #+12]
+   \   0000002C   102094E5           LDR      R2,[R4, #+16]
+   \   00000030   020050E1           CMP      R0,R2
+   \   00000034   0F01001A           BNE      ??_cbChronoCallback_5
+    179          		{
+    180          #ifdef _WINDOWS
+    181          			WM_RestartTimer(hScreenTimer, GAUGE_SCREEN_REFRESH_TIME * 5);
+    182          #else
+    183          			WM_RestartTimer(hScreenTimer, GAUGE_SCREEN_REFRESH_TIME * 5);
+   \   00000038   7D10A0E3           MOV      R1,#+125
+   \   0000003C   0200A0E1           MOV      R0,R2
+   \   00000040   ........           BL       WM_RestartTimer
+    184          #endif
+    185          			WM_InvalidateWindow(hChronoScreen);
+   \   00000044   0C0094E5           LDR      R0,[R4, #+12]
+   \   00000048   ........           BL       WM_InvalidateWindow
+   \   0000004C   090100EA           B        ??_cbChronoCallback_5
+    186          		}
+    187          		break;
+    188          
+    189          	case WM_PAINT:
+    190          
+    191          #define	XSIZE	200
+    192          #define	YSIZE	120
+    193          #define	XSTART_POS	5
+    194          #define	YSTART_POS	108
+    195          
+    196          #ifdef	VERSION_1
+    197          		if (time++ > 60 * GAUGE_SCREEN_REFRESHES_PER_SECOND)
+    198          			time = 0;
+    199          		offset = 0 - (time * PIXEL_STEP_PER_REFRESH);
+    200          
+    201          		GUI_DrawBitmap(&bmTimeList, XSTART_POS, offset);
+    202          		GUI_DrawBitmap(&bmChronometric_wTrans, 0, 0);
+    203          
+    204          		if (SlideOutVisible())
+    205          			DrawSignalStrength();
+    206          #elif defined VERSION_2
+    207          		if (CS_IsVisible(CHRONOGRAPH_SCREEN) || firsttimethrough)
+    208          		{
+    209          			char *pTimeList, *pScreen;
+    210          			int x, y, xSize;
+    211          
+    212          			firsttimethrough = FALSE;
+    213          			
+    214          			pTimeList = (char *)GUI_MEMDEV_GetDataPtr(timeList);
+    215          			pScreen = (char *)GUI_MEMDEV_GetDataPtr(screen);
+    216          
+    217          			// Calculate offset into ticker image
+    218          			if (time++ > 60 * GAUGE_SCREEN_REFRESHES_PER_SECOND)
+    219          				time = 0;
+    220          			offset = (int)((float)time * PIXEL_STEP_PER_REFRESH);
+    221          
+    222          			// Correct destination address for position of time list on screen
+    223          			pScreen += (YSTART_POS * XSIZE_PHYS * 2) + XSTART_POS;
+    224          
+    225          			//xSize = GUI_MEMDEV_GetXSize(timeList);
+    226          			xSize = XSIZE;
+    227          			pTimeList += offset * xSize;
+    228          
+    229          			// copy visible portion of time ticker tape to the display memory area
+    230          			for (y = 0; y < YSIZE; y++)
+    231          			{
+    232          				for (x = 0; x < xSize; x++)
+    233          				{
+    234          					*pScreen++ = *pTimeList++;
+    235          				}
+    236          				pScreen += (XSIZE_PHYS * 2) - xSize;
+    237          			}
+    238          
+    239          			if (SlideOutVisible())
+    240          				DrawSignalStrength();
+    241          	
+    242          			GUI_MEMDEV_Write(screen);
+    243          			GUI_SelectLCD();
+    244          		}
+    245          #elif defined VERSION_3
+    246          		if (CS_IsVisible(CHRONOGRAPH_SCREEN) || firsttimethrough)
+    247          		{
+    248          			char *pTimeList, *pScreen;
+    249          			int x, y, xSize;
+    250          
+    251          			firsttimethrough = FALSE;
+    252          			
+    253          			pTimeList = (char *)GUI_MEMDEV_GetDataPtr(timeList);
+    254          			pScreen = (char *)GUI_MEMDEV_GetDataPtr(screen);
+    255          
+    256          			// Calculate offset into ticker image
+    257          			if (time++ > 60 * GAUGE_SCREEN_REFRESHES_PER_SECOND)
+    258          				time = 0;
+    259          			offset = (int)((float)time * PIXEL_STEP_PER_REFRESH);
+    260          
+    261          			// Put "fresh" image in buffer
+    262          			GUI_MEMDEV_Select(screen);
+    263          			GUI_DrawBitmap(&bmChronometric_original, 0, 0);
+    264          			GUI_MEMDEV_Select(0);
+    265          
+    266          			// Correct destination address for position of time list on screen
+    267          			pScreen += (YSTART_POS * XSIZE_PHYS * 2) + XSTART_POS;
+    268          
+    269          			//xSize = GUI_MEMDEV_GetXSize(timeList);
+    270          			xSize = XSIZE;
+    271          			pTimeList += offset * xSize;
+    272          
+    273          			// copy visible portion of time ticker tape to the display memory area
+    274          			for (y = 0; y < YSIZE; y++)
+    275          			{
+    276          				for (x = 0; x < xSize; x++)
+    277          				{
+    278          					*pScreen++ &= *pTimeList++;
+    279          				}
+    280          				pScreen += (XSIZE_PHYS * 2) - xSize;
+    281          			}
+    282          
+    283          			if (SlideOutVisible())
+    284          				DrawSignalStrength();
+    285          	
+    286          			GUI_MEMDEV_Write(screen);
+    287          			GUI_SelectLCD();
+    288          		}
+    289          #elif defined VERSION_4
+    290          		if (CS_IsVisible(CHRONOGRAPH_SCREEN) || firsttimethrough)
+    291          		{
+    292          			char *pTimeList, *pScreen;
+    293          			char *pYellowDigitsList;
+    294          			int x, y, xSize;
+    295          
+    296          			firsttimethrough = FALSE;
+    297          			
+    298          			pTimeList = (char *)GUI_MEMDEV_GetDataPtr(timeList);
+    299          			pScreen = (char *)GUI_MEMDEV_GetDataPtr(screen);
+    300          			pYellowDigitsList = (char *)GUI_MEMDEV_GetDataPtr(yellowDigitsList);
+    301          
+    302          			// Calculate offset into ticker image
+    303          			if (time++ > 60 * GAUGE_SCREEN_REFRESHES_PER_SECOND)
+    304          				time = 0;
+    305          			offset = (int)((float)time * PIXEL_STEP_PER_REFRESH);
+    306          
+    307          			// Put "fresh" image in buffer
+    308          			GUI_MEMDEV_Select(screen);
+    309          			GUI_DrawBitmap(&bmChronometric_NoTrans_2, 0, 0);
+    310          			GUI_MEMDEV_Select(0);
+    311          
+    312          			// Correct destination address for position of time list on screen
+    313          			pScreen += (YSTART_POS * XSIZE_PHYS * 2) + XSTART_POS;
+    314          
+    315          			//xSize = GUI_MEMDEV_GetXSize(timeList);
+    316          			xSize = XSIZE;
+    317          			pTimeList += offset * xSize;
+    318          
+    319          			// copy visible portion of time ticker tape to the display memory area
+    320          			for (y = 0; y < YSIZE; y++)
+    321          			{
+    322          				for (x = 0; x < xSize; x++)
+    323          				{
+    324          					*pScreen++ &= *pTimeList++;
+    325          				}
+    326          				pScreen += (XSIZE_PHYS * 2) - xSize;
+    327          			}
+    328          
+    329          			// YELLOW TAPE TICKER
+    330          			// Calculate offset into ticker image
+    331          			if (time2++ > 10 * GAUGE_SCREEN_REFRESHES_PER_SECOND)
+    332          				time2 = 0;
+    333          			offset = (int)((float)time2 * PIXEL_STEP_PER_REFRESH);
+    334          
+    335          
+    336          			// Correct destination address for position of time list on screen
+    337          			pScreen = (char *)GUI_MEMDEV_GetDataPtr(screen);
+    338          			pScreen += (11 * XSIZE_PHYS * 2) + (103 * 2);
+    339          
+    340          			// Calculate offset into yellow list
+    341          			pYellowDigitsList += offset * 80;
+    342          
+    343          			// copy visible portion of yellow digits tape to the display memory area
+    344          			for (y = 0; y < 50; y++)
+    345          			{
+    346          				for (x = 0; x < (40 * 2); x++)
+    347          				{
+    348          					*pScreen++ |= *pYellowDigitsList++;
+    349          				}
+    350          				pScreen += (XSIZE_PHYS * 2) - (40 * 2);
+    351          			}
+    352          
+    353          			if (SlideOutVisible())
+    354          				DrawSignalStrength();
+    355          	
+    356          			GUI_MEMDEV_Write(screen);
+    357          			GUI_SelectLCD();
+    358          		}
+    359          #elif defined VERSION_5
+    360          //		if (CS_IsVisible(CHRONOGRAPH_SCREEN) || firsttimethrough)
+    361          //		{
+    362          //			char *pTimeList, *pScreen, *pScreen2;
+    363          //			char *pYellowDigitsList;
+    364          //			int x, y, xSize;
+    365          //
+    366          //			firsttimethrough = FALSE;
+    367          //			
+    368          //			pTimeList = (char *)GUI_MEMDEV_GetDataPtr(timeList);
+    369          //			pScreen = (char *)GUI_MEMDEV_GetDataPtr(screen);
+    370          //			pScreen2 = (char *)GUI_MEMDEV_GetDataPtr(screen2);
+    371          //			pYellowDigitsList = (char *)GUI_MEMDEV_GetDataPtr(yellowDigitsList);
+    372          //
+    373          //			// Put "fresh" image in buffer
+    374          //			GUI_MEMDEV_Select(screen2);
+    375          //			memcpy((void *)pScreen2, (void *)pScreen, XSIZE_PHYS * YSIZE_PHYS * sizeof(int));
+    376          //	//		GUI_MEMDEV_Select(0);
+    377          //
+    378          //			// Correct destination address for position of time list on screen
+    379          //			pScreen2 += (YSTART_POS * XSIZE_PHYS * 2) + XSTART_POS;
+    380          //
+    381          //			// Calculate offset into ticker image
+    382          //			if (time++ > 60 * GAUGE_SCREEN_REFRESHES_PER_SECOND)
+    383          //				time = 0;
+    384          //			offset = (int)((float)time * PIXEL_STEP_PER_REFRESH);
+    385          //			//xSize = GUI_MEMDEV_GetXSize(timeList);
+    386          //			xSize = XSIZE;
+    387          //			pTimeList += offset * xSize;
+    388          //
+    389          //			// copy visible portion of time ticker tape to the display memory area
+    390          //			for (y = 0; y < YSIZE; y++)
+    391          //			{
+    392          //				for (x = 0; x < xSize; x++)
+    393          //				{
+    394          //					*pScreen2++ &= *pTimeList++;
+    395          //				}
+    396          //				pScreen2 += (XSIZE_PHYS * 2) - xSize;
+    397          //			}
+    398          //
+    399          //			// YELLOW TAPE TICKER
+    400          //			// Calculate offset into ticker image
+    401          //			if (time2++ > 10 * GAUGE_SCREEN_REFRESHES_PER_SECOND)
+    402          //				time2 = 0;
+    403          //			offset = (int)((float)time2 * PIXEL_STEP_PER_REFRESH);
+    404          //
+    405          //			// Correct destination address for position of time list on screen
+    406          //			pScreen2 = (char *)GUI_MEMDEV_GetDataPtr(screen2);
+    407          //			pScreen2 += (11 * XSIZE_PHYS * 2) + (103 * 2);
+    408          //
+    409          //			// Calculate offset into yellow list
+    410          //			pYellowDigitsList += offset * 80;
+    411          //
+    412          //			// copy visible portion of yellow digits tape to the display memory area
+    413          //			for (y = 0; y < 50; y++)
+    414          //			{
+    415          //				for (x = 0; x < (40 * 2); x++)
+    416          //				{
+    417          //					*pScreen2++ |= *pYellowDigitsList++;
+    418          //				}
+    419          //				pScreen2 += (XSIZE_PHYS * 2) - (40 * 2);
+    420          //			}
+    421          //	
+    422          ////			GUI_MEMDEV_Select(screen2);
+    423          //
+    424          //			if (SlideOutVisible())
+    425          //				DrawSignalStrength();
+    426          //
+    427          //			GUI_MEMDEV_Write(screen2);
+    428          //			GUI_SelectLCD();
+    429          //		}
+    430          		if (CS_IsVisible(CHRONOGRAPH_SCREEN) || firsttimethrough)
+   \                     ??_cbChronoCallback_3:
+   \   00000050   ........           LDR      R4,??DataTable3_11
+   \   00000054   0B00A0E3           MOV      R0,#+11
+   \   00000058   ........           BL       CS_IsVisible
+   \   0000005C   000050E3           CMP      R0,#+0
+   \   00000060   2800D405           LDRBEQ   R0,[R4, #+40]
+   \   00000064   00005003           CMPEQ    R0,#+0
+   \   00000068   0201000A           BEQ      ??_cbChronoCallback_5
+    431          		{
+    432          			char *pTimeList, *pScreen;
+    433          			char *pYellowDigitsList;
+    434          			int x, y, xSize;
+    435          			GUI_MEMDEV_Handle mControl;
+    436          
+    437          			firsttimethrough = FALSE;
+   \   0000006C   0000A0E3           MOV      R0,#+0
+   \   00000070   2800C4E5           STRB     R0,[R4, #+40]
+    438          			
+    439          			pTimeList = (char *)GUI_MEMDEV_GetDataPtr(timeList);
+   \   00000074   180094E5           LDR      R0,[R4, #+24]
+   \   00000078   ........           BL       GUI_MEMDEV_GetDataPtr
+   \   0000007C   0070A0E1           MOV      R7,R0
+    440          			pScreen = (char *)GUI_MEMDEV_GetDataPtr(screen);
+   \   00000080   140094E5           LDR      R0,[R4, #+20]
+   \   00000084   ........           BL       GUI_MEMDEV_GetDataPtr
+   \   00000088   0080A0E1           MOV      R8,R0
+    441          			pYellowDigitsList = (char *)GUI_MEMDEV_GetDataPtr(yellowDigitsList);
+   \   0000008C   1C0094E5           LDR      R0,[R4, #+28]
+   \   00000090   ........           BL       GUI_MEMDEV_GetDataPtr
+   \   00000094   0050A0E1           MOV      R5,R0
+    442          
+    443          			// Calculate offset into ticker image
+    444          			if (time++ > 60 * GAUGE_SCREEN_REFRESHES_PER_SECOND)
+   \   00000098   200094E5           LDR      R0,[R4, #+32]
+   \   0000009C   6120A0E3           MOV      R2,#+97
+   \   000000A0   902E82E3           ORR      R2,R2,#0x900
+   \   000000A4   011080E2           ADD      R1,R0,#+1
+   \   000000A8   020050E1           CMP      R0,R2
+    445          				time = 0;
+   \   000000AC   0010A0A3           MOVGE    R1,#+0
+   \   000000B0   201084E5           STR      R1,[R4, #+32]
+    446          			offset = (int)((float)time * PIXEL_STEP_PER_REFRESH);
+   \   000000B4   ........           LDR      R6,??DataTable3_12  ;; 0x3f45a5a6
+   \   000000B8   0100A0E1           MOV      R0,R1
+   \   000000BC   ........           BL       __aeabi_i2f
+   \   000000C0   0610A0E1           MOV      R1,R6
+   \   000000C4   ........           BL       __aeabi_fmul
+   \   000000C8   ........           BL       __aeabi_f2iz
+   \   000000CC   0090A0E1           MOV      R9,R0
+    447          
+    448          			// Put "fresh" image in buffer
+    449          			GUI_MEMDEV_Select(screen);
+   \   000000D0   140094E5           LDR      R0,[R4, #+20]
+   \   000000D4   ........           BL       GUI_MEMDEV_Select
+    450          			GUI_DrawBitmap(&bmChronometric_NoTrans_2, 0, 0);
+   \   000000D8   0020A0E3           MOV      R2,#+0
+   \   000000DC   0010A0E3           MOV      R1,#+0
+   \   000000E0   ........           LDR      R0,??DataTable3_13
+   \   000000E4   ........           BL       GUI_DrawBitmap
+    451          			GUI_MEMDEV_Select(0);
+   \   000000E8   0000A0E3           MOV      R0,#+0
+   \   000000EC   ........           BL       GUI_MEMDEV_Select
+    452          
+    453          
+    454          			// Update tach
+    455          			pChronoGauge->SetValue(GetValue(VEHICLE_RPM).iVal);
+   \   000000F0   3510A0E3           MOV      R1,#+53
+   \   000000F4   0D00A0E1           MOV      R0,SP
+   \   000000F8   ........           BL       GetValue
+   \   000000FC   00009DE5           LDR      R0,[SP, #+0]
+   \   00000100   ........           BL       __aeabi_i2f
+   \   00000104   0010A0E1           MOV      R1,R0
+   \   00000108   000094E5           LDR      R0,[R4, #+0]
+   \   0000010C   ........           BL       _ZN11ChronoGauge8SetValueEf
+    456          			mControl = pChronoGauge->DrawToMemArea();
+   \   00000110   000094E5           LDR      R0,[R4, #+0]
+   \   00000114   ........           BL       _ZN5Gauge13DrawToMemAreaEv
+   \   00000118   00A0A0E1           MOV      R10,R0
+    457          			GUI_MEMDEV_Select(screen);
+   \   0000011C   140094E5           LDR      R0,[R4, #+20]
+   \   00000120   ........           BL       GUI_MEMDEV_Select
+    458          			GUI_MEMDEV_Write(mControl);
+   \   00000124   0A00A0E1           MOV      R0,R10
+   \   00000128   ........           BL       GUI_MEMDEV_Write
+    459          
+    460          
+    461          			// Correct destination address for position of time list on screen
+    462          			pScreen += (YSTART_POS * XSIZE_PHYS * 2) + XSTART_POS;
+   \   0000012C   ........           LDR      R0,??DataTable3_14  ;; 0x19505
+    463          
+    464          			//xSize = GUI_MEMDEV_GetXSize(timeList);
+    465          			xSize = XSIZE;
+    466          			pTimeList += offset * xSize;
+   \   00000130   C810A0E3           MOV      R1,#+200
+   \   00000134   083080E0           ADD      R3,R0,R8
+   \   00000138   917920E0           MLA      R0,R1,R9,R7
+    467          
+    468          			// copy visible portion of time ticker tape to the display memory area
+    469          			for (y = 0; y < YSIZE; y++)
+   \   0000013C   7810A0E3           MOV      R1,#+120
+    470          			{
+    471          				for (x = 0; x < xSize; x++)
+   \                     ??_cbChronoCallback_6:
+   \   00000140   2820A0E3           MOV      R2,#+40
+    472          				{
+    473          					*pScreen++ &= *pTimeList++;
+   \                     ??_cbChronoCallback_7:
+   \   00000144   00C0D3E5           LDRB     R12,[R3, #+0]
+   \   00000148   01E0D0E4           LDRB     LR,[R0], #+1
+    474          				}
+   \   0000014C   012052E2           SUBS     R2,R2,#+1
+   \   00000150   0CC00EE0           AND      R12,LR,R12
+   \   00000154   01C0C3E4           STRB     R12,[R3], #+1
+   \   00000158   00C0D3E5           LDRB     R12,[R3, #+0]
+   \   0000015C   01E0D0E4           LDRB     LR,[R0], #+1
+   \   00000160   0CC00EE0           AND      R12,LR,R12
+   \   00000164   01C0C3E4           STRB     R12,[R3], #+1
+   \   00000168   00C0D3E5           LDRB     R12,[R3, #+0]
+   \   0000016C   01E0D0E4           LDRB     LR,[R0], #+1
+   \   00000170   0CC00EE0           AND      R12,LR,R12
+   \   00000174   01C0C3E4           STRB     R12,[R3], #+1
+   \   00000178   00C0D3E5           LDRB     R12,[R3, #+0]
+   \   0000017C   01E0D0E4           LDRB     LR,[R0], #+1
+   \   00000180   0CC00EE0           AND      R12,LR,R12
+   \   00000184   00C0C3E5           STRB     R12,[R3, #+0]
+   \   00000188   01C083E2           ADD      R12,R3,#+1
+   \   0000018C   00E0DCE5           LDRB     LR,[R12, #+0]
+   \   00000190   0170D0E4           LDRB     R7,[R0], #+1
+   \   00000194   01308CE2           ADD      R3,R12,#+1
+   \   00000198   0EE007E0           AND      LR,R7,LR
+   \   0000019C   00E0CCE5           STRB     LR,[R12, #+0]
+   \   000001A0   E7FFFF1A           BNE      ??_cbChronoCallback_7
+    475          				pScreen += (XSIZE_PHYS * 2) - xSize;
+   \   000001A4   BE3F83E2           ADD      R3,R3,#+760
+    476          			}
+   \   000001A8   011051E2           SUBS     R1,R1,#+1
+   \   000001AC   E3FFFF1A           BNE      ??_cbChronoCallback_6
+    477          
+    478          			// YELLOW TAPE TICKER
+    479          			// Calculate offset into ticker image
+    480          			if (time2++ > 10 * GAUGE_SCREEN_REFRESHES_PER_SECOND)
+   \   000001B0   240094E5           LDR      R0,[R4, #+36]
+   \   000001B4   9120A0E3           MOV      R2,#+145
+   \   000001B8   402F82E3           ORR      R2,R2,#0x100
+   \   000001BC   011080E2           ADD      R1,R0,#+1
+   \   000001C0   020050E1           CMP      R0,R2
+    481          				time2 = 0;
+   \   000001C4   0010A0A3           MOVGE    R1,#+0
+   \   000001C8   241084E5           STR      R1,[R4, #+36]
+    482          			offset = (int)((float)time2 * PIXEL_STEP_PER_REFRESH);
+   \   000001CC   0100A0E1           MOV      R0,R1
+   \   000001D0   ........           BL       __aeabi_i2f
+   \   000001D4   0610A0E1           MOV      R1,R6
+   \   000001D8   ........           BL       __aeabi_fmul
+   \   000001DC   ........           BL       __aeabi_f2iz
+   \   000001E0   0060A0E1           MOV      R6,R0
+    483          
+    484          
+    485          			// Correct destination address for position of time list on screen
+    486          			pScreen = (char *)GUI_MEMDEV_GetDataPtr(screen);
+    487          			pScreen += (11 * XSIZE_PHYS * 2) + (103 * 2);
+   \   000001E4   0E70A0E3           MOV      R7,#+14
+   \   000001E8   A87D87E3           ORR      R7,R7,#0x2A00
+   \   000001EC   140094E5           LDR      R0,[R4, #+20]
+   \   000001F0   ........           BL       GUI_MEMDEV_GetDataPtr
+   \   000001F4   003087E0           ADD      R3,R7,R0
+    488          
+    489          			// Calculate offset into yellow list
+    490          			pYellowDigitsList += offset * 80;
+   \   000001F8   5010A0E3           MOV      R1,#+80
+   \   000001FC   915620E0           MLA      R0,R1,R6,R5
+    491          
+    492          			// copy visible portion of yellow digits tape to the display memory area
+    493          			for (y = 0; y < 50; y++)
+   \   00000200   3210A0E3           MOV      R1,#+50
+    494          			{
+    495          				for (x = 0; x < (40 * 2); x++)
+   \                     ??_cbChronoCallback_8:
+   \   00000204   1020A0E3           MOV      R2,#+16
+    496          				{
+    497          					*pScreen++ |= *pYellowDigitsList++;
+   \                     ??_cbChronoCallback_9:
+   \   00000208   00C0D3E5           LDRB     R12,[R3, #+0]
+   \   0000020C   01E0D0E4           LDRB     LR,[R0], #+1
+    498          				}
+   \   00000210   012052E2           SUBS     R2,R2,#+1
+   \   00000214   0CC08EE1           ORR      R12,LR,R12
+   \   00000218   01C0C3E4           STRB     R12,[R3], #+1
+   \   0000021C   00C0D3E5           LDRB     R12,[R3, #+0]
+   \   00000220   01E0D0E4           LDRB     LR,[R0], #+1
+   \   00000224   0CC08EE1           ORR      R12,LR,R12
+   \   00000228   01C0C3E4           STRB     R12,[R3], #+1
+   \   0000022C   00C0D3E5           LDRB     R12,[R3, #+0]
+   \   00000230   01E0D0E4           LDRB     LR,[R0], #+1
+   \   00000234   0CC08EE1           ORR      R12,LR,R12
+   \   00000238   01C0C3E4           STRB     R12,[R3], #+1
+   \   0000023C   00C0D3E5           LDRB     R12,[R3, #+0]
+   \   00000240   01E0D0E4           LDRB     LR,[R0], #+1
+   \   00000244   0CC08EE1           ORR      R12,LR,R12
+   \   00000248   00C0C3E5           STRB     R12,[R3, #+0]
+   \   0000024C   01C083E2           ADD      R12,R3,#+1
+   \   00000250   00E0DCE5           LDRB     LR,[R12, #+0]
+   \   00000254   0150D0E4           LDRB     R5,[R0], #+1
+   \   00000258   01308CE2           ADD      R3,R12,#+1
+   \   0000025C   0EE085E1           ORR      LR,R5,LR
+   \   00000260   00E0CCE5           STRB     LR,[R12, #+0]
+   \   00000264   E7FFFF1A           BNE      ??_cbChronoCallback_9
+    499          				pScreen += (XSIZE_PHYS * 2) - (40 * 2);
+   \   00000268   DC3F83E2           ADD      R3,R3,#+880
+    500          			}
+   \   0000026C   011051E2           SUBS     R1,R1,#+1
+   \   00000270   E3FFFF1A           BNE      ??_cbChronoCallback_8
+    501          
+    502          			if (SlideOutVisible())
+   \   00000274   ........           BL       SlideOutVisible
+   \   00000278   000050E3           CMP      R0,#+0
+   \   0000027C   0000000A           BEQ      ??_cbChronoCallback_10
+    503          				DrawSignalStrength();
+   \   00000280   ........           BL       DrawSignalStrength
+    504          	
+    505          			// Draw test bitmap yellow digit
+    506          			{
+    507          				//GUI_DrawBitmap(GetBitmapDigit((time / 10) % 10), 98, 8);
+    508          				GUI_DrawBitmap(GetBitmapDigit((time / 10) % 10), 44, 8);
+   \                     ??_cbChronoCallback_10:
+   \   00000284   200094E5           LDR      R0,[R4, #+32]
+   \   00000288   ........           LDR      R1,??DataTable3_15  ;; 0x66666667
+   \   0000028C   0A50A0E3           MOV      R5,#+10
+   \   00000290   9021C1E0           SMULL    R2,R1,R0,R1
+   \   00000294   4101B0E1           ASRS     R0,R1,#+2
+   \   00000298   ........           LDR      R1,??DataTable3_15  ;; 0x66666667
+   \   0000029C   01008042           ADDMI    R0,R0,#+1
+   \   000002A0   9021C1E0           SMULL    R2,R1,R0,R1
+   \   000002A4   4111B0E1           ASRS     R1,R1,#+2
+   \   000002A8   01108142           ADDMI    R1,R1,#+1
+   \   000002AC   950101E0           MUL      R1,R5,R1
+   \   000002B0   010040E0           SUB      R0,R0,R1
+   \   000002B4   010040E2           SUB      R0,R0,#+1
+   \   000002B8   080050E3           CMP      R0,#+8
+   \   000002BC   00F18F90           ADDLS    PC,PC,R0, LSL #+2
+   \                     ??_cbChronoCallback_0:
+   \   000002C0   1A00008A           BHI      ??_cbChronoCallback_11
+   \   000002C4   170000EA           B        ??_cbChronoCallback_12
+   \   000002C8   140000EA           B        ??_cbChronoCallback_13
+   \   000002CC   110000EA           B        ??_cbChronoCallback_14
+   \   000002D0   0E0000EA           B        ??_cbChronoCallback_15
+   \   000002D4   0B0000EA           B        ??_cbChronoCallback_16
+   \   000002D8   080000EA           B        ??_cbChronoCallback_17
+   \   000002DC   050000EA           B        ??_cbChronoCallback_18
+   \   000002E0   020000EA           B        ??_cbChronoCallback_19
+   \   000002E4   FFFFFFEA           B        ??_cbChronoCallback_20
+   \                     ??_cbChronoCallback_20:
+   \   000002E8   ........           LDR      R0,??DataTable3_10
+   \   000002EC   100000EA           B        ??_cbChronoCallback_21
+   \                     ??_cbChronoCallback_19:
+   \   000002F0   ........           LDR      R0,??DataTable3_9
+   \   000002F4   0E0000EA           B        ??_cbChronoCallback_21
+   \                     ??_cbChronoCallback_18:
+   \   000002F8   ........           LDR      R0,??DataTable3_8
+   \   000002FC   0C0000EA           B        ??_cbChronoCallback_21
+   \                     ??_cbChronoCallback_17:
+   \   00000300   ........           LDR      R0,??DataTable3_7
+   \   00000304   0A0000EA           B        ??_cbChronoCallback_21
+   \                     ??_cbChronoCallback_16:
+   \   00000308   ........           LDR      R0,??DataTable3_6
+   \   0000030C   080000EA           B        ??_cbChronoCallback_21
+   \                     ??_cbChronoCallback_15:
+   \   00000310   ........           LDR      R0,??DataTable3_5
+   \   00000314   060000EA           B        ??_cbChronoCallback_21
+   \                     ??_cbChronoCallback_14:
+   \   00000318   ........           LDR      R0,??DataTable3_4
+   \   0000031C   040000EA           B        ??_cbChronoCallback_21
+   \                     ??_cbChronoCallback_13:
+   \   00000320   ........           LDR      R0,??DataTable3_3
+   \   00000324   020000EA           B        ??_cbChronoCallback_21
+   \                     ??_cbChronoCallback_12:
+   \   00000328   ........           LDR      R0,??DataTable3_2
+   \   0000032C   000000EA           B        ??_cbChronoCallback_21
+   \                     ??_cbChronoCallback_11:
+   \   00000330   ........           LDR      R0,??DataTable3_1
+   \                     ??_cbChronoCallback_21:
+   \   00000334   0820A0E3           MOV      R2,#+8
+   \   00000338   2C10A0E3           MOV      R1,#+44
+   \   0000033C   ........           BL       GUI_DrawBitmap
+    509          				GUI_DrawBitmap(GetBitmapDigit((time / 100) % 10), 3, 8);
+   \   00000340   200094E5           LDR      R0,[R4, #+32]
+   \   00000344   ........           LDR      R1,??DataTable3_16  ;; 0x51eb851f
+   \   00000348   9021C1E0           SMULL    R2,R1,R0,R1
+   \   0000034C   C102B0E1           ASRS     R0,R1,#+5
+   \   00000350   ........           LDR      R1,??DataTable3_15  ;; 0x66666667
+   \   00000354   01008042           ADDMI    R0,R0,#+1
+   \   00000358   9021C1E0           SMULL    R2,R1,R0,R1
+   \   0000035C   4111B0E1           ASRS     R1,R1,#+2
+   \   00000360   01108142           ADDMI    R1,R1,#+1
+   \   00000364   950101E0           MUL      R1,R5,R1
+   \   00000368   010040E0           SUB      R0,R0,R1
+   \   0000036C   010040E2           SUB      R0,R0,#+1
+   \   00000370   080050E3           CMP      R0,#+8
+   \   00000374   00F18F90           ADDLS    PC,PC,R0, LSL #+2
+   \                     ??_cbChronoCallback_1:
+   \   00000378   1A00008A           BHI      ??_cbChronoCallback_22
+   \   0000037C   170000EA           B        ??_cbChronoCallback_23
+   \   00000380   140000EA           B        ??_cbChronoCallback_24
+   \   00000384   110000EA           B        ??_cbChronoCallback_25
+   \   00000388   0E0000EA           B        ??_cbChronoCallback_26
+   \   0000038C   0B0000EA           B        ??_cbChronoCallback_27
+   \   00000390   080000EA           B        ??_cbChronoCallback_28
+   \   00000394   050000EA           B        ??_cbChronoCallback_29
+   \   00000398   020000EA           B        ??_cbChronoCallback_30
+   \   0000039C   FFFFFFEA           B        ??_cbChronoCallback_31
+   \                     ??_cbChronoCallback_31:
+   \   000003A0   ........           LDR      R0,??DataTable3_10
+   \   000003A4   100000EA           B        ??_cbChronoCallback_32
+   \                     ??_cbChronoCallback_30:
+   \   000003A8   ........           LDR      R0,??DataTable3_9
+   \   000003AC   0E0000EA           B        ??_cbChronoCallback_32
+   \                     ??_cbChronoCallback_29:
+   \   000003B0   ........           LDR      R0,??DataTable3_8
+   \   000003B4   0C0000EA           B        ??_cbChronoCallback_32
+   \                     ??_cbChronoCallback_28:
+   \   000003B8   ........           LDR      R0,??DataTable3_7
+   \   000003BC   0A0000EA           B        ??_cbChronoCallback_32
+   \                     ??_cbChronoCallback_27:
+   \   000003C0   ........           LDR      R0,??DataTable3_6
+   \   000003C4   080000EA           B        ??_cbChronoCallback_32
+   \                     ??_cbChronoCallback_26:
+   \   000003C8   ........           LDR      R0,??DataTable3_5
+   \   000003CC   060000EA           B        ??_cbChronoCallback_32
+   \                     ??_cbChronoCallback_25:
+   \   000003D0   ........           LDR      R0,??DataTable3_4
+   \   000003D4   040000EA           B        ??_cbChronoCallback_32
+   \                     ??_cbChronoCallback_24:
+   \   000003D8   ........           LDR      R0,??DataTable3_3
+   \   000003DC   020000EA           B        ??_cbChronoCallback_32
+   \                     ??_cbChronoCallback_23:
+   \   000003E0   ........           LDR      R0,??DataTable3_2
+   \   000003E4   000000EA           B        ??_cbChronoCallback_32
+   \                     ??_cbChronoCallback_22:
+   \   000003E8   ........           LDR      R0,??DataTable3_1
+    510          			}
+   \                     ??_cbChronoCallback_32:
+   \   000003EC   0820A0E3           MOV      R2,#+8
+   \   000003F0   0310A0E3           MOV      R1,#+3
+   \   000003F4   ........           BL       GUI_DrawBitmap
+    511          
+    512          
+    513          			GUI_MEMDEV_CopyToLCD(screen);
+   \   000003F8   140094E5           LDR      R0,[R4, #+20]
+   \   000003FC   ........           BL       GUI_MEMDEV_CopyToLCD
+    514          	//		GUI_MEMDEV_Write(screen);
+    515          			GUI_SelectLCD();
+   \   00000400   ........           BL       GUI_SelectLCD
+   \   00000404   1B0000EA           B        ??_cbChronoCallback_5
+    516          		}
+    517          #endif
+    518          		break;
+    519          
+    520          	case WM_DELETE:
+    521          #ifdef	VERSION_2
+    522          		GUI_MEMDEV_Delete(screen);
+    523          		GUI_MEMDEV_Delete(timeList);
+    524          #elif defined	VERSION_3
+    525          		GUI_MEMDEV_Delete(screen);
+    526          		GUI_MEMDEV_Delete(timeList);
+    527          #elif defined	VERSION_4
+    528          		GUI_MEMDEV_Delete(screen);
+    529          		GUI_MEMDEV_Delete(timeList);
+    530          		GUI_MEMDEV_Delete(yellowDigitsList);
+    531          #elif defined	VERSION_5
+    532          		//GUI_MEMDEV_Delete(screen);
+    533          		//GUI_MEMDEV_Delete(screen2);
+    534          		//GUI_MEMDEV_Delete(timeList);
+    535          		//GUI_MEMDEV_Delete(yellowDigitsList);
+    536          		GUI_MEMDEV_Delete(screen);
+   \                     ??_cbChronoCallback_2:
+   \   00000408   ........           LDR      R4,??DataTable3_11
+   \   0000040C   140094E5           LDR      R0,[R4, #+20]
+   \   00000410   ........           BL       GUI_MEMDEV_Delete
+    537          		GUI_MEMDEV_Delete(timeList);
+   \   00000414   180094E5           LDR      R0,[R4, #+24]
+   \   00000418   ........           BL       GUI_MEMDEV_Delete
+    538          		GUI_MEMDEV_Delete(yellowDigitsList);
+   \   0000041C   1C0094E5           LDR      R0,[R4, #+28]
+   \   00000420   ........           BL       GUI_MEMDEV_Delete
+    539          
+    540          		if (pYellow)
+   \   00000424   040094E5           LDR      R0,[R4, #+4]
+   \   00000428   000050E3           CMP      R0,#+0
+   \   0000042C   0200000A           BEQ      ??_cbChronoCallback_33
+    541          		{
+    542          			delete pYellow;
+   \   00000430   ........           BL       _ZdlPv
+    543          			pYellow = 0;
+   \   00000434   0000A0E3           MOV      R0,#+0
+   \   00000438   040084E5           STR      R0,[R4, #+4]
+    544          		}
+    545          		if (pRed)
+   \                     ??_cbChronoCallback_33:
+   \   0000043C   080094E5           LDR      R0,[R4, #+8]
+   \   00000440   000050E3           CMP      R0,#+0
+   \   00000444   0200000A           BEQ      ??_cbChronoCallback_34
+    546          		{
+    547          			delete pRed;
+   \   00000448   ........           BL       _ZdlPv
+    548          			pRed = 0;
+   \   0000044C   0000A0E3           MOV      R0,#+0
+   \   00000450   080084E5           STR      R0,[R4, #+8]
+    549          		}
+    550          		if (pChronoGauge)
+   \                     ??_cbChronoCallback_34:
+   \   00000454   000094E5           LDR      R0,[R4, #+0]
+   \   00000458   000050E3           CMP      R0,#+0
+   \   0000045C   0500000A           BEQ      ??_cbChronoCallback_5
+    551          		{
+    552          			delete pChronoGauge;
+   \   00000460   ........           BL       _ZN11ChronoGaugeD1Ev
+   \   00000464   ........           BL       _ZdlPv
+    553          			pChronoGauge = 0;
+   \   00000468   0000A0E3           MOV      R0,#+0
+   \   0000046C   000084E5           STR      R0,[R4, #+0]
+   \   00000470   000000EA           B        ??_cbChronoCallback_5
+    554          		}
+    555          #endif
+    556          		break;
+    557          
+    558          	default:
+    559          		  WM_DefaultProc(pMsg);
+   \                     ??_cbChronoCallback_4:
+   \   00000474   ........           BL       WM_DefaultProc
+    560          	};
+    561          }
+   \                     ??_cbChronoCallback_5:
+   \   00000478   08D08DE2           ADD      SP,SP,#+8        ;; stack cleaning
+   \   0000047C   F087BDE8           POP      {R4-R10,PC}      ;; return
+    562          //#define	LAP_TIME_RIGHT	210
+    563          
+    564          /*********************************************************************
+    565          *
+    566          *       Chrono Screen
+    567          */
+
+   \                                 In section .text, align 4, keep-with-next
+    568          WM_HWIN DisplayChronoScreen(WM_HWIN hParent)
+    569          {
+   \                     DisplayChronoScreen:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0050A0E1           MOV      R5,R0
+   \   00000008   38D04DE2           SUB      SP,SP,#+56
+    570          	//if (vehicleData.tach.greenStart != 0)
+    571          	//	pGreen = new Alarm(true, vehicleData.tach.greenStart, vehicleData.tach.upperYellowStart, GUI_GREEN, GUI_DARKGREEN, NORMAL, NULL, NULL);
+    572          	//else pGreen = 0;
+    573          #ifdef VERSION_5
+    574          	pYellow = new Alarm(true, vehicleData.tach.upperYellowStart, vehicleData.tach.upperRedStart, GUI_YELLOW, GUI_DARKYELLOW, NORMAL, NULL, NULL);
+   \   0000000C   2000A0E3           MOV      R0,#+32
+   \   00000010   ........           BL       _Znwj
+   \   00000014   0040B0E1           MOVS     R4,R0
+   \   00000018   1600000A           BEQ      ??DisplayChronoScreen_0
+   \   0000001C   0000A0E3           MOV      R0,#+0
+   \   00000020   10008DE5           STR      R0,[SP, #+16]
+   \   00000024   0C008DE5           STR      R0,[SP, #+12]
+   \   00000028   0100A0E3           MOV      R0,#+1
+   \   0000002C   08008DE5           STR      R0,[SP, #+8]
+   \   00000030   8000A0E3           MOV      R0,#+128
+   \   00000034   800C80E3           ORR      R0,R0,#0x8000
+   \   00000038   04008DE5           STR      R0,[SP, #+4]
+   \   0000003C   FF00A0E3           MOV      R0,#+255
+   \   00000040   ........           LDR      R6,??DataTable3_17
+   \   00000044   FF0C80E3           ORR      R0,R0,#0xFF00
+   \   00000048   00008DE5           STR      R0,[SP, #+0]
+   \   0000004C   240096E5           LDR      R0,[R6, #+36]
+   \   00000050   ........           BL       __aeabi_i2f
+   \   00000054   0070A0E1           MOV      R7,R0
+   \   00000058   200096E5           LDR      R0,[R6, #+32]
+   \   0000005C   ........           BL       __aeabi_i2f
+   \   00000060   0020A0E1           MOV      R2,R0
+   \   00000064   0730A0E1           MOV      R3,R7
+   \   00000068   0110A0E3           MOV      R1,#+1
+   \   0000006C   0400A0E1           MOV      R0,R4
+   \   00000070   ........           BL       _ZN5AlarmC1Ebffmm9AlarmTypePS_S1_
+   \   00000074   000000EA           B        ??DisplayChronoScreen_1
+   \                     ??DisplayChronoScreen_0:
+   \   00000078   0000A0E3           MOV      R0,#+0
+   \                     ??DisplayChronoScreen_1:
+   \   0000007C   ........           LDR      R4,??DataTable3_11
+   \   00000080   040084E5           STR      R0,[R4, #+4]
+    575          	pRed = new Alarm(true, vehicleData.tach.upperRedStart, CalculateScaleTop(vehicleData.tach.scaleEnd), GUI_RED, GUI_DARKRED, HIGH, pYellow, NULL);
+   \   00000084   2000A0E3           MOV      R0,#+32
+   \   00000088   ........           BL       _Znwj
+   \   0000008C   0070B0E1           MOVS     R7,R0
+   \   00000090   1600000A           BEQ      ??DisplayChronoScreen_2
+   \   00000094   ........           LDR      R6,??DataTable3_17
+   \   00000098   140096E5           LDR      R0,[R6, #+20]
+   \   0000009C   ........           BL       CalculateScaleTop
+   \   000000A0   0010A0E3           MOV      R1,#+0
+   \   000000A4   10108DE5           STR      R1,[SP, #+16]
+   \   000000A8   041094E5           LDR      R1,[R4, #+4]
+   \   000000AC   0C108DE5           STR      R1,[SP, #+12]
+   \   000000B0   0310A0E3           MOV      R1,#+3
+   \   000000B4   08108DE5           STR      R1,[SP, #+8]
+   \   000000B8   8010A0E3           MOV      R1,#+128
+   \   000000BC   04108DE5           STR      R1,[SP, #+4]
+   \   000000C0   FF10A0E3           MOV      R1,#+255
+   \   000000C4   00108DE5           STR      R1,[SP, #+0]
+   \   000000C8   ........           BL       __aeabi_i2f
+   \   000000CC   0080A0E1           MOV      R8,R0
+   \   000000D0   240096E5           LDR      R0,[R6, #+36]
+   \   000000D4   ........           BL       __aeabi_i2f
+   \   000000D8   0020A0E1           MOV      R2,R0
+   \   000000DC   0830A0E1           MOV      R3,R8
+   \   000000E0   0110A0E3           MOV      R1,#+1
+   \   000000E4   0700A0E1           MOV      R0,R7
+   \   000000E8   ........           BL       _ZN5AlarmC1Ebffmm9AlarmTypePS_S1_
+   \   000000EC   000000EA           B        ??DisplayChronoScreen_3
+   \                     ??DisplayChronoScreen_2:
+   \   000000F0   0000A0E3           MOV      R0,#+0
+   \                     ??DisplayChronoScreen_3:
+   \   000000F4   080084E5           STR      R0,[R4, #+8]
+    576          #endif
+    577          	firsttimethrough = true;
+   \   000000F8   0100A0E3           MOV      R0,#+1
+   \   000000FC   2800C4E5           STRB     R0,[R4, #+40]
+    578          
+    579          #ifdef	VERSION_1
+    580          	if ((hChronoScreen = WM_CreateWindowAsChild(0, 0, XSIZE_PHYS, YSIZE_PHYS, hParent, WM_CF_SHOW | WM_CF_MEMDEV, _cbChronoCallback, 0)) <= 0)
+    581          #elif defined VERSION_2
+    582          	if ((hChronoScreen = WM_CreateWindowAsChild(0, 0, XSIZE_PHYS, YSIZE_PHYS, hParent, WM_CF_SHOW, _cbChronoCallback, 0)) <= 0)
+    583          #elif defined VERSION_3
+    584          	if ((hChronoScreen = WM_CreateWindowAsChild(0, 0, XSIZE_PHYS, YSIZE_PHYS, hParent, WM_CF_SHOW, _cbChronoCallback, 0)) <= 0)
+    585          #elif defined VERSION_4
+    586          	if ((hChronoScreen = WM_CreateWindowAsChild(0, 0, XSIZE_PHYS, YSIZE_PHYS, hParent, WM_CF_SHOW, _cbChronoCallback, 0)) <= 0)
+    587          #elif defined VERSION_5
+    588          	if ((hChronoScreen = WM_CreateWindowAsChild(0, 0, XSIZE_PHYS, YSIZE_PHYS, hParent, WM_CF_SHOW, _cbChronoCallback, 0)) <= 0)
+   \   00000100   0000A0E3           MOV      R0,#+0
+   \   00000104   0C008DE5           STR      R0,[SP, #+12]
+   \   00000108   ........           LDR      R0,??DataTable3_18
+   \   0000010C   00508DE5           STR      R5,[SP, #+0]
+   \   00000110   08008DE5           STR      R0,[SP, #+8]
+   \   00000114   0200A0E3           MOV      R0,#+2
+   \   00000118   04008DE5           STR      R0,[SP, #+4]
+   \   0000011C   443FA0E3           MOV      R3,#+272
+   \   00000120   782FA0E3           MOV      R2,#+480
+   \   00000124   0010A0E3           MOV      R1,#+0
+   \   00000128   0000A0E3           MOV      R0,#+0
+   \   0000012C   ........           BL       WM_CreateWindowAsChild
+   \   00000130   0C0084E5           STR      R0,[R4, #+12]
+   \   00000134   010050E3           CMP      R0,#+1
+   \   00000138   000000AA           BGE      ??DisplayChronoScreen_4
+    589          		SystemError();
+   \   0000013C   ........           BL       SystemError
+    590          
+    591          	if ((pChronoGauge = new ChronoGauge(145, 0, 136, 0, CalculateScaleTop(vehicleData.tach.scaleEnd), "", "", "", pRed, 1000, 500, 0, 1000, false, hChronoScreen, &bmDefaultGauge)) <= 0)
+   \                     ??DisplayChronoScreen_4:
+   \   00000140   410FA0E3           MOV      R0,#+260
+   \   00000144   ........           BL       _Znwj
+   \   00000148   0050B0E1           MOVS     R5,R0
+   \   0000014C   2400000A           BEQ      ??DisplayChronoScreen_5
+   \   00000150   ........           LDR      R0,??DataTable3_17
+   \   00000154   140090E5           LDR      R0,[R0, #+20]
+   \   00000158   ........           BL       CalculateScaleTop
+   \   0000015C   ........           LDR      R2,??DataTable3_19
+   \   00000160   ........           ADR      R1,??DataTable3  ;; ""
+   \   00000164   30208DE5           STR      R2,[SP, #+48]
+   \   00000168   0C2094E5           LDR      R2,[R4, #+12]
+   \   0000016C   10108DE5           STR      R1,[SP, #+16]
+   \   00000170   2C208DE5           STR      R2,[SP, #+44]
+   \   00000174   0020A0E3           MOV      R2,#+0
+   \   00000178   28208DE5           STR      R2,[SP, #+40]
+   \   0000017C   FA2FA0E3           MOV      R2,#+1000
+   \   00000180   24208DE5           STR      R2,[SP, #+36]
+   \   00000184   0020A0E3           MOV      R2,#+0
+   \   00000188   20208DE5           STR      R2,[SP, #+32]
+   \   0000018C   4324A0E3           MOV      R2,#+1124073472
+   \   00000190   FA2882E3           ORR      R2,R2,#0xFA0000
+   \   00000194   1C208DE5           STR      R2,[SP, #+28]
+   \   00000198   802882E2           ADD      R2,R2,#+8388608
+   \   0000019C   18208DE5           STR      R2,[SP, #+24]
+   \   000001A0   082094E5           LDR      R2,[R4, #+8]
+   \   000001A4   0C108DE5           STR      R1,[SP, #+12]
+   \   000001A8   14208DE5           STR      R2,[SP, #+20]
+   \   000001AC   08108DE5           STR      R1,[SP, #+8]
+   \   000001B0   ........           BL       __aeabi_i2f
+   \   000001B4   04008DE5           STR      R0,[SP, #+4]
+   \   000001B8   0000A0E3           MOV      R0,#+0
+   \   000001BC   00008DE5           STR      R0,[SP, #+0]
+   \   000001C0   8830A0E3           MOV      R3,#+136
+   \   000001C4   0020A0E3           MOV      R2,#+0
+   \   000001C8   9110A0E3           MOV      R1,#+145
+   \   000001CC   0500A0E1           MOV      R0,R5
+   \   000001D0   ........           BL       _ZN11ChronoGaugeC1EiiiffPcS0_S0_P5AlarmffiiclPK10GUI_BITMAP
+   \   000001D4   000084E5           STR      R0,[R4, #+0]
+   \   000001D8   000050E3           CMP      R0,#+0
+   \   000001DC   0300001A           BNE      ??DisplayChronoScreen_6
+   \   000001E0   010000EA           B        ??DisplayChronoScreen_7
+   \                     ??DisplayChronoScreen_5:
+   \   000001E4   0000A0E3           MOV      R0,#+0
+   \   000001E8   000084E5           STR      R0,[R4, #+0]
+    592          #endif
+    593          		SystemError();
+   \                     ??DisplayChronoScreen_7:
+   \   000001EC   ........           BL       SystemError
+    594          
+    595          	//if (selectedRaceMode == ROADRACE_MODE)
+    596          	//{
+    597          	//	if ((pSpeed = new DigitalStringOutput(50, 5, 140, 70, Left, hChronoScreen, GUI_FontD48, GUI_WHITE)) <= 0)
+    598          	//		SystemError();
+    599          
+    600          	//	if ((pLap = new DigitalStringOutput(80, 113, 65, 40, Left, hChronoScreen, GUI_FontD32, GUI_WHITE)) <= 0)
+    601          	//		SystemError();
+    602          
+    603          	//	if ((pLapTime = new DigitalStringOutput(0, 160, 210, 50, Left, hChronoScreen, GUI_FontD48, GUI_WHITE)) <= 0)
+    604          	//		SystemError();
+    605          
+    606          	//	if ((pPredictiveLap = new PredictiveLapTimer(30, 220, 207, 50, GetPredictiveScale(), -GetPredictiveScale(), hChronoScreen)) <= 0)
+    607          	//		SystemError();
+    608          	//}
+    609          	//else if ((pSpeed = new DigitalStringOutput(50, 10, 140, 70, Left, hChronoScreen, GUI_FontD48, GUI_WHITE)) <= 0)
+    610          	//	SystemError();
+    611          
+    612          	//WM_InvalidateWindow(hChronoScreen);
+    613          
+    614          	hScreenTimer = WM_CreateTimer(hChronoScreen, 0, GAUGE_SCREEN_REFRESH_TIME, 0);
+   \                     ??DisplayChronoScreen_6:
+   \   000001F0   0030A0E3           MOV      R3,#+0
+   \   000001F4   1920A0E3           MOV      R2,#+25
+   \   000001F8   0010A0E3           MOV      R1,#+0
+   \   000001FC   0C0094E5           LDR      R0,[R4, #+12]
+   \   00000200   ........           BL       WM_CreateTimer
+   \   00000204   100084E5           STR      R0,[R4, #+16]
+    615          
+    616          	// create a memory area to hold the lap time strip
+    617          
+    618          	//mem = GUI_MEMDEV_Create(0, 0, 100, SIZE_OF_TIME_STRIP_IN_PIXELS);
+    619          #ifdef	VERSION_2
+    620          	timeList = GUI_MEMDEV_Create(0, 0, 100, 2100);
+    621          	GUI_MEMDEV_Select(timeList);
+    622          	GUI_DrawBitmap(&bmTimeList, 0, 0);
+    623          
+    624          	screen = GUI_MEMDEV_Create(0, 0, XSIZE_PHYS, YSIZE_PHYS);
+    625          	GUI_MEMDEV_Select(screen);
+    626          	GUI_DrawBitmap(&bmChronometric_NoTrans, 0, 0);
+    627          
+    628          	GUI_MEMDEV_Select(0);
+    629          #elif defined	VERSION_3
+    630          	timeList = GUI_MEMDEV_Create(0, 0, 100, 2100);
+    631          	GUI_MEMDEV_Select(timeList);
+    632          	GUI_DrawBitmap(&bmTimeList, 0, 0);
+    633          
+    634          	screen = GUI_MEMDEV_Create(0, 0, XSIZE_PHYS, YSIZE_PHYS);
+    635          	//GUI_MEMDEV_Select(screen);
+    636          	//GUI_DrawBitmap(&bmChronometric_NoTrans, 0, 0);
+    637          
+    638          	GUI_MEMDEV_Select(0);
+    639          #elif defined	VERSION_4
+    640          	timeList = GUI_MEMDEV_Create(0, 0, 100, 2100);
+    641          	GUI_MEMDEV_Select(timeList);
+    642          	GUI_DrawBitmap(&bmTimeList, 0, 0);
+    643          
+    644          	yellowDigitsList = GUI_MEMDEV_Create(0, 0, 40, 442);
+    645          	GUI_MEMDEV_Select(yellowDigitsList);
+    646          	GUI_DrawBitmap(&bmYellowDigits, 0, 0);
+    647          
+    648          	screen = GUI_MEMDEV_Create(0, 0, XSIZE_PHYS, YSIZE_PHYS);
+    649          	//GUI_MEMDEV_Select(screen);
+    650          	//GUI_DrawBitmap(&bmChronometric_NoTrans_2, 0, 0);
+    651          
+    652          	GUI_MEMDEV_Select(0);
+    653          #elif defined	VERSION_5
+    654          	//timeList = GUI_MEMDEV_Create(0, 0, 100, 2100);
+    655          	//GUI_MEMDEV_Select(timeList);
+    656          	//GUI_DrawBitmap(&bmTimeList, 0, 0);
+    657          
+    658          	//yellowDigitsList = GUI_MEMDEV_Create(0, 0, 40, 442);
+    659          	//GUI_MEMDEV_Select(yellowDigitsList);
+    660          	//GUI_DrawBitmap(&bmYellowDigits, 0, 0);
+    661          
+    662          	//screen = GUI_MEMDEV_Create(0, 0, XSIZE_PHYS, YSIZE_PHYS);
+    663          	//GUI_MEMDEV_Select(screen);
+    664          	//GUI_DrawBitmap(&bmChronometric_NoTrans_2, 0, 0);
+    665          
+    666          	//screen2 = GUI_MEMDEV_Create(0, 0, XSIZE_PHYS, YSIZE_PHYS);
+    667          	//GUI_MEMDEV_Select(0);
+    668          	timeList = GUI_MEMDEV_Create(0, 0, 100, 2100);
+   \   00000208   3430A0E3           MOV      R3,#+52
+   \   0000020C   803E83E3           ORR      R3,R3,#0x800
+   \   00000210   6420A0E3           MOV      R2,#+100
+   \   00000214   0010A0E3           MOV      R1,#+0
+   \   00000218   0000A0E3           MOV      R0,#+0
+   \   0000021C   ........           BL       GUI_MEMDEV_Create
+   \   00000220   180084E5           STR      R0,[R4, #+24]
+    669          	GUI_MEMDEV_Select(timeList);
+   \   00000224   ........           BL       GUI_MEMDEV_Select
+    670          	GUI_DrawBitmap(&bmTimeList, 0, 0);
+   \   00000228   0020A0E3           MOV      R2,#+0
+   \   0000022C   0010A0E3           MOV      R1,#+0
+   \   00000230   ........           LDR      R0,??DataTable3_20
+   \   00000234   ........           BL       GUI_DrawBitmap
+    671          
+    672          	yellowDigitsList = GUI_MEMDEV_Create(0, 0, 40, 442);
+   \   00000238   BA30A0E3           MOV      R3,#+186
+   \   0000023C   403F83E3           ORR      R3,R3,#0x100
+   \   00000240   2820A0E3           MOV      R2,#+40
+   \   00000244   0010A0E3           MOV      R1,#+0
+   \   00000248   0000A0E3           MOV      R0,#+0
+   \   0000024C   ........           BL       GUI_MEMDEV_Create
+   \   00000250   1C0084E5           STR      R0,[R4, #+28]
+    673          	GUI_MEMDEV_Select(yellowDigitsList);
+   \   00000254   ........           BL       GUI_MEMDEV_Select
+    674          	GUI_DrawBitmap(&bmYellowDigits, 0, 0);
+   \   00000258   0020A0E3           MOV      R2,#+0
+   \   0000025C   0010A0E3           MOV      R1,#+0
+   \   00000260   ........           LDR      R0,??DataTable3_21
+   \   00000264   ........           BL       GUI_DrawBitmap
+    675          
+    676          	screen = GUI_MEMDEV_Create(0, 0, XSIZE_PHYS, YSIZE_PHYS);
+   \   00000268   443FA0E3           MOV      R3,#+272
+   \   0000026C   782FA0E3           MOV      R2,#+480
+   \   00000270   0010A0E3           MOV      R1,#+0
+   \   00000274   0000A0E3           MOV      R0,#+0
+   \   00000278   ........           BL       GUI_MEMDEV_Create
+   \   0000027C   140084E5           STR      R0,[R4, #+20]
+    677          	//GUI_MEMDEV_Select(screen);
+    678          	//GUI_DrawBitmap(&bmChronometric_NoTrans_2, 0, 0);
+    679          
+    680          	GUI_MEMDEV_Select(0);
+   \   00000280   0000A0E3           MOV      R0,#+0
+   \   00000284   ........           BL       GUI_MEMDEV_Select
+    681          #endif
+    682          
+    683          	return hChronoScreen;
+   \   00000288   0C0094E5           LDR      R0,[R4, #+12]
+   \   0000028C   38D08DE2           ADD      SP,SP,#+56
+   \   00000290   F081BDE8           POP      {R4-R8,PC}       ;; return
+    684          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3:
+   \   00000000   00000000           DC8      "",0x0,0x0,0x0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_1:
+   \   00000000   ........           DC32     bmYellow_0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_2:
+   \   00000000   ........           DC32     bmYellow_1
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_3:
+   \   00000000   ........           DC32     bmYellow_2
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_4:
+   \   00000000   ........           DC32     bmYellow_3
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_5:
+   \   00000000   ........           DC32     bmYellow_4
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_6:
+   \   00000000   ........           DC32     bmYellow_5
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_7:
+   \   00000000   ........           DC32     bmYellow_6
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_8:
+   \   00000000   ........           DC32     bmYellow_7
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_9:
+   \   00000000   ........           DC32     bmYellow_8
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_10:
+   \   00000000   ........           DC32     bmYellow_9
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_11:
+   \   00000000   ........           DC32     pChronoGauge
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_12:
+   \   00000000   A6A5453F           DC32     0x3f45a5a6
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_13:
+   \   00000000   ........           DC32     bmChronometric_NoTrans_2
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_14:
+   \   00000000   05950100           DC32     0x19505
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_15:
+   \   00000000   67666666           DC32     0x66666667
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_16:
+   \   00000000   1F85EB51           DC32     0x51eb851f
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_17:
+   \   00000000   ........           DC32     vehicleData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_18:
+   \   00000000   ........           DC32     _cbChronoCallback
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_19:
+   \   00000000   ........           DC32     bmDefaultGauge
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_20:
+   \   00000000   ........           DC32     bmTimeList
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_21:
+   \   00000000   ........           DC32     bmYellowDigits
+
+   \                                 In section .rodata, align 1, keep-with-next
+   \                     `?<Constant "">`:
+   \   00000000                      ; Initializer data, 1 bytes
+   \   00000000   00                 DC8 0
+    685          
+    686          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function            .cstack
+     --------            -------
+     DisplayChronoScreen     80
+     GetBitmapDigit(int)      0
+     _cbChronoCallback       40
+
+
+   Section sizes:
+
+     Function/Label      Bytes
+     --------------      -----
+     pChronoGauge          41
+     pYellow
+     pRed
+     hChronoScreen
+     hScreenTimer
+     screen
+     timeList
+     yellowDigitsList
+     time
+     time2
+     firsttimethrough
+     GetBitmapDigit(int)  132
+     _cbChronoCallback   1152
+     DisplayChronoScreen  660
+     ??DataTable3           4
+     ??DataTable3_1         4
+     ??DataTable3_2         4
+     ??DataTable3_3         4
+     ??DataTable3_4         4
+     ??DataTable3_5         4
+     ??DataTable3_6         4
+     ??DataTable3_7         4
+     ??DataTable3_8         4
+     ??DataTable3_9         4
+     ??DataTable3_10        4
+     ??DataTable3_11        4
+     ??DataTable3_12        4
+     ??DataTable3_13        4
+     ??DataTable3_14        4
+     ??DataTable3_15        4
+     ??DataTable3_16        4
+     ??DataTable3_17        4
+     ??DataTable3_18        4
+     ??DataTable3_19        4
+     ??DataTable3_20        4
+     ??DataTable3_21        4
+     ?<Constant "">         1
+
+ 
+    41 bytes in section .bss
+     1 byte  in section .rodata
+ 2 032 bytes in section .text
+ 
+ 2 032 bytes of CODE  memory
+     1 byte  of CONST memory
+    41 bytes of DATA  memory
+
+Errors: none
+Warnings: none

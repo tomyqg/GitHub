@@ -1,0 +1,290 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:10:40 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\DUII\ProfilerScreen.c                            #
+#    Command line =  C:\DUII\DUII\ProfilerScreen.c -D DEBUG=1 -D              #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\ProfilerScreen.lst         #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\ProfilerScreen.o            #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\DUII\ProfilerScreen.c
+      1          
+      2          #ifdef PROFILER
+      3          
+      4          #include <stdio.h>
+      5          #include <stdlib.h>
+      6          #include <string.h>
+      7          #include "DUII.h"
+      8          #include "GUI.h"
+      9          #include "GeneralConfig.h"
+     10          #include "commondefs.h"
+     11          #include "ConfigScreens.h"
+     12          #include "ProfilerScreen.h"
+     13          #include "RunningGauges.h"
+     14          #include "DataHandler.h"
+     15          #ifndef _WINDOWS
+     16          #include "profiler.h"
+     17          #include "datadecode.h"
+     18          #include "adc.h"
+     19          #endif
+     20          #include "SFScreens.h"
+     21          #include "LEDHandler.h"
+     22          
+     23          /*********************************************************************
+     24          *
+     25          *       External data and code
+     26          *
+     27          **********************************************************************
+     28          */
+     29          extern GUI_CONST_STORAGE GUI_BITMAP bmthreewayarrow;
+     30          extern char lockupSemaphore;
+     31          
+     32          /*********************************************************************
+     33          *
+     34          *       Public code
+     35          *
+     36          **********************************************************************
+     37          */
+     38          
+     39          /*********************************************************************
+     40          *
+     41          *       Local Prototypes
+     42          *
+     43          **********************************************************************
+     44          */
+     45          
+     46          /*********************************************************************
+     47          *
+     48          *       Local Defines and Constants
+     49          *
+     50          **********************************************************************
+     51          */
+     52          
+     53          /*********************************************************************
+     54          *
+     55          *       Local Variables
+     56          *
+     57          **********************************************************************
+     58          */
+     59          #ifdef _WINDOWS
+     60          static WM_HTIMER hScreenTimer;
+     61          static char firsttimethrough;
+     62          static GUI_MEMDEV_Handle memGPS;
+     63          #endif
+     64          static WM_HTIMER hTestScreenTimer;
+     65          static WM_HWIN hProfiler;
+     66          static char testfirsttimethrough;
+     67          static GUI_MEMDEV_Handle memTest;
+     68          
+     69          #define	TOP_LINE			40
+     70          #define	COLUMN_ONE			5
+     71          #define	COLUMN_TWO			130
+     72          #define	COLUMN_THREE		300
+     73          #define	COLUMN_FOUR			415
+     74          #define	LINE_GAP			30
+     75          
+     76          /*********************************************************************
+     77          *
+     78          *       GPS Info Screen Callback
+     79          */
+     80          void ProfilerCallback(WM_MESSAGE * pMsg)
+     81          {
+     82          	switch(pMsg->MsgId)
+     83          	{
+     84          	case WM_TIMER:
+     85          		if (pMsg->Data.v == hTestScreenTimer)
+     86          		{
+     87          			WM_RestartTimer(hTestScreenTimer, GAUGE_SCREEN_REFRESH_TIME);
+     88          			WM_InvalidateWindow(hProfiler);
+     89          		}
+     90          		break;
+     91          
+     92          	case WM_PAINT:
+     93          		if (CS_IsVisible(PROFILER_SCREEN) || testfirsttimethrough)
+     94          		{
+     95          			char scratch[40];
+     96          			char i;
+     97          
+     98          			if (lockupSemaphore)			// If main has not run since our last paint - exit!
+     99          				break;
+    100          			else lockupSemaphore = true;
+    101          			
+    102          			testfirsttimethrough = FALSE;
+    103          
+    104          			GUI_MEMDEV_Select(memTest);
+    105          			GUI_Clear();
+    106          			GUI_SetColor(GUI_WHITE);
+    107          			GUI_SetFont(&GUI_Font24_ASCII);
+    108          
+    109          			// Draw screen title
+    110          			GUI_DispStringHCenterAt("Task Profiler", XSIZE_PHYS/2, 5);
+    111          
+    112          			for (i = 0; i < NUMBER_OF_TASKS; i++)
+    113          			{
+    114          				sprintf(scratch, "%s", taskProfile[i].profileName);
+    115          				GUI_DispStringAt(scratch, COLUMN_ONE, TOP_LINE + (LINE_GAP * i));
+    116          
+    117          				sprintf(scratch, "Starts: %d", taskProfile[i].numberOfStarts);
+    118          				GUI_DispStringAt(scratch, COLUMN_TWO, TOP_LINE + (LINE_GAP * i));
+    119          
+    120          				sprintf(scratch, "Max: %d", taskProfile[i].maxExecTime);
+    121          				GUI_DispStringAt(scratch, COLUMN_THREE, TOP_LINE + (LINE_GAP * i));
+    122          
+    123          #ifdef _WINDOWS
+    124          				sprintf(scratch, "Total: %d", taskProfile[i].totalExecTime);
+    125          #else
+    126          				{
+    127          					long currentTime;
+    128          					int percent;
+    129          
+    130          					currentTime = OS_GetTime32();
+    131          					percent = (int) (((float)taskProfile[i].totalExecTime / (float)currentTime) * 100.0);
+    132          					sprintf(scratch, "%%: %d", percent);
+    133          				}
+    134          #endif
+    135          				GUI_DispStringAt(scratch, COLUMN_FOUR, TOP_LINE + (LINE_GAP * i));
+    136          			}
+    137          
+    138          #if 0
+    139          			// Draw Light Level
+    140          			sprintf(scratch, "Raw Light Level: %d       ", GetADC(ADC_LIGHT_LEVEL));
+    141          			GUI_DispStringAt(scratch, LEFT_COLUMN, TOP_LINE);
+    142          
+    143          			// Draw LED Board Temperature
+    144          			sprintf(scratch, "LED Temp: %d   ", GetADC(ADC_LED_BOARD_TEMP));
+    145          			GUI_DispStringAt(scratch, LEFT_COLUMN, TOP_LINE + (LINE_GAP * 1));
+    146          
+    147          	//		// Draw Side LED
+    148          	//		sprintf(scratch, "Side LED intensity: %d   ", warningLEDPWMSetting);
+    149          			// Draw raw light reading
+    150          			sprintf(scratch, "Normalized Light: %d       ", GetNormalizedLightIntensity());
+    151          			GUI_DispStringAt(scratch, LEFT_COLUMN, TOP_LINE + (LINE_GAP * 2));
+    152          
+    153          			// Draw Tach LED
+    154          			sprintf(scratch, "Tach LED intensity: %d   ", tachLEDPWMSetting);
+    155          			GUI_DispStringAt(scratch, LEFT_COLUMN, TOP_LINE + (LINE_GAP * 3));
+    156          
+    157          			// Draw Backlight
+    158          			sprintf(scratch, "Backlight intensity: %d   ", backlightPWMSetting);
+    159          			GUI_DispStringAt(scratch, LEFT_COLUMN, TOP_LINE + (LINE_GAP * 4));
+    160          
+    161          			// Draw Vehicle Power
+    162          			sprintf(scratch, "Battery voltage: %2.1f   ", GetValue(VEHICLE_12V).fVal));
+    163          			GUI_DispStringAt(scratch, LEFT_COLUMN, TOP_LINE + (LINE_GAP * 5));
+    164          
+    165          #if LIGHTTEST			
+    166          			// Draw Light level when adjustments made
+    167          			sprintf(scratch, "Light set at: %d   ", sysData.lightLevelWhenIntensitySet);
+    168          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE);
+    169          
+    170          			// Draw light correction
+    171          			sprintf(scratch, "Light Correction: %d   ", lightCorrection);
+    172          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 1));
+    173          
+    174          			// Draw temp correction
+    175          			sprintf(scratch, "Temp Correction: %d   ", tempCorrection);
+    176          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 2));
+    177          
+    178          			// Draw total correction
+    179          			sprintf(scratch, "Total Correction: %d   ", totalCorrection);
+    180          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 3));
+    181          #else
+    182          			// Show total distance
+    183          			sprintf(scratch, "Distance Mi: %1.1f   ", (float) sysData.totalDistanceEver * (39.0 / 12.0 / 5280.0));
+    184          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE);
+    185          
+    186          			// Draw total operating time
+    187          			sprintf(scratch, "Operating Hrs: %1.1f   ", sysData.totalTimeEver / 3600.0);
+    188          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 1));
+    189          
+    190          			// Draw Highest RPM
+    191          			sprintf(scratch, "Highest Rev: %d   ", sysData.maxRpmEver);
+    192          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 2));
+    193          #endif
+    194          			
+    195          			// Draw SU, DU info
+    196          			sprintf(scratch, "DF: %d, %d   ", unsavedSysData.dataflash[0].bytesPerPage, unsavedSysData.dataflash[1].bytesPerPage);
+    197          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 4));
+    198          			
+    199          			// Draw SU, DU info
+    200          			sprintf(scratch, "SU %d.%02d, DU %d.%02d  ", suData.suSwRev / 100, suData.suSwRev % 100, unsavedSysData.duSwRev / 100,  unsavedSysData.duSwRev % 100);
+    201          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 5));
+    202          
+    203          			//// Draw X-G
+    204          			//// If SU HW Rev < 200 display temp else display Z
+    205          			//if (suData.su_hw_rev < 200)
+    206          			//	sprintf(scratch, "Temp: %.1f %s   ", GetValue(SU_TEMPERATURE).fVal, sysData.units == METRIC ? "C" : "F");
+    207          			//else sprintf(scratch, "Z - G: %.2f   ", GetValue(Z_G).fVal);
+    208          			//GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 4));
+    209          #endif
+    210          
+    211          			// Draw navigation arrow
+    212          			GUI_DrawBitmap(&bmthreewayarrow, 0, 229);
+    213          			CheckWarningPopups();
+    214          			GUI_MEMDEV_CopyToLCD(memTest);
+    215          			GUI_SelectLCD();
+    216          		}
+    217          		break;
+    218          
+    219          	case WM_DELETE:
+    220          		GUI_MEMDEV_Delete(memTest);
+    221          		break;
+    222          
+    223          	default:
+    224          		  WM_DefaultProc(pMsg);
+    225          	};
+    226          }
+    227          
+    228          /*********************************************************************
+    229          *
+    230          *       GPS Info Screen Create
+    231          */
+    232          WM_HWIN DisplayProfilerScreen(WM_HWIN hParent)
+    233          {
+    234          	testfirsttimethrough = true;
+    235          
+    236          	// create a memory area to reduce flicker on paint.
+    237          	memTest = GUI_MEMDEV_Create(0, 0, XSIZE_PHYS, YSIZE_PHYS);
+    238          
+    239          	if ((hProfiler = WM_CreateWindowAsChild(0, 0, XSIZE_PHYS, YSIZE_PHYS, hParent, WM_CF_SHOW, ProfilerCallback, 0)) <= 0)
+    240          		SystemError();
+    241          
+    242          	WM_InvalidateWindow(hProfiler);
+    243          
+    244          	hTestScreenTimer = WM_CreateTimer(hProfiler, 0, GAUGE_SCREEN_REFRESH_TIME, 0);
+    245          
+    246          	return hProfiler;
+    247          }
+    248          
+    249          /*************************** End of file ****************************/
+    250          
+    251          // End ifdef PROFILER
+    252          #endif
+
+
+ 
+ 
+ 0 bytes of memory
+
+Errors: none
+Warnings: none

@@ -1,0 +1,864 @@
+C51 COMPILER V8.02   DUTEST                                                                09/26/2011 17:44:37 PAGE 1   
+
+
+C51 COMPILER V8.02, COMPILATION OF MODULE DUTEST
+OBJECT MODULE PLACED IN dutest.OBJ
+COMPILER INVOKED BY: f:\Keil\C51\BIN\C51.EXE dutest.c OPTIMIZE(9,SIZE) BROWSE INCDIR(f:\Keil\C51\INC\;f:\Keil\Traqmate\1
+                    -32micro\CommonFiles\) DB DEFINE(DISPLAY,EXTCLK6,NODEBUG,PACKMEM) DEBUG OBJECTEXTEND
+
+line level    source
+
+   1          #include <stdlib.h>
+   2          //#include <stdio.h>
+   3          //#include <string.h>
+   4          
+   5          /* universal data elements */
+   6          typedef unsigned char u08;
+   7          typedef unsigned int u16;
+   8          typedef unsigned long u32;
+   9          typedef char s08;
+  10          typedef int s16;
+  11          typedef long s32;
+  12          
+  13          #include <crc16table.c>
+  14          #include <boolean.h>
+  15          #include <c8051f120.h>
+  16          //#include <message.h>
+  17          #include <opcode.h>
+  18          
+  19          #define DISPLAYATTACHED
+  20          #define NOTEST 0
+  21          
+  22          //-----------------------------------------------------------------------------
+  23          // 16-bit SFR Definitions for 'F02x
+  24          //-----------------------------------------------------------------------------
+  25          
+  26          sfr16 DP       = 0x82;                 // data pointer
+  27          sfr16 ADC0     = 0xbe;                 // ADC0 data
+  28          sfr16 ADC0GT   = 0xc4;                 // ADC0 greater than window
+  29          sfr16 ADC0LT   = 0xc6;                 // ADC0 less than window
+  30          sfr16 RCAP2    = 0xca;                 // Timer2 capture/reload
+  31          sfr16 RCAP3    = 0xca;                 // Timer3 capture/reload
+  32          sfr16 RCAP4    = 0xca;                 // Timer4 capture/reload
+  33          sfr16 TMR2     = 0xcc;                 // Timer2
+  34          sfr16 TMR3     = 0xcc;                 // Timer3
+  35          sfr16 TMR4     = 0xcc;                 // Timer4
+  36          sfr16 DAC0     = 0xd2;                 // DAC0 data
+  37          sfr16 DAC1     = 0xd2;                 // DAC1 data
+  38          sfr16 PCA0CP5  = 0xe1;                 // PCA0 Module 5 capture
+  39          sfr16 PCA0CP2  = 0xe9;                 // PCA0 Module 2 capture
+  40          sfr16 PCA0CP3  = 0xeb;                 // PCA0 Module 3 capture
+  41          sfr16 PCA0CP4  = 0xed;                 // PCA0 Module 4 capture
+  42          sfr16 PCA0     = 0xf9;                 // PCA0 counter
+  43          sfr16 PCA0CP0  = 0xfb;                 // PCA0 Module 0 capture
+  44          sfr16 PCA0CP1  = 0xfd;                 // PCA0 Module 1 capture
+  45          
+  46          //-----------------------------------------------------------------------------
+  47          // Global CONSTANTS
+  48          //-----------------------------------------------------------------------------
+  49          
+  50          #define SAMPLE_RATE     160                                     // THIS AFFECTS COMM TIMEOUT!!
+  51                                                                                          // ADC record rate in hz (must be 10x INT_DEC)
+  52          #define SAMPS_PER_SEC   10                              // number of accel samples to store
+  53          #define INT_DEC         (SAMPLE_RATE / SAMPS_PER_SEC)   // integrate and decimate ratio (64x oversample)
+  54          
+C51 COMPILER V8.02   DUTEST                                                                09/26/2011 17:44:37 PAGE 2   
+
+  55          
+  56          #define SOH 0x16
+  57          // communication timeout
+  58          #define CTS_COUNTDOWN   40                      // MAX = 256!!, 40 / 160 = .250 sec
+  59          
+  60          enum {
+  61                  START,
+  62                  SOURCE,
+  63                  DESTINATION,
+  64                  UPPER_BYTE_COUNT,
+  65                  LOWER_BYTE_COUNT,
+  66                  OPCODE,
+  67                  CHECKSUM,
+  68                  DATA_START } ;
+  69          
+  70          #define MSG_WRAPPER     (DATA_START + 2)        // length of message wrapper including CRC
+  71          
+  72          enum states {
+  73                  LOOKING_FOR_SYNC = 0x01,
+  74                  POSSIBLE_SYNC,
+  75                  DO_CHECKSUM,
+  76                  FOUND_SYNC,
+  77                  MESSAGE_COMPLETE } ;
+  78          
+  79          // unit ids
+  80          enum units {
+  81                  SELF,
+  82                  PC,                                                             // 1
+  83                  SENSOR_UNIT,                                    // 2
+  84                  DISPLAY_UNIT                                    // 3
+  85          };
+  86          #define NUMUNITS                DISPLAY_UNIT            // total number of units
+  87          
+  88          #define ASCIIBAUD               38400L                  // Baud rate of UART0 in bps
+  89          #define MSGBAUD                 115200L                 // Baud rate of UART0 in bps
+  90          #define INTCLK                  24500000                // Internal oscillator frequency in Hz
+  91          #define SYSCLK                  98000000                // Output of PLL derived from (INTCLK*2)
+  92          // #define SYSCLK                       22118400L               // SYSCLK frequency in Hz
+  93          #define MSGDATA                 530                             // max size data transmitted in a message
+  94          #define MSGSIZE                 (MSGDATA + MSG_WRAPPER + 2)     // each packet is MSGSIZE bytes + wrapper + CRC
+  95          #define NAMELEN                 16                              // length of text string for driver, car, track
+  96          #define NUMSESSIONS             26                              // 512 / 19 = 26 sessions
+  97          #define NUMDRIVERS              12                              // 12 individual drivers allowed
+  98          #define NUMCARS                 12                              // 12 individual cars allowed
+  99          #define NUMTRACKS               16                              // 16 tracks allowed
+ 100          #define INDEXPAGE               0                               // session index segment
+ 101          #define USERPAGE                1                               // user data segment
+ 102          #define TRACKPAGE               2                               // track data segment
+ 103          #define DATAPAGE                3                               // first data segment
+ 104          
+ 105          //Application specific definitions
+ 106          #define MAX_PAGE_SIZE                           MAX_PAGE_32MBIT // change to 64 bit if using bigger part
+ 107                                                                                          
+ 108          #define SAMPS_PER_PAGE                          8               // number of seconds per storage page
+ 109          #define OWNER_LEN                                       80              // number of characters for owner name & contact
+ 110          
+ 111          //Cygnal 8051 SPI Definitions
+ 112          #define SPICFG_MODE_MASK                        0xC0
+ 113          #define SPICFG_BITCNT_MASK                      0x38
+ 114          #define SPICFG_FRMSIZ_MASK                      0x07
+ 115          #define SCRATCHLEN                                      128             // size of scratchpad in flash */
+ 116          #define FLASHLEN                                        528             // size of a page in flash
+C51 COMPILER V8.02   DUTEST                                                                09/26/2011 17:44:37 PAGE 3   
+
+ 117          #define NUMPORTS                                        2               // number of UARTS on MCU
+ 118          
+ 119          //-----------------------------------------------------------------------------
+ 120          // Global VARIABLES
+ 121          //-----------------------------------------------------------------------------
+ 122          
+ 123          #ifdef PRINTASCII               // print it out the serial port
+              #define PRINT(FORMAT, TEXT) do { sprintf (tx0buff, FORMAT"\r\n", TEXT); XmitUART0(tx0buff, strlen(tx0buff)
+             -); } while (0)
+              #else
+ 126          #ifdef PRINTDISPLAY             // send a message to display unit
+              #define PRINT(FORMAT, TEXT) do { sprintf (MsgPayload, FORMAT, TEXT); SendMessage((u08) DISPLAY_UNIT, (u08)
+             - WRITE_DISPLAY_TEXT, strlen(MsgPayload)+1); } while (0)
+              #else           // swallow any prints
+ 129          #define PRINT(FORMAT, TEXT) 
+ 130          #endif
+ 131          #endif
+ 132          
+ 133          #define TEXTPRINT(TEXT) PRINT("%s",TEXT)
+ 134          
+ 135          // Useful Macros
+ 136          #define MIN(x,y) (((x)<(y))?(x):(y))
+ 137          #define MAX(x,y) (((x)>(y))? (x):(y))
+ 138          #define ABS(a) ((a >= 0)? (a) : -(a))
+ 139          #define HI(x) ((P##x) |= (1<<(B##x)))
+ 140          #define LO(x) ((P##x) &= ~(1<<(B##x)))
+ 141          #define XOR(x) ((P##x) ^= (1<<(B##x)))
+ 142          #define ISHI(x) ((P##x) & (1<<(B##x)))
+ 143          #define WAIT(x) do {xdata int qqq; for (qqq=x; qqq>0; qqq--); } while(0)
+ 144          #define DELAY_MS(x) do {xdata long zzz; for (zzz=(1100L * x); zzz>0; zzz--); } while(0)
+ 145          #define tohex(c) (c<10? (c+'0'):(c+'A'-10))
+ 146          
+ 147          #define PDF_RST P7                                              // DataFlash chip reset
+ 148          #define BDF_RST 2
+ 149          #define PDF_WP  P7                                              // DataFlash chip write protect
+ 150          #define BDF_WP  0
+ 151          #define PDF_CS  P7                                              // DataFlash chip select
+ 152          #define BDF_CS  1
+ 153          
+ 154          #define PRS232ON        P5                                      // 1 forces RS-232 on
+ 155          #define BRS232ON        5
+ 156          #define PRS232OFF       P5                                      // 0 forces RS-232 off
+ 157          #define BRS232OFF       6
+ 158          
+ 159          #define P3VDISPEN       P7                                      // 1 turns on display
+ 160          #define B3VDISPEN       3
+ 161          #define P3VGPSEN        P7                                      // 1 turns on GPS circuitry
+ 162          #define B3VGPSEN        4
+ 163          #define P3VIFEN         P7                                      // 1 turns on external interface
+ 164          #define B3VIFEN         5
+ 165          #define P5VEN           P7                                      // 1 keeps power on main unit
+ 166          #define B5VEN           7
+ 167          
+ 168          #define PACCST          P5                                      // 1 turns on accelerometer selftest
+ 169          #define BACCST          2
+ 170          
+ 171          //types of com ports
+ 172          typedef enum {
+ 173                  MESSAGING,
+ 174                  TSIPGPS,
+ 175                  ASCII
+ 176          } comusagetype;
+C51 COMPILER V8.02   DUTEST                                                                09/26/2011 17:44:37 PAGE 4   
+
+ 177          
+ 178          typedef enum {
+ 179                  OPEN,
+ 180                  CLOSE
+ 181          } comaction;
+ 182          
+ 183          typedef struct {
+ 184                  u08 port;                                               // port number
+ 185                  comusagetype use;                               // what port is used for
+ 186                  u16 txbytes;                                    // number of bytes left to xmit on port
+ 187                  u08 *rxptr;                                             // NULL when no rx'd msg, else point to rx'd msg
+ 188                  u08 *txptr;                                             // points to current byte in output buffer
+ 189                  char parity;                                    // which parity is in use
+ 190                  void (*int_func)(void);                 // interrupt driver
+ 191                  u08 rxidx;                                              // index to tsip rx buffer
+ 192                  u08 txbuff[MSGSIZE];                    // pointer to transmit buffer
+ 193                  u08 rxbuff[2][MSGSIZE];                 // pointer to receive buffer
+ 194          } comporthandle;
+ 195          
+ 196          // Display Unit Modes
+ 197          typedef enum {
+ 198                  WAITING,
+ 199                  DRIVE,
+ 200                  DRAGRACE,
+ 201                  AUTOCROSS,
+ 202                  LAPS,
+ 203                  TIMING,
+ 204                  ERASE
+ 205          } tmstatetype;
+ 206          
+ 207          //------------------------------------------------------------------------------------
+ 208          // Function PROTOTYPES
+ 209          //------------------------------------------------------------------------------------
+ 210          s16 SendMessage(u08, u08, u16 );
+ 211          s16 Verify_CRC(u08 *, u16) ;
+ 212          s16 SendNAK(u08, u08);
+ 213          s16 Parse_Message(u08 *, u08);
+ 214          void SYSCLK_Init (void);
+ 215          void UART_Init (comporthandle *, u32 );
+ 216          void XmitUART(comporthandle *, u16 );
+ 217          void Timer3_Init (u16);
+ 218          void PORT_Init_DU (void);
+ 219          unsigned int crc16(u08 *, u16);
+ 220          s16 Verify_CRC(u08 * , u16 );
+ 221          
+ 222          // Global Variables
+ 223          xdata comporthandle com[NUMPORTS];                      // handles to com ports
+ 224          //      0 place = this units id, 1 unit = PC = COM1, 2 unit = SU = COM0, 3 unit = DISPLAY = self = -1
+ 225          code s08 msgrouting[NUMUNITS+1] = {DISPLAY_UNIT, 1, 0, -1};     // what port to route messages to
+ 226          xdata u08 CTS[NUMUNITS] = {0};  // non-zero when waiting for response, 0 when clear to send
+ 227          xdata u16 clocktick = 0;                        // increments in 1/SAMPLE_RATE sec intervals
+ 228          xdata tmstatetype dispstate = WAITING;          // where in the state machine
+ 229                                                  // timing and position of lap
+ 230          
+ 231          
+ 232          void main (     void ) {
+ 233   1              xdata BOOL collecting = FALSE;                  // TRUE when collecting data
+ 234   1              int retval;                                                             // function call return value
+ 235   1      
+ 236   1              SFRPAGE = CONFIG_PAGE;
+ 237   1      
+ 238   1              // disable watchdog timer
+C51 COMPILER V8.02   DUTEST                                                                09/26/2011 17:44:37 PAGE 5   
+
+ 239   1              WDTCN = 0xde;
+ 240   1              WDTCN = 0xad;
+ 241   1      
+ 242   1              SYSCLK_Init();                                          // initialize oscillator
+ 243   1              PORT_Init_DU();                                         // enable ports
+ 244   1      
+ 245   1              // create com ports
+ 246   1      
+ 247   1              // initialize
+ 248   1              com[0].txbytes = 0;
+ 249   1              com[0].rxidx = 0;
+ 250   1              com[0].rxptr = com[0].txptr = NULL;
+ 251   1              com[0].use = MESSAGING;
+ 252   1              com[0].port = 0;
+ 253   1              com[0].parity = 'N';    // parity = NONE
+ 254   1      
+ 255   1              UART_Init(&(com[0]), MSGBAUD);
+ 256   1              Timer3_Init ((u16) (SYSCLK/SAMPLE_RATE/12));    // initialize Timer3 to overflow at sample rate
+ 257   1      
+ 258   1              EA = 1;                                                         // enable global interrupts
+ 259   1      
+ 260   1              // Reset the sensor unit
+ 261   1              com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START] = DRIVE;
+ 262   1              SendMessage((u08) SENSOR_UNIT, (u08) MODE_CHANGE, 1);
+ 263   1              while (1) {
+ 264   2                      u08 *fred;
+ 265   2      
+ 266   2                      // check for incoming sensor unit message
+ 267   2                      if (NULL != com[0].rxptr) {
+ 268   3      
+ 269   3                              fred = com[0].rxptr;
+ 270   3                              // process the message
+ 271   3                              retval = Parse_Message(fred, (u08) 0);
+ 272   3      
+ 273   3                              // clear the semaphore to signal buffer free
+ 274   3                              com[0].rxptr = NULL;
+ 275   3                      } // if
+ 276   2      
+ 277   2              } // while
+ 278   1      } // main
+ 279          
+ 280          //-----------------------------------------------------------------------------
+ 281          // Initialization Subroutines
+ 282          //-----------------------------------------------------------------------------
+ 283          
+ 284          //-----------------------------------------------------------------------------
+ 285          // SYSCLK_Init
+ 286          //-----------------------------------------------------------------------------
+ 287          //
+ 288          // This routine initializes the system clock to use the internal oscillator
+ 289          // at 24.5 MHz multiplied by two using the PLL.
+ 290          //
+ 291          void SYSCLK_Init (void)
+ 292          {
+ 293   1              int i;                                                                  // software timer
+ 294   1              u08 SFRPAGE_SAVE = SFRPAGE;                             // Save Current SFR page
+ 295   1      
+ 296   1              SFRPAGE = CONFIG_PAGE;                                  // set SFR page
+ 297   1              SFRPGCN = 0x01;                                                 // turn on auto SFR paging for interrupts
+ 298   1      
+ 299   1              OSCICN = 0x83;                                                  // 10000011 set internal oscillator to run at max frequency
+ 300   1              CLKSEL = 0x00;                                                  // Select the internal osc. as the SYSCLK source
+C51 COMPILER V8.02   DUTEST                                                                09/26/2011 17:44:37 PAGE 6   
+
+ 301   1      
+ 302   1              PLL0CN= 0x00;                                                   // Set internal osc. as PLL source
+ 303   1      
+ 304   1              SFRPAGE = LEGACY_PAGE;
+ 305   1              FLSCL   = 0x50;                                                 // Set FLASH read time for 100MHz clk
+ 306   1      
+ 307   1              SFRPAGE = CONFIG_PAGE;
+ 308   1              PLL0CN |= 0x01;                                                 // Enable Power to PLL
+ 309   1              PLL0DIV = 0x01;                                                 // Set Pre-divide value to N (N = 1)
+ 310   1              PLL0FLT = 0x01;                                                 // Set the PLL filter register for
+ 311   1                                                                                              // a reference clock from 19 - 30 MHz
+ 312   1                                                                                              // and an output clock from 45 - 80 MHz
+ 313   1              PLL0MUL = 0x04;                                                 // Multiply SYSCLK by M (M = 4)
+ 314   1      
+ 315   1              for (i=0; i < 256; i++) ;                               // Wait at least 5us
+ 316   1              PLL0CN |= 0x02;                                                 // Enable the PLL
+ 317   1              while(!(PLL0CN & 0x10));                                // Wait until PLL frequency is locked
+ 318   1              CLKSEL= 0x02;                                                   // Select PLL as SYSCLK source
+ 319   1      
+ 320   1              SFRPAGE = SFRPAGE_SAVE;                                 // Restore SFR page
+ 321   1      }
+ 322          
+ 323          //-----------------------------------------------------------------------------
+ 324          // UART_Init
+ 325          //-----------------------------------------------------------------------------
+ 326          //
+ 327          // Configure the UART for interrupt driven operation, <baud> and <parity>.
+ 328          //
+ 329          void UART_Init (comporthandle *handle, u32 baud)
+ 330          {
+ 331   1              u08 SFRPAGE_SAVE = SFRPAGE;             // Save Current SFR page
+ 332   1      
+ 333   1              switch(handle->port) {
+ 334   2                      case 0:                                                                 // Use Timer 2 for baud
+ 335   2      
+ 336   2                              SFRPAGE = UART0_PAGE;
+ 337   2                              SSTA0 = 0x15;                                           // 00010101 no doubler, user timer 2
+ 338   2      
+ 339   2                              switch (handle->parity) {
+ 340   3                                      case 'n':
+ 341   3                                      case 'N':
+ 342   3                                              SCON0 = 0x50;                           // SCON0: mode 1, 8-bit UART, enable RX
+ 343   3                                              break;
+ 344   3                                      case 'e':
+ 345   3                                      case 'E':
+ 346   3                                      case 'o':
+ 347   3                                      case 'O':
+ 348   3                                              SCON0 = 0xD0;                           // SCON0: mode 3, 9-bit UART, enable RX
+ 349   3                                              break;
+ 350   3                              } // switch
+ 351   2      
+ 352   2                              SFRPAGE = TMR2_PAGE;
+ 353   2                              TMR2CN = 0x04;                                          // 00000100 no ext trig, enabled, timer, auto reload
+ 354   2                              TMR2CF = 0x08;                                          // 00001000 sysclk source, count up
+ 355   2      
+ 356   2                              RCAP2 = -(SYSCLK/baud/16);                      // set timer 2 reload value
+ 357   2                              TMR2 = 0xFFFF;                                          // set to reload immediately
+ 358   2                              TR2 = 1;                                                        // start timer
+ 359   2      
+ 360   2                              SFRPAGE = UART0_PAGE;
+ 361   2                              RI0 = TI0 = 0;                                          // Clear interrupt flags
+ 362   2                              ES0 = 1;                                                        // Enable UART0 interrupts
+C51 COMPILER V8.02   DUTEST                                                                09/26/2011 17:44:37 PAGE 7   
+
+ 363   2                              break;
+ 364   2                      case 1:                                                                 // User Timer 1 for baud
+ 365   2      
+ 366   2                              SFRPAGE = UART1_PAGE;
+ 367   2                              switch (handle->parity) {
+ 368   3                                      case 'n':
+ 369   3                                      case 'N':
+ 370   3                                              SCON1 = 0x10;                           // 00010000 SCON1: mode 1, 8-bit UART, enable RX
+ 371   3                                              break;
+ 372   3                                      case 'e':
+ 373   3                                      case 'E':
+ 374   3                                      case 'o':
+ 375   3                                      case 'O':
+ 376   3                                              SCON1 = 0x90;                           // 10010000 SCON1: mode 3, 9-bit UART, enable RX
+ 377   3                                              break;
+ 378   3                              } // switch
+ 379   2      
+ 380   2                              SFRPAGE = TIMER01_PAGE;
+ 381   2                              TMOD    &= ~0xF0;
+ 382   2                              TMOD    |=  0x20;                                               // TMOD: timer 1, mode 2, 8-bit reload
+ 383   2      
+ 384   2                              if (SYSCLK/baud/2/256 < 1) {
+ 385   3                                      TH1 = -(SYSCLK/baud/2);
+ 386   3                                      CKCON |= 0x10;                                          // T1M = 1; SCA1:0 = xx
+ 387   3                              } else if (SYSCLK/baud/2/256 < 4) {
+ 388   3                                      TH1 = -(SYSCLK/baud/2/4);
+ 389   3                                      CKCON &= ~0x13;                                         // Clear all T1 related bits
+ 390   3                                      CKCON |=0x01;                                           // T1M = 0; SCA1:0 = 01
+ 391   3                              } else if (SYSCLK/baud/2/256 < 12) {
+ 392   3                                      TH1 = -(SYSCLK/baud/2/12);
+ 393   3                                      CKCON &= ~0x13;                                         // T1M = 0; SCA1:0 = 00
+ 394   3                              } else {
+ 395   3                                      TH1 = -(SYSCLK/baud/2/48);
+ 396   3                                      CKCON &= ~0x13;                                         // Clear all T1 related bits
+ 397   3                                      CKCON |=0x02;                                           // T1M = 0; SCA1:0 = 10
+ 398   3                              }
+ 399   2      
+ 400   2                              TL1 = TH1;                                                              // initialize Timer1
+ 401   2                              TR1 = 1;                                                                // start Timer1
+ 402   2      
+ 403   2                              SFRPAGE = UART1_PAGE;
+ 404   2                              RI1 = TI1 = 0;                                                  // Indicate TX1 ready
+ 405   2      
+ 406   2                              EIE2 |= 0x40;                                                   // ES1=1, Enable UART1 interrupts
+ 407   2                              break;
+ 408   2              } // switch
+ 409   1      
+ 410   1              SFRPAGE = SFRPAGE_SAVE;                 // Restore SFR page
+ 411   1      
+ 412   1      } // UART_Init
+ 413          
+ 414          //------------------------------------------------------------------------------------
+ 415          // PORT_Init_DU
+ 416          //------------------------------------------------------------------------------------
+ 417          //
+ 418          // Configure the Crossbar and GPIO ports
+ 419          //
+ 420          void PORT_Init_DU (void) {
+ 421   1      
+ 422   1              u08 SFRPAGE_SAVE = SFRPAGE;             // Save Current SFR page
+ 423   1      
+ 424   1              SFRPAGE = CONFIG_PAGE;                  // set SFR page
+C51 COMPILER V8.02   DUTEST                                                                09/26/2011 17:44:37 PAGE 8   
+
+ 425   1      
+ 426   1              XBR0 = 0xFF;                                    // all functions available at port pins
+ 427   1              XBR1 = 0xFF;                                    // ditto
+ 428   1              XBR2 = 0xC4;                                    // 11000100 all functions, no pullups, xbar enable, t4 off,
+ 429   1                                                                              // Uart1 Enable, Ext Mem Disable, Ext Convert off
+ 430   1      
+ 431   1              P0MDOUT = 0x15;                                 // 00010101 enable TX0, SI, SCK, as push-pulls
+ 432   1              P0 = 0xEA;                                              // set all open drain pins to 1
+ 433   1      
+ 434   1              P1MDIN  = 0x03;                                 // 00000011 set all analog inputs except TX1, RX1
+ 435   1              P1MDOUT = 0x01;                                 // 00000001 enable tx1 as push-pull
+ 436   1      
+ 437   1              P2MDOUT = 0x00;                                 // all pins open drain
+ 438   1              P2 = 0xFF;                                              // write a 1 to each bit
+ 439   1      
+ 440   1              P3MDOUT = 0x00;                                 // all pins open drain 
+ 441   1              P3 = 0xFF;                                              // write a 1 to each bit
+ 442   1      
+ 443   1              P7MDOUT = 0xFF;
+ 444   1              P7 = 0x86;                                              // 00000111 all backlights off, force disp on, dataflash wp on, 
+ 445   1                                                                              //                      dataflash cs off, dataflash reset off
+ 446   1              P6MDOUT = 0x00;
+ 447   1              P6 = 0xFF;                                              // 11110111
+ 448   1      
+ 449   1              P5MDOUT = 0x00;
+ 450   1              P5 = 0xFF;                                              // 11111111 all inputs
+ 451   1      
+ 452   1              P4MDOUT = 0x00;                                 // 4 all pushpull
+ 453   1              P4 = 0xFF;                                              // 11111111
+ 454   1      
+ 455   1              SFRPAGE = SFRPAGE_SAVE;                 // Restore SFR page
+ 456   1      }
+ 457          //-----------------------------------------------------------------------------
+ 458          // Timer3_Init
+ 459          //-----------------------------------------------------------------------------
+ 460          //
+ 461          // Configure Timer3 to auto-reload at interval specified by <counts> and generate
+ 462          // an interrupt which will start a sample sycle. Uses SYSCLK as its time base.
+ 463          //
+ 464          void Timer3_Init (u16 counts)
+ 465          {
+ 466   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 467   1      
+ 468   1              SFRPAGE = TMR3_PAGE;
+ 469   1      
+ 470   1              TMR3CN = 0x00;                                          // Stop Timer3; Clear TF3;
+ 471   1              TMR3CF = 0x01;                                          // use SYSCLK/12 as timebase, count up
+ 472   1      
+ 473   1              RCAP3 = - (int) counts;                         // Init reload values
+ 474   1      
+ 475   1              TMR3 = 0xFFFF;                                          // set to reload immediately
+ 476   1              EIE2 |= 0x01;                                           // enable Timer3 interrupts
+ 477   1              TMR3CN |= 0x04;                                         // start Timer3
+ 478   1      
+ 479   1              SFRPAGE = SFRPAGE_SAVE;                         // Restore SFR page
+ 480   1      }
+ 481          
+ 482          //////
+ 483          /// MESSAGING
+ 484          /////
+ 485          
+ 486          #define SendACK_Data(DEST, LEN) SendMessage((u08) DEST, (u08) ACK,(LEN))
+C51 COMPILER V8.02   DUTEST                                                                09/26/2011 17:44:37 PAGE 9   
+
+ 487          #define SendACK(DEST) SendACK_Data(DEST, 0)
+ 488          // #define Verify_CRC(DAT, COUNT) (((((u16)*(DAT))<<8) + *(DAT+1)) == crc16((DAT), (COUNT)))
+ 489          #define MSG_SEG (pagesize + MSG_WRAPPER)
+ 490          
+ 491          // The following function gets passed all the input data
+ 492          // necessary to build a complete message. For efficiency it does not
+ 493          // get passed the data buffer itself.
+ 494          // In addition to being passed the data, the function will also
+ 495          // call supporting functions to calculate checksums for the header
+ 496          // and if appropriate, crc's for the data portion of the message
+ 497          
+ 498          s16 SendMessage(        u08 dest,               // unit id of destination
+ 499                                                  u08 opcode,             // message opcode
+ 500                                                  u16 bytes)      {       // number of bytes to transmit
+ 501   1              u08 chk = 0xFF;                                 // used to start the header checksum calculation
+ 502   1              u16 i = 0;                                              // general index
+ 503   1              u16 crc = 0;                                    // used to hold the calculated CRC
+ 504   1              u08 port = msgrouting[dest];
+ 505   1      
+ 506   1              // grab the unit
+ 507   1              CTS[dest-1] = CTS_COUNTDOWN;
+ 508   1      
+ 509   1              com[port].txbuff[START] = SOH ;  // start of header
+ 510   1              com[port].txbuff[SOURCE] = msgrouting[0]; // source of the message
+ 511   1              com[port].txbuff[DESTINATION] = dest; // destination of the message (same as above)
+ 512   1      
+ 513   1              bytes += 2;                                     // add two bytes to the total for the CRC
+ 514   1      
+ 515   1              com[port].txbuff[UPPER_BYTE_COUNT] = (bytes & 0xff00)>>8 ;  // format byte count to
+ 516   1              com[port].txbuff[LOWER_BYTE_COUNT] = bytes & 0xff;          // two byte field
+ 517   1      
+ 518   1              com[port].txbuff[OPCODE]=opcode ;       // store the message op code
+ 519   1              
+ 520   1              for (i=0; i<CHECKSUM;i++)       // calculate the message header checksum
+ 521   1                      chk ^= com[port].txbuff[i] ;            // over all bytes from SOH through op code
+ 522   1              
+ 523   1              com[port].txbuff[CHECKSUM] = chk ;      // store the checksum in final header byte
+ 524   1      
+ 525   1              bytes -= 2;                                     // remove crc from total
+ 526   1      
+ 527   1              crc = crc16(&(com[port].txbuff[DATA_START]),bytes);     // calculate the crc
+ 528   1      
+ 529   1              com[port].txbuff[++bytes+CHECKSUM] = (crc & 0xff00)>>8 ;                // store the high crc byte
+ 530   1              com[port].txbuff[++bytes+CHECKSUM] = (crc & 0xff) ;                     // store the low crc byte
+ 531   1      
+ 532   1              XmitUART(&(com[port]), DATA_START+bytes);                                               // send it
+ 533   1              return(DATA_START+bytes) ;  // return total number of bytes processed in message
+ 534   1      
+ 535   1      } // SendMessage
+ 536          
+ 537          // the following routine will parse a message based on the op code
+ 538          // it is up to the opcode to determine any additional processing, such as
+ 539          // CRC calculations, or the meaning of the data
+ 540          s16 Parse_Message(u08 *msgptr, u08 port) 
+ 541          {
+ 542   1              int retval;
+ 543   1              static int counter = 0;
+ 544   1              xdata u16 msgdatalen;
+ 545   1      //      xdata u16 temp1, temp2, temp3, temp6;
+ 546   1      //      xdata u08 *tmpptr1;
+ 547   1      //      xdata u08 *tmpptr2;
+ 548   1      //      xdata int temp4, temp5;
+C51 COMPILER V8.02   DUTEST                                                                09/26/2011 17:44:37 PAGE 10  
+
+ 549   1      
+ 550   1              /// ***** DATA TRAP
+ 551   1              if ((* ((u08 *) &msgptr)) == 0) {
+ 552   2                      int retval = 1;
+ 553   2              }
+ 554   1      
+ 555   1              counter++;
+ 556   1      //      tmpptr1 = msgptr+UPPER_BYTE_COUNT;
+ 557   1      //      tmpptr2 = msgptr+LOWER_BYTE_COUNT;
+ 558   1      
+ 559   1      //      temp1 = *tmpptr1 << 8;
+ 560   1      //      temp2 = *tmpptr2;
+ 561   1      //      temp3 = temp1 + temp2 - 2;
+ 562   1      //      temp4 = UPPER_BYTE_COUNT;
+ 563   1      //      temp5 = LOWER_BYTE_COUNT;
+ 564   1      
+ 565   1              msgdatalen = (msgptr[UPPER_BYTE_COUNT] << 8) + msgptr[LOWER_BYTE_COUNT] - 2;
+ 566   1      //      msgdatalen = temp3;
+ 567   1      
+ 568   1      /// ***** DATA TRAP
+ 569   1              if (msgdatalen > 0x100) {
+ 570   2                      int retval = 1;
+ 571   2              }
+ 572   1      
+ 573   1              retval = Verify_CRC(com[0].rxptr+DATA_START, msgdatalen);
+ 574   1      
+ 575   1              if (retval) {           // bad data
+ 576   2                      if (NAK != msgptr[OPCODE] && ACK != msgptr[OPCODE])     { // don't NAK an ACK or NAK
+ 577   3                              // grab the port
+ 578   3                              CTS[msgptr[SOURCE]-1] = CTS_COUNTDOWN;
+ 579   3      
+ 580   3                              retval = SendNAK(msgptr[SOURCE], (u08) BAD_CRC);                // no data is returned and no crc
+ 581   3                      } // if
+ 582   2              } // if
+ 583   1              else {                          // parse the good data
+ 584   2                      // ***** if message not for me, then route it
+ 585   2      
+ 586   2                      switch (com[0].rxptr[OPCODE]) {
+ 587   3                      case ACK:
+ 588   3                              // free up unit for more communications
+ 589   3                              CTS[msgptr[SOURCE]-1] = 0;
+ 590   3                              break;
+ 591   3      
+ 592   3                      case NAK:
+ 593   3                              // fall back and retry PUT CODE HERE
+ 594   3      
+ 595   3                              // free up unit for more communications
+ 596   3                              CTS[msgptr[SOURCE]-1] = 0;
+ 597   3                              break;
+ 598   3      
+ 599   3                      case GPS_DATA: {
+ 600   4      
+ 601   4                              // ACK the message
+ 602   4      //                      retval = SendACK(msgptr[SOURCE]);
+ 603   4      
+ 604   4                              // free up unit for more communications
+ 605   4                              CTS[msgptr[SOURCE]-1] = 0;
+ 606   4      
+ 607   4                      } // GPS_DATA
+ 608   3                      case GPS_PULSE: {
+ 609   4      
+ 610   4      //                      retval = SendACK(msgptr[SOURCE]);
+C51 COMPILER V8.02   DUTEST                                                                09/26/2011 17:44:37 PAGE 11  
+
+ 611   4      
+ 612   4                              // free up unit for more communications
+ 613   4                              CTS[msgptr[SOURCE]-1] = 0;
+ 614   4      
+ 615   4                      } // GPS_PULSE
+ 616   3      
+ 617   3                      case ACCEL_DATA: {
+ 618   4      
+ 619   4      //                      retval = SendACK(*(msgptr+SOURCE));
+ 620   4                              
+ 621   4                              // free up unit for more communications
+ 622   4                              CTS[msgptr[SOURCE]-1] = 0;
+ 623   4      
+ 624   4                              break;                  
+ 625   4                      }
+ 626   3                      } // switch
+ 627   2      
+ 628   2              } // else
+ 629   1      
+ 630   1              return(retval);  // this should be the return value of sending ACK or ACK with
+ 631   1                               // data, assuming the opcode processes successfully
+ 632   1      }
+*** WARNING C280 IN LINE 540 OF DUTEST.C: 'port': unreferenced local variable
+ 633          
+ 634          
+ 635          // The following function calculates the crc16 result and verifies it against*/
+ 636          // the received value in the data.  The function returns:    
+ 637          // 0 if the crc compares
+ 638          // -1 if the crc does not match
+ 639          
+ 640          s16 Verify_CRC(u08 * dat, u16 bytecount) {
+ 641   1              u16 retval, data_crc ;
+ 642   1      
+ 643   1              retval = crc16(dat, bytecount); // calculate the crc on the received data
+ 644   1      
+ 645   1              data_crc = (dat[bytecount])<<8 ;  // get the crc from the message
+ 646   1              data_crc += (dat[bytecount+1]);
+ 647   1      
+ 648   1              if (retval == data_crc)  // check calculated against received
+ 649   1                      return(0) ;  // if the crc's match
+ 650   1              else
+ 651   1                      return(-1); // -1 otherwise
+ 652   1      }
+ 653          
+ 654          s16 SendNAK(u08 dest,           // unit id of destination
+ 655                                  u08 reason) {
+ 656   1              com[msgrouting[dest]].txbuff[DATA_START] = reason ;
+ 657   1              SendMessage(dest,NAK,1);
+ 658   1      
+ 659   1              return(0) ;
+ 660   1      
+ 661   1      }
+ 662          
+ 663          // This function starts an interrupt-driven transmit of the trasmit buffer 
+ 664          // on designated UART. Blocks only if previous transmission is in progress.
+ 665          void XmitUART(comporthandle *handle, u16 numbytes) {
+ 666   1      
+ 667   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 668   1      
+ 669   1      // ***** don't think we need to check CTS here but maybe
+ 670   1              while (0 != handle->txbytes) ;          // wait for previous transmission to finish
+ 671   1      //      while (0 != CTS[handle->port]);
+C51 COMPILER V8.02   DUTEST                                                                09/26/2011 17:44:37 PAGE 12  
+
+ 672   1              handle->txptr = handle->txbuff;
+ 673   1              handle->txbytes = numbytes;
+ 674   1              if (0 == handle->port) {
+ 675   2                      SFRPAGE = UART0_PAGE;
+ 676   2                      TI0 = 1;                                                // generate an interrupt to get started
+ 677   2              }
+ 678   1              else {
+ 679   2                      SFRPAGE = UART1_PAGE;
+ 680   2                      TI1 = 1;                                                // generate an interrupt to get started
+ 681   2              } // else
+ 682   1              SFRPAGE = SFRPAGE_SAVE;
+ 683   1      }
+ 684          
+ 685          //**********************
+ 686          // Interrupt Functions
+ 687          //**********************
+ 688          
+ 689          
+ 690          // MSG0 ISR - Message Protocol on UART 0
+ 691          #define SCON SCON0
+ 692          #define SBUF SBUF0
+ 693          #define COM 0
+ 694          void MSG0_ISR (void) interrupt 4 using 2 {
+ 695   1              u08 tempch;
+ 696   1              static int msg_state = LOOKING_FOR_SYNC;        // init state machine variable
+ 697   1              static int msg_length ;                                         // variables to build message
+ 698   1              static u08 chk = 0;                                                     // init the checksum variable
+ 699   1              static int index = 0;                                           // init the receive character storage index
+ 700   1              static u08 *buff;                                                       // for quicker access to buffer
+ 701   1      
+ 702   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 703   1      
+ 704   1              // determine if tx or rx or both caused interrupt
+ 705   1      
+ 706   1              if (SCON & 0x01) {                      // byte received
+ 707   2                      tempch = SBUF;
+ 708   2                      SCON &= ~0x01;                                          // clear receive interrupt flag
+ 709   2      
+ 710   2                      switch(msg_state) {                                     // based on the state of reception we are in
+ 711   3                      case LOOKING_FOR_SYNC:                          // state = 1
+ 712   3                              index = 0;                                      // init the storage index
+ 713   3                              if (tempch==SOH) {                              // if start of header byte received
+ 714   4                                      buff = &(com[COM].rxbuff[com[COM].rxidx][0]);   // for quicker access to buffer
+ 715   4                                      buff[index++]=tempch ;  // store SOH
+ 716   4                                      chk ^= tempch ;                         // start checksum calc
+ 717   4                                      msg_state = POSSIBLE_SYNC;      // update state
+ 718   4                              }
+ 719   3                              break ;
+ 720   3                      
+ 721   3                      case POSSIBLE_SYNC:                                     // state = 2
+ 722   3                              buff[index++] = tempch ;        // get the next byte
+ 723   3                              chk ^= tempch ;                         // continue checksum calc
+ 724   3                              if (index == CHECKSUM)                  // see if we should have
+ 725   3                                      msg_state = DO_CHECKSUM;                // received the checksum
+ 726   3                              break ;
+ 727   3      
+ 728   3                      case DO_CHECKSUM:                                       // state = 3
+ 729   3                              buff[index++]=tempch ;          // store rcv checksum
+ 730   3                              chk ^= 0xff ;                                   // final calculation exor
+ 731   3                              if (chk == tempch) {                    // check against rcv'd checksum
+ 732   4                                                                                              // if they match, get the message length
+ 733   4                                      msg_length = buff[UPPER_BYTE_COUNT];
+C51 COMPILER V8.02   DUTEST                                                                09/26/2011 17:44:37 PAGE 13  
+
+ 734   4                                      msg_length = msg_length << 8 ;
+ 735   4                                      msg_length += buff[LOWER_BYTE_COUNT];
+ 736   4      
+ 737   4                                      if(msg_length) msg_state=FOUND_SYNC ;   // remainder of message
+ 738   4                                      else msg_state=MESSAGE_COMPLETE;                // no message remaining
+ 739   4                              }
+ 740   3                              else {                                                  // if checksum failed, start looking again
+ 741   4                                      index=0;                                        // discard all received data
+ 742   4                                      msg_state=LOOKING_FOR_SYNC;             // set new state
+ 743   4                                      chk = 0;                                        // re-init checksum byte
+ 744   4                              }
+ 745   3                              break ;
+ 746   3                      
+ 747   3                      case FOUND_SYNC:                                        // get remainder of message // state = 4
+ 748   3                              buff[index++]=tempch ;          // store the data
+ 749   3                              if (index == DATA_START+msg_length)             // see if finished
+ 750   3                                      msg_state=MESSAGE_COMPLETE ;                    // set message complete
+ 751   3                              break;
+ 752   3      
+ 753   3                      default:            // should never get here if state machine works
+ 754   3                              break ;
+ 755   3                      } // switch
+ 756   2                                                                              // state = 5
+ 757   2                      if(msg_state==MESSAGE_COMPLETE) { // check to see if complete msg received
+ 758   3                              msg_state=LOOKING_FOR_SYNC ; // if so, set up for new msg
+ 759   3                              index = 0 ;              // reset index
+ 760   3                              chk = 0;                 // reset checksum variable
+ 761   3                              if (NULL == com[COM].rxptr)     {                               // if last buffer processed
+ 762   4                                      com[COM].rxptr = buff;                                  // set semaphore
+ 763   4                                      com[COM].rxidx = com[COM].rxidx ^ 1;    // swap buffers
+ 764   4                              } // if
+ 765   3                              else {                                                                          // overwrite current buffer
+ 766   4                                      // ******************* Just for test
+ 767   4                                      index = 0;
+ 768   4                              }
+ 769   3                      }
+ 770   2              } // if
+ 771   1      
+ 772   1              if (SCON & 0x02) {              // byte transmitted
+ 773   2                      if (0 != com[COM].txbytes) {
+ 774   3                              SBUF = *(com[COM].txptr);
+ 775   3                              (com[COM].txptr)++;
+ 776   3                              (com[COM].txbytes)--;
+ 777   3                      }
+ 778   2                      else {   
+ 779   3                              com[COM].txptr = NULL;
+ 780   3                      }
+ 781   2                      SCON &= ~0x02;                                          // clear transmit interrupt flag
+ 782   2              } // if
+ 783   1      
+ 784   1              SFRPAGE = SFRPAGE_SAVE;
+ 785   1      
+ 786   1      } // MSG0_ISR
+ 787          
+ 788          // Timer 3 Interrupt
+ 789          //
+ 790          // When T3 expires, start a series of ADC conversions and flash LED as required
+ 791          void T3_ISR (void) interrupt 14 using 3
+ 792          {
+ 793   1              u16 i;
+ 794   1      
+ 795   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+C51 COMPILER V8.02   DUTEST                                                                09/26/2011 17:44:37 PAGE 14  
+
+ 796   1      
+ 797   1              SFRPAGE = TMR3_PAGE;
+ 798   1      
+ 799   1              // clear Timer 3 interrupt
+ 800   1              TMR3CN &= 0x7F;
+ 801   1      
+ 802   1              // increment a clock tick
+ 803   1              clocktick++;
+ 804   1      
+ 805   1              // count down timeouts for serial communication
+ 806   1              for (i = 0; i<NUMUNITS; i++)
+ 807   1                      if(CTS[i]) CTS[i]--;
+ 808   1      
+ 809   1              SFRPAGE = SFRPAGE_SAVE;
+ 810   1      
+ 811   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1960    ----
+   CONSTANT SIZE    =    516    ----
+   XDATA SIZE       =   3282       3
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     12      39
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  1 WARNING(S),  0 ERROR(S)

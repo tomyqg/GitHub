@@ -1,0 +1,1235 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     02/Dec/2015  11:33:31 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\Setup\NewLCDConf.c                      #
+#    Command line =  C:\DUII\TargetHW\Setup\NewLCDConf.c -D DEBUG=1 -D        #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\Ne #
+#                    wLCDConf.lst                                             #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\New #
+#                    LCDConf.o                                                #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\Setup\NewLCDConf.c
+      1          /*********************************************************************
+      2          *                SEGGER Microcontroller GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 1996 - 2009  SEGGER Microcontroller GmbH & Co. KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          ** emWin V5.00 - Graphical user interface for embedded applications **
+     13          emWin is protected by international copyright laws.   Knowledge of the
+     14          source code may not be used to write a similar product.  This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : LCDConf.c
+     19          Purpose     : Display controller configuration (single layer)
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          #include "RTOS.h"
+     24          #include "GUI.h"
+     25          #include "GUIDRV_Lin.h"
+     26          #include "SPI_API.h"
+     27          #include "LCDConf.h"
+     28          #include "commondefs.h"
+     29          
+     30          /*********************************************************************
+     31          *
+     32          *       Layer configuration (to be modified)
+     33          *
+     34          **********************************************************************
+     35          */
+     36          
+     37          
+     38          //
+     39          // Color conversion
+     40          //
+     41          #define COLOR_CONVERSION  GUICC_M565
+     42          
+     43          //
+     44          // Display driver
+     45          //
+     46          #define DISPLAY_DRIVER  &GUIDRV_Lin_OXY_16_API
+     47          
+     48          //
+     49          // Pixel width in bytes
+     50          //
+     51           #define PIXEL_WIDTH  2
+     52          
+     53          //
+     54          // Video RAM address
+     55          //
+     56          #define VRAM_ADDR  ((U32)&_aVRAM[0] + 0x8000000)  // Write to non-cached SDRAM area
+     57          
+     58          /*********************************************************************
+     59          *
+     60          *       Configuration checking
+     61          *
+     62          **********************************************************************
+     63          */
+     64          #ifndef   VXSIZE_PHYS
+     65            #define VXSIZE_PHYS XSIZE_PHYS
+     66          #endif
+     67          #ifndef   VYSIZE_PHYS
+     68            #define VYSIZE_PHYS YSIZE_PHYS
+     69          #endif
+     70          #ifndef   VRAM_ADDR
+     71            #define VRAM_ADDR 0
+     72          #endif
+     73          
+     74          #ifndef   XSIZE_PHYS
+     75            #error Physical X size of display is not defined!
+     76          #endif
+     77          #ifndef   YSIZE_PHYS
+     78            #error Physical Y size of display is not defined!
+     79          #endif
+     80          #ifndef   COLOR_CONVERSION
+     81            #error Color conversion not defined!
+     82          #endif
+     83          #ifndef   DISPLAY_DRIVER
+     84            #error No display driver defined!
+     85          #endif
+     86          
+     87          /*********************************************************************
+     88          *
+     89          *       Defines
+     90          *
+     91          **********************************************************************
+     92          */
+     93          
+     94          #define CPU_MCK                            (12000000)
+     95          
+     96          /****** Touch controller values *************************************/
+     97          #define TOUCH_AD_TOP                       (945)
+     98          #define TOUCH_AD_BOTTOM                    (74)
+     99          #define TOUCH_AD_LEFT                      (40)
+    100          #define TOUCH_AD_RIGHT                     (967)
+    101          #define TOUCH_TIMER_INTERVAL               (10)
+    102          
+    103          /****** SFRs used for LCD and touch *********************************/
+    104          //
+    105          // PIOs
+    106          //
+    107          //#define PIOA_IDR                           (*(volatile U32*) (0xFFFFF444))
+    108          //#define PIOA_PPUDR                         (*(volatile U32*) (0xFFFFF460))
+    109          //#define PIOA_PPUER                         (*(volatile U32*) (0xFFFFF464))
+    110          //#define PIOA_ASR                           (*(volatile U32*) (0xFFFFF470))
+    111          //#define PIOA_BSR                           (*(volatile U32*) (0xFFFFF474))
+    112          //#define PIOA_PDR                           (*(volatile U32*) (0xFFFFF404))
+    113          //
+    114          //#define PIOC_IDR                           (*(volatile U32*) (0xFFFFF844))
+    115          //#define PIOC_PPUDR                         (*(volatile U32*) (0xFFFFF860))
+    116          //#define PIOC_PPUER                         (*(volatile U32*) (0xFFFFF864))
+    117          //#define PIOC_ASR                           (*(volatile U32*) (0xFFFFF870))
+    118          //#define PIOC_BSR                           (*(volatile U32*) (0xFFFFF874))
+    119          //#define PIOC_PDR                           (*(volatile U32*) (0xFFFFF804))
+    120          //
+    121          ///*      SPI0 */
+    122          //// ----WRONG!!!  #define SPI_BASE  0xFFFC8000
+    123          //#define SPI_CR    			(*(volatile U32*) (SPI_BASE + 0x00))
+    124          //#define SPI_MR    			(*(volatile U32*) (SPI_BASE + 0x04))
+    125          //#define SPI_RDR   			(*(volatile U32*) (SPI_BASE + 0x08))
+    126          //#define SPI_TDR   			(*(volatile U32*) (SPI_BASE + 0x0C))
+    127          //#define SPI_SR    			(*(volatile U32*) (SPI_BASE + 0x10))
+    128          //#define SPI_IER   			(*(volatile U32*) (SPI_BASE + 0x14))
+    129          //#define SPI_IDR   			(*(volatile U32*) (SPI_BASE + 0x18))
+    130          //#define SPI_IMR   			(*(volatile U32*) (SPI_BASE + 0x1c))
+    131          //#define SPI_CSR0  			(*(volatile U32*) (SPI_BASE + 0x30))
+    132          //#define SPI_CSR1  			(*(volatile U32*) (SPI_BASE + 0x34))
+    133          //#define SPI_CSR2  			(*(volatile U32*) (SPI_BASE + 0x38))
+    134          //#define SPI_CSR3  			(*(volatile U32*) (SPI_BASE + 0x3c))
+    135          //
+    136          ///*      SPI PDC */
+    137          //#define SPI_PDC_RPR  			(*(volatile U32*) (SPI_BASE + 0x100))
+    138          //#define SPI_PDC_RCR  			(*(volatile U32*) (SPI_BASE + 0x104))
+    139          //#define SPI_PDC_TPR  			(*(volatile U32*) (SPI_BASE + 0x108))
+    140          //#define SPI_PDC_TCR  			(*(volatile U32*) (SPI_BASE + 0x10c))
+    141          //#define SPI_PDC_RNPR 			(*(volatile U32*) (SPI_BASE + 0x110))
+    142          //#define SPI_PDC_RNCR 			(*(volatile U32*) (SPI_BASE + 0x114))
+    143          //#define SPI_PDC_TNPR 			(*(volatile U32*) (SPI_BASE + 0x118))
+    144          //#define SPI_PDC_TNCR 			(*(volatile U32*) (SPI_BASE + 0x11c))
+    145          //#define SPI_PDC_PTCR 			(*(volatile U32*) (SPI_BASE + 0x120))
+    146          //#define SPI_PDC_PTSR 			(*(volatile U32*) (SPI_BASE + 0x124))
+    147          //
+    148          //#define SPI_RXBUFF    ((unsigned int) 0x1 <<  6)    // (SPI) RXBUFF Interrupt
+    149          //#define SPI_TXBUFE    ((unsigned int) 0x1 <<  7)    // (SPI) TXBUFE Interrupt
+    150          //
+    151          //#define PDC_RXTEN     ((unsigned int) 0x1 <<  0)    // (PDC) Receiver Transfer Enable
+    152          //#define PDC_RXTDIS    ((unsigned int) 0x1 <<  1)    // (PDC) Receiver Transfer Disable
+    153          //#define PDC_TXTEN     ((unsigned int) 0x1 <<  8)    // (PDC) Transmitter Transfer Enable
+    154          //#define PDC_TXTDIS    ((unsigned int) 0x1 <<  9)    // (PDC) Transmitter Transfer Disable
+    155          //
+    156          //
+    157          //#define SPI_ID          12
+    158          
+    159          ////
+    160          //// PMC
+    161          ////
+    162          //#define AT91C_BASE_PMC                    (*(volatile U32*) (0xFFFFFC10))  // (PMC) System Clock Enable Register - KMC - actually PERIPHERAL clocks
+    163          //
+    164          #define AT91C_ID_TSADC_BIT                (20)                             // Touch Screen / ADC Controller
+    165          #define AT91C_ID_LCDC_BIT                 (23)                             // LCD Controller
+    166          #define AT91C_LCDC_PS_BIT                 (0x3 <<  0)                      // (LCDC) LCD Contrast Counter Prescaler
+    167          #define AT91C_LCDC_PS_BIT_NOTDIVIDED_BIT  (0x0)                            // (LCDC) Counter Freq is System Freq.
+    168          #define AT91C_LCDC_POL_BIT                (0x1 <<  2)                      // (LCDC) Polarity of output Pulse
+    169          #define AT91C_LCDC_ENA_PWMGEMENABLED      (0x1 <<  3)                      // (LCDC) PWM Generator Disabled
+    170          #define AT91C_LCDC_POL_BIT_POSITIVEPULSE  (0x1 <<  2)                      // (LCDC) Positive Pulse
+    171          #define AT91C_LCDC_DMAEN_BIT              (0x1 <<  0)                      // (LCDC) DAM Enable
+    172          #define AT91C_LCDC_PWR_BIT                (0x1 <<  0)                      // (LCDC) LCD Module Power Control
+    173          
+    174          //
+    175          // LCDC
+    176          //
+    177          #define LCDC_DMACON                       (*(volatile U32*) (0x0050001C))  // DMACON
+    178          #define LCDC_PWRCON                       (*(volatile U32*) (0x0050083C))  // DMACON
+    179          #define LCDC_LCDCON1                      (*(volatile U32*) (0x00500800))  // LCDCON1
+    180          #define LCDC_LCDCON2                      (*(volatile U32*) (0x00500804))  // LCDCON2
+    181          #define LCDC_LCDFRMCFG                    (*(volatile U32*) (0x00500810))  // LCDFRMCFG
+    182          #define LCDC_TIM1                         (*(volatile U32*) (0x00500808))  // LCDTIM1
+    183          #define LCDC_TIM2                         (*(volatile U32*) (0x0050080C))  // LCDTIM2
+    184          #define LCDC_CTRSTCON                     (*(volatile U32*) (0x00500840))  // CTRSTCON
+    185          #define LCDC_CTRSTVAL                     (*(volatile U32*) (0x00500844))  // CTRSTVAL
+    186          #define LCDC_DMAFRMCFG                    (*(volatile U32*) (0x00500018))  // DMAFRMCFG
+    187          #define LCDC_FIFO                         (*(volatile U32*) (0x00500814))  // FIFO
+    188          #define LCDC_DMABADDR1                    (*(volatile U32*) (0x00500000))  // DMABADDR1
+    189          
+    190          #define LCD_MCK                           ((CPU_MCK * 50 / 3) / 2)
+    191          #define LCD_PIXELCLOCK                    (LCD_FRAMESIZE_PIXELS * LCD_FRAMERATE / LCD_IFWIDTH)
+    192          #define LCD_FRAMESIZE_PIXELS              (XSIZE_PHYS * YSIZE_PHYS * (PIXEL_WIDTH * 8))
+    193          
+    194          #define LCD_FRAMERATE                     75
+    195          #define LCD_IFWIDTH                       24
+    196          #define LCD_TIMING_HFP                    2                               // Horizontal front porch in LCDDOTCLK cycles.
+    197          #define LCD_TIMING_HBP                    2                               // Horizontal back porch in LCDDOTCLK cycles.
+    198          #define LCD_TIMING_HPW                    41                              // Horizontal pulse width in LCDDOTCLK cycles.
+    199          #define LCD_TIMING_VFP                    1
+    200          #define LCD_TIMING_VBP                    1
+    201          #define LCD_TIMING_VPW                    2
+    202          #define LCD_TIMING_VHDLY                  1
+    203          
+    204          #define LCD_FRAMESIZE                     (LCD_FRAMESIZE_PIXELS / 32)
+    205          
+    206          ////
+    207          //// TS
+    208          ////
+    209          //#define TSADCC_CR                         (*(volatile U32*) (0xFFFD0000))  // Control register
+    210          //#define TSADCC_MR                         (*(volatile U32*) (0xFFFD0004))  // Mode register
+    211          //#define TSADCC_TRGR                       (*(volatile U32*) (0xFFFD0008))  // Trigger register
+    212          //#define TSADCC_TSR                        (*(volatile U32*) (0xFFFD000C))  // Touch Screen register
+    213          //#define TSADCC_SR                         (*(volatile U32*) (0xFFFD001C))  // Status register
+    214          //#define TSADCC_CDR0                       (*(volatile U32*) (0xFFFD0030))  // Channel data register 0
+    215          //#define TSADCC_CDR1                       (*(volatile U32*) (0xFFFD0034))  // Channel data register 1
+    216          //#define TSADCC_CDR2                       (*(volatile U32*) (0xFFFD0038))  // Channel data register 2
+    217          //#define TSADCC_CDR3                       (*(volatile U32*) (0xFFFD003C))  // Channel data register 3
+    218          //
+    219          //#define TSADCC_ADCCLK                     (1000000)                        // Touchscreen ADC clock frequency to use
+    220          //#define TSADCC_SR_EOC3_BIT                (3)
+    221          //
+    222          /*********************************************************************
+    223          *
+    224          *       Static data
+    225          *
+    226          **********************************************************************
+    227          */
+    228          
+    229          static int stopTSScan = FALSE;		// Semaphore to suspend normal touch scan while touch screen calibration is in progress
+    230          
+    231          //
+    232          // Video RAM
+    233          //
+
+   \                                 In section .noinit, align 4
+    234          __no_init static U16 _aVRAM[VXSIZE_PHYS * VYSIZE_PHYS];
+   \                     _aVRAM:
+   \   00000000                      DS8 783360
+    235          
+    236          //
+    237          // OS timers
+    238          //
+    239          static OS_TIMER _TOUCHTIMER;
+
+   \                                 In section .data, align 4
+   \   00000000   0A000000           DC32 10
+    240          static U32      _TOUCHTIMER_INTERVAL = 10;
+    241          
+    242          /*********************************************************************
+    243          *
+    244          *       Static code
+    245          *
+    246          **********************************************************************
+    247          */
+    248          
+    249          /*********************************************************************
+    250          *
+    251          *       _ExecTouch
+    252          */
+
+   \                                 In section .text, align 4, keep-with-next
+    253          static void _ExecTouch(void) {
+   \                     _ExecTouch:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+    254            GUI_TOUCH_Exec();
+   \   00000008   ........           BL       GUI_TOUCH_Exec
+    255            OS_RetriggerTimer(&_TOUCHTIMER);
+   \   0000000C   04D08DE2           ADD      SP,SP,#+4
+   \   00000010   0040BDE8           POP      {LR}
+   \   00000014   ........           LDR      R0,??DataTable13
+   \   00000018   ........           B        OS_RetriggerTimer  ;; tailcall
+    256          }
+    257          
+    258          /*********************************************************************
+    259          *
+    260          *       _InitController
+    261          *
+    262          * Purpose:
+    263          *   Initializes the LCD controller
+    264          *
+    265          */
+    266          
+    267          extern void uSDelay(int);
+    268          
+
+   \                                 In section .text, align 4, keep-with-next
+    269          static void _InitController(unsigned LayerIndex) {
+   \                     _InitController:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+    270            U32 TouchOrientation;
+    271          
+    272             //
+    273             // Initialize touch screen
+    274             //
+    275          //	SPIInit();									// Done in Main()
+    276          	TSInit();									// Send start conversion command
+   \   00000008   ........           BL       TSInit
+    277          		
+    278          //  AT91C_BASE_PMC |= (1 << AT91C_ID_TSADC_BIT);  // Enable Touch Screen Controller clock
+    279          //  PIOA_ASR        = 0                           // Setup ports to peripheral A
+    280          //                    | (0x01 << 17)              // PA17: AD0
+    281          //                    | (0x01 << 18)              // PA18: AD1
+    282          //                    | (0x01 << 19)              // PA19: AD2
+    283          //                    | (0x01 << 20)              // PA20: AD3
+    284          //                    ;
+    285          //  PIOA_PPUDR      = 0
+    286          //                    | (0x01 << 17)              // PA17: AD0
+    287          //                    | (0x01 << 18)              // PA18: AD1
+    288          //                    | (0x01 << 19)              // PA19: AD2
+    289          //                    | (0x01 << 20)              // PA20: AD3
+    290          //                    ;
+    291          //  TSADCC_MR       = 0
+    292          //                    | (0x01 <<  0)              // Touch screen only mode
+    293          //                    | (0x01 <<  6)              // Enable pen detect
+    294          //                    | (0x3F <<  8)              // Prescaler rate selection (PRESCAL = (MCK / (2 * ADCCLK)) + 1))
+    295          //                    | (0x7F << 16)              // Start Up Time (STARTUP = (time[s] * ADCCLK) / (1000000 * 8) - 1)) new
+    296          //                    | (0x0F << 24)              // Track and Hold time (SHTIM = (time[ns] x ADCCLK) / 1000000000 - 1)  new
+    297          //                    | (0x0E << 28)              // Pen Detect debouncing period (PENDBC = (2^PENDBC) / ADCCLK)
+    298          //                    ;
+    299          //  TSADCC_TSR      =   (0x0F << 24);             // Track and Hold time (SHTIM = (time[ns] x ADCCLK) / 1000000000 - 1)		- new value
+    300            //
+    301            // Calibrate touch
+    302            //
+    303            TouchOrientation = (GUI_MIRROR_X * LCD_GetMirrorXEx(0)) |
+    304                               (GUI_MIRROR_Y * LCD_GetMirrorYEx(0)) |
+    305                               (GUI_SWAP_XY  * LCD_GetSwapXYEx (0)) ;
+   \   0000000C   0000A0E3           MOV      R0,#+0
+   \   00000010   ........           BL       LCD_GetMirrorXEx
+   \   00000014   0040A0E1           MOV      R4,R0
+   \   00000018   0000A0E3           MOV      R0,#+0
+   \   0000001C   ........           BL       LCD_GetMirrorYEx
+   \   00000020   0050A0E1           MOV      R5,R0
+   \   00000024   0000A0E3           MOV      R0,#+0
+   \   00000028   ........           BL       LCD_GetSwapXYEx
+    306            GUI_TOUCH_SetOrientation(TouchOrientation);
+   \   0000002C   851084E1           ORR      R1,R4,R5, LSL #+1
+   \   00000030   000181E1           ORR      R0,R1,R0, LSL #+2
+   \   00000034   ........           BL       GUI_TOUCH_SetOrientation
+    307            GUI_TOUCH_Calibrate(GUI_COORD_X, 0, XSIZE_PHYS, TOUCH_AD_RIGHT, TOUCH_AD_LEFT);  // x axis
+   \   00000038   2800A0E3           MOV      R0,#+40
+   \   0000003C   00008DE5           STR      R0,[SP, #+0]
+   \   00000040   C730A0E3           MOV      R3,#+199
+   \   00000044   C03F83E3           ORR      R3,R3,#0x300
+   \   00000048   782FA0E3           MOV      R2,#+480
+   \   0000004C   0010A0E3           MOV      R1,#+0
+   \   00000050   0000A0E3           MOV      R0,#+0
+   \   00000054   ........           BL       GUI_TOUCH_Calibrate
+    308            GUI_TOUCH_Calibrate(GUI_COORD_Y, 0, YSIZE_PHYS, TOUCH_AD_BOTTOM, TOUCH_AD_TOP);   // y axis
+   \   00000058   B100A0E3           MOV      R0,#+177
+   \   0000005C   C00F80E3           ORR      R0,R0,#0x300
+   \   00000060   00008DE5           STR      R0,[SP, #+0]
+   \   00000064   4A30A0E3           MOV      R3,#+74
+   \   00000068   442FA0E3           MOV      R2,#+272
+   \   0000006C   0010A0E3           MOV      R1,#+0
+   \   00000070   0100A0E3           MOV      R0,#+1
+   \   00000074   ........           BL       GUI_TOUCH_Calibrate
+    309            //
+    310            // Initialize LCD
+    311            //
+    312            PIOC_IDR        = 0xE8;
+   \   00000078   E800A0E3           MOV      R0,#+232
+   \   0000007C   4010A0E3           MOV      R1,#+64
+   \   00000080   FC0701E5           STR      R0,[R1, #-2044]
+    313            PIOC_PPUDR      = 0xE8;
+   \   00000084   5C10A0E3           MOV      R1,#+92
+   \   00000088   FC0701E5           STR      R0,[R1, #-2044]
+    314            PIOC_ASR        = 0xE8;
+   \   0000008C   6C10A0E3           MOV      R1,#+108
+   \   00000090   FC0701E5           STR      R0,[R1, #-2044]
+    315            PIOC_PDR        = 0xE8;
+   \   00000094   FB10E0E3           MVN      R1,#+251
+   \   00000098   701EC1E3           BIC      R1,R1,#0x700
+   \   0000009C   000081E5           STR      R0,[R1, #+0]
+    316            PIOC_IDR        = 0x03FFBE12;
+   \   000000A0   ........           LDR      R0,??DataTable13_1  ;; 0x3ffbe12
+   \   000000A4   4020A0E3           MOV      R2,#+64
+   \   000000A8   FC0702E5           STR      R0,[R2, #-2044]
+    317            PIOC_PPUDR      = 0x03FFBE12;
+   \   000000AC   5C20A0E3           MOV      R2,#+92
+   \   000000B0   FC0702E5           STR      R0,[R2, #-2044]
+    318            PIOC_BSR        = 0x03FFBE12;
+   \   000000B4   7020A0E3           MOV      R2,#+112
+   \   000000B8   FC0702E5           STR      R0,[R2, #-2044]
+    319            PIOC_PDR        = 0x03FFBE12;
+   \   000000BC   000081E5           STR      R0,[R1, #+0]
+    320          // KMC Fixed names  AT91C_BASE_PMC  = 1 << AT91C_ID_LCDC_BIT;                         // Enable peripheral clock
+    321            PMC_PCER			= 1 << AT91C_ID_LCDC_BIT;                         // Enable peripheral clock
+   \   000000C0   E70F82E2           ADD      R0,R2,#+924
+   \   000000C4   8018A0E3           MOV      R1,#+8388608
+   \   000000C8   FC1700E5           STR      R1,[R0, #-2044]
+    322            LCDC_DMACON     = 0x00;                                           // Disable the LCD and the DMA
+   \   000000CC   5008A0E3           MOV      R0,#+5242880
+   \   000000D0   0010A0E3           MOV      R1,#+0
+   \   000000D4   1C1080E5           STR      R1,[R0, #+28]
+    323            LCDC_PWRCON     = 0 << 1;
+   \   000000D8   3C1880E5           STR      R1,[R0, #+2108]
+    324            LCDC_LCDCON1    = ((LCD_MCK / 2 / LCD_PIXELCLOCK) - 3) << 12;     // DCLK of 10.00MHz
+   \   000000DC   401CA0E3           MOV      R1,#+16384
+   \   000000E0   001880E5           STR      R1,[R0, #+2048]
+    325            LCDC_LCDCON2    = 0x80008682;                                     // Make VSYNC and HSYNC normally high, pulse low
+   \   000000E4   ........           LDR      R1,??DataTable13_2  ;; 0x80008682
+   \   000000E8   ........           LDR      R2,??DataTable13_3
+   \   000000EC   041880E5           STR      R1,[R0, #+2052]
+    326            LCDC_LCDFRMCFG  = ((XSIZE_PHYS - 1) << 21) | (YSIZE_PHYS - 1);
+   \   000000F0   ........           LDR      R1,??DataTable13_4  ;; 0x3be0010f
+   \   000000F4   0130A0E3           MOV      R3,#+1
+   \   000000F8   101880E5           STR      R1,[R0, #+2064]
+    327            LCDC_TIM1       = LCD_TIMING_VFP                                  // Configure timings
+    328                          |  (LCD_TIMING_VBP      << 8)
+    329                          | ((LCD_TIMING_VPW-1)   << 16)
+    330                          | ((LCD_TIMING_VHDLY-1) << 24);
+   \   000000FC   ........           LDR      R1,??DataTable13_5  ;; 0x10101
+   \   00000100   19C0A0E3           MOV      R12,#+25
+   \   00000104   081880E5           STR      R1,[R0, #+2056]
+    331            LCDC_TIM2       = (LCD_TIMING_HBP-1) | ((LCD_TIMING_HPW-1) << 8) | ((LCD_TIMING_HFP-1) << 24);
+   \   00000108   ........           LDR      R1,??DataTable13_6  ;; 0x1002801
+   \   0000010C   ........           LDR      R4,??DataTable13
+   \   00000110   0C1880E5           STR      R1,[R0, #+2060]
+    332            LCDC_CTRSTCON  &= ~AT91C_LCDC_PS_BIT;                             // Configure contrast
+   \   00000114   401890E5           LDR      R1,[R0, #+2112]
+   \   00000118   0310C1E3           BIC      R1,R1,#0x3
+   \   0000011C   401880E5           STR      R1,[R0, #+2112]
+    333            LCDC_CTRSTCON  |= AT91C_LCDC_PS_BIT_NOTDIVIDED_BIT;
+   \   00000120   401890E5           LDR      R1,[R0, #+2112]
+   \   00000124   401880E5           STR      R1,[R0, #+2112]
+    334            LCDC_CTRSTCON  &= ~AT91C_LCDC_POL_BIT;
+   \   00000128   401890E5           LDR      R1,[R0, #+2112]
+   \   0000012C   0410C1E3           BIC      R1,R1,#0x4
+   \   00000130   401880E5           STR      R1,[R0, #+2112]
+    335            LCDC_CTRSTVAL   = 0x80;
+   \   00000134   8010A0E3           MOV      R1,#+128
+   \   00000138   441880E5           STR      R1,[R0, #+2116]
+    336            LCDC_CTRSTCON  |= AT91C_LCDC_POL_BIT_POSITIVEPULSE;
+   \   0000013C   401890E5           LDR      R1,[R0, #+2112]
+   \   00000140   041081E3           ORR      R1,R1,#0x4
+   \   00000144   401880E5           STR      R1,[R0, #+2112]
+    337            LCDC_CTRSTCON  |= AT91C_LCDC_ENA_PWMGEMENABLED;
+   \   00000148   401890E5           LDR      R1,[R0, #+2112]
+   \   0000014C   081081E3           ORR      R1,R1,#0x8
+   \   00000150   401880E5           STR      R1,[R0, #+2112]
+    338          
+    339            // gas per rob
+    340            LCDC_CTRSTCON = 0x0F;
+   \   00000154   0F10A0E3           MOV      R1,#+15
+   \   00000158   401880E5           STR      R1,[R0, #+2112]
+    341          
+    342            LCDC_DMAFRMCFG  = LCD_FRAMESIZE | (LCDC_DMAFRMCFG & 0xFF000000);  // Configure DMA
+   \   0000015C   181090E5           LDR      R1,[R0, #+24]
+   \   00000160   FF1401E2           AND      R1,R1,#0xFF000000
+   \   00000164   FF1C81E3           ORR      R1,R1,#0xFF00
+   \   00000168   181080E5           STR      R1,[R0, #+24]
+    343            LCDC_DMAFRMCFG &= 0x00FFFFFF;
+   \   0000016C   181090E5           LDR      R1,[R0, #+24]
+   \   00000170   0114A0E1           LSL      R1,R1,#+8
+   \   00000174   2114A0E1           LSR      R1,R1,#+8
+   \   00000178   181080E5           STR      R1,[R0, #+24]
+    344            LCDC_DMAFRMCFG |= ((2-1) << 24);
+   \   0000017C   181090E5           LDR      R1,[R0, #+24]
+   \   00000180   401781E3           ORR      R1,R1,#0x1000000
+   \   00000184   181080E5           STR      R1,[R0, #+24]
+    345            LCDC_FIFO       = 2048 - (2 * 4 + 3);
+   \   00000188   F510A0E3           MOV      R1,#+245
+   \   0000018C   701E81E3           ORR      R1,R1,#0x700
+   \   00000190   141880E5           STR      R1,[R0, #+2068]
+    346            LCDC_DMABADDR1  = (U32)VRAM_ADDR;
+   \   00000194   002080E5           STR      R2,[R0, #+0]
+    347            LCDC_DMACON     = AT91C_LCDC_DMAEN_BIT;
+   \   00000198   1C3080E5           STR      R3,[R0, #+28]
+    348            LCDC_PWRCON     = AT91C_LCDC_PWR_BIT | (0x0C << 1);
+   \   0000019C   3CC880E5           STR      R12,[R0, #+2108]
+    349            LCDC_FIFO       = 2048 - (2 * 4 + 3);
+   \   000001A0   141880E5           STR      R1,[R0, #+2068]
+    350            LCDC_DMABADDR1  = (U32)VRAM_ADDR;                                 // Set frame buffer
+   \   000001A4   002080E5           STR      R2,[R0, #+0]
+    351            LCDC_DMACON     = AT91C_LCDC_DMAEN_BIT;                           // Enable DMA and LCD
+   \   000001A8   1C3080E5           STR      R3,[R0, #+28]
+    352            LCDC_PWRCON     = AT91C_LCDC_PWR_BIT | (0x0C << 1);
+   \   000001AC   3CC880E5           STR      R12,[R0, #+2108]
+    353            //
+    354            // Start touch measurement
+    355            //
+    356            OS_CREATETIMER(&_TOUCHTIMER, _ExecTouch, _TOUCHTIMER_INTERVAL);
+   \   000001B0   0A20A0E3           MOV      R2,#+10
+   \   000001B4   ........           LDR      R1,??DataTable13_7
+   \   000001B8   0400A0E1           MOV      R0,R4
+   \   000001BC   ........           BL       OS_CreateTimer
+   \   000001C0   0400A0E1           MOV      R0,R4
+   \   000001C4   04D08DE2           ADD      SP,SP,#+4
+   \   000001C8   3040BDE8           POP      {R4,R5,LR}
+   \   000001CC   ........           B        OS_StartTimer    ;; tailcall
+    357          }
+    358          
+    359          /*********************************************************************
+    360          *
+    361          *       Local functions
+    362          *
+    363          **********************************************************************
+    364          */
+    365          
+    366          /*********************************************************************
+    367          *
+    368          *       _SetDisplayOrigin()
+    369          */
+    370          static void _SetDisplayOrigin(int x, int y) {
+    371            //
+    372            // Set start address for display data and enable LCD controller
+    373            //
+    374            LCDC_DMABADDR1 = (unsigned long) VRAM_ADDR + (y * XSIZE_PHYS * PIXEL_WIDTH);   // Needs to be set, before LCDC is enabled
+    375          }
+    376          
+    377          /*********************************************************************
+    378          *
+    379          *       Public code
+    380          *
+    381          **********************************************************************
+    382          */
+    383          
+    384          /*********************************************************************
+    385          *
+    386          *       LCD_X_Config
+    387          *
+    388          * Purpose:
+    389          *   Called during the initialization process in order to set up the
+    390          *   display driver configuration.
+    391          *
+    392          */
+
+   \                                 In section .text, align 4, keep-with-next
+    393          void LCD_X_Config(void) {
+   \                     LCD_X_Config:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+    394            //
+    395            // Set display driver and color conversion for 1st layer
+    396            //
+    397            GUI_DEVICE_CreateAndLink(DISPLAY_DRIVER, COLOR_CONVERSION, 0, 0);
+   \   00000008   0030A0E3           MOV      R3,#+0
+   \   0000000C   0020A0E3           MOV      R2,#+0
+   \   00000010   ........           LDR      R1,??DataTable13_8
+   \   00000014   ........           LDR      R0,??DataTable13_9
+   \   00000018   ........           BL       GUI_DEVICE_CreateAndLink
+    398            //
+    399            // Display driver configuration, required for Lin-driver
+    400            //
+    401            if (LCD_GetSwapXYEx(0)) {
+   \   0000001C   0000A0E3           MOV      R0,#+0
+   \   00000020   ........           BL       LCD_GetSwapXYEx
+   \   00000024   000050E3           CMP      R0,#+0
+   \   00000028   0600000A           BEQ      ??LCD_X_Config_0
+    402              LCD_SetSizeEx    (0, YSIZE_PHYS,   XSIZE_PHYS);
+   \   0000002C   782FA0E3           MOV      R2,#+480
+   \   00000030   441FA0E3           MOV      R1,#+272
+   \   00000034   0000A0E3           MOV      R0,#+0
+   \   00000038   ........           BL       LCD_SetSizeEx
+    403              LCD_SetVSizeEx   (0, VYSIZE_PHYS,  VXSIZE_PHYS);
+   \   0000003C   782FA0E3           MOV      R2,#+480
+   \   00000040   CC1FA0E3           MOV      R1,#+816
+   \   00000044   040000EA           B        ??LCD_X_Config_1
+    404            } else {
+    405              LCD_SetSizeEx    (0, XSIZE_PHYS,   YSIZE_PHYS);
+   \                     ??LCD_X_Config_0:
+   \   00000048   442FA0E3           MOV      R2,#+272
+   \   0000004C   781FA0E3           MOV      R1,#+480
+   \   00000050   ........           BL       LCD_SetSizeEx
+    406              LCD_SetVSizeEx   (0, VXSIZE_PHYS,  VYSIZE_PHYS);
+   \   00000054   CC2FA0E3           MOV      R2,#+816
+   \   00000058   781FA0E3           MOV      R1,#+480
+   \                     ??LCD_X_Config_1:
+   \   0000005C   0000A0E3           MOV      R0,#+0
+   \   00000060   ........           BL       LCD_SetVSizeEx
+    407            }
+    408            LCD_SetVRAMAddrEx(0, (void *)VRAM_ADDR);
+   \   00000064   04D08DE2           ADD      SP,SP,#+4
+   \   00000068   0040BDE8           POP      {LR}
+   \   0000006C   ........           LDR      R1,??DataTable13_3
+   \   00000070   0000A0E3           MOV      R0,#+0
+   \   00000074   ........           B        LCD_SetVRAMAddrEx  ;; tailcall
+    409            //
+    410            // Set user palette data (only required if no fixed palette is used)
+    411            //
+    412            #if defined(PALETTE)
+    413              LCD_SetLUTEx(0, PALETTE);
+    414            #endif
+    415          }
+    416          
+    417          /*********************************************************************
+    418          *
+    419          *       LCD_X_DisplayDriver
+    420          *
+    421          * Purpose:
+    422          *   This function is called by the display driver for several purposes.
+    423          *   To support the according task the routine needs to be adapted to
+    424          *   the display controller. Please note that the commands marked with
+    425          *   'optional' are not cogently required and should only be adapted if
+    426          *   the display controller supports these features.
+    427          *
+    428          * Parameter:
+    429          *   LayerIndex - Index of layer to be configured
+    430          *   Cmd        - Please refer to the details in the switch statement below
+    431          *   pData      - Pointer to a LCD_X_DATA structure
+    432          *
+    433          * Return Value:
+    434          *   < -1 - Error
+    435          *     -1 - Command not handled
+    436          *      0 - Ok
+    437          */
+
+   \                                 In section .text, align 4, keep-with-next
+    438          int LCD_X_DisplayDriver(unsigned LayerIndex, unsigned Cmd, void * pData) {
+   \                     LCD_X_DisplayDriver:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+    439            int r;
+    440            LCD_X_SETORG_INFO * pSetOrg;
+    441          
+    442            (void) LayerIndex;
+    443            (void) pData;
+    444          
+    445            switch (Cmd) {
+   \   00000008   011051E2           SUBS     R1,R1,#+1
+   \   0000000C   0200000A           BEQ      ??LCD_X_DisplayDriver_0
+   \   00000010   021051E2           SUBS     R1,R1,#+2
+   \   00000014   0400000A           BEQ      ??LCD_X_DisplayDriver_1
+   \   00000018   0B0000EA           B        ??LCD_X_DisplayDriver_2
+    446            //
+    447            // Required
+    448            //
+    449            case LCD_X_INITCONTROLLER: {
+    450              //
+    451              // Called during the initialization process in order to set up the
+    452              // display controller and put it into operation. If the display
+    453              // controller is not initialized by any external routine this needs
+    454              // to be adapted by the customer...
+    455              //
+    456              // ...
+    457              _InitController(0);
+   \                     ??LCD_X_DisplayDriver_0:
+   \   0000001C   0000A0E3           MOV      R0,#+0
+   \   00000020   ........           BL       _InitController
+    458              return 0;
+   \                     ??LCD_X_DisplayDriver_3:
+   \   00000024   0000A0E3           MOV      R0,#+0
+   \   00000028   080000EA           B        ??LCD_X_DisplayDriver_4
+    459            case LCD_X_SETORG:
+    460              //
+    461              // Required for setting the display origin which is passed in the 'xPos' and 'yPos' element of p
+    462              //
+    463              pSetOrg = (LCD_X_SETORG_INFO *)pData;
+    464              _SetDisplayOrigin(pSetOrg->xPos, pSetOrg->yPos);
+   \                     ??LCD_X_DisplayDriver_1:
+   \   0000002C   041092E5           LDR      R1,[R2, #+4]
+   \   00000030   ........           LDR      R0,??DataTable13_10
+   \   00000034   F02FA0E3           MOV      R2,#+960
+   \   00000038   920120E0           MLA      R0,R2,R1,R0
+   \   0000003C   5018A0E3           MOV      R1,#+5242880
+   \   00000040   800680E2           ADD      R0,R0,#+134217728
+   \   00000044   000081E5           STR      R0,[R1, #+0]
+    465              return 0;
+   \   00000048   F5FFFFEA           B        ??LCD_X_DisplayDriver_3
+    466            }
+    467            default:
+    468              r = -1;
+    469            }
+    470            return r;
+   \                     ??LCD_X_DisplayDriver_2:
+   \   0000004C   0000E0E3           MVN      R0,#+0
+   \                     ??LCD_X_DisplayDriver_4:
+   \   00000050   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000054   0080BDE8           POP      {PC}             ;; return
+    471          }
+
+   \                                 In section .bss, align 4
+    472          
+    473          /*********************************************************************
+    474          *
+    475          *       GUI_TOUCH
+    476          */
+    477          
+    478          #if GUI_SUPPORT_TOUCH // Dummy routines needed when touch support is enabled
+    479          
+    480          /*********************************************************************
+    481          *
+    482          *       Static data for global Touch functions
+    483          *
+    484          **********************************************************************
+    485          */
+    486          
+    487          static U32 _TouchX;
+    488          static U32 _TouchY;
+    489          static int _IsTouch;
+    490          
+    491          #define TOUCH_FILTER_SIZE 4
+    492          static unsigned int xhistory[TOUCH_FILTER_SIZE];
+   \                     xhistory:
+   \   00000000                      DS8 16
+   \   00000010                      DS8 16
+   \   00000020                      DS8 4
+   \   00000024                      DS8 4
+   \   00000028                      DS8 4
+   \   0000002C                      DS8 4
+   \   00000030                      DS8 4
+
+   \                                 In section .bss, align 4
+   \                     _TOUCHTIMER:
+   \   00000000                      DS8 20
+    493          static unsigned int yhistory[TOUCH_FILTER_SIZE];
+    494          static unsigned int numtouches;
+    495          
+    496          /*********************************************************************
+    497          *
+    498          *       Local GUI_TOUCH functions
+    499          *
+    500          **********************************************************************
+    501          */
+    502          
+    503          /*********************************************************************
+    504          *
+    505          *       _CheckTouch()
+    506          *
+    507          * Function decription:
+    508          *   Checks if a valid touch AD conversion has been done.
+    509          *
+    510          * Return value:
+    511          *   0: No valid touch value
+    512          *   1: Valid touch converted
+    513          */
+
+   \                                 In section .text, align 4, keep-with-next
+    514          unsigned const char READ_X_COMMAND[] = { 0x01 };
+   \                     READ_X_COMMAND:
+   \   00000000                      ; Initializer data, 1 bytes
+   \   00000000   01                 DC8 1
+
+   \                                 In section .text, align 4, keep-with-next
+    515          unsigned const char READ_Y_COMMAND[] = { 0x09 };
+   \                     READ_Y_COMMAND:
+   \   00000000                      ; Initializer data, 1 bytes
+   \   00000000   09                 DC8 9
+
+   \                                 In section .rodata, align 1, keep-with-next
+    516          unsigned const char START_X_CONVERSION_COMMAND[] = { 0x90 };
+   \                     START_X_CONVERSION_COMMAND:
+   \   00000000                      ; Initializer data, 1 bytes
+   \   00000000   90                 DC8 144
+
+   \                                 In section .rodata, align 1, keep-with-next
+    517          unsigned const char START_Y_CONVERSION_COMMAND[] = { 0x98 };
+   \                     START_Y_CONVERSION_COMMAND:
+   \   00000000                      ; Initializer data, 1 bytes
+   \   00000000   98                 DC8 152
+
+   \                                 In section .rodata, align 1, keep-with-next
+    518          unsigned const char START_PROCESSING_TOUCH_COMMAND2[] = { 0x88 };
+   \                     START_PROCESSING_TOUCH_COMMAND2:
+   \   00000000                      ; Initializer data, 1 bytes
+   \   00000000   88                 DC8 136
+    519          
+    520          #define TS_PENDETECT_PIN  0x80000000
+    521          
+
+   \                                 In section .text, align 4, keep-with-next
+    522          static int _CheckTouch(void)
+    523          {
+   \                     _CheckTouch:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+    524          unsigned char xResults[2];
+    525          unsigned char yResults[2];
+    526          
+    527          	if (PIOA_PDSR & TS_PENDETECT_PIN)
+   \   00000004   C300E0E3           MVN      R0,#+195
+   \   00000008   B00EC0E3           BIC      R0,R0,#0xB00
+   \   0000000C   000090E5           LDR      R0,[R0, #+0]
+   \   00000010   08D04DE2           SUB      SP,SP,#+8
+   \   00000014   ........           LDR      R4,??DataTable13_11
+   \   00000018   800410E3           TST      R0,#0x80000000
+   \   0000001C   0400000A           BEQ      ??_CheckTouch_0
+    528          	{
+    529          		numtouches = 0;
+   \   00000020   0000A0E3           MOV      R0,#+0
+   \   00000024   300084E5           STR      R0,[R4, #+48]
+    530          		_TouchX = _TouchY = 0;
+   \   00000028   280084E5           STR      R0,[R4, #+40]
+   \   0000002C   240084E5           STR      R0,[R4, #+36]
+    531          		return 0;				// Return no touch
+   \   00000030   370000EA           B        ??_CheckTouch_1
+    532          	}
+    533          	
+    534          	TS_SPI_X_EnableCS();
+   \                     ??_CheckTouch_0:
+   \   00000034   ........           BL       TS_SPI_X_EnableCS
+    535          	// Read X value	
+    536          	TS_SPI_X_Write_Read( READ_X_COMMAND, sizeof(READ_X_COMMAND), xResults, sizeof(xResults));
+   \   00000038   0230A0E3           MOV      R3,#+2
+   \   0000003C   02208DE2           ADD      R2,SP,#+2
+   \   00000040   0110A0E3           MOV      R1,#+1
+   \   00000044   ........           ADR      R0,READ_X_COMMAND
+   \   00000048   ........           BL       TS_SPI_X_Write_Read
+    537          	// Read Y value	
+    538          	TS_SPI_X_Write_Read( READ_Y_COMMAND, sizeof(READ_Y_COMMAND), yResults, sizeof(yResults));
+   \   0000004C   0230A0E3           MOV      R3,#+2
+   \   00000050   0D20A0E1           MOV      R2,SP
+   \   00000054   0110A0E3           MOV      R1,#+1
+   \   00000058   ........           ADR      R0,READ_Y_COMMAND
+   \   0000005C   ........           BL       TS_SPI_X_Write_Read
+    539          	TS_SPI_X_DisableCS();
+   \   00000060   ........           BL       TS_SPI_X_DisableCS
+    540          
+    541          #ifdef	EVAL_BOARD
+    542          // Reverse X and Y
+    543          	_TouchY  = (xResults[0] << 8) | xResults[1];
+    544          	_TouchX  = (yResults[0] << 8) | yResults[1];
+    545          #else // FINAL BOARD
+    546          // Reverse polarity
+    547          	_TouchX  = 1024 - ((xResults[0] << 8) | xResults[1]);
+   \   00000064   0200DDE5           LDRB     R0,[SP, #+2]
+   \   00000068   0310DDE5           LDRB     R1,[SP, #+3]
+   \   0000006C   000481E1           ORR      R0,R1,R0, LSL #+8
+   \   00000070   400E60E2           RSB      R0,R0,#+1024
+   \   00000074   240084E5           STR      R0,[R4, #+36]
+    548          	_TouchY  = 1024 - ((yResults[0] << 8) | yResults[1]);
+   \   00000078   0000DDE5           LDRB     R0,[SP, #+0]
+   \   0000007C   0110DDE5           LDRB     R1,[SP, #+1]
+   \   00000080   000481E1           ORR      R0,R1,R0, LSL #+8
+    549          #endif
+    550          
+    551          	if ((_TouchX == 0x0000) && (_TouchY == 0x0000))	{ // Check for no valid data
+   \   00000084   241094E5           LDR      R1,[R4, #+36]
+   \   00000088   400E60E2           RSB      R0,R0,#+1024
+   \   0000008C   280084E5           STR      R0,[R4, #+40]
+   \   00000090   012090E1           ORRS     R2,R0,R1
+    552          		numtouches = 0;			// clear out touch counter
+   \   00000094   0000A003           MOVEQ    R0,#+0
+   \   00000098   30008405           STREQ    R0,[R4, #+48]
+    553          		return 0;				// Return no touch
+   \   0000009C   1C00000A           BEQ      ??_CheckTouch_1
+    554          	} // if
+    555          	else {
+    556          		int i;
+    557          		unsigned int accumx;
+    558          		unsigned int accumy;
+    559          		
+    560          		// store current values in history
+    561          		xhistory[numtouches % TOUCH_FILTER_SIZE] = _TouchX;
+   \   000000A0   302094E5           LDR      R2,[R4, #+48]
+   \   000000A4   033002E2           AND      R3,R2,#0x3
+   \   000000A8   031184E7           STR      R1,[R4, +R3, LSL #+2]
+    562          		yhistory[numtouches % TOUCH_FILTER_SIZE] = _TouchY;
+   \   000000AC   031184E0           ADD      R1,R4,R3, LSL #+2
+   \   000000B0   100081E5           STR      R0,[R1, #+16]
+    563          
+    564          		if (++numtouches < TOUCH_FILTER_SIZE + 2)		// lose first 2 samples
+   \   000000B4   010082E2           ADD      R0,R2,#+1
+   \   000000B8   300084E5           STR      R0,[R4, #+48]
+   \   000000BC   060050E3           CMP      R0,#+6
+    565          		  return 0;
+   \   000000C0   0000A033           MOVCC    R0,#+0
+   \   000000C4   1200003A           BCC      ??_CheckTouch_1
+    566          		
+    567          		// made it here so we have enough samples, calculate average
+    568          		accumx = accumy = 0;
+    569          	  	for (i=0; i < TOUCH_FILTER_SIZE; i++) {
+    570          			accumx += xhistory[i];
+    571          			accumy += yhistory[i];
+    572          		} //
+    573          		_TouchX = accumx / TOUCH_FILTER_SIZE;
+   \   000000C8   000094E5           LDR      R0,[R4, #+0]
+   \   000000CC   041094E5           LDR      R1,[R4, #+4]
+   \   000000D0   000081E0           ADD      R0,R1,R0
+   \   000000D4   081094E5           LDR      R1,[R4, #+8]
+   \   000000D8   000081E0           ADD      R0,R1,R0
+   \   000000DC   0C1094E5           LDR      R1,[R4, #+12]
+   \   000000E0   000081E0           ADD      R0,R1,R0
+   \   000000E4   2001A0E1           LSR      R0,R0,#+2
+   \   000000E8   240084E5           STR      R0,[R4, #+36]
+    574          		_TouchY = accumy / TOUCH_FILTER_SIZE;	
+   \   000000EC   100094E5           LDR      R0,[R4, #+16]
+   \   000000F0   141094E5           LDR      R1,[R4, #+20]
+   \   000000F4   000081E0           ADD      R0,R1,R0
+   \   000000F8   181094E5           LDR      R1,[R4, #+24]
+   \   000000FC   000081E0           ADD      R0,R1,R0
+   \   00000100   1C1094E5           LDR      R1,[R4, #+28]
+   \   00000104   000081E0           ADD      R0,R1,R0
+   \   00000108   2001A0E1           LSR      R0,R0,#+2
+   \   0000010C   280084E5           STR      R0,[R4, #+40]
+    575          
+    576          		return 1;					// Else valid touch detect
+   \   00000110   0100A0E3           MOV      R0,#+1
+   \                     ??_CheckTouch_1:
+   \   00000114   08D08DE2           ADD      SP,SP,#+8        ;; stack cleaning
+   \   00000118   1080BDE8           POP      {R4,PC}          ;; return
+    577          	} // else
+    578          }
+    579          
+    580          /*********************************************************************
+    581          *
+    582          *       Global GUI_TOUCH functions
+    583          *
+    584          **********************************************************************
+    585          */
+    586          
+    587          /*********************************************************************
+    588          *
+    589          *       GUI_TOUCH_X_ActivateX()
+    590          *
+    591          * Function decription:
+    592          *   Called from GUI, if touch support is enabled.
+    593          *   Switches on voltage on X-axis,
+    594          *   prepares measurement for Y-axis.
+    595          *   Voltage on Y-axis is switched off.
+    596          */
+
+   \                                 In section .text, align 4, keep-with-next
+    597          void GUI_TOUCH_X_ActivateX(void) {
+    598          }
+   \                     GUI_TOUCH_X_ActivateX:
+   \   00000000   1EFF2FE1           BX       LR               ;; return
+    599          
+    600          /*********************************************************************
+    601          *
+    602          *       GUI_TOUCH_X_ActivateY()
+    603          *
+    604          * Function decription:
+    605          *   Called from GUI, if touch support is enabled.
+    606          *   Switches on voltage on Y-axis,
+    607          *   prepares measurement for X-axis.
+    608          *   Voltage on X-axis is switched off.
+    609          */
+
+   \                                 In section .text, align 4, keep-with-next
+    610          void GUI_TOUCH_X_ActivateY(void) {
+    611          }
+   \                     GUI_TOUCH_X_ActivateY:
+   \   00000000   1EFF2FE1           BX       LR               ;; return
+    612          
+    613          
+    614          /*********************************************************************
+    615          *
+    616          *       GUI_TOUCH_X_MeasureX()
+    617          *
+    618          * Function decription:
+    619          *   Called from GUI, if touch support is enabled.
+    620          *   Measures voltage of X-axis.
+    621          */
+
+   \                                 In section .text, align 4, keep-with-next
+    622          int  GUI_TOUCH_X_MeasureX(void) {
+    623            if (_IsTouch) {
+   \                     GUI_TOUCH_X_MeasureX:
+   \   00000000   ........           LDR      R0,??DataTable13_11
+   \   00000004   2C1090E5           LDR      R1,[R0, #+44]
+   \   00000008   000051E3           CMP      R1,#+0
+   \   0000000C   0100000A           BEQ      ??GUI_TOUCH_X_MeasureX_0
+    624              return _TouchX;
+   \   00000010   240090E5           LDR      R0,[R0, #+36]
+   \   00000014   1EFF2FE1           BX       LR
+    625            }
+    626            return -1;
+   \                     ??GUI_TOUCH_X_MeasureX_0:
+   \   00000018   0000E0E3           MVN      R0,#+0
+   \   0000001C   1EFF2FE1           BX       LR               ;; return
+    627          }
+    628          
+    629          /*********************************************************************
+    630          *
+    631          *       GUI_TOUCH_X_MeasureY()
+    632          *
+    633          * Function decription:
+    634          *   Called from GUI, if touch support is enabled.
+    635          *   Measures voltage of Y-axis.
+    636          */
+
+   \                                 In section .text, align 4, keep-with-next
+    637          int  GUI_TOUCH_X_MeasureY(void)
+    638          {
+   \                     GUI_TOUCH_X_MeasureY:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+    639          	if (stopTSScan == TRUE)
+   \   00000004   ........           LDR      R4,??DataTable13_11
+   \   00000008   200094E5           LDR      R0,[R4, #+32]
+   \   0000000C   010050E3           CMP      R0,#+1
+   \   00000010   0500000A           BEQ      ??GUI_TOUCH_X_MeasureY_0
+    640          		return -1;
+    641          
+    642          	_IsTouch = _CheckTouch();
+   \   00000014   ........           BL       _CheckTouch
+   \   00000018   2C0084E5           STR      R0,[R4, #+44]
+    643          //  if ((TSADCC_SR & (1 << 20))) {
+    644          //    return 1;
+    645          //  }
+    646          //  if ((TSADCC_SR & (1 << 21))) {
+    647          //    return 1;
+    648          //  }
+    649          	if (_IsTouch)
+   \   0000001C   000050E3           CMP      R0,#+0
+   \   00000020   0100000A           BEQ      ??GUI_TOUCH_X_MeasureY_0
+    650          		return _TouchY;
+   \   00000024   280094E5           LDR      R0,[R4, #+40]
+   \   00000028   1080BDE8           POP      {R4,PC}
+    651          	else return -1;
+   \                     ??GUI_TOUCH_X_MeasureY_0:
+   \   0000002C   0000E0E3           MVN      R0,#+0
+   \   00000030   1080BDE8           POP      {R4,PC}          ;; return
+    652          }
+    653          #endif // GUI_SUPPORT_TOUCH
+    654          
+    655          /*********************************************************************
+    656          *
+    657          *       StartTouchCalibration()
+    658          *
+    659          * Function decription:
+    660          *   Called from GUI, to configure for calibration mode.
+    661          *
+    662          *	 Return: -1	- failure to set up calibration mode
+    663          *				 0 - Ready for the user to hit the first target
+    664          */
+
+   \                                 In section .text, align 4, keep-with-next
+    665          int StartTouchCalibration(void)
+    666          {
+    667          // Ready for user to touch first target
+    668          	stopTSScan = FALSE;
+   \                     StartTouchCalibration:
+   \   00000000   ........           LDR      R0,??DataTable13_11
+   \   00000004   0010A0E3           MOV      R1,#+0
+   \   00000008   201080E5           STR      R1,[R0, #+32]
+    669          	return 0;
+   \   0000000C   0000A0E3           MOV      R0,#+0
+   \   00000010   1EFF2FE1           BX       LR               ;; return
+    670          }
+    671          
+    672          
+    673          /*********************************************************************
+    674          *
+    675          *       GetTouchPoint()
+    676          *
+    677          * Function decription:
+    678          *   Called from GUI, wait for user to press and release the target
+    679          *
+    680          *	 Return: -1	- failure communicating with the chip - exit mode
+    681          *				 0 - no reply from chip
+    682          *				 1 - touch detected
+    683          */
+
+   \                                 In section .text, align 4, keep-with-next
+    684          int GetTouchPoint(void)
+    685          {
+    686          	return _CheckTouch();
+   \                     GetTouchPoint:
+   \   00000000   ........           B        _CheckTouch      ;; tailcall
+    687          }
+    688          
+    689          /*********************************************************************
+    690          *
+    691          *       StopTouchScreenScan()
+    692          *
+    693          * Function decription:
+    694          *   Called from GUI, to suspend touch screen scanning while the flash
+    695          *	is being reprogrammed.  Reprogramming needs exclusive use of the
+    696          *	SPI bus.
+    697          *
+    698          *	 Return: none
+    699          */
+
+   \                                 In section .text, align 4, keep-with-next
+    700          void StopTouchScreenScan(void)
+    701          {
+    702          	stopTSScan = true;
+   \                     StopTouchScreenScan:
+   \   00000000   ........           LDR      R0,??DataTable13_11
+   \   00000004   0110A0E3           MOV      R1,#+1
+   \   00000008   201080E5           STR      R1,[R0, #+32]
+    703          }
+   \   0000000C   1EFF2FE1           BX       LR               ;; return
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable13:
+   \   00000000   ........           DC32     _TOUCHTIMER
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable13_1:
+   \   00000000   12BEFF03           DC32     0x3ffbe12
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable13_2:
+   \   00000000   82860080           DC32     0x80008682
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable13_3:
+   \   00000000   ........           DC32     _aVRAM+0x8000000
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable13_4:
+   \   00000000   0F01E03B           DC32     0x3be0010f
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable13_5:
+   \   00000000   01010100           DC32     0x10101
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable13_6:
+   \   00000000   01280001           DC32     0x1002801
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable13_7:
+   \   00000000   ........           DC32     _ExecTouch
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable13_8:
+   \   00000000   ........           DC32     LCD_API_ColorConv_M565
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable13_9:
+   \   00000000   ........           DC32     GUIDRV_Lin_OXY_16_API
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable13_10:
+   \   00000000   ........           DC32     _aVRAM
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable13_11:
+   \   00000000   ........           DC32     xhistory
+    704          
+    705          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function              .cstack
+     --------              -------
+     GUI_TOUCH_X_ActivateX      0
+     GUI_TOUCH_X_ActivateY      0
+     GUI_TOUCH_X_MeasureX       0
+     GUI_TOUCH_X_MeasureY       8
+     GetTouchPoint              8
+     LCD_X_Config               8
+     LCD_X_DisplayDriver        8
+     StartTouchCalibration      0
+     StopTouchScreenScan        0
+     _CheckTouch               16
+     _ExecTouch                 8
+     _InitController           16
+
+
+   Section sizes:
+
+     Function/Label                 Bytes
+     --------------                 -----
+     _aVRAM                         783360
+     _TOUCHTIMER_INTERVAL                4
+     _ExecTouch                         28
+     _InitController                   464
+     LCD_X_Config                      120
+     LCD_X_DisplayDriver                88
+     xhistory                           52
+     yhistory
+     stopTSScan
+     _TouchX
+     _TouchY
+     _IsTouch
+     numtouches
+     _TOUCHTIMER                        20
+     READ_X_COMMAND                      1
+     READ_Y_COMMAND                      1
+     START_X_CONVERSION_COMMAND          1
+     START_Y_CONVERSION_COMMAND          1
+     START_PROCESSING_TOUCH_COMMAND2
+                                         1
+     _CheckTouch                       284
+     GUI_TOUCH_X_ActivateX               4
+     GUI_TOUCH_X_ActivateY               4
+     GUI_TOUCH_X_MeasureX               32
+     GUI_TOUCH_X_MeasureY               52
+     StartTouchCalibration              20
+     GetTouchPoint                       4
+     StopTouchScreenScan                16
+     ??DataTable13                       4
+     ??DataTable13_1                     4
+     ??DataTable13_2                     4
+     ??DataTable13_3                     4
+     ??DataTable13_4                     4
+     ??DataTable13_5                     4
+     ??DataTable13_6                     4
+     ??DataTable13_7                     4
+     ??DataTable13_8                     4
+     ??DataTable13_9                     4
+     ??DataTable13_10                    4
+     ??DataTable13_11                    4
+
+ 
+      72 bytes in section .bss
+       4 bytes in section .data
+ 783 360 bytes in section .noinit
+       3 bytes in section .rodata
+   1 166 bytes in section .text
+ 
+   1 166 bytes of CODE  memory
+       3 bytes of CONST memory
+ 783 436 bytes of DATA  memory
+
+Errors: none
+Warnings: none

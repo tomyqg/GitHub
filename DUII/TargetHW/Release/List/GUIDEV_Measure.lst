@@ -1,0 +1,1135 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:10:16 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\GUI\GUIDEV_Measure.c                    #
+#    Command line =  C:\DUII\TargetHW\GUI\GUIDEV_Measure.c -D DEBUG=1 -D      #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\GUIDEV_Measure.lst         #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\GUIDEV_Measure.o            #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\GUI\GUIDEV_Measure.c
+      1          /*********************************************************************
+      2          *                SEGGER Microcontroller GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 1996 - 2010  SEGGER Microcontroller GmbH & Co. KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          ** emWin V5.06 - Graphical user interface for embedded applications **
+     13          emWin is protected by international copyright laws.   Knowledge of the
+     14          source code may not be used to write a similar product.  This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : GUIDEV_Measure.c
+     19          Purpose     : Implementation of measurement devices
+     20                        The purpose of a measurement device is to find out the
+     21                        area (Rectangle) affected by a sequence of drawing
+     22                        operations.
+     23          ---------------------------END-OF-HEADER------------------------------
+     24          */
+     25          
+     26          #include <string.h>
+     27          
+     28          #include "GUI_Private.h"
+     29          
+     30          #if GUI_WINSUPPORT
+     31            #include "WM.h"
+     32          #endif
+     33          
+     34          /* Memory device capabilities are compiled only if support for them is enabled.*/ 
+     35          #if GUI_SUPPORT_MEMDEV
+     36          
+     37          /*********************************************************************
+     38          *
+     39          *       typedefs
+     40          *
+     41          **********************************************************************
+     42          */
+     43          
+     44          typedef struct {
+     45            GUI_DEVICE * pDevice;
+     46            GUI_RECT rUsed;
+     47            tLCDDEV_Color2Index*  pfColor2Index;
+     48            tLCDDEV_Index2Color*  pfIndex2Color;
+     49            tLCDDEV_GetIndexMask* pfGetIndexMask;
+     50          } GUI_MEASDEV;
+     51          
+     52          /*********************************************************************
+     53          *
+     54          *       defines
+     55          *
+     56          **********************************************************************
+     57          */
+     58          
+     59          #define GUI_MEASDEV_H2P(h) ((GUI_MEASDEV *)GUI_ALLOC_h2p(h))
+     60          
+     61          /*********************************************************************
+     62          *
+     63          *       static code
+     64          *
+     65          **********************************************************************
+     66          */
+     67          /*********************************************************************
+     68          *
+     69          *       _MarkPixel
+     70          */
+     71          static void _MarkPixel(int x, int y) {
+     72            GUI_MEASDEV * pDev = (GUI_MEASDEV *)(GUI_MEMDEV_H2P(GUI_Context.hDevData));
+     73            if (x < pDev->rUsed.x0) {
+     74              pDev->rUsed.x0 = x;
+     75            }
+     76            if (x > pDev->rUsed.x1) {
+     77              pDev->rUsed.x1 = x;
+     78            }
+     79            if (y < pDev->rUsed.y0) {
+     80              pDev->rUsed.y0 = y;
+     81            }
+     82            if (y > pDev->rUsed.y1) {
+     83              pDev->rUsed.y1 = y;
+     84            }
+     85          }
+     86          
+     87          /*********************************************************************
+     88          *
+     89          *       _MarkRect
+     90          */
+     91          static void _MarkRect(int x0, int y0, int x1, int y1) {
+     92            GUI_MEASDEV * pDev = (GUI_MEASDEV *)(GUI_MEMDEV_H2P(GUI_Context.hDevData));
+     93            if (x0 < pDev->rUsed.x0) {
+     94              pDev->rUsed.x0 = x0;
+     95            }
+     96            if (x1 > pDev->rUsed.x1) {
+     97              pDev->rUsed.x1 = x1;
+     98            }
+     99            if (y0 < pDev->rUsed.y0) {
+    100              pDev->rUsed.y0 = y0;
+    101            }
+    102            if (y1 > pDev->rUsed.y1) {
+    103              pDev->rUsed.y1 = y1;
+    104            }
+    105          }
+    106          
+    107          /*********************************************************************
+    108          *
+    109          *       _DrawBitmap
+    110          */
+
+   \                                 In section .text, align 4, keep-with-next
+    111          static void _DrawBitmap(GUI_DEVICE * pDevice, int x0, int y0, int xsize, int ysize,
+    112                                 int BitsPerPixel, int BytesPerLine,
+    113                                 const U8 GUI_UNI_PTR * pData, int Diff,
+    114                                 const LCD_PIXELINDEX* pTrans)
+    115          {
+   \                     _DrawBitmap:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   18009DE5           LDR      R0,[SP, #+24]
+   \   0000000C   0250A0E1           MOV      R5,R2
+    116            GUI_USE_PARA(pDevice);
+    117            GUI_USE_PARA(BitsPerPixel);
+    118            GUI_USE_PARA(BytesPerLine);
+    119            GUI_USE_PARA(pData);
+    120            GUI_USE_PARA(Diff);
+    121            GUI_USE_PARA(pTrans);
+    122            _MarkRect(x0, y0, x0 + xsize - 1, y0 + ysize - 1);
+   \   00000010   050080E0           ADD      R0,R0,R5
+   \   00000014   0140A0E1           MOV      R4,R1
+   \   00000018   016040E2           SUB      R6,R0,#+1
+   \   0000001C   040083E0           ADD      R0,R3,R4
+   \   00000020   017040E2           SUB      R7,R0,#+1
+   \   00000024   ........           LDR      R0,??DataTable12
+   \   00000028   880090E5           LDR      R0,[R0, #+136]
+   \   0000002C   ........           BL       GUI_ALLOC_h2p
+   \   00000030   F410D0E1           LDRSH    R1,[R0, #+4]
+    123          }
+   \   00000034   04D08DE2           ADD      SP,SP,#+4
+   \   00000038   010054E1           CMP      R4,R1
+   \   0000003C   B440C0B1           STRHLT   R4,[R0, #+4]
+   \   00000040   F810D0E1           LDRSH    R1,[R0, #+8]
+   \   00000044   070051E1           CMP      R1,R7
+   \   00000048   B870C0B1           STRHLT   R7,[R0, #+8]
+   \   0000004C   F610D0E1           LDRSH    R1,[R0, #+6]
+   \   00000050   010055E1           CMP      R5,R1
+   \   00000054   B650C0B1           STRHLT   R5,[R0, #+6]
+   \   00000058   FA10D0E1           LDRSH    R1,[R0, #+10]
+   \   0000005C   060051E1           CMP      R1,R6
+   \   00000060   BA60C0B1           STRHLT   R6,[R0, #+10]
+   \   00000064   F080BDE8           POP      {R4-R7,PC}       ;; return
+    124          
+    125          /*********************************************************************
+    126          *
+    127          *       _DrawHLine
+    128          */
+
+   \                                 In section .text, align 4, keep-with-next
+    129          static void _DrawHLine(GUI_DEVICE * pDevice, int x0, int y,  int x1) {
+   \                     _DrawHLine:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+    130            GUI_USE_PARA(pDevice);
+    131            _MarkRect(x0, y, x1, y);
+   \   00000004   ........           LDR      R0,??DataTable12
+   \   00000008   0140A0E1           MOV      R4,R1
+   \   0000000C   0250A0E1           MOV      R5,R2
+   \   00000010   0360A0E1           MOV      R6,R3
+   \   00000014   880090E5           LDR      R0,[R0, #+136]
+   \   00000018   ........           BL       GUI_ALLOC_h2p
+   \   0000001C   F410D0E1           LDRSH    R1,[R0, #+4]
+   \   00000020   010054E1           CMP      R4,R1
+   \   00000024   B440C0B1           STRHLT   R4,[R0, #+4]
+   \   00000028   F810D0E1           LDRSH    R1,[R0, #+8]
+   \   0000002C   060051E1           CMP      R1,R6
+   \   00000030   B860C0B1           STRHLT   R6,[R0, #+8]
+   \   00000034   F610D0E1           LDRSH    R1,[R0, #+6]
+   \   00000038   010055E1           CMP      R5,R1
+   \   0000003C   B650C0B1           STRHLT   R5,[R0, #+6]
+   \   00000040   FA10D0E1           LDRSH    R1,[R0, #+10]
+   \   00000044   050051E1           CMP      R1,R5
+   \   00000048   BA50C0B1           STRHLT   R5,[R0, #+10]
+    132          }
+   \   0000004C   7080BDE8           POP      {R4-R6,PC}       ;; return
+    133          
+    134          /*********************************************************************
+    135          *
+    136          *       _DrawVLine
+    137          */
+
+   \                                 In section .text, align 4, keep-with-next
+    138          static void _DrawVLine(GUI_DEVICE * pDevice, int x , int y0,  int y1) {
+   \                     _DrawVLine:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+    139            GUI_USE_PARA(pDevice);
+    140            _MarkRect(x, y0, x, y1);
+   \   00000004   ........           LDR      R0,??DataTable12
+   \   00000008   0140A0E1           MOV      R4,R1
+   \   0000000C   0250A0E1           MOV      R5,R2
+   \   00000010   0360A0E1           MOV      R6,R3
+   \   00000014   880090E5           LDR      R0,[R0, #+136]
+   \   00000018   ........           BL       GUI_ALLOC_h2p
+   \   0000001C   F410D0E1           LDRSH    R1,[R0, #+4]
+   \   00000020   010054E1           CMP      R4,R1
+   \   00000024   B440C0B1           STRHLT   R4,[R0, #+4]
+   \   00000028   F810D0E1           LDRSH    R1,[R0, #+8]
+   \   0000002C   040051E1           CMP      R1,R4
+   \   00000030   B840C0B1           STRHLT   R4,[R0, #+8]
+   \   00000034   F610D0E1           LDRSH    R1,[R0, #+6]
+   \   00000038   010055E1           CMP      R5,R1
+   \   0000003C   B650C0B1           STRHLT   R5,[R0, #+6]
+   \   00000040   FA10D0E1           LDRSH    R1,[R0, #+10]
+   \   00000044   060051E1           CMP      R1,R6
+   \   00000048   BA60C0B1           STRHLT   R6,[R0, #+10]
+    141          }
+   \   0000004C   7080BDE8           POP      {R4-R6,PC}       ;; return
+    142          
+    143          /*********************************************************************
+    144          *
+    145          *       _SetPixelIndex
+    146          */
+
+   \                                 In section .text, align 4, keep-with-next
+    147          static void _SetPixelIndex(GUI_DEVICE * pDevice, int x, int y, int Index) {
+   \                     _SetPixelIndex:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+    148            GUI_USE_PARA(pDevice);
+    149            GUI_USE_PARA(Index);
+    150            _MarkPixel(x, y);
+   \   00000004   ........           LDR      R0,??DataTable12
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0140A0E1           MOV      R4,R1
+   \   00000010   0250A0E1           MOV      R5,R2
+   \   00000014   880090E5           LDR      R0,[R0, #+136]
+   \   00000018   ........           BL       GUI_ALLOC_h2p
+   \   0000001C   F410D0E1           LDRSH    R1,[R0, #+4]
+    151          }
+   \   00000020   04D08DE2           ADD      SP,SP,#+4
+   \   00000024   010054E1           CMP      R4,R1
+   \   00000028   B440C0B1           STRHLT   R4,[R0, #+4]
+   \   0000002C   F810D0E1           LDRSH    R1,[R0, #+8]
+   \   00000030   040051E1           CMP      R1,R4
+   \   00000034   B840C0B1           STRHLT   R4,[R0, #+8]
+   \   00000038   F610D0E1           LDRSH    R1,[R0, #+6]
+   \   0000003C   010055E1           CMP      R5,R1
+   \   00000040   B650C0B1           STRHLT   R5,[R0, #+6]
+   \   00000044   FA10D0E1           LDRSH    R1,[R0, #+10]
+   \   00000048   050051E1           CMP      R1,R5
+   \   0000004C   BA50C0B1           STRHLT   R5,[R0, #+10]
+   \   00000050   3080BDE8           POP      {R4,R5,PC}       ;; return
+    152          
+    153          /*********************************************************************
+    154          *
+    155          *       _XorPixel
+    156          */
+
+   \                                 In section .text, align 4, keep-with-next
+    157          static void _XorPixel(GUI_DEVICE * pDevice, int x, int y) {
+   \                     _XorPixel:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+    158            GUI_USE_PARA(pDevice);
+    159            _MarkPixel(x, y);
+   \   00000004   ........           LDR      R0,??DataTable12
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0140A0E1           MOV      R4,R1
+   \   00000010   0250A0E1           MOV      R5,R2
+   \   00000014   880090E5           LDR      R0,[R0, #+136]
+   \   00000018   ........           BL       GUI_ALLOC_h2p
+   \   0000001C   F410D0E1           LDRSH    R1,[R0, #+4]
+    160          }
+   \   00000020   04D08DE2           ADD      SP,SP,#+4
+   \   00000024   010054E1           CMP      R4,R1
+   \   00000028   B440C0B1           STRHLT   R4,[R0, #+4]
+   \   0000002C   F810D0E1           LDRSH    R1,[R0, #+8]
+   \   00000030   040051E1           CMP      R1,R4
+   \   00000034   B840C0B1           STRHLT   R4,[R0, #+8]
+   \   00000038   F610D0E1           LDRSH    R1,[R0, #+6]
+   \   0000003C   010055E1           CMP      R5,R1
+   \   00000040   B650C0B1           STRHLT   R5,[R0, #+6]
+   \   00000044   FA10D0E1           LDRSH    R1,[R0, #+10]
+   \   00000048   050051E1           CMP      R1,R5
+   \   0000004C   BA50C0B1           STRHLT   R5,[R0, #+10]
+   \   00000050   3080BDE8           POP      {R4,R5,PC}       ;; return
+    161          
+    162          /*********************************************************************
+    163          *
+    164          *       _GetPixelIndex
+    165          */
+
+   \                                 In section .text, align 4, keep-with-next
+    166          static unsigned int _GetPixelIndex(GUI_DEVICE * pDevice, int x, int y) { 
+    167            GUI_USE_PARA(pDevice);
+    168            GUI_USE_PARA(x);
+    169            GUI_USE_PARA(y);
+    170            return 0;
+   \                     _GetPixelIndex:
+   \   00000000   0000A0E3           MOV      R0,#+0
+   \   00000004   1EFF2FE1           BX       LR               ;; return
+    171          }
+    172          
+    173          /*********************************************************************
+    174          *
+    175          *       _FillRect
+    176          */
+
+   \                                 In section .text, align 4, keep-with-next
+    177          static void _FillRect(GUI_DEVICE * pDevice, int x0, int y0, int x1, int y1) {
+   \                     _FillRect:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+    178            GUI_USE_PARA(pDevice);
+    179            _MarkRect(x0, y0, x1, y1);
+   \   00000004   ........           LDR      R0,??DataTable12
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0160A0E1           MOV      R6,R1
+   \   00000010   0240A0E1           MOV      R4,R2
+   \   00000014   0370A0E1           MOV      R7,R3
+   \   00000018   18509DE5           LDR      R5,[SP, #+24]
+   \   0000001C   880090E5           LDR      R0,[R0, #+136]
+   \   00000020   ........           BL       GUI_ALLOC_h2p
+   \   00000024   F410D0E1           LDRSH    R1,[R0, #+4]
+    180          }
+   \   00000028   04D08DE2           ADD      SP,SP,#+4
+   \   0000002C   010056E1           CMP      R6,R1
+   \   00000030   B460C0B1           STRHLT   R6,[R0, #+4]
+   \   00000034   F810D0E1           LDRSH    R1,[R0, #+8]
+   \   00000038   070051E1           CMP      R1,R7
+   \   0000003C   B870C0B1           STRHLT   R7,[R0, #+8]
+   \   00000040   F610D0E1           LDRSH    R1,[R0, #+6]
+   \   00000044   010054E1           CMP      R4,R1
+   \   00000048   B640C0B1           STRHLT   R4,[R0, #+6]
+   \   0000004C   FA10D0E1           LDRSH    R1,[R0, #+10]
+   \   00000050   050051E1           CMP      R1,R5
+   \   00000054   BA50C0B1           STRHLT   R5,[R0, #+10]
+   \   00000058   F080BDE8           POP      {R4-R7,PC}       ;; return
+    181          
+    182          /*********************************************************************
+    183          *
+    184          *       _GetRect
+    185          */
+
+   \                                 In section .text, align 4, keep-with-next
+    186          static void _GetRect(GUI_DEVICE * pDevice, LCD_RECT * pRect) {
+    187            GUI_USE_PARA(pDevice);
+    188            pRect->x0 = pRect->y0 = -4095;
+   \                     _GetRect:
+   \   00000000   FE00E0E3           MVN      R0,#+254
+   \   00000004   F00EC0E3           BIC      R0,R0,#0xF00
+   \   00000008   B200C1E1           STRH     R0,[R1, #+2]
+   \   0000000C   B000C1E1           STRH     R0,[R1, #+0]
+    189            pRect->x1 = pRect->y1 =  4095;
+   \   00000010   000060E2           RSB      R0,R0,#+0
+   \   00000014   B600C1E1           STRH     R0,[R1, #+6]
+   \   00000018   B400C1E1           STRH     R0,[R1, #+4]
+    190          }
+   \   0000001C   1EFF2FE1           BX       LR               ;; return
+    191          
+    192          /*********************************************************************
+    193          *
+    194          *       _CalcPolyRect
+    195          */
+    196          static void _CalcPolyRect(GUI_RECT *pr, const GUI_POINT* paPoint, int NumPoints) {
+    197            int i;
+    198            int xMin, xMax, yMin, yMax;
+    199            xMin = GUI_XMAX;
+    200            yMin = GUI_YMAX;
+    201            xMax = GUI_XMIN;
+    202            yMax = GUI_YMIN;
+    203            for (i = 0; i  <NumPoints; i++) {
+    204              int x = paPoint->x;
+    205              int y = paPoint->y;
+    206              if (xMin > x)
+    207                xMin = x;
+    208              if (xMax < x)
+    209                xMax = x;
+    210              if (yMin > y)
+    211                yMin = y;
+    212              if (yMax < y)
+    213                yMax = y;
+    214              paPoint++;
+    215            }
+    216            pr->x0 = xMin;
+    217            pr->x1 = xMax;
+    218            pr->y0 = yMin;
+    219            pr->y1 = yMax;
+    220          }
+    221          
+    222          /*********************************************************************
+    223          *
+    224          *       _FillPolygon
+    225          */
+
+   \                                 In section .text, align 4, keep-with-next
+    226          static void _FillPolygon(GUI_DEVICE * pDevice, const GUI_POINT* paPoint, int NumPoints, int x0, int y0) {
+   \                     _FillPolygon:
+   \   00000000   F0432DE9           PUSH     {R4-R9,LR}
+    227            GUI_RECT r;
+    228          
+    229            GUI_USE_PARA(pDevice);
+    230            _CalcPolyRect(&r, paPoint, NumPoints);
+   \   00000004   FF50A0E3           MOV      R5,#+255
+   \   00000008   F05E85E3           ORR      R5,R5,#0xF00
+   \   0000000C   0540A0E1           MOV      R4,R5
+   \   00000010   0CD04DE2           SUB      SP,SP,#+12
+   \   00000014   01E0A0E1           MOV      LR,R1
+   \   00000018   000064E2           RSB      R0,R4,#+0
+   \   0000001C   28C09DE5           LDR      R12,[SP, #+40]
+   \   00000020   0570A0E1           MOV      R7,R5
+   \   00000024   0010A0E1           MOV      R1,R0
+   \   00000028   010052E3           CMP      R2,#+1
+   \   0000002C   300000BA           BLT      ??_FillPolygon_0
+   \   00000030   018042E2           SUB      R8,R2,#+1
+   \   00000034   F060DEE1           LDRSH    R6,[LR, #+0]
+   \   00000038   F290DEE1           LDRSH    R9,[LR, #+2]
+   \   0000003C   010018E3           TST      R8,#0x1
+   \   00000040   0B00000A           BEQ      ??_FillPolygon_1
+   \   00000044   0920A0E1           MOV      R2,R9
+   \   00000048   050056E1           CMP      R6,R5
+   \   0000004C   0670A0B1           MOVLT    R7,R6
+   \   00000050   019080E2           ADD      R9,R0,#+1
+   \   00000054   090056E1           CMP      R6,R9
+   \   00000058   0600A0A1           MOVGE    R0,R6
+   \   0000005C   050052E1           CMP      R2,R5
+   \   00000060   0240A0B1           MOVLT    R4,R2
+   \   00000064   090052E1           CMP      R2,R9
+   \   00000068   F460FEE1           LDRSH    R6,[LR, #+4]!
+   \   0000006C   0210A0A1           MOVGE    R1,R2
+   \   00000070   F290DEE1           LDRSH    R9,[LR, #+2]
+   \                     ??_FillPolygon_1:
+   \   00000074   A850B0E1           LSRS     R5,R8,#+1
+   \   00000078   1500000A           BEQ      ??_FillPolygon_2
+   \                     ??_FillPolygon_3:
+   \   0000007C   070056E1           CMP      R6,R7
+   \   00000080   0670A0D1           MOVLE    R7,R6
+   \   00000084   060050E1           CMP      R0,R6
+   \   00000088   0600A0B1           MOVLT    R0,R6
+   \   0000008C   040059E1           CMP      R9,R4
+   \   00000090   0940A0D1           MOVLE    R4,R9
+   \   00000094   F460FEE1           LDRSH    R6,[LR, #+4]!
+   \   00000098   090051E1           CMP      R1,R9
+   \   0000009C   0910A0B1           MOVLT    R1,R9
+   \   000000A0   070056E1           CMP      R6,R7
+   \   000000A4   F220DEE1           LDRSH    R2,[LR, #+2]
+   \   000000A8   0670A0D1           MOVLE    R7,R6
+   \   000000AC   060050E1           CMP      R0,R6
+   \   000000B0   0600A0B1           MOVLT    R0,R6
+   \   000000B4   040052E1           CMP      R2,R4
+   \   000000B8   0240A0D1           MOVLE    R4,R2
+   \   000000BC   020051E1           CMP      R1,R2
+   \   000000C0   0210A0B1           MOVLT    R1,R2
+   \   000000C4   F460FEE1           LDRSH    R6,[LR, #+4]!
+   \   000000C8   F290DEE1           LDRSH    R9,[LR, #+2]
+   \   000000CC   015055E2           SUBS     R5,R5,#+1
+   \   000000D0   E9FFFF1A           BNE      ??_FillPolygon_3
+   \                     ??_FillPolygon_2:
+   \   000000D4   070056E1           CMP      R6,R7
+   \   000000D8   0670A0D1           MOVLE    R7,R6
+   \   000000DC   060050E1           CMP      R0,R6
+   \   000000E0   0600A0B1           MOVLT    R0,R6
+   \   000000E4   040059E1           CMP      R9,R4
+   \   000000E8   0940A0D1           MOVLE    R4,R9
+   \   000000EC   090051E1           CMP      R1,R9
+   \   000000F0   0910A0B1           MOVLT    R1,R9
+   \                     ??_FillPolygon_0:
+   \   000000F4   B400CDE1           STRH     R0,[SP, #+4]
+   \   000000F8   B610CDE1           STRH     R1,[SP, #+6]
+   \   000000FC   B070CDE1           STRH     R7,[SP, #+0]
+   \   00000100   B240CDE1           STRH     R4,[SP, #+2]
+    231            GUI_MoveRect(&r, x0, y0);
+   \   00000104   0C20A0E1           MOV      R2,R12
+   \   00000108   0310A0E1           MOV      R1,R3
+   \   0000010C   0D00A0E1           MOV      R0,SP
+   \   00000110   ........           BL       GUI_MoveRect
+    232            _MarkRect(r.x0, r.y0, r.x1, r.y1);
+   \   00000114   ........           LDR      R0,??DataTable12
+   \   00000118   F640DDE1           LDRSH    R4,[SP, #+6]
+   \   0000011C   F450DDE1           LDRSH    R5,[SP, #+4]
+   \   00000120   F260DDE1           LDRSH    R6,[SP, #+2]
+   \   00000124   F070DDE1           LDRSH    R7,[SP, #+0]
+   \   00000128   880090E5           LDR      R0,[R0, #+136]
+   \   0000012C   ........           BL       GUI_ALLOC_h2p
+   \   00000130   F410D0E1           LDRSH    R1,[R0, #+4]
+    233          }
+   \   00000134   0CD08DE2           ADD      SP,SP,#+12
+   \   00000138   010057E1           CMP      R7,R1
+   \   0000013C   B470C0B1           STRHLT   R7,[R0, #+4]
+   \   00000140   F810D0E1           LDRSH    R1,[R0, #+8]
+   \   00000144   050051E1           CMP      R1,R5
+   \   00000148   B850C0B1           STRHLT   R5,[R0, #+8]
+   \   0000014C   F610D0E1           LDRSH    R1,[R0, #+6]
+   \   00000150   010056E1           CMP      R6,R1
+   \   00000154   B660C0B1           STRHLT   R6,[R0, #+6]
+   \   00000158   FA10D0E1           LDRSH    R1,[R0, #+10]
+   \   0000015C   040051E1           CMP      R1,R4
+   \   00000160   BA40C0B1           STRHLT   R4,[R0, #+10]
+   \   00000164   F083BDE8           POP      {R4-R9,PC}       ;; return
+    234          
+    235          /*********************************************************************
+    236          *
+    237          *       _FillPolygonAA
+    238          */
+
+   \                                 In section .text, align 4, keep-with-next
+    239          static void _FillPolygonAA(GUI_DEVICE * pDevice, const GUI_POINT* paPoint, int NumPoints, int x0, int y0) {
+   \                     _FillPolygonAA:
+   \   00000000   F0432DE9           PUSH     {R4-R9,LR}
+    240            GUI_RECT r;
+    241          
+    242            GUI_USE_PARA(pDevice);
+    243            _CalcPolyRect(&r, paPoint, NumPoints);
+   \   00000004   FF50A0E3           MOV      R5,#+255
+   \   00000008   F05E85E3           ORR      R5,R5,#0xF00
+   \   0000000C   0540A0E1           MOV      R4,R5
+   \   00000010   0CD04DE2           SUB      SP,SP,#+12
+   \   00000014   01E0A0E1           MOV      LR,R1
+   \   00000018   000064E2           RSB      R0,R4,#+0
+   \   0000001C   28C09DE5           LDR      R12,[SP, #+40]
+   \   00000020   0570A0E1           MOV      R7,R5
+   \   00000024   0010A0E1           MOV      R1,R0
+   \   00000028   010052E3           CMP      R2,#+1
+   \   0000002C   300000BA           BLT      ??_FillPolygonAA_0
+   \   00000030   018042E2           SUB      R8,R2,#+1
+   \   00000034   F060DEE1           LDRSH    R6,[LR, #+0]
+   \   00000038   F290DEE1           LDRSH    R9,[LR, #+2]
+   \   0000003C   010018E3           TST      R8,#0x1
+   \   00000040   0B00000A           BEQ      ??_FillPolygonAA_1
+   \   00000044   0920A0E1           MOV      R2,R9
+   \   00000048   050056E1           CMP      R6,R5
+   \   0000004C   0670A0B1           MOVLT    R7,R6
+   \   00000050   019080E2           ADD      R9,R0,#+1
+   \   00000054   090056E1           CMP      R6,R9
+   \   00000058   0600A0A1           MOVGE    R0,R6
+   \   0000005C   050052E1           CMP      R2,R5
+   \   00000060   0240A0B1           MOVLT    R4,R2
+   \   00000064   090052E1           CMP      R2,R9
+   \   00000068   F460FEE1           LDRSH    R6,[LR, #+4]!
+   \   0000006C   0210A0A1           MOVGE    R1,R2
+   \   00000070   F290DEE1           LDRSH    R9,[LR, #+2]
+   \                     ??_FillPolygonAA_1:
+   \   00000074   A850B0E1           LSRS     R5,R8,#+1
+   \   00000078   1500000A           BEQ      ??_FillPolygonAA_2
+   \                     ??_FillPolygonAA_3:
+   \   0000007C   070056E1           CMP      R6,R7
+   \   00000080   0670A0D1           MOVLE    R7,R6
+   \   00000084   060050E1           CMP      R0,R6
+   \   00000088   0600A0B1           MOVLT    R0,R6
+   \   0000008C   040059E1           CMP      R9,R4
+   \   00000090   0940A0D1           MOVLE    R4,R9
+   \   00000094   F460FEE1           LDRSH    R6,[LR, #+4]!
+   \   00000098   090051E1           CMP      R1,R9
+   \   0000009C   0910A0B1           MOVLT    R1,R9
+   \   000000A0   070056E1           CMP      R6,R7
+   \   000000A4   F220DEE1           LDRSH    R2,[LR, #+2]
+   \   000000A8   0670A0D1           MOVLE    R7,R6
+   \   000000AC   060050E1           CMP      R0,R6
+   \   000000B0   0600A0B1           MOVLT    R0,R6
+   \   000000B4   040052E1           CMP      R2,R4
+   \   000000B8   0240A0D1           MOVLE    R4,R2
+   \   000000BC   020051E1           CMP      R1,R2
+   \   000000C0   0210A0B1           MOVLT    R1,R2
+   \   000000C4   F460FEE1           LDRSH    R6,[LR, #+4]!
+   \   000000C8   F290DEE1           LDRSH    R9,[LR, #+2]
+   \   000000CC   015055E2           SUBS     R5,R5,#+1
+   \   000000D0   E9FFFF1A           BNE      ??_FillPolygonAA_3
+   \                     ??_FillPolygonAA_2:
+   \   000000D4   070056E1           CMP      R6,R7
+   \   000000D8   0670A0D1           MOVLE    R7,R6
+   \   000000DC   060050E1           CMP      R0,R6
+   \   000000E0   0600A0B1           MOVLT    R0,R6
+   \   000000E4   040059E1           CMP      R9,R4
+   \   000000E8   0940A0D1           MOVLE    R4,R9
+   \   000000EC   090051E1           CMP      R1,R9
+   \   000000F0   0910A0B1           MOVLT    R1,R9
+   \                     ??_FillPolygonAA_0:
+   \   000000F4   B400CDE1           STRH     R0,[SP, #+4]
+   \   000000F8   B610CDE1           STRH     R1,[SP, #+6]
+   \   000000FC   B070CDE1           STRH     R7,[SP, #+0]
+   \   00000100   B240CDE1           STRH     R4,[SP, #+2]
+    244            GUI_MoveRect(&r, x0, y0);
+   \   00000104   0C20A0E1           MOV      R2,R12
+   \   00000108   0310A0E1           MOV      R1,R3
+   \   0000010C   0D00A0E1           MOV      R0,SP
+   \   00000110   ........           BL       GUI_MoveRect
+    245            if (GUI_Context.AA_HiResEnable) {
+   \   00000114   ........           LDR      R4,??DataTable12
+   \   00000118   9900D4E5           LDRB     R0,[R4, #+153]
+   \   0000011C   000050E3           CMP      R0,#+0
+   \   00000120   1300000A           BEQ      ??_FillPolygonAA_4
+    246              r.x0 /= GUI_Context.AA_Factor;
+   \   00000124   F000DDE1           LDRSH    R0,[SP, #+0]
+   \   00000128   9810D4E5           LDRB     R1,[R4, #+152]
+   \   0000012C   ........           BL       __aeabi_idiv
+   \   00000130   B000CDE1           STRH     R0,[SP, #+0]
+    247              r.y0 /= GUI_Context.AA_Factor;
+   \   00000134   F200DDE1           LDRSH    R0,[SP, #+2]
+   \   00000138   9810D4E5           LDRB     R1,[R4, #+152]
+   \   0000013C   ........           BL       __aeabi_idiv
+   \   00000140   B200CDE1           STRH     R0,[SP, #+2]
+   \   00000144   9810D4E5           LDRB     R1,[R4, #+152]
+   \   00000148   F400DDE1           LDRSH    R0,[SP, #+4]
+   \   0000014C   000081E0           ADD      R0,R1,R0
+   \   00000150   010040E2           SUB      R0,R0,#+1
+   \   00000154   ........           BL       __aeabi_idiv
+   \   00000158   B400CDE1           STRH     R0,[SP, #+4]
+   \   0000015C   9810D4E5           LDRB     R1,[R4, #+152]
+   \   00000160   F600DDE1           LDRSH    R0,[SP, #+6]
+   \   00000164   000081E0           ADD      R0,R1,R0
+   \   00000168   010040E2           SUB      R0,R0,#+1
+   \   0000016C   ........           BL       __aeabi_idiv
+   \   00000170   B600CDE1           STRH     R0,[SP, #+6]
+    248              r.x1 = (r.x1 + GUI_Context.AA_Factor - 1) / GUI_Context.AA_Factor;
+    249              r.y1 = (r.y1 + GUI_Context.AA_Factor - 1) / GUI_Context.AA_Factor;
+    250            }
+    251            _MarkRect(r.x0, r.y0, r.x1, r.y1);
+   \                     ??_FillPolygonAA_4:
+   \   00000174   F650DDE1           LDRSH    R5,[SP, #+6]
+   \   00000178   F460DDE1           LDRSH    R6,[SP, #+4]
+   \   0000017C   F270DDE1           LDRSH    R7,[SP, #+2]
+   \   00000180   F080DDE1           LDRSH    R8,[SP, #+0]
+   \   00000184   880094E5           LDR      R0,[R4, #+136]
+   \   00000188   ........           BL       GUI_ALLOC_h2p
+   \   0000018C   F410D0E1           LDRSH    R1,[R0, #+4]
+    252          }
+   \   00000190   0CD08DE2           ADD      SP,SP,#+12
+   \   00000194   010058E1           CMP      R8,R1
+   \   00000198   B480C0B1           STRHLT   R8,[R0, #+4]
+   \   0000019C   F810D0E1           LDRSH    R1,[R0, #+8]
+   \   000001A0   060051E1           CMP      R1,R6
+   \   000001A4   B860C0B1           STRHLT   R6,[R0, #+8]
+   \   000001A8   F610D0E1           LDRSH    R1,[R0, #+6]
+   \   000001AC   010057E1           CMP      R7,R1
+   \   000001B0   B670C0B1           STRHLT   R7,[R0, #+6]
+   \   000001B4   FA10D0E1           LDRSH    R1,[R0, #+10]
+   \   000001B8   050051E1           CMP      R1,R5
+   \   000001BC   BA50C0B1           STRHLT   R5,[R0, #+10]
+   \   000001C0   F083BDE8           POP      {R4-R9,PC}       ;; return
+    253          
+    254          /*********************************************************************
+    255          *
+    256          *       _GetDevData
+    257          */
+
+   \                                 In section .text, align 4, keep-with-next
+    258          static void * _GetDevData(GUI_DEVICE * pDevice, int Index) {
+    259            GUI_USE_PARA(pDevice);
+    260            GUI_USE_PARA(Index);
+    261            return NULL;
+   \                     _GetDevData:
+   \   00000000   0000A0E3           MOV      R0,#+0
+   \   00000004   1EFF2FE1           BX       LR               ;; return
+    262          }
+    263          
+    264          /*********************************************************************
+    265          *
+    266          *       _SetOrg
+    267          */
+
+   \                                 In section .text, align 4, keep-with-next
+    268          static void _SetOrg(GUI_DEVICE * pDevice, int x, int y) {
+    269            pDevice = pDevice->pNext;
+   \                     _SetOrg:
+   \   00000000   000090E5           LDR      R0,[R0, #+0]
+    270            pDevice->pDeviceAPI->pfSetOrg(pDevice, x, y);
+   \   00000004   0C3090E5           LDR      R3,[R0, #+12]
+   \   00000008   203093E5           LDR      R3,[R3, #+32]
+   \   0000000C   13FF2FE1           BX       R3               ;; tailcall
+    271          }
+    272          /*********************************************************************
+    273          *
+    274          *       _GetDevFunc
+    275          */
+
+   \                                 In section .text, align 4, keep-with-next
+    276          static void (* _GetDevFunc(GUI_DEVICE ** ppDevice, int Index))(void) {
+    277            GUI_USE_PARA(ppDevice);
+    278            switch (Index) {
+   \                     _GetDevFunc:
+   \   00000000   110051E3           CMP      R1,#+17
+   \   00000004   0300000A           BEQ      ??_GetDevFunc_0
+   \   00000008   0600003A           BCC      ??_GetDevFunc_1
+   \   0000000C   120051E3           CMP      R1,#+18
+   \   00000010   0200000A           BEQ      ??_GetDevFunc_2
+   \   00000014   030000EA           B        ??_GetDevFunc_1
+    279            case LCD_DEVFUNC_FILLPOLY:
+    280              return (void (*)(void))_FillPolygon;
+   \                     ??_GetDevFunc_0:
+   \   00000018   ........           LDR      R0,??DataTable12_1
+   \   0000001C   1EFF2FE1           BX       LR
+    281            case LCD_DEVFUNC_FILLPOLYAA:
+    282              return (void (*)(void))_FillPolygonAA;
+   \                     ??_GetDevFunc_2:
+   \   00000020   ........           LDR      R0,??DataTable12_2
+   \   00000024   1EFF2FE1           BX       LR
+    283            }
+    284            return NULL;
+   \                     ??_GetDevFunc_1:
+   \   00000028   0000A0E3           MOV      R0,#+0
+   \   0000002C   1EFF2FE1           BX       LR               ;; return
+    285          }
+    286          /*********************************************************************
+    287          *
+    288          *       _GetDevProp
+    289          */
+
+   \                                 In section .text, align 4, keep-with-next
+    290          static I32 _GetDevProp(GUI_DEVICE * pDevice, int Index) {
+    291            GUI_USE_PARA(pDevice);
+    292            GUI_USE_PARA(Index);
+    293            return 0;
+   \                     _GetDevProp:
+   \   00000000   0000A0E3           MOV      R0,#+0
+   \   00000004   1EFF2FE1           BX       LR               ;; return
+    294          }
+    295          
+    296          /*********************************************************************
+    297          *
+    298          *       GUI_DEVICE_API structure
+    299          */
+
+   \                                 In section .text, align 4, keep-with-next
+    300          static const GUI_DEVICE_API _MeasDev_API = {
+   \                     _MeasDev_API:
+   \   00000000                      ; Initializer data, 52 bytes
+   \   00000000   07000000....       DC32 7, _DrawBitmap, _DrawHLine, _DrawVLine, _FillRect, _GetPixelIndex, _SetPixelIndex, _XorPixel, _SetOrg, _GetDevFunc
+   \              ............
+   \              ............
+   \              ............
+   \              ............
+   \              ............
+   \              ........    
+   \   00000028   ............       DC32 _GetDevProp, _GetDevData, _GetRect
+   \              ............
+    301            //
+    302            // Data
+    303            //
+    304            DEVICE_CLASS_MEASDEV,
+    305            //
+    306            // Drawing functions
+    307            //
+    308            _DrawBitmap   ,
+    309            _DrawHLine    ,
+    310            _DrawVLine    ,
+    311            _FillRect     ,
+    312            _GetPixelIndex,
+    313            _SetPixelIndex,
+    314            _XorPixel     ,
+    315            //
+    316            // Set origin
+    317            //
+    318            _SetOrg       ,
+    319            //
+    320            // Request information
+    321            //
+    322            _GetDevFunc   ,
+    323            _GetDevProp   ,
+    324            _GetDevData,
+    325            _GetRect      ,
+    326          };
+    327          
+    328          /*********************************************************************
+    329          *
+    330          *       Exported routines
+    331          *
+    332          **********************************************************************
+    333          */
+    334          /*********************************************************************
+    335          *
+    336          *       GUI_MEASDEV_Delete
+    337          */
+
+   \                                 In section .text, align 4, keep-with-next
+    338          void GUI_MEASDEV_Delete(GUI_MEASDEV_Handle hMemDev) {
+   \                     GUI_MEASDEV_Delete:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    339            GUI_DEVICE * pDevice;
+    340            GUI_MEASDEV * pDevData;
+    341          
+    342            //
+    343            // Make sure memory device is not used
+    344            //
+    345            if ((GUI_Context.hDevData == hMemDev) != 0) {
+   \   00000008   ........           LDR      R0,??DataTable12
+   \   0000000C   04D04DE2           SUB      SP,SP,#+4
+   \   00000010   880090E5           LDR      R0,[R0, #+136]
+   \   00000014   040050E1           CMP      R0,R4
+   \   00000018   0000001A           BNE      ??GUI_MEASDEV_Delete_0
+    346          	  GUI_SelectLCD();
+   \   0000001C   ........           BL       GUI_SelectLCD
+    347            }
+    348            GUI_LOCK();
+   \                     ??GUI_MEASDEV_Delete_0:
+   \   00000020   ........           BL       GUI_Lock
+    349            pDevData = (GUI_MEASDEV *)GUI_LOCK_H(hMemDev);
+    350            pDevice = pDevData->pDevice;
+   \   00000024   0400A0E1           MOV      R0,R4
+   \   00000028   ........           BL       GUI_ALLOC_LockH
+   \   0000002C   005090E5           LDR      R5,[R0, #+0]
+    351            GUI_UNLOCK_H(pDevData);
+   \   00000030   ........           BL       GUI_ALLOC_UnlockH
+    352            GUI_ALLOC_Free(hMemDev);
+   \   00000034   0400A0E1           MOV      R0,R4
+   \   00000038   ........           BL       GUI_ALLOC_Free
+    353            GUI_DEVICE_Unlink(pDevice);
+   \   0000003C   0500A0E1           MOV      R0,R5
+   \   00000040   ........           BL       GUI_DEVICE_Unlink
+    354            GUI_DEVICE_Delete(pDevice);
+   \   00000044   0500A0E1           MOV      R0,R5
+   \   00000048   ........           BL       GUI_DEVICE_Delete
+    355            GUI_UNLOCK();
+   \   0000004C   04D08DE2           ADD      SP,SP,#+4
+   \   00000050   3040BDE8           POP      {R4,R5,LR}
+   \   00000054   ........           B        GUI_Unlock       ;; tailcall
+    356          }
+    357          
+    358          /*********************************************************************
+    359          *
+    360          *       GUI_MEASDEV_ClearRect
+    361          */
+
+   \                                 In section .text, align 4, keep-with-next
+    362          void GUI_MEASDEV_ClearRect(GUI_MEASDEV_Handle hMemDev) {
+   \                     GUI_MEASDEV_ClearRect:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   \   00000004   0040B0E1           MOVS     R4,R0
+    363            if (hMemDev) {
+   \   00000008   0A00000A           BEQ      ??GUI_MEASDEV_ClearRect_0
+    364              GUI_MEASDEV * pDevData;
+    365              GUI_LOCK();
+   \   0000000C   ........           BL       GUI_Lock
+    366              pDevData = (GUI_MEASDEV *)GUI_ALLOC_h2p(hMemDev);
+   \   00000010   0400A0E1           MOV      R0,R4
+   \   00000014   ........           BL       GUI_ALLOC_h2p
+    367              pDevData->rUsed.x0 = GUI_XMAX;
+   \   00000018   FF10A0E3           MOV      R1,#+255
+   \   0000001C   F01E81E3           ORR      R1,R1,#0xF00
+   \   00000020   B410C0E1           STRH     R1,[R0, #+4]
+    368              pDevData->rUsed.y0 = GUI_YMAX;
+   \   00000024   B610C0E1           STRH     R1,[R0, #+6]
+    369              pDevData->rUsed.x1 = GUI_XMIN;
+   \   00000028   001061E2           RSB      R1,R1,#+0
+   \   0000002C   B810C0E1           STRH     R1,[R0, #+8]
+    370              pDevData->rUsed.y1 = GUI_YMIN;
+   \   00000030   BA10C0E1           STRH     R1,[R0, #+10]
+    371              GUI_UNLOCK();
+   \   00000034   ........           BL       GUI_Unlock
+    372            } 
+    373          }
+   \                     ??GUI_MEASDEV_ClearRect_0:
+   \   00000038   1080BDE8           POP      {R4,PC}          ;; return
+    374          
+    375          /*********************************************************************
+    376          *
+    377          *       GUI_MEASDEV_Create
+    378          */
+
+   \                                 In section .text, align 4, keep-with-next
+    379          GUI_MEASDEV_Handle GUI_MEASDEV_Create(void) {
+   \                     GUI_MEASDEV_Create:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+    380            int MemSize;
+    381            GUI_MEASDEV_Handle hMemDev;
+    382            GUI_MEASDEV * pDevData;
+    383            GUI_DEVICE * pDevice;
+    384          
+    385            pDevice = GUI_DEVICE_Create(&_MeasDev_API, GUI_Context.apDevice[GUI_Context.SelLayer]->pColorConvAPI, 0, GUI_Context.SelLayer);
+   \   00000004   ........           LDR      R0,??DataTable12
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   1130D0E5           LDRB     R3,[R0, #+17]
+   \   00000010   0020A0E3           MOV      R2,#+0
+   \   00000014   030180E0           ADD      R0,R0,R3, LSL #+2
+   \   00000018   480090E5           LDR      R0,[R0, #+72]
+   \   0000001C   101090E5           LDR      R1,[R0, #+16]
+   \   00000020   ........           ADR      R0,_MeasDev_API
+   \   00000024   ........           BL       GUI_DEVICE_Create
+   \   00000028   0040B0E1           MOVS     R4,R0
+    386            if (pDevice == 0) {
+    387              return 0;
+   \   0000002C   0000A003           MOVEQ    R0,#+0
+   \   00000030   1900000A           BEQ      ??GUI_MEASDEV_Create_0
+    388            }
+    389            MemSize = sizeof(GUI_MEASDEV);
+    390            hMemDev = GUI_ALLOC_AllocZero(MemSize);
+   \   00000034   1800A0E3           MOV      R0,#+24
+   \   00000038   ........           BL       GUI_ALLOC_AllocZero
+   \   0000003C   0050B0E1           MOVS     R5,R0
+    391            if (hMemDev) {
+   \   00000040   1200000A           BEQ      ??GUI_MEASDEV_Create_1
+    392              GUI_LOCK();
+   \   00000044   ........           BL       GUI_Lock
+    393              pDevice->u.hContext = hMemDev;
+   \   00000048   085084E5           STR      R5,[R4, #+8]
+    394              pDevData = (GUI_MEASDEV *)GUI_LOCK_H(hMemDev);
+    395              pDevData->pDevice       = pDevice;
+   \   0000004C   0500A0E1           MOV      R0,R5
+   \   00000050   ........           BL       GUI_ALLOC_LockH
+   \   00000054   004080E5           STR      R4,[R0, #+0]
+    396              GUI_MEASDEV_ClearRect(hMemDev);
+   \   00000058   ........           BL       GUI_Lock
+   \   0000005C   0500A0E1           MOV      R0,R5
+   \   00000060   ........           BL       GUI_ALLOC_h2p
+   \   00000064   FF10A0E3           MOV      R1,#+255
+   \   00000068   F01E81E3           ORR      R1,R1,#0xF00
+   \   0000006C   B410C0E1           STRH     R1,[R0, #+4]
+   \   00000070   B610C0E1           STRH     R1,[R0, #+6]
+   \   00000074   001061E2           RSB      R1,R1,#+0
+   \   00000078   B810C0E1           STRH     R1,[R0, #+8]
+   \   0000007C   BA10C0E1           STRH     R1,[R0, #+10]
+   \   00000080   ........           BL       GUI_Unlock
+    397              GUI_UNLOCK_H(pDevData);
+   \   00000084   ........           BL       GUI_ALLOC_UnlockH
+    398              GUI_UNLOCK();
+   \   00000088   ........           BL       GUI_Unlock
+   \   0000008C   010000EA           B        ??GUI_MEASDEV_Create_2
+    399            } else {
+    400              GUI_DEVICE_Delete(pDevice);
+   \                     ??GUI_MEASDEV_Create_1:
+   \   00000090   0400A0E1           MOV      R0,R4
+   \   00000094   ........           BL       GUI_DEVICE_Delete
+    401              GUI_DEBUG_WARN("GUI_MEASDEV_Create: Alloc failed");
+    402            }
+    403            return hMemDev;
+   \                     ??GUI_MEASDEV_Create_2:
+   \   00000098   0500A0E1           MOV      R0,R5
+   \                     ??GUI_MEASDEV_Create_0:
+   \   0000009C   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   000000A0   3080BDE8           POP      {R4,R5,PC}       ;; return
+    404          }
+    405          
+    406          /*********************************************************************
+    407          *
+    408          *       GUI_MEASDEV_Select
+    409          */
+
+   \                                 In section .text, align 4, keep-with-next
+    410          void GUI_MEASDEV_Select(GUI_MEASDEV_Handle hMemDev) {
+   \                     GUI_MEASDEV_Select:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0040B0E1           MOVS     R4,R0
+    411            GUI_MEASDEV * pDevData;
+    412          
+    413            if (hMemDev == 0) {
+   \   0000000C   0100001A           BNE      ??GUI_MEASDEV_Select_0
+    414              GUI_SelectLCD();
+   \   00000010   ........           BL       GUI_SelectLCD
+   \   00000014   0C0000EA           B        ??GUI_MEASDEV_Select_1
+    415            } else {
+    416              #if GUI_WINSUPPORT
+    417                WM_Deactivate();
+   \                     ??GUI_MEASDEV_Select_0:
+   \   00000018   ........           BL       WM_Deactivate
+    418              #endif
+    419              GUI_Context.hDevData     = hMemDev;
+   \   0000001C   ........           LDR      R5,??DataTable12
+   \   00000020   884085E5           STR      R4,[R5, #+136]
+    420              GUI_LOCK();
+   \   00000024   ........           BL       GUI_Lock
+    421              pDevData = (GUI_MEASDEV *)GUI_LOCK_H(hMemDev);
+   \   00000028   0400A0E1           MOV      R0,R4
+   \   0000002C   ........           BL       GUI_ALLOC_LockH
+    422              GUI_DEVICE_Link(pDevData->pDevice);
+   \   00000030   000090E5           LDR      R0,[R0, #+0]
+   \   00000034   ........           BL       GUI_DEVICE_Link
+    423              GUI_Context.pClipRect_HL = NULL;
+   \   00000038   0000A0E3           MOV      R0,#+0
+   \   0000003C   140085E5           STR      R0,[R5, #+20]
+    424              GUI_UNLOCK_H(pDevData);
+   \   00000040   ........           BL       GUI_ALLOC_UnlockH
+    425              GUI_UNLOCK();
+   \   00000044   ........           BL       GUI_Unlock
+    426              LCD_SetClipRectMax();
+   \   00000048   ........           BL       LCD_SetClipRectMax
+    427            }
+    428          }
+   \                     ??GUI_MEASDEV_Select_1:
+   \   0000004C   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000050   3080BDE8           POP      {R4,R5,PC}       ;; return
+    429          
+    430          /*********************************************************************
+    431          *
+    432          *       GUI_MEASDEV_GetRect
+    433          */
+
+   \                                 In section .text, align 4, keep-with-next
+    434          void GUI_MEASDEV_GetRect(GUI_MEASDEV_Handle hMem, GUI_RECT * pRect) {
+   \                     GUI_MEASDEV_GetRect:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0150A0E1           MOV      R5,R1
+    435            if (hMem) {
+   \   00000010   000054E3           CMP      R4,#+0
+   \   00000014   0D00000A           BEQ      ??GUI_MEASDEV_GetRect_0
+    436              GUI_MEASDEV * pDev;
+    437              GUI_LOCK();
+   \   00000018   ........           BL       GUI_Lock
+    438              pDev = (GUI_MEASDEV *)GUI_ALLOC_h2p(hMem);
+   \   0000001C   0400A0E1           MOV      R0,R4
+   \   00000020   ........           BL       GUI_ALLOC_h2p
+    439              if (pRect) {
+   \   00000024   000055E3           CMP      R5,#+0
+   \   00000028   0700000A           BEQ      ??GUI_MEASDEV_GetRect_1
+    440                pRect->x0 = pDev->rUsed.x0;
+   \   0000002C   F410D0E1           LDRSH    R1,[R0, #+4]
+   \   00000030   B010C5E1           STRH     R1,[R5, #+0]
+    441                pRect->y0 = pDev->rUsed.y0;
+   \   00000034   F610D0E1           LDRSH    R1,[R0, #+6]
+   \   00000038   B210C5E1           STRH     R1,[R5, #+2]
+    442                pRect->x1 = pDev->rUsed.x1;
+   \   0000003C   F810D0E1           LDRSH    R1,[R0, #+8]
+   \   00000040   B410C5E1           STRH     R1,[R5, #+4]
+    443                pRect->y1 = pDev->rUsed.y1;
+   \   00000044   FA00D0E1           LDRSH    R0,[R0, #+10]
+   \   00000048   B600C5E1           STRH     R0,[R5, #+6]
+    444              }
+    445              GUI_UNLOCK();
+   \                     ??GUI_MEASDEV_GetRect_1:
+   \   0000004C   ........           BL       GUI_Unlock
+    446            }
+    447          }
+   \                     ??GUI_MEASDEV_GetRect_0:
+   \   00000050   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000054   3080BDE8           POP      {R4,R5,PC}       ;; return
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12:
+   \   00000000   ........           DC32     GUI_Context
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_1:
+   \   00000000   ........           DC32     _FillPolygon
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_2:
+   \   00000000   ........           DC32     _FillPolygonAA
+    448          
+    449          #else
+    450          
+    451          void GUIDEV_Measure(void);
+    452          void GUIDEV_Measure(void) {} /* avoid empty object files */
+    453          
+    454          #endif /* GUI_MEMDEV_SUPPORT */
+    455          
+    456          /*************************** end of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function              .cstack
+     --------              -------
+     GUI_MEASDEV_ClearRect      8
+     GUI_MEASDEV_Create        16
+     GUI_MEASDEV_Delete        16
+     GUI_MEASDEV_GetRect       16
+     GUI_MEASDEV_Select        16
+     _DrawBitmap               24
+     _DrawHLine                16
+     _DrawVLine                16
+     _FillPolygon              40
+     _FillPolygonAA            40
+     _FillRect                 24
+     _GetDevData                0
+     _GetDevFunc                0
+     _GetDevProp                0
+     _GetPixelIndex             0
+     _GetRect                   0
+     _SetOrg                    8
+     _SetPixelIndex            16
+     _XorPixel                 16
+
+
+   Section sizes:
+
+     Function/Label        Bytes
+     --------------        -----
+     _DrawBitmap            104
+     _DrawHLine              80
+     _DrawVLine              80
+     _SetPixelIndex          84
+     _XorPixel               84
+     _GetPixelIndex           8
+     _FillRect               92
+     _GetRect                32
+     _FillPolygon           360
+     _FillPolygonAA         452
+     _GetDevData              8
+     _SetOrg                 16
+     _GetDevFunc             48
+     _GetDevProp              8
+     _MeasDev_API            52
+     GUI_MEASDEV_Delete      88
+     GUI_MEASDEV_ClearRect   60
+     GUI_MEASDEV_Create     164
+     GUI_MEASDEV_Select      84
+     GUI_MEASDEV_GetRect     88
+     ??DataTable12            4
+     ??DataTable12_1          4
+     ??DataTable12_2          4
+
+ 
+ 2 004 bytes in section .text
+ 
+ 2 004 bytes of CODE memory
+
+Errors: none
+Warnings: none

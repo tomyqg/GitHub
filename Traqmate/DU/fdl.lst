@@ -1,0 +1,237 @@
+C51 COMPILER V9.51   FDL                                                                   11/23/2014 20:47:18 PAGE 1   
+
+
+C51 COMPILER V9.51, COMPILATION OF MODULE FDL
+NO OBJECT MODULE REQUESTED
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE ..\CommonFiles\fdl.c OPTIMIZE(9,SIZE) BROWSE MDU_F120 INCDIR(..\..\C51\INC\
+                    -;..\CommonFiles\) DB DEFINE(DISPLAY,EXTCLK6,NODEBUG,PACKMEM) PRINT(.\fdl.lst) SRC(.\fdl.SRC)
+
+line level    source
+
+   1          // software downloader
+   2          //
+   3          // this must be less than 510 bytes when compiled which is very tight. It must
+   4          // not extend into address 0xFFFE or 0xFFFF, the micro flash lock bytes
+   5          // it is loaded at 0xFE00 and must be self-contained so the code copy will
+   6          // not overwrite it.
+   7          //
+   8          // initial implementation John Paulos, 04/26/2005
+   9          // re-written Glenn Stephens, 05/02/2005
+  10          //
+  11          
+  12          #include <tmtypes.h>
+  13          #ifdef DISPLAY
+  14          #include <display.h>
+  15          #else
+              #include <sensor.h>
+              #endif
+  18          
+  19          //#define DFWAITREAD do {int q; for (q=0; q<64; q++) ; } while(0)  // 64 seems to work well. should be ver
+             -ified.
+  20          //#define DFWAITWRITE do {int q; for (q=0; q<64; q++) ; } while(0)  // longer for erase.
+  21          #define DFWAIT do {int q; for (q=0; q<64; q++) ; } while(0)  // longer for erase.
+  22          
+  23          u08 FDL_xferSPI (u08);
+  24          u08 FDL_DataFlash_Read_Status(void);
+  25          
+  26          void CopytoCodeSpace(u16 lastpage) {
+  27   1              char * data pwrite;
+  28   1              char EA_save;
+  29   1              u16 i, page;
+  30   1              u08 status;
+  31   1      #pragma ASM
+  32   1      // support code versions with roadblock at 0xfe00
+  33   1      // this code duplicates the c compiler argument passing code
+  34   1      //      argument passing, R6 = MSB, R7 = LSB
+  35   1              MOV     lastpage?040,R6
+  36   1              MOV     lastpage?040+01H,R7
+  37   1      #pragma ENDASM
+  38   1      
+  39   1              pwrite = 0x0;                                           // initialize code pointer
+  40   1      
+  41   1              EA_save = EA;                                           // save interrupt status
+  42   1              EA = 0;                                                         // disable interrupts
+  43   1      
+  44   1              SFRPAGE = LEGACY_PAGE;
+  45   1              FLSCL |= 0x01;                                          // enable flash writes/erases from user software
+  46   1      
+  47   1              PSCTL = 0x03;                                           // movx writes erase flash page
+  48   1      
+  49   1              // erase code memory up to last 1024 page containing bootstrapper
+  50   1              while (pwrite < LAST_CODE_PAGE) {       // stop one page from end of codespace
+  51   2                      *pwrite = 0x88;                                 // write any value to initiate page erase
+  52   2                      pwrite += CODE_PAGE_SIZE;               // point to next page
+  53   2              }
+C51 COMPILER V9.51   FDL                                                                   11/23/2014 20:47:18 PAGE 2   
+
+  54   1      
+  55   1              PSCTL = 0x00;                                           // movx writes to target ram
+  56   1              pwrite = 0x00;                                          // reset code pointer
+  57   1      
+  58   1              // copy code over from dataflash to micro flash codespace 512 bytes at a time
+  59   1              for (page=0; page < (BOOTSTRAP_ADDR/CODE_DOWNLOAD_SIZE); page++) {
+  60   2      
+  61   2                      SFRPAGE = CONFIG_PAGE;
+  62   2      
+  63   2      //                      FDL_DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, read_page);
+  64   2      // function is put in line here to avoid passing pointer which uses code put in by 
+  65   2      // compiler in lower code space
+  66   2      
+  67   2      #ifdef SENSOR
+                              if (!(page % 4)) LED1 = ~LED1;;
+              #endif
+  70   2      
+  71   2                      // wait for Serial Flash to be available
+  72   2                      do {
+  73   3                              status = FDL_DataFlash_Read_Status();
+  74   3                      } while (!(status & STATUS_READY_MASK));
+  75   2      
+  76   2                      // set CS to low
+  77   2                      DF_CS1 = 0;
+  78   2                      DFWAIT;
+  79   2      
+  80   2                      // shift out command
+  81   2                      FDL_xferSPI(MEMORY_PAGE_READ);
+  82   2              
+  83   2                      // shift out reserved bits and upper bits of page address
+  84   2                      FDL_xferSPI(page >> 6); 
+  85   2      
+  86   2                      // shift out bottom 6 bits of page address and top bits of byte address
+  87   2                      FDL_xferSPI((u08) page << 2);
+  88   2      
+  89   2                      // shift out bottom 8 bits of unsigned char address
+  90   2                      FDL_xferSPI(0);
+  91   2      
+  92   2                      // shift out 4 bytes of don't cares
+  93   2                      FDL_xferSPI(0); FDL_xferSPI(0); FDL_xferSPI(0); FDL_xferSPI(0);
+  94   2      
+  95   2                      // shift in the data
+  96   2                      for (i=0; i < CODE_DOWNLOAD_SIZE; i++)
+  97   2                              flashpage.bigbuff[i] =  FDL_xferSPI(0);
+  98   2      
+  99   2                      // raise CS to end operation
+ 100   2                      DF_CS1 = 1;
+ 101   2      
+ 102   2      // end of inline function
+ 103   2      
+ 104   2                      SFRPAGE = LEGACY_PAGE;
+ 105   2                      PSCTL = 0x01;                                           // movx writes to codeflash
+ 106   2      
+ 107   2                      // copy dataflash page into micro flash
+ 108   2                      for (i=0; i < CODE_DOWNLOAD_SIZE; i++)
+ 109   2                              *pwrite++ = flashpage.bigbuff[i];
+ 110   2      
+ 111   2                      PSCTL = 0x00;
+ 112   2              } // for
+ 113   1      
+ 114   1              PSCTL = 0;                                                      // movx writes target ram
+ 115   1      
+C51 COMPILER V9.51   FDL                                                                   11/23/2014 20:47:18 PAGE 3   
+
+ 116   1              FLSCL &= ~0x01;                                         // disable flash writes from user sw
+ 117   1              EA = EA_save;
+ 118   1              PSW = 0;
+ 119   1      
+ 120   1              SFRPAGE = CONFIG_PAGE;
+ 121   1      
+ 122   1              // clear the flash - NOTE: cannot use global variables. Must choose max erase pages.
+ 123   1              for (page = 0; page < MAX_NUM_PAGES; page += 8) {
+ 124   2      
+ 125   2      #ifdef SENSOR
+                              // invert LED every so often
+                              if (!(page % 64)) LED2 = ~LED2;
+              #endif
+ 129   2      
+ 130   2                      // inline dataflash erase block
+ 131   2      
+ 132   2                      // wait for Serial Flash to be available
+ 133   2                      do {
+ 134   3                              status = FDL_DataFlash_Read_Status();
+ 135   3                      } while (!(status & STATUS_READY_MASK));
+ 136   2      
+ 137   2                      DF_CS1 = 0;
+ 138   2                      DFWAIT;
+ 139   2      
+ 140   2                      //command
+ 141   2                      FDL_xferSPI(BLOCK_ERASE);
+ 142   2      
+ 143   2                      // shift out reserved bits and upper bits of page address
+ 144   2                      FDL_xferSPI(page >> 6);
+ 145   2      
+ 146   2                      // shift out bottom 6 bits of page address and top bits of byte address
+ 147   2                      FDL_xferSPI((u08) page << 2);
+ 148   2      
+ 149   2                      // shift out bottom 8 bits of unsigned char address
+ 150   2                      FDL_xferSPI(0);
+ 151   2      
+ 152   2                      DF_CS1 = 1;
+ 153   2      
+ 154   2                      // end of inline function
+ 155   2              } // for
+ 156   1      
+ 157   1              DFWAIT;
+ 158   1              
+ 159   1              // wait for Serial Flash to be finished
+ 160   1              do {
+ 161   2                      status = FDL_DataFlash_Read_Status();
+ 162   2              } while (!(status & STATUS_READY_MASK));
+ 163   1      
+ 164   1              SFRPAGE = LEGACY_PAGE;
+ 165   1      
+ 166   1              // pull the reset line to restart everything
+ 167   1              RSTSRC = RSTSRC | 0x01;
+ 168   1      }
+*** WARNING C280 IN LINE 26 OF ..\CommonFiles\fdl.c: 'lastpage': unreferenced local variable
+ 169          
+ 170          // simultaneously write and read one unsigned char to SPI (mode 3). Blocking.
+ 171          u08 FDL_xferSPI (u08 ch) {
+ 172   1      
+ 173   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 174   1              SFRPAGE = SPI0_PAGE;
+ 175   1      
+ 176   1              SPI0DAT = ch;
+C51 COMPILER V9.51   FDL                                                                   11/23/2014 20:47:18 PAGE 4   
+
+ 177   1      
+ 178   1              // wait for shifting
+ 179   1              while (!SPIF) ;
+ 180   1      
+ 181   1              SPIF = 0;                       // clear the xfer complete flag
+ 182   1      
+ 183   1              ch = SPI0DAT;
+ 184   1              
+ 185   1              SFRPAGE = SFRPAGE_SAVE;
+ 186   1      
+ 187   1              return (ch);
+ 188   1      }
+ 189          
+ 190          // returns the value of DataFlash Status Register. Non-blocking.
+ 191          u08 FDL_DataFlash_Read_Status(void) {
+ 192   1         u08 dat;
+ 193   1      
+ 194   1              DF_CS1 = 0;
+ 195   1              DFWAIT;
+ 196   1      
+ 197   1              //command
+ 198   1              FDL_xferSPI(STATUS_REGISTER_READ);
+ 199   1      
+ 200   1              dat = FDL_xferSPI(0);
+ 201   1      
+ 202   1              DF_CS1 = 1;
+ 203   1        
+ 204   1         return (dat);
+ 205   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    476    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      15
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  1 WARNING(S),  0 ERROR(S)

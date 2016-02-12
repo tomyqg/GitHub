@@ -1,0 +1,676 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:14:54 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\FAT_Read.c                           #
+#    Command line =  C:\DUII\TargetHW\FS\FAT_Read.c -D DEBUG=1 -D             #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\FAT_Read.lst               #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\FAT_Read.o                  #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\FAT_Read.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : FAT_Read.c
+     19          Purpose     : FAT read routines
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          /*********************************************************************
+     24          *
+     25          *             #include Section
+     26          *
+     27          **********************************************************************
+     28          */
+     29          
+     30          #include "FAT_Intern.h"
+     31          
+     32          /*********************************************************************
+     33          *
+     34          *       Data structures
+     35          *
+     36          **********************************************************************
+     37          */
+     38          typedef struct {
+     39            U32  FirstSector;
+     40            U32  NumSectors;
+     41            FS_SB * pSBData;
+     42            void  * pData;
+     43          } BURST_INFO_R;
+     44          
+     45          /*********************************************************************
+     46          *
+     47          *       Static code
+     48          *
+     49          **********************************************************************
+     50          */
+     51          
+     52          /*********************************************************************
+     53          *
+     54          *       _ReadBurst
+     55          *
+     56          */
+     57          static int _ReadBurst(BURST_INFO_R * pBurstInfo) {
+     58            if (pBurstInfo->NumSectors) {
+     59              if (FS_LB_ReadBurstPart(pBurstInfo->pSBData->pPart,
+     60                                      pBurstInfo->FirstSector,
+     61                                      pBurstInfo->NumSectors,
+     62                                      pBurstInfo->pData, FS_SECTOR_TYPE_DATA))
+     63              {
+     64                FS_DEBUG_ERROROUT((FS_MTYPE_FS, "_ReadBurst (FAT): Burst read error.\n"));
+     65                return 1;     // read error
+     66              }
+     67            }
+     68            return 0;         // No problem !
+     69          }
+     70          
+     71          /*********************************************************************
+     72          *
+     73          *       _ReadData
+     74          *
+     75          *  Function description
+     76          *    Read data from a file.
+     77          *    Does most of the actual work and contains optimizations such as file buffer & burst support.
+     78          *
+     79          *  Return value:
+     80          *    Number of bytes read
+     81          */
+
+   \                                 In section .text, align 4, keep-with-next
+     82          static U32 _ReadData(U8 *pData, U32 NumBytesReq, FS_FILE * pFile, FS_SB * pSBData, FS_SB * pSBfat) {
+   \                     _ReadData:
+   \   00000000   F64F2DE9           PUSH     {R1,R2,R4-R11,LR}
+     83            U32           NumBytesRead;
+     84            U32           BytesPerCluster;
+     85            FS_VOLUME *   pVolume;
+     86            U32           NumBytesCluster;
+     87            U32           FirstByteAfterCluster;
+     88            int           SectorOff;
+     89            U32           SectorNo;
+     90            FS_FILE_OBJ * pFileObj;
+     91            FS_FAT_INFO * pFATInfo;
+     92            char          ZeroCopyAllowed;
+     93            BURST_INFO_R  BurstInfo;
+     94          #if FS_USE_FILE_BUFFER
+     95            FS_FILE_BUFFER * pFileBuffer;
+     96          #endif
+     97          
+     98            //
+     99            // Init / Compute some values used thruout the routine
+    100            //
+    101            pFileObj        = pFile->pFileObj;
+   \   00000004   001092E5           LDR      R1,[R2, #+0]
+   \   00000008   24D04DE2           SUB      SP,SP,#+36
+   \   0000000C   0040A0E1           MOV      R4,R0
+   \   00000010   10108DE5           STR      R1,[SP, #+16]
+    102            pVolume         = pFileObj->pVolume;
+    103            pFATInfo        = &pVolume->FSInfo.FATInfo;
+   \   00000014   080091E5           LDR      R0,[R1, #+8]
+    104            BytesPerCluster = pFATInfo->BytesPerCluster;
+   \   00000018   0010A0E3           MOV      R1,#+0
+   \   0000001C   1C0080E2           ADD      R0,R0,#+28
+   \   00000020   04008DE5           STR      R0,[SP, #+4]
+   \   00000024   0C0090E5           LDR      R0,[R0, #+12]
+   \   00000028   0C108DE5           STR      R1,[SP, #+12]
+   \   0000002C   1C008DE5           STR      R0,[SP, #+28]
+    105            NumBytesRead    = 0;
+    106            BurstInfo.NumSectors  = 0;
+    107            BurstInfo.FirstSector = 0xFFFFFFFFUL;
+   \   00000030   0110E0E1           MVN      R1,R1
+    108            BurstInfo.pSBData     = pSBData;
+    109            //
+    110            // Check if "Zero copy" is possible.
+    111            // Per default, it is, but some systems may not allow the driver in some situations to read data directly into the application buffer.
+    112            // Possible reasons can be misaligned destination (DMA requires 4-byte alignment, but application buffer is not) or caching issues.
+    113            // On most systems, this does not need to be considered since it is not an issue; ideally this is taken care of by the driver anyhow;
+    114            // meaning that if copying is required, it is already done by the driver itself
+    115            //
+    116            ZeroCopyAllowed = 1;
+    117          #if FS_SUPPORT_CHECK_MEMORY
+    118            {
+    119              FS_MEMORY_IS_ACCESSIBLE_CALLBACK * pfMemoryIsAccessible;
+    120          
+    121              pfMemoryIsAccessible = pFileObj->pVolume->Partition.Device.Data.pfMemoryIsAccessible;
+    122              if (pfMemoryIsAccessible) {
+    123                if (pfMemoryIsAccessible(pData, NumBytesReq) == 0) {
+    124                  ZeroCopyAllowed = 0;
+    125                }
+    126              }
+    127            }
+    128          #endif
+    129            //
+    130            // Check if we can serve application  from file buffer. If so, copy from file buffer and return.
+    131            //
+    132          #if FS_USE_FILE_BUFFER
+    133            {
+    134              I32 Off;
+    135              I32 NumBytesAvail;
+    136          
+    137              pFileBuffer = pFileObj->pBuffer;
+   \   00000034   10009DE5           LDR      R0,[SP, #+16]
+   \   00000038   14108DE5           STR      R1,[SP, #+20]
+   \   0000003C   247090E5           LDR      R7,[R0, #+36]
+   \   00000040   0350A0E1           MOV      R5,R3
+   \   00000044   0060A0E3           MOV      R6,#+0
+    138              if (pFileBuffer) {
+   \   00000048   000057E3           CMP      R7,#+0
+   \   0000004C   2600000A           BEQ      ??_ReadData_0
+    139                if (pFileBuffer->IsDirty) {  // Dirty will only be set if file buffer is also used for write operations
+   \   00000050   1400D7E5           LDRB     R0,[R7, #+20]
+   \   00000054   000050E3           CMP      R0,#+0
+   \   00000058   0300000A           BEQ      ??_ReadData_1
+    140                  FS_FAT_CleanWriteBuffer(pFile, NULL, 0, pSBData);
+   \   0000005C   0020A0E3           MOV      R2,#+0
+   \   00000060   0010A0E3           MOV      R1,#+0
+   \   00000064   28009DE5           LDR      R0,[SP, #+40]
+   \   00000068   ........           BL       FS_FAT_CleanWriteBuffer
+    141                }
+    142                Off = pFile->FilePos - pFileBuffer->FilePos;
+   \                     ??_ReadData_1:
+   \   0000006C   28009DE5           LDR      R0,[SP, #+40]
+   \   00000070   041097E5           LDR      R1,[R7, #+4]
+   \   00000074   040090E5           LDR      R0,[R0, #+4]
+   \   00000078   010050E0           SUBS     R0,R0,R1
+    143                //
+    144                // Check if data for the current file position is present in our buffer and if the file buffer can serve data for the whole read.
+    145                //
+    146                if (Off >= 0) {
+   \   0000007C   1A00004A           BMI      ??_ReadData_0
+    147                  NumBytesAvail = pFileBuffer->NumBytesInBuffer - Off;
+   \   00000080   101097E5           LDR      R1,[R7, #+16]
+   \   00000084   008041E0           SUB      R8,R1,R0
+    148                  if (NumBytesAvail > 0) {
+   \   00000088   010058E3           CMP      R8,#+1
+   \   0000008C   160000BA           BLT      ??_ReadData_0
+    149                    I32 NumBytesToCopy;
+    150          
+    151                    NumBytesToCopy = MIN(NumBytesAvail, (I32)NumBytesReq);
+   \   00000090   24109DE5           LDR      R1,[SP, #+36]
+   \   00000094   010058E1           CMP      R8,R1
+   \   00000098   0180A0C1           MOVGT    R8,R1
+    152                    FS_MEMCPY(pData, pFileBuffer->pData + Off, NumBytesToCopy);
+   \   0000009C   001097E5           LDR      R1,[R7, #+0]
+   \   000000A0   0820A0E1           MOV      R2,R8
+   \   000000A4   011080E0           ADD      R1,R0,R1
+   \   000000A8   0400A0E1           MOV      R0,R4
+   \   000000AC   ........           BL       FS_memcpy
+    153                    pFile->FilePos   += NumBytesToCopy;
+   \   000000B0   28009DE5           LDR      R0,[SP, #+40]
+   \   000000B4   28109DE5           LDR      R1,[SP, #+40]
+   \   000000B8   040090E5           LDR      R0,[R0, #+4]
+   \   000000BC   000088E0           ADD      R0,R8,R0
+   \   000000C0   040081E5           STR      R0,[R1, #+4]
+    154                    NumBytesReq -= NumBytesToCopy;
+   \   000000C4   24009DE5           LDR      R0,[SP, #+36]
+   \   000000C8   080040E0           SUB      R0,R0,R8
+   \   000000CC   24008DE5           STR      R0,[SP, #+36]
+    155                    if (NumBytesReq == 0) {
+   \   000000D0   000050E3           CMP      R0,#+0
+   \   000000D4   0200001A           BNE      ??_ReadData_2
+    156                      return NumBytesToCopy;
+   \   000000D8   0800A0E1           MOV      R0,R8
+   \                     ??_ReadData_3:
+   \   000000DC   2CD08DE2           ADD      SP,SP,#+44       ;; stack cleaning
+   \   000000E0   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    157                    }
+    158                    pData        += NumBytesToCopy;
+   \                     ??_ReadData_2:
+   \   000000E4   044088E0           ADD      R4,R8,R4
+    159                    NumBytesRead += NumBytesToCopy;
+   \   000000E8   0C808DE5           STR      R8,[SP, #+12]
+    160                  }
+    161                }
+    162              }
+    163            }
+    164          #endif
+    165            //
+    166            // Main loop
+    167            // We determine the cluster (allocate as necessary using the FAT buffer)
+    168            // and write data into the cluster
+    169            // 
+    170            do {
+    171              //
+    172              // Locate current cluster.
+    173              // 
+    174              if (FS_FAT_GotoCluster(pFile, pSBfat)) {
+   \                     ??_ReadData_0:
+   \   000000EC   50109DE5           LDR      R1,[SP, #+80]
+   \   000000F0   28009DE5           LDR      R0,[SP, #+40]
+   \   000000F4   ........           BL       FS_FAT_GotoCluster
+   \   000000F8   000050E3           CMP      R0,#+0
+   \   000000FC   0100000A           BEQ      ??_ReadData_4
+    175                FS_DEBUG_ERROROUT((FS_MTYPE_FS, "_ReadData: Too few cluster allocated to file.\n"));
+    176                return NumBytesRead;           /* File truncated (to few clusters) */
+   \                     ??_ReadData_5:
+   \   00000100   0C009DE5           LDR      R0,[SP, #+12]
+   \   00000104   F4FFFFEA           B        ??_ReadData_3
+    177              }
+    178          
+    179              FirstByteAfterCluster = BytesPerCluster * (pFileObj->Data.Fat.CurClusterFile + 1);
+    180              NumBytesCluster   = FirstByteAfterCluster - pFile->FilePos;
+   \                     ??_ReadData_4:
+   \   00000108   10209DE5           LDR      R2,[SP, #+16]
+   \   0000010C   1C109DE5           LDR      R1,[SP, #+28]
+   \   00000110   102092E5           LDR      R2,[R2, #+16]
+   \   00000114   28009DE5           LDR      R0,[SP, #+40]
+   \   00000118   012082E2           ADD      R2,R2,#+1
+   \   0000011C   920101E0           MUL      R1,R2,R1
+   \   00000120   040090E5           LDR      R0,[R0, #+4]
+    181              if (NumBytesCluster > NumBytesReq) {
+   \   00000124   24209DE5           LDR      R2,[SP, #+36]
+   \   00000128   001041E0           SUB      R1,R1,R0
+   \   0000012C   010052E1           CMP      R2,R1
+   \   00000130   0120A081           MOVHI    R2,R1
+    182                NumBytesCluster = NumBytesReq;
+    183              }
+    184              SectorOff = pFile->FilePos & (pFATInfo->BytesPerSec - 1);
+   \   00000134   04109DE5           LDR      R1,[SP, #+4]
+   \   00000138   08208DE5           STR      R2,[SP, #+8]
+   \   0000013C   B410D1E1           LDRH     R1,[R1, #+4]
+   \   00000140   011041E2           SUB      R1,R1,#+1
+   \   00000144   008001E0           AND      R8,R1,R0
+    185              SectorNo  = FS_FAT_ClusterId2SectorNo(pFATInfo, pFileObj->Data.Fat.CurClusterAbs);
+   \   00000148   10009DE5           LDR      R0,[SP, #+16]
+   \   0000014C   141090E5           LDR      R1,[R0, #+20]
+   \   00000150   04009DE5           LDR      R0,[SP, #+4]
+   \   00000154   ........           BL       FS_FAT_ClusterId2SectorNo
+    186              SectorNo += (pFile->FilePos >> pFATInfo->ldBytesPerSector) & (pFATInfo->SecPerClus -1);
+   \   00000158   04309DE5           LDR      R3,[SP, #+4]
+   \   0000015C   04209DE5           LDR      R2,[SP, #+4]
+   \   00000160   28109DE5           LDR      R1,[SP, #+40]
+   \   00000164   1C30D3E5           LDRB     R3,[R3, #+28]
+   \   00000168   B620D2E1           LDRH     R2,[R2, #+6]
+   \   0000016C   041091E5           LDR      R1,[R1, #+4]
+   \   00000170   013043E2           SUB      R3,R3,#+1
+   \   00000174   311203E0           AND      R1,R3,R1, LSR R2
+   \   00000178   009081E0           ADD      R9,R1,R0
+    187              //
+    188              // Read data from the cluster, iterating over sectors
+    189              // 
+    190              do {
+    191                unsigned NumBytesSector;
+    192                NumBytesSector = pFATInfo->BytesPerSec - SectorOff;
+   \                     ??_ReadData_6:
+   \   0000017C   04009DE5           LDR      R0,[SP, #+4]
+    193                if ((U32)NumBytesSector > NumBytesCluster) {
+   \   00000180   08A09DE5           LDR      R10,[SP, #+8]
+   \   00000184   B400D0E1           LDRH     R0,[R0, #+4]
+   \   00000188   081040E0           SUB      R1,R0,R8
+   \   0000018C   01005AE1           CMP      R10,R1
+   \   00000190   01A0A081           MOVHI    R10,R1
+    194                  NumBytesSector = (unsigned)NumBytesCluster;
+    195                }
+    196                //
+    197                // Do we have to read one sector into intermediate buffer ?
+    198                //
+    199                if   ((ZeroCopyAllowed == 0)
+    200          #if FS_DRIVER_ALIGNMENT > 1      // Not required, just to avoid warnings
+    201                  || (((U32)pData & (FS_DRIVER_ALIGNMENT - 1)))
+    202          #endif
+    203                  || (NumBytesSector != pFATInfo->BytesPerSec))    // Do we read the sector only partially ?
+   \   00000194   030014E3           TST      R4,#0x3
+   \   00000198   00005A01           CMPEQ    R10,R0
+   \   0000019C   2500000A           BEQ      ??_ReadData_7
+    204                {
+    205                  //
+    206                  // Safe, but slow: Read one sector using memory of a smart buffer and copy data to destination
+    207                  //
+    208                  FS__SB_SetSector(pSBData, SectorNo, FS_SB_TYPE_DATA);
+   \   000001A0   0020A0E3           MOV      R2,#+0
+   \   000001A4   0910A0E1           MOV      R1,R9
+   \   000001A8   0500A0E1           MOV      R0,R5
+   \   000001AC   ........           BL       FS__SB_SetSector
+    209                  if (FS__SB_Read(pSBData)) {
+   \   000001B0   0500A0E1           MOV      R0,R5
+   \   000001B4   ........           BL       FS__SB_Read
+   \   000001B8   000050E3           CMP      R0,#+0
+   \   000001BC   CFFFFF1A           BNE      ??_ReadData_5
+    210                    return NumBytesRead;
+    211                  }
+    212                  FS_MEMCPY(pData, pSBData->pBuffer + SectorOff, NumBytesSector);
+   \   000001C0   080095E5           LDR      R0,[R5, #+8]
+   \   000001C4   0A20A0E1           MOV      R2,R10
+   \   000001C8   001088E0           ADD      R1,R8,R0
+   \   000001CC   0400A0E1           MOV      R0,R4
+   \   000001D0   ........           BL       FS_memcpy
+    213          #if FS_USE_FILE_BUFFER
+    214                  //
+    215                  // Copy data which has been read from storage, but not yet requested by application to file buffer
+    216                  //
+    217                  pFileBuffer = pFileObj->pBuffer;
+   \   000001D4   10009DE5           LDR      R0,[SP, #+16]
+   \   000001D8   247090E5           LDR      R7,[R0, #+36]
+    218                  if (pFileBuffer) {
+   \   000001DC   000057E3           CMP      R7,#+0
+   \   000001E0   2900000A           BEQ      ??_ReadData_8
+    219                    int NumBytesToCopy;
+    220          
+    221                    NumBytesToCopy = pFATInfo->BytesPerSec - NumBytesSector - SectorOff;
+   \   000001E4   04009DE5           LDR      R0,[SP, #+4]
+   \   000001E8   B400D0E1           LDRH     R0,[R0, #+4]
+   \   000001EC   0A0040E0           SUB      R0,R0,R10
+   \   000001F0   08B040E0           SUB      R11,R0,R8
+    222                    NumBytesToCopy = MIN(NumBytesToCopy, (int)pFileBuffer->BufferSize);
+   \   000001F4   0C0097E5           LDR      R0,[R7, #+12]
+   \   000001F8   00005BE1           CMP      R11,R0
+   \   000001FC   00B0A0A1           MOVGE    R11,R0
+    223                    if (NumBytesToCopy) {    // Do we read the sector only partially ?
+   \   00000200   00005BE3           CMP      R11,#+0
+   \   00000204   2000000A           BEQ      ??_ReadData_8
+    224                      FS_MEMCPY(pFileBuffer->pData, pSBData->pBuffer + SectorOff + NumBytesSector, NumBytesToCopy);
+   \   00000208   080095E5           LDR      R0,[R5, #+8]
+   \   0000020C   0B20A0E1           MOV      R2,R11
+   \   00000210   000088E0           ADD      R0,R8,R0
+   \   00000214   00108AE0           ADD      R1,R10,R0
+   \   00000218   000097E5           LDR      R0,[R7, #+0]
+   \   0000021C   ........           BL       FS_memcpy
+    225                      pFileBuffer->FilePos          = pFile->FilePos + NumBytesSector;
+   \   00000220   28009DE5           LDR      R0,[SP, #+40]
+   \   00000224   040090E5           LDR      R0,[R0, #+4]
+   \   00000228   00008AE0           ADD      R0,R10,R0
+   \   0000022C   040087E5           STR      R0,[R7, #+4]
+    226                      pFileBuffer->NumBytesInBuffer = NumBytesToCopy;
+   \   00000230   10B087E5           STR      R11,[R7, #+16]
+   \   00000234   140000EA           B        ??_ReadData_8
+    227                    }
+    228                  }
+    229          #endif
+    230                } else {
+    231                  //
+    232                  // Zero copy variant. Check if we need to read the previous burst data
+    233                  //
+    234                  if (SectorNo != BurstInfo.FirstSector + BurstInfo.NumSectors) {
+   \                     ??_ReadData_7:
+   \   00000238   14009DE5           LDR      R0,[SP, #+20]
+   \   0000023C   000086E0           ADD      R0,R6,R0
+   \   00000240   000059E1           CMP      R9,R0
+   \   00000244   0F00000A           BEQ      ??_ReadData_9
+    235                    if (_ReadBurst(&BurstInfo)) {
+   \   00000248   000056E3           CMP      R6,#+0
+   \   0000024C   0900000A           BEQ      ??_ReadData_10
+   \   00000250   0000A0E3           MOV      R0,#+0
+   \   00000254   00008DE5           STR      R0,[SP, #+0]
+   \   00000258   18309DE5           LDR      R3,[SP, #+24]
+   \   0000025C   0620A0E1           MOV      R2,R6
+   \   00000260   14109DE5           LDR      R1,[SP, #+20]
+   \   00000264   040095E5           LDR      R0,[R5, #+4]
+   \   00000268   ........           BL       FS_LB_ReadBurstPart
+   \   0000026C   000050E3           CMP      R0,#+0
+    236                      FS_DEBUG_ERROROUT((FS_MTYPE_FS, "_ReadData: Burst read error.\n"));
+    237                      return 0;               // We do not know how many bytes have been read o.k., so reporting 0 is on the safe side
+   \   00000270   0000A013           MOVNE    R0,#+0
+   \   00000274   98FFFF1A           BNE      ??_ReadData_3
+    238                    }
+    239                    BurstInfo.FirstSector = SectorNo;
+   \                     ??_ReadData_10:
+   \   00000278   14908DE5           STR      R9,[SP, #+20]
+    240                    BurstInfo.NumSectors  = 1;
+   \   0000027C   0160A0E3           MOV      R6,#+1
+    241                    BurstInfo.pData       = pData;
+   \   00000280   18408DE5           STR      R4,[SP, #+24]
+   \   00000284   000000EA           B        ??_ReadData_8
+    242                  } else {
+    243                    BurstInfo.NumSectors++;
+   \                     ??_ReadData_9:
+   \   00000288   016086E2           ADD      R6,R6,#+1
+    244                  }
+    245                }
+    246                //
+    247                // Update management info
+    248                //
+    249                pData           += NumBytesSector;
+    250                NumBytesCluster -= NumBytesSector;
+   \                     ??_ReadData_8:
+   \   0000028C   08009DE5           LDR      R0,[SP, #+8]
+    251                NumBytesReq     -= NumBytesSector;
+    252                NumBytesRead    += NumBytesSector;
+    253                pFile->FilePos  += NumBytesSector;
+   \   00000290   28109DE5           LDR      R1,[SP, #+40]
+   \   00000294   0A0040E0           SUB      R0,R0,R10
+   \   00000298   08008DE5           STR      R0,[SP, #+8]
+   \   0000029C   24009DE5           LDR      R0,[SP, #+36]
+   \   000002A0   04408AE0           ADD      R4,R10,R4
+   \   000002A4   0A0040E0           SUB      R0,R0,R10
+   \   000002A8   24008DE5           STR      R0,[SP, #+36]
+   \   000002AC   0C009DE5           LDR      R0,[SP, #+12]
+    254                SectorNo++;
+   \   000002B0   019089E2           ADD      R9,R9,#+1
+   \   000002B4   00008AE0           ADD      R0,R10,R0
+   \   000002B8   0C008DE5           STR      R0,[SP, #+12]
+   \   000002BC   28009DE5           LDR      R0,[SP, #+40]
+    255                SectorOff = 0;                // Next sector will be written from start
+   \   000002C0   0080A0E3           MOV      R8,#+0
+   \   000002C4   040090E5           LDR      R0,[R0, #+4]
+   \   000002C8   00008AE0           ADD      R0,R10,R0
+   \   000002CC   040081E5           STR      R0,[R1, #+4]
+    256              } while (NumBytesCluster);
+   \   000002D0   08009DE5           LDR      R0,[SP, #+8]
+   \   000002D4   000050E3           CMP      R0,#+0
+   \   000002D8   A7FFFF1A           BNE      ??_ReadData_6
+    257            } while (NumBytesReq);
+   \   000002DC   24009DE5           LDR      R0,[SP, #+36]
+   \   000002E0   000050E3           CMP      R0,#+0
+   \   000002E4   80FFFF1A           BNE      ??_ReadData_0
+    258            if (_ReadBurst(&BurstInfo)) {
+   \   000002E8   000056E3           CMP      R6,#+0
+   \   000002EC   83FFFF0A           BEQ      ??_ReadData_5
+   \   000002F0   00008DE5           STR      R0,[SP, #+0]
+   \   000002F4   18309DE5           LDR      R3,[SP, #+24]
+   \   000002F8   0620A0E1           MOV      R2,R6
+   \   000002FC   14109DE5           LDR      R1,[SP, #+20]
+   \   00000300   040095E5           LDR      R0,[R5, #+4]
+   \   00000304   ........           BL       FS_LB_ReadBurstPart
+   \   00000308   000050E3           CMP      R0,#+0
+   \   0000030C   7BFFFF0A           BEQ      ??_ReadData_5
+    259              FS_DEBUG_ERROROUT((FS_MTYPE_FS, "_ReadData: Burst read error.\n"));
+    260              NumBytesRead = 0;               // We do not know how many bytes have been read o.k., so reporting 0 is on the safe side
+   \   00000310   0C808DE5           STR      R8,[SP, #+12]
+   \   00000314   79FFFFEA           B        ??_ReadData_5
+    261            }
+    262            return NumBytesRead;
+    263          }
+    264          
+    265          
+    266          /*********************************************************************
+    267          *
+    268          *       FS_FAT_Read
+    269          *
+    270          *  Function description
+    271          *    FS internal function. Read data from a file.
+    272          *
+    273          *  Return value:
+    274          *    Number of elements read.
+    275          */
+
+   \                                 In section .text, align 4, keep-with-next
+    276          U32 FS_FAT_Read(FS_FILE *pFile, void * pData, U32 NumBytesReq) {
+   \                     FS_FAT_Read:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   0160A0E1           MOV      R6,R1
+    277            U32           NumBytesRead;
+    278            FS_SB         sbData;          /* Sector buffer for Data */
+    279            FS_SB         sbfat;           /* Sector buffer for FAT handling */
+    280            FS_FILE_OBJ * pFileObj;
+    281            FS_VOLUME   * pVolume;
+    282          
+    283          
+    284            pFileObj = pFile->pFileObj;
+    285            pVolume  = pFileObj->pVolume;
+    286            //
+    287            // Check if file status is O.K..
+    288            // If not, return.
+    289            // 
+    290            if (pFile->Error) {
+   \   0000000C   F810D4E1           LDRSH    R1,[R4, #+8]
+   \   00000010   000094E5           LDR      R0,[R4, #+0]
+   \   00000014   24D04DE2           SUB      SP,SP,#+36
+   \   00000018   0250A0E1           MOV      R5,R2
+   \   0000001C   087090E5           LDR      R7,[R0, #+8]
+   \   00000020   000051E3           CMP      R1,#+0
+   \   00000024   0100000A           BEQ      ??FS_FAT_Read_0
+    291              return 0;                 // Error
+   \                     ??FS_FAT_Read_1:
+   \   00000028   0000A0E3           MOV      R0,#+0
+   \   0000002C   270000EA           B        ??FS_FAT_Read_2
+    292            }
+    293          
+    294            if (pFile->FilePos >= pFileObj->Size) {
+   \                     ??FS_FAT_Read_0:
+   \   00000030   041090E5           LDR      R1,[R0, #+4]
+   \   00000034   042094E5           LDR      R2,[R4, #+4]
+   \   00000038   010052E1           CMP      R2,R1
+   \   0000003C   0200003A           BCC      ??FS_FAT_Read_3
+    295              pFile->Error = FS_ERR_EOF;
+   \                     ??FS_FAT_Read_4:
+   \   00000040   0000E0E3           MVN      R0,#+0
+   \   00000044   B800C4E1           STRH     R0,[R4, #+8]
+    296              return 0;
+   \   00000048   F6FFFFEA           B        ??FS_FAT_Read_1
+    297              
+    298            }
+    299          
+    300            //
+    301            // Make sure we do not try to read beyond the end of the file
+    302            // 
+    303            {
+    304              U32 NumBytesAvail;
+    305              NumBytesAvail = pFileObj->Size - pFile->FilePos;
+   \                     ??FS_FAT_Read_3:
+   \   0000004C   021041E0           SUB      R1,R1,R2
+    306              if (NumBytesReq > NumBytesAvail) {
+   \   00000050   050051E1           CMP      R1,R5
+   \   00000054   0150A091           MOVLS    R5,R1
+    307                NumBytesReq = NumBytesAvail;
+    308              }
+    309            }
+    310            if (NumBytesReq == 0) {
+   \   00000058   000055E3           CMP      R5,#+0
+   \   0000005C   F7FFFF0A           BEQ      ??FS_FAT_Read_4
+    311              pFile->Error = FS_ERR_EOF;
+    312              return 0;
+    313            }
+    314          
+    315            if (pFileObj->FirstCluster == 0) {
+   \   00000060   000090E5           LDR      R0,[R0, #+0]
+   \   00000064   000050E3           CMP      R0,#+0
+   \   00000068   1800000A           BEQ      ??FS_FAT_Read_2
+    316              FS_DEBUG_ERROROUT((FS_MTYPE_FS, "FS_FAT_Read: Can not read: No cluster in directory entry.\n"));
+    317              return 0;
+    318            }
+    319            //
+    320            // Allocate sector buffers.
+    321            // 
+    322          
+    323            FS__SB_Create(&sbfat,  &pVolume->Partition);
+   \   0000006C   0710A0E1           MOV      R1,R7
+   \   00000070   04008DE2           ADD      R0,SP,#+4
+   \   00000074   ........           BL       FS__SB_Create
+    324            FS__SB_Create(&sbData, &pVolume->Partition);
+   \   00000078   0710A0E1           MOV      R1,R7
+   \   0000007C   14008DE2           ADD      R0,SP,#+20
+   \   00000080   ........           BL       FS__SB_Create
+    325            //
+    326            // Do the work in a static subroutine
+    327            // 
+    328            NumBytesRead = _ReadData((U8 *)pData, NumBytesReq, pFile, &sbData, &sbfat);
+   \   00000084   04008DE2           ADD      R0,SP,#+4
+   \   00000088   00008DE5           STR      R0,[SP, #+0]
+   \   0000008C   14308DE2           ADD      R3,SP,#+20
+   \   00000090   0420A0E1           MOV      R2,R4
+   \   00000094   0510A0E1           MOV      R1,R5
+   \   00000098   0600A0E1           MOV      R0,R6
+   \   0000009C   ........           BL       _ReadData
+   \   000000A0   0060A0E1           MOV      R6,R0
+    329            //
+    330            // If less bytes have been read than intended
+    331            //   - Set error code in file structure (unless already set)
+    332            //   - Invalidate the Current cluster Id to make sure we read allocation list from start next time we read
+    333            // 
+    334            if (NumBytesRead != NumBytesReq) {
+   \   000000A4   050056E1           CMP      R6,R5
+   \   000000A8   0300000A           BEQ      ??FS_FAT_Read_5
+    335              if (pFile->Error == 0) {
+   \   000000AC   F800D4E1           LDRSH    R0,[R4, #+8]
+   \   000000B0   000050E3           CMP      R0,#+0
+    336                FS_DEBUG_ERROROUT((FS_MTYPE_FS, "FS_FAT_Read: General read error.\n"));
+    337                pFile->Error = FS_ERR_READERROR;
+   \   000000B4   0600E003           MVNEQ    R0,#+6
+   \   000000B8   B800C401           STRHEQ   R0,[R4, #+8]
+    338              }
+    339            }
+    340            //
+    341            // Cleanup
+    342            // 
+    343            FS__SB_Delete(&sbfat);
+   \                     ??FS_FAT_Read_5:
+   \   000000BC   04008DE2           ADD      R0,SP,#+4
+   \   000000C0   ........           BL       FS__SB_Delete
+    344            FS__SB_Delete(&sbData);
+   \   000000C4   14008DE2           ADD      R0,SP,#+20
+   \   000000C8   ........           BL       FS__SB_Delete
+    345            return NumBytesRead;
+   \   000000CC   0600A0E1           MOV      R0,R6
+   \                     ??FS_FAT_Read_2:
+   \   000000D0   24D08DE2           ADD      SP,SP,#+36       ;; stack cleaning
+   \   000000D4   F080BDE8           POP      {R4-R7,PC}       ;; return
+    346          }
+    347          
+    348          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function    .cstack
+     --------    -------
+     FS_FAT_Read     56
+     _ReadData       80
+
+
+   Section sizes:
+
+     Function/Label Bytes
+     -------------- -----
+     _ReadData       792
+     FS_FAT_Read     216
+
+ 
+ 1 008 bytes in section .text
+ 
+ 1 008 bytes of CODE memory
+
+Errors: none
+Warnings: none

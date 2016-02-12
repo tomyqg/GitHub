@@ -1,0 +1,614 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:12:31 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\FAT_VolumeLabel.c                    #
+#    Command line =  C:\DUII\TargetHW\FS\FAT_VolumeLabel.c -D DEBUG=1 -D      #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\FAT_VolumeLabel.lst        #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\FAT_VolumeLabel.o           #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\FAT_VolumeLabel.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : FAT_VolumeLabel.c
+     19          Purpose     : FAT File System Layer for handling the volume label
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          /*********************************************************************
+     24          *
+     25          *             #include Section
+     26          *
+     27          **********************************************************************
+     28          */
+     29          
+     30          #include "FAT_Intern.h"
+     31          
+     32          /*********************************************************************
+     33          *
+     34          *       #define constants
+     35          *
+     36          **********************************************************************
+     37          */
+     38          
+     39          /*********************************************************************
+     40          *
+     41          *       Typedefs
+     42          *
+     43          **********************************************************************
+     44          */
+     45          
+     46          
+     47          /*********************************************************************
+     48          *
+     49          *       Static const
+     50          *
+     51          **********************************************************************
+     52          */
+     53          
+     54          
+     55          /*********************************************************************
+     56          *
+     57          *       Static code
+     58          *
+     59          **********************************************************************
+     60          */
+     61          
+     62          /*********************************************************************
+     63          *
+     64          *       _CopyShortName
+     65          *
+     66          */
+     67          static void _CopyVolName(char * pDest, U8 * pSrc, unsigned VolumeLabelSize) {
+     68            int       i;
+     69            char    * p;
+     70            unsigned  MaxLen;
+     71            
+     72            MaxLen = MIN(11 , VolumeLabelSize);
+     73            FS_MEMCPY(pDest, pSrc, MaxLen);
+     74            p = pDest + MaxLen--;
+     75            *p-- = 0;
+     76            for (i = MaxLen; i ; i--) {  
+     77              if (*p == ' ') {
+     78                 *p = 0;
+     79              } else {
+     80                break;
+     81              }
+     82              p--;
+     83            }
+     84          }
+     85          
+     86          /*********************************************************************
+     87          *
+     88          *       _FindVolumeDirEntry
+     89          *
+     90          */
+     91          static FS_FAT_DENTRY * _FindVolumeDirEntry(FS_VOLUME * pVolume, FS_SB * pSB) {
+     92            FS_FAT_DENTRY * pDirEntry;
+     93            FS_DIR_POS      DirPos;
+     94          
+     95            
+     96            FS_FAT_InitDirEntryScan(&pVolume->FSInfo.FATInfo, &DirPos, 0);
+     97            do {
+     98              pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &DirPos);
+     99              if (!pDirEntry) {
+    100                break;
+    101              }
+    102              if (pDirEntry->data[0] == 0) {
+    103                pDirEntry = (FS_FAT_DENTRY*)NULL;
+    104                break;  /* No more entries. Not found. */
+    105              }
+    106              if ((pDirEntry->data[DIR_ENTRY_OFF_ATTRIBUTES] == FS_FAT_ATTR_VOLUME_ID) &&
+    107                  (pDirEntry->data[0] != 0xe5)) { /* Attributes does match and not a deleted entry */
+    108                break;
+    109              }
+    110              FS_FAT_IncDirPos(&DirPos);
+    111            
+    112            } while (1);
+    113            return pDirEntry;
+    114          }
+    115          
+    116          /*********************************************************************
+    117          *
+    118          *       _CheckVolumeLabelChar
+    119          *
+    120          *  Function description
+    121          *
+    122          *  Return value
+    123          * 
+    124          *  Review Remarks (OO,RS)
+    125          *    - Function name does not indicate return value. Better: IsLegalVolumeChar() ?
+    126          *    - "White list" better than "black list" ?
+    127          *    - Reference to documentation missing
+    128          *    - Header: FD, RV missing
+    129          *    
+    130          */
+    131          static int _CheckVolumeLabelChar(char c) {
+    132            switch (c) {
+    133            case '"':
+    134            case '&':
+    135            case '*':
+    136            case '+':
+    137            case '-':
+    138            case ',':
+    139            case '.':
+    140            case '/':
+    141            case ':':
+    142            case ';':
+    143            case '<':
+    144            case '=':
+    145            case '>':
+    146            case '?':
+    147            case '[':
+    148            case ']':
+    149            case '\\':
+    150              return 1;     // Illegal character
+    151            }
+    152            return 0;       // Permitted character
+    153          }
+    154          
+    155          #if 0
+    156          /*********************************************************************
+    157          *
+    158          *       _IsLegalVolumeChar
+    159          *
+    160          *  Function description
+    161          *    Checks if the given character can be used in a volume label
+    162          *
+    163          *  Return value
+    164          * 
+    165          *
+    166          *  Review
+    167          *    RS 08-07-20
+    168          */
+    169          static int _IsLegalVolumeChar(char c) {
+    170            if ((c >= '0') && (c <= '9') {
+    171              return 1;       // Digits are permitted
+    172            }
+    173            if ((c >= 'a') && (c <= 'z') {
+    174              return 1;       // lowercase are permitted
+    175            }
+    176            if ((c >= 'A') && (c <= 'Z') {
+    177              return 1;       // lowercase are permitted
+    178            }
+    179            switch (c) {
+    180            case '&':
+    181            case '*':
+    182            case '+':
+    183            case '-':
+    184            case ',':
+    185            case '.':
+    186            case '/':
+    187            case ':':
+    188            case ';':
+    189            case '<':
+    190            case '=':
+    191            case '>':
+    192            case '?':
+    193            case '[':
+    194            case ']':
+    195            case '\\':
+    196              return 1;     // Legal character
+    197            }
+    198            return 0;       // Not Permitted
+    199          }
+    200          #endif
+    201          
+    202          
+    203          
+    204          /*********************************************************************
+    205          *
+    206          *       _MakeVolLabelName
+    207          *
+    208          *  Function description:
+    209          *
+    210          */
+    211          static void _MakeVolLabelName(FS_83NAME * pVolLabel, const char * pVolumeLabel) {
+    212            char     * p;
+    213            unsigned   MaxLen;
+    214            unsigned   i;
+    215          
+    216            MaxLen = FS_STRLEN(pVolumeLabel);
+    217            MaxLen = MIN(11, MaxLen);
+    218            FS_MEMSET(&pVolLabel->ac[0], ' ', sizeof(pVolLabel->ac));
+    219            p = &pVolLabel->ac[0];
+    220            for (i = 0; i < MaxLen; i++) {
+    221              char c;
+    222              c = *pVolumeLabel++;
+    223              if (_CheckVolumeLabelChar(c)) {
+    224                *p++ = '_';
+    225              } else {
+    226                *p++ = FS_TOUPPER(c);
+    227              }
+    228            }
+    229          }
+    230          
+    231          /*********************************************************************
+    232          *
+    233          *       Public code
+    234          *
+    235          **********************************************************************
+    236          */
+    237          
+    238          /*********************************************************************
+    239          *
+    240          *       FS_FAT_GetVolumeLabel
+    241          *
+    242          *  Function description:
+    243          *    Retrieves the label for a FAT volume, if it exists.
+    244          *
+    245          *  Return value:
+    246          *   == 0    - O.K.
+    247          *   != 0    - Error
+    248          *
+    249          */
+
+   \                                 In section .text, align 4, keep-with-next
+    250          int FS_FAT_GetVolumeLabel(FS_VOLUME * pVolume, char * pVolumeLabel, unsigned VolumeLabelSize) {
+   \                     FS_FAT_GetVolumeLabel:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   20D04DE2           SUB      SP,SP,#+32
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0260A0E1           MOV      R6,R2
+    251            FS_FAT_DENTRY * pDirEntry;
+    252            FS_SB           sb;
+    253          
+    254            FS__SB_Create(&sb, &pVolume->Partition);
+   \   00000014   0410A0E1           MOV      R1,R4
+   \   00000018   10008DE2           ADD      R0,SP,#+16
+   \   0000001C   ........           BL       FS__SB_Create
+    255            //
+    256            // Find the volume label entry
+    257            //
+    258            pDirEntry = _FindVolumeDirEntry(pVolume,  &sb);
+   \   00000020   0020A0E3           MOV      R2,#+0
+   \   00000024   0D10A0E1           MOV      R1,SP
+   \   00000028   1C0084E2           ADD      R0,R4,#+28
+   \   0000002C   ........           BL       FS_FAT_InitDirEntryScan
+   \   00000030   060000EA           B        ??FS_FAT_GetVolumeLabel_0
+   \                     ??FS_FAT_GetVolumeLabel_1:
+   \   00000034   0B20D0E5           LDRB     R2,[R0, #+11]
+   \   00000038   080052E3           CMP      R2,#+8
+   \   0000003C   0100001A           BNE      ??FS_FAT_GetVolumeLabel_2
+   \   00000040   E50051E3           CMP      R1,#+229
+   \   00000044   1100001A           BNE      ??FS_FAT_GetVolumeLabel_3
+   \                     ??FS_FAT_GetVolumeLabel_2:
+   \   00000048   0D00A0E1           MOV      R0,SP
+   \   0000004C   ........           BL       FS_FAT_IncDirPos
+   \                     ??FS_FAT_GetVolumeLabel_0:
+   \   00000050   0D20A0E1           MOV      R2,SP
+   \   00000054   10108DE2           ADD      R1,SP,#+16
+   \   00000058   0400A0E1           MOV      R0,R4
+   \   0000005C   ........           BL       FS_FAT_GetDirEntry
+   \   00000060   000050E3           CMP      R0,#+0
+   \   00000064   0300000A           BEQ      ??FS_FAT_GetVolumeLabel_4
+   \   00000068   0010D0E5           LDRB     R1,[R0, #+0]
+   \   0000006C   000051E3           CMP      R1,#+0
+   \   00000070   EFFFFF1A           BNE      ??FS_FAT_GetVolumeLabel_1
+    259            if (pDirEntry) {
+    260              //
+    261              // volume label found, copy the name.
+    262              //
+    263              _CopyVolName(pVolumeLabel, pDirEntry->data, VolumeLabelSize);
+    264            } else {
+    265              //
+    266              // No volume label available
+    267              //
+    268              *pVolumeLabel = 0;
+   \   00000074   0000A0E3           MOV      R0,#+0
+   \                     ??FS_FAT_GetVolumeLabel_4:
+   \   00000078   0000C5E5           STRB     R0,[R5, #+0]
+    269            }
+    270            FS__SB_Delete(&sb);
+   \                     ??FS_FAT_GetVolumeLabel_5:
+   \   0000007C   10008DE2           ADD      R0,SP,#+16
+   \   00000080   ........           BL       FS__SB_Delete
+    271            return 0;
+   \   00000084   0000A0E3           MOV      R0,#+0
+   \   00000088   20D08DE2           ADD      SP,SP,#+32
+   \   0000008C   7080BDE8           POP      {R4-R6,PC}       ;; return
+   \                     ??FS_FAT_GetVolumeLabel_3:
+   \   00000090   0C0056E3           CMP      R6,#+12
+   \   00000094   0B60A023           MOVCS    R6,#+11
+   \   00000098   0010A0E1           MOV      R1,R0
+   \   0000009C   0620A0E1           MOV      R2,R6
+   \   000000A0   0500A0E1           MOV      R0,R5
+   \   000000A4   ........           BL       FS_memcpy
+   \   000000A8   050086E0           ADD      R0,R6,R5
+   \   000000AC   0010A0E3           MOV      R1,#+0
+   \   000000B0   011040E4           STRB     R1,[R0], #-1
+   \   000000B4   012046E2           SUB      R2,R6,#+1
+   \                     ??FS_FAT_GetVolumeLabel_6:
+   \   000000B8   000052E3           CMP      R2,#+0
+   \   000000BC   EEFFFF0A           BEQ      ??FS_FAT_GetVolumeLabel_5
+   \   000000C0   0030D0E5           LDRB     R3,[R0, #+0]
+   \   000000C4   200053E3           CMP      R3,#+32
+   \   000000C8   01104004           STRBEQ   R1,[R0], #-1
+   \   000000CC   01204202           SUBEQ    R2,R2,#+1
+   \   000000D0   F8FFFF0A           BEQ      ??FS_FAT_GetVolumeLabel_6
+   \   000000D4   E8FFFFEA           B        ??FS_FAT_GetVolumeLabel_5
+    272          }
+    273          
+    274          /*********************************************************************
+    275          *
+    276          *       FS_FAT_GetVolumeLabel
+    277          *
+    278          *  Function description:
+    279          *    Sets a label for a FAT volume.
+    280          *
+    281          *  Return value:
+    282          *   == 0    - O.K.
+    283          *   != 0    - Error
+    284          *
+    285          */
+
+   \                                 In section .text, align 4, keep-with-next
+    286          int FS_FAT_SetVolumeLabel(FS_VOLUME * pVolume, const char * pVolumeLabel) {
+   \                     FS_FAT_SetVolumeLabel:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   30D04DE2           SUB      SP,SP,#+48
+   \   00000008   0050A0E1           MOV      R5,R0
+   \   0000000C   0160A0E1           MOV      R6,R1
+    287            FS_FAT_DENTRY * pDirEntry;
+    288            FS_SB           sb;
+    289            int             r;
+    290          
+    291            r = -1;
+   \   00000010   0070E0E3           MVN      R7,#+0
+    292            FS__SB_Create(&sb, &pVolume->Partition);
+   \   00000014   0510A0E1           MOV      R1,R5
+   \   00000018   0C008DE2           ADD      R0,SP,#+12
+   \   0000001C   ........           BL       FS__SB_Create
+    293            //
+    294            // Find the volume label entry
+    295            //
+    296            pDirEntry = _FindVolumeDirEntry(pVolume,  &sb);
+   \   00000020   0020A0E3           MOV      R2,#+0
+   \   00000024   1C108DE2           ADD      R1,SP,#+28
+   \   00000028   1C0085E2           ADD      R0,R5,#+28
+   \   0000002C   ........           BL       FS_FAT_InitDirEntryScan
+   \   00000030   060000EA           B        ??FS_FAT_SetVolumeLabel_1
+   \                     ??FS_FAT_SetVolumeLabel_2:
+   \   00000034   0B20D0E5           LDRB     R2,[R0, #+11]
+   \   00000038   080052E3           CMP      R2,#+8
+   \   0000003C   0100001A           BNE      ??FS_FAT_SetVolumeLabel_3
+   \   00000040   E50051E3           CMP      R1,#+229
+   \   00000044   0B00001A           BNE      ??FS_FAT_SetVolumeLabel_4
+   \                     ??FS_FAT_SetVolumeLabel_3:
+   \   00000048   1C008DE2           ADD      R0,SP,#+28
+   \   0000004C   ........           BL       FS_FAT_IncDirPos
+   \                     ??FS_FAT_SetVolumeLabel_1:
+   \   00000050   1C208DE2           ADD      R2,SP,#+28
+   \   00000054   0C108DE2           ADD      R1,SP,#+12
+   \   00000058   0500A0E1           MOV      R0,R5
+   \   0000005C   ........           BL       FS_FAT_GetDirEntry
+   \   00000060   000050E3           CMP      R0,#+0
+   \   00000064   0300000A           BEQ      ??FS_FAT_SetVolumeLabel_4
+   \   00000068   0010D0E5           LDRB     R1,[R0, #+0]
+   \   0000006C   000051E3           CMP      R1,#+0
+   \   00000070   EFFFFF1A           BNE      ??FS_FAT_SetVolumeLabel_2
+   \   00000074   0000A0E3           MOV      R0,#+0
+   \                     ??FS_FAT_SetVolumeLabel_4:
+   \   00000078   0040A0E1           MOV      R4,R0
+    297            //
+    298            // Create/Delete the volume label
+    299            //
+    300            if (pVolumeLabel) {
+   \   0000007C   000056E3           CMP      R6,#+0
+   \   00000080   6B00000A           BEQ      ??FS_FAT_SetVolumeLabel_5
+    301              FS_83NAME VolLabel;
+    302                U32 TimeDate;
+    303          
+    304              TimeDate = FS_X_GetTimeDate();
+   \   00000084   ........           BL       FS_X_GetTimeDate
+   \   00000088   0070A0E1           MOV      R7,R0
+    305              //
+    306              _MakeVolLabelName(&VolLabel, pVolumeLabel);
+   \   0000008C   0600A0E1           MOV      R0,R6
+   \   00000090   ........           BL       strlen
+   \   00000094   0080A0E1           MOV      R8,R0
+   \   00000098   0C0058E3           CMP      R8,#+12
+   \   0000009C   0B80A023           MOVCS    R8,#+11
+   \   000000A0   2020A0E3           MOV      R2,#+32
+   \   000000A4   0B10A0E3           MOV      R1,#+11
+   \   000000A8   1C008DE2           ADD      R0,SP,#+28
+   \   000000AC   ........           BL       __aeabi_memset4
+   \   000000B0   1C008DE2           ADD      R0,SP,#+28
+   \   000000B4   000058E3           CMP      R8,#+0
+   \   000000B8   4900000A           BEQ      ??FS_FAT_SetVolumeLabel_6
+   \   000000BC   5F10A0E3           MOV      R1,#+95
+   \                     ??FS_FAT_SetVolumeLabel_7:
+   \   000000C0   0120D6E4           LDRB     R2,[R6], #+1
+   \   000000C4   223042E2           SUB      R3,R2,#+34
+   \   000000C8   3B0053E3           CMP      R3,#+59
+   \   000000CC   03F18F90           ADDLS    PC,PC,R3, LSL #+2
+   \                     ??FS_FAT_SetVolumeLabel_0:
+   \   000000D0   3D00008A           BHI      ??FS_FAT_SetVolumeLabel_8
+   \   000000D4   3A0000EA           B        ??FS_FAT_SetVolumeLabel_9
+   \   000000D8   3B0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   000000DC   3A0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   000000E0   390000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   000000E4   360000EA           B        ??FS_FAT_SetVolumeLabel_9
+   \   000000E8   370000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   000000EC   360000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   000000F0   350000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   000000F4   320000EA           B        ??FS_FAT_SetVolumeLabel_9
+   \   000000F8   310000EA           B        ??FS_FAT_SetVolumeLabel_9
+   \   000000FC   300000EA           B        ??FS_FAT_SetVolumeLabel_9
+   \   00000100   2F0000EA           B        ??FS_FAT_SetVolumeLabel_9
+   \   00000104   2E0000EA           B        ??FS_FAT_SetVolumeLabel_9
+   \   00000108   2D0000EA           B        ??FS_FAT_SetVolumeLabel_9
+   \   0000010C   2E0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000110   2D0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000114   2C0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000118   2B0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   0000011C   2A0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000120   290000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000124   280000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000128   270000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   0000012C   260000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000130   250000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000134   220000EA           B        ??FS_FAT_SetVolumeLabel_9
+   \   00000138   210000EA           B        ??FS_FAT_SetVolumeLabel_9
+   \   0000013C   200000EA           B        ??FS_FAT_SetVolumeLabel_9
+   \   00000140   1F0000EA           B        ??FS_FAT_SetVolumeLabel_9
+   \   00000144   1E0000EA           B        ??FS_FAT_SetVolumeLabel_9
+   \   00000148   1D0000EA           B        ??FS_FAT_SetVolumeLabel_9
+   \   0000014C   1E0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000150   1D0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000154   1C0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000158   1B0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   0000015C   1A0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000160   190000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000164   180000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000168   170000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   0000016C   160000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000170   150000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000174   140000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000178   130000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   0000017C   120000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000180   110000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000184   100000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000188   0F0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   0000018C   0E0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000190   0D0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000194   0C0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   00000198   0B0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   0000019C   0A0000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   000001A0   090000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   000001A4   080000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   000001A8   070000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   000001AC   060000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   000001B0   050000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   000001B4   040000EA           B        ??FS_FAT_SetVolumeLabel_8
+   \   000001B8   010000EA           B        ??FS_FAT_SetVolumeLabel_9
+   \   000001BC   000000EA           B        ??FS_FAT_SetVolumeLabel_9
+   \   000001C0   FFFFFFEA           B        ??FS_FAT_SetVolumeLabel_9
+   \                     ??FS_FAT_SetVolumeLabel_9:
+   \   000001C4   0110C0E4           STRB     R1,[R0], #+1
+   \   000001C8   030000EA           B        ??FS_FAT_SetVolumeLabel_10
+   \                     ??FS_FAT_SetVolumeLabel_8:
+   \   000001CC   613042E2           SUB      R3,R2,#+97
+   \   000001D0   1A0053E3           CMP      R3,#+26
+   \   000001D4   20204232           SUBCC    R2,R2,#+32
+   \   000001D8   0120C0E4           STRB     R2,[R0], #+1
+   \                     ??FS_FAT_SetVolumeLabel_10:
+   \   000001DC   018058E2           SUBS     R8,R8,#+1
+   \   000001E0   B6FFFF1A           BNE      ??FS_FAT_SetVolumeLabel_7
+    307              if (pDirEntry == (FS_FAT_DENTRY *)NULL) {
+   \                     ??FS_FAT_SetVolumeLabel_6:
+   \   000001E4   000054E3           CMP      R4,#+0
+   \   000001E8   0400001A           BNE      ??FS_FAT_SetVolumeLabel_11
+    308                pDirEntry = FS_FAT_FindEmptyDirEntry(pVolume, &sb, 0);
+   \   000001EC   0020A0E3           MOV      R2,#+0
+   \   000001F0   0C108DE2           ADD      R1,SP,#+12
+   \   000001F4   0500A0E1           MOV      R0,R5
+   \   000001F8   ........           BL       FS_FAT_FindEmptyDirEntry
+   \   000001FC   0040A0E1           MOV      R4,R0
+    309              }
+    310              
+    311              FS_FAT_WriteDirEntry83(pDirEntry, &VolLabel, 0, FS_FAT_ATTR_VOLUME_ID, 0, (U16)(TimeDate >> 16), (U16)(TimeDate & 0xffff));
+   \                     ??FS_FAT_SetVolumeLabel_11:
+   \   00000200   0708A0E1           LSL      R0,R7,#+16
+   \   00000204   2008A0E1           LSR      R0,R0,#+16
+   \   00000208   08008DE5           STR      R0,[SP, #+8]
+   \   0000020C   2708A0E1           LSR      R0,R7,#+16
+   \   00000210   04008DE5           STR      R0,[SP, #+4]
+   \   00000214   0000A0E3           MOV      R0,#+0
+   \   00000218   00008DE5           STR      R0,[SP, #+0]
+   \   0000021C   0830A0E3           MOV      R3,#+8
+   \   00000220   0020A0E3           MOV      R2,#+0
+   \   00000224   1C108DE2           ADD      R1,SP,#+28
+   \   00000228   0400A0E1           MOV      R0,R4
+   \   0000022C   ........           BL       FS_FAT_WriteDirEntry83
+    312              r = 0;
+   \   00000230   030000EA           B        ??FS_FAT_SetVolumeLabel_12
+    313            } else {
+    314              if (pDirEntry) {
+   \                     ??FS_FAT_SetVolumeLabel_5:
+   \   00000234   000054E3           CMP      R4,#+0
+   \   00000238   0200000A           BEQ      ??FS_FAT_SetVolumeLabel_13
+    315                //
+    316                // Delete this volume label entry
+    317                //
+    318                pDirEntry->data[0] = 0xe5;
+   \   0000023C   E500A0E3           MOV      R0,#+229
+   \   00000240   0000C4E5           STRB     R0,[R4, #+0]
+    319                r = 0;
+   \                     ??FS_FAT_SetVolumeLabel_12:
+   \   00000244   0070A0E3           MOV      R7,#+0
+    320              }
+    321            }
+    322            FS__SB_MarkDirty(&sb);
+   \                     ??FS_FAT_SetVolumeLabel_13:
+   \   00000248   0C008DE2           ADD      R0,SP,#+12
+   \   0000024C   ........           BL       FS__SB_MarkDirty
+    323            FS__SB_Delete(&sb);
+   \   00000250   0C008DE2           ADD      R0,SP,#+12
+   \   00000254   ........           BL       FS__SB_Delete
+    324            return r;
+   \   00000258   0700A0E1           MOV      R0,R7
+   \   0000025C   30D08DE2           ADD      SP,SP,#+48
+   \   00000260   F081BDE8           POP      {R4-R8,PC}       ;; return
+    325          }
+    326          
+    327          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function              .cstack
+     --------              -------
+     FS_FAT_GetVolumeLabel     48
+     FS_FAT_SetVolumeLabel     72
+
+
+   Section sizes:
+
+     Function/Label        Bytes
+     --------------        -----
+     FS_FAT_GetVolumeLabel  216
+     FS_FAT_SetVolumeLabel  612
+
+ 
+ 828 bytes in section .text
+ 
+ 828 bytes of CODE memory
+
+Errors: none
+Warnings: none

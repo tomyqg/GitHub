@@ -1,0 +1,2340 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:13:34 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\FS_Storage.c                         #
+#    Command line =  C:\DUII\TargetHW\FS\FS_Storage.c -D DEBUG=1 -D           #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\FS_Storage.lst             #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\FS_Storage.o                #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\FS_Storage.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : FS_Storage.c
+     19          Purpose     : Implementation of Storage API functions
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          /*********************************************************************
+     24          *
+     25          *             #include Section
+     26          *
+     27          **********************************************************************
+     28          */
+     29          
+     30          #define FS_STORAGE_C
+     31          
+     32          #include "FS_Int.h"
+
+   \                                 In section .bss, align 4
+   \   __absolute struct <unnamed> FS_STORAGE_Counters
+   \                     FS_STORAGE_Counters:
+   \   00000000                      DS8 20
+     33          
+     34          /*********************************************************************
+     35          *
+     36          *       Static data
+     37          *
+     38          **********************************************************************
+     39          */
+     40          
+     41          /*********************************************************************
+     42          *
+     43          *       Public data for internal use
+     44          *
+     45          **********************************************************************
+     46          */
+     47          
+     48          /*********************************************************************
+     49          *
+     50          *       Static code
+     51          *
+     52          **********************************************************************
+     53          */
+     54          
+     55          /*********************************************************************
+     56          *
+     57          *       _AllocVolumeHandle
+     58          *
+     59          *  Function description:
+     60          *    Returns a free volume handle.
+     61          *
+     62          *  Return value:
+     63          *    pVolume     - A valid free volume handle
+     64          *
+     65          */
+     66          static FS_VOLUME * _AllocVolumeHandle(void) {
+     67            FS_VOLUME * pVolume;
+     68          
+     69            FS_LOCK_SYS();
+     70            pVolume = &FS_Global.FirstVolume;
+     71            while (1) { /* While no free entry found. */
+     72              if (pVolume->InUse == 0) {
+     73                FS_VOLUME * pNext;
+     74                //
+     75                // Save the pNext pointer to restore it back.
+     76                //
+     77                pNext = pVolume->pNext;
+     78                FS_MEMSET(pVolume, 0, sizeof(FS_VOLUME));
+     79                pVolume->InUse = 1;
+     80                pVolume->pNext = pNext;
+     81                break;
+     82              }
+     83              if (pVolume->pNext == NULL) {
+     84                pVolume->pNext = (FS_VOLUME *)FS_TryAlloc(sizeof(FS_VOLUME));
+     85                if (pVolume->pNext) {
+     86                  FS_MEMSET(pVolume->pNext, 0, sizeof(FS_VOLUME));
+     87                }
+     88              }
+     89              pVolume = pVolume->pNext;
+     90              //
+     91              // Neither a free volume handle found 
+     92              // nor enough space to allocate a new one.
+     93              //
+     94              if (pVolume == NULL) {
+     95                break;
+     96              }
+     97            }
+     98            FS_UNLOCK_SYS();
+     99            return pVolume;
+    100          }
+    101          
+    102          /*********************************************************************
+    103          *
+    104          *       Public code, internal API functions
+    105          *
+    106          **********************************************************************
+    107          */
+    108          
+    109          /*********************************************************************
+    110          *
+    111          *       FS__IoCtlNL
+    112          *
+    113          *  Function description:
+    114          *    Internal version of FS_IoCtl.
+    115          *    Execute device command.
+    116          *
+    117          *  Parameters:
+    118          *    pVolume     - Pointer to the device structure.
+    119          *    Cmd         - Command to be executed.
+    120          *    Aux         - Parameter depending on command.
+    121          *    pBuffer     - Pointer to a buffer used for the command.
+    122          *
+    123          *  Return value:
+    124          *    Command specific. In general a negative value means an error.
+    125          */
+
+   \                                 In section .text, align 4, keep-with-next
+    126          int FS__IoCtlNL(FS_VOLUME * pVolume, I32 Cmd, I32 Aux, void *pBuffer) {
+   \                     FS__IoCtlNL:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   0150A0E1           MOV      R5,R1
+    127            int Status;
+    128          
+    129            switch (Cmd) {
+   \   0000000C   FC0F45E2           SUB      R0,R5,#+1008
+   \   00000010   030050E3           CMP      R0,#+3
+   \   00000014   04D04DE2           SUB      SP,SP,#+4
+   \   00000018   0260A0E1           MOV      R6,R2
+   \   0000001C   0370A0E1           MOV      R7,R3
+   \   00000020   0400A0E1           MOV      R0,R4
+   \   00000024   0100008A           BHI      ??FS__IoCtlNL_0
+    130            case FS_CMD_UNMOUNT:
+    131            case FS_CMD_UNMOUNT_FORCED:
+    132            case FS_CMD_SYNC:
+    133            case FS_CMD_DEINIT:
+    134              return FS_IOCTL(&pVolume->Partition.Device, Cmd, Aux, pBuffer);
+   \                     ??FS__IoCtlNL_1:
+   \   00000028   ........           BL       FS_LB_Ioctl
+   \   0000002C   080000EA           B        ??FS__IoCtlNL_2
+    135            case FS_CMD_FORMAT_LOW_LEVEL:
+    136            case FS_CMD_REQUIRES_FORMAT:
+    137            case FS_CMD_FREE_SECTORS:
+    138            case FS_CMD_GET_DEVINFO:
+    139            case FS_CMD_SET_DELAY:
+    140            default:
+    141              break;
+    142            }
+    143            Status = FS_LB_GetStatus(&pVolume->Partition.Device);
+    144            if (Status >= 0) {
+   \                     ??FS__IoCtlNL_0:
+   \   00000030   ........           BL       FS_LB_GetStatus
+   \   00000034   000050E3           CMP      R0,#+0
+   \   00000038   0400004A           BMI      ??FS__IoCtlNL_3
+    145              return FS_IOCTL(&pVolume->Partition.Device, Cmd, Aux, pBuffer);
+   \   0000003C   0730A0E1           MOV      R3,R7
+   \   00000040   0620A0E1           MOV      R2,R6
+   \   00000044   0510A0E1           MOV      R1,R5
+   \   00000048   0400A0E1           MOV      R0,R4
+   \   0000004C   F5FFFFEA           B        ??FS__IoCtlNL_1
+    146            }
+    147            return -1;
+   \                     ??FS__IoCtlNL_3:
+   \   00000050   0000E0E3           MVN      R0,#+0
+   \                     ??FS__IoCtlNL_2:
+   \   00000054   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000058   F080BDE8           POP      {R4-R7,PC}       ;; return
+    148          }
+    149          
+    150          /*********************************************************************
+    151          *
+    152          *       FS__IoCtl
+    153          *
+    154          *  Function description:
+    155          *    Internal version of FS_IoCtl.
+    156          *    Execute device command.
+    157          *
+    158          *  Parameters:
+    159          *    pVolume     - Pointer to the specified volume.
+    160          *    Cmd         - Command to be executed.
+    161          *    Aux         - Parameter depending on command.
+    162          *    pBuffer     - Pointer to a buffer used for the command.
+    163          *
+    164          *  Return value:
+    165          *    Command specific. In general a negative value means an error.
+    166          */
+
+   \                                 In section .text, align 4, keep-with-next
+    167          int FS__IoCtl(FS_VOLUME * pVolume, I32 Cmd, I32 Aux, void *pBuffer) {
+   \                     FS__IoCtl:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   0150A0E1           MOV      R5,R1
+   \   0000000C   0260A0E1           MOV      R6,R2
+   \   00000010   0370A0E1           MOV      R7,R3
+    168            int          r;
+    169            r = -1;
+   \   00000014   0080E0E3           MVN      R8,#+0
+    170            if (pVolume) {
+   \   00000018   000054E3           CMP      R4,#+0
+   \   0000001C   0C00000A           BEQ      ??FS__IoCtl_0
+    171              FS_LOCK_DRIVER(&pVolume->Partition.Device);
+    172              r = FS__IoCtlNL(pVolume, Cmd, Aux, pBuffer);
+   \   00000020   FC0F45E2           SUB      R0,R5,#+1008
+   \   00000024   030050E3           CMP      R0,#+3
+   \   00000028   0400A0E1           MOV      R0,R4
+   \   0000002C   0600009A           BLS      ??FS__IoCtl_1
+   \   00000030   ........           BL       FS_LB_GetStatus
+   \   00000034   000050E3           CMP      R0,#+0
+   \   00000038   0500004A           BMI      ??FS__IoCtl_0
+   \   0000003C   0730A0E1           MOV      R3,R7
+   \   00000040   0620A0E1           MOV      R2,R6
+   \   00000044   0510A0E1           MOV      R1,R5
+   \   00000048   0400A0E1           MOV      R0,R4
+   \                     ??FS__IoCtl_1:
+   \   0000004C   ........           BL       FS_LB_Ioctl
+   \   00000050   0080A0E1           MOV      R8,R0
+    173              FS_UNLOCK_DRIVER(&pVolume->Partition.Device);
+    174            }
+    175            return r;
+   \                     ??FS__IoCtl_0:
+   \   00000054   0800A0E1           MOV      R0,R8
+   \   00000058   F081BDE8           POP      {R4-R8,PC}       ;; return
+    176          }
+    177          
+    178          /*********************************************************************
+    179          *
+    180          *       FS__FormatLow
+    181          *
+    182          *  Function description:
+    183          *    Low-level format the medium
+    184          *
+    185          *  Parameters:
+    186          *    pDevice       Device specifier (string). "" refers to the first device.
+    187          *  
+    188          *  Return value:
+    189          *    ==0         - O.K.: Low level format successful
+    190          *    !=0         - ERROR
+    191          */
+
+   \                                 In section .text, align 4, keep-with-next
+    192          int FS__FormatLow(FS_VOLUME * pVolume) {
+   \                     FS__FormatLow:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0040A0E1           MOV      R4,R0
+    193            int          r;
+    194          
+    195            FS__UnmountForcedNL(pVolume);
+   \   0000000C   ........           BL       FS__UnmountForcedNL
+    196            r = FS__IoCtl(pVolume, FS_CMD_FORMAT_LOW_LEVEL, 0, 0);  /* Erase & Low-level  format the flash */
+   \   00000010   0050E0E3           MVN      R5,#+0
+   \   00000014   000054E3           CMP      R4,#+0
+   \   00000018   0A00000A           BEQ      ??FS__FormatLow_0
+   \   0000001C   0400A0E1           MOV      R0,R4
+   \   00000020   ........           BL       FS_LB_GetStatus
+   \   00000024   000050E3           CMP      R0,#+0
+   \   00000028   0600004A           BMI      ??FS__FormatLow_0
+   \   0000002C   ED10A0E3           MOV      R1,#+237
+   \   00000030   0030A0E3           MOV      R3,#+0
+   \   00000034   0020A0E3           MOV      R2,#+0
+   \   00000038   C01F81E3           ORR      R1,R1,#0x300
+   \   0000003C   0400A0E1           MOV      R0,R4
+   \   00000040   ........           BL       FS_LB_Ioctl
+   \   00000044   0050A0E1           MOV      R5,R0
+    197            return r;
+   \                     ??FS__FormatLow_0:
+   \   00000048   0500A0E1           MOV      R0,R5
+   \   0000004C   04D08DE2           ADD      SP,SP,#+4
+   \   00000050   3080BDE8           POP      {R4,R5,PC}       ;; return
+    198          }
+    199          
+    200          /*********************************************************************
+    201          *
+    202          *       FS__WriteSector
+    203          *
+    204          *  Function description:
+    205          *    Internal version of FS_WriteSector
+    206          *    Writes a sector to a device
+    207          *
+    208          *  Return value:
+    209          *       0             O.K.
+    210          *    != 0             Error
+    211          */
+
+   \                                 In section .text, align 4, keep-with-next
+    212          int FS__WriteSector(FS_VOLUME * pVolume, const void *pData, U32 SectorIndex) {
+   \                     FS__WriteSector:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   0150A0E1           MOV      R5,R1
+   \   0000000C   0260A0E1           MOV      R6,R2
+    213            FS_DEVICE  * pDevice;
+    214            int r;
+    215          
+    216            r = -1;
+   \   00000010   0000E0E3           MVN      R0,#+0
+    217            if (pVolume) {
+   \   00000014   000054E3           CMP      R4,#+0
+   \   00000018   0600000A           BEQ      ??FS__WriteSector_0
+    218              pDevice = &pVolume->Partition.Device;
+    219              FS_LOCK_DRIVER(pDevice);
+    220              FS_LB_InitMediumIfRequired(pDevice);
+   \   0000001C   0400A0E1           MOV      R0,R4
+   \   00000020   ........           BL       FS_LB_InitMediumIfRequired
+    221              r = FS_LB_WriteDevice(pDevice, SectorIndex, pData, FS_SECTOR_TYPE_DATA);
+   \   00000024   0030A0E3           MOV      R3,#+0
+   \   00000028   0520A0E1           MOV      R2,R5
+   \   0000002C   0610A0E1           MOV      R1,R6
+   \   00000030   0400A0E1           MOV      R0,R4
+   \   00000034   ........           BL       FS_LB_WriteDevice
+    222              FS_UNLOCK_DRIVER(pDevice);
+    223            }
+    224            return r;
+   \                     ??FS__WriteSector_0:
+   \   00000038   7080BDE8           POP      {R4-R6,PC}       ;; return
+    225          }
+    226          
+    227          /*********************************************************************
+    228          *
+    229          *       FS__ReadSector
+    230          *
+    231          *  Function description:
+    232          *    Internal version of FS_ReadSector
+    233          *    Reads a sector to a device
+    234          *
+    235          *  Return value:
+    236          *       0             O.K.
+    237          *    != 0             Error
+    238          */
+
+   \                                 In section .text, align 4, keep-with-next
+    239          int FS__ReadSector(FS_VOLUME * pVolume, void *pData, U32 SectorIndex) {
+   \                     FS__ReadSector:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   0150A0E1           MOV      R5,R1
+   \   0000000C   0260A0E1           MOV      R6,R2
+    240            FS_DEVICE  * pDevice;
+    241            int r;
+    242          
+    243            r = -1;
+   \   00000010   0000E0E3           MVN      R0,#+0
+    244            if (pVolume) {
+   \   00000014   000054E3           CMP      R4,#+0
+   \   00000018   0600000A           BEQ      ??FS__ReadSector_0
+    245              pDevice = &pVolume->Partition.Device;
+    246              FS_LOCK_DRIVER(pDevice);
+    247              FS_LB_InitMediumIfRequired(pDevice);
+   \   0000001C   0400A0E1           MOV      R0,R4
+   \   00000020   ........           BL       FS_LB_InitMediumIfRequired
+    248              r = FS_LB_ReadDevice(pDevice, SectorIndex, pData, FS_SECTOR_TYPE_DATA);
+   \   00000024   0030A0E3           MOV      R3,#+0
+   \   00000028   0520A0E1           MOV      R2,R5
+   \   0000002C   0610A0E1           MOV      R1,R6
+   \   00000030   0400A0E1           MOV      R0,R4
+   \   00000034   ........           BL       FS_LB_ReadDevice
+    249              FS_UNLOCK_DRIVER(pDevice);
+    250            }
+    251            return r;
+   \                     ??FS__ReadSector_0:
+   \   00000038   7080BDE8           POP      {R4-R6,PC}       ;; return
+    252          }
+    253          
+    254          /*********************************************************************
+    255          *
+    256          *       FS__WriteSectors
+    257          *
+    258          *  Function description:
+    259          *    Writes multiple sectors to a volume.
+    260          *
+    261          *  Return value:
+    262          *       0             O.K.
+    263          *    != 0             Error
+    264          */
+
+   \                                 In section .text, align 4, keep-with-next
+    265          int FS__WriteSectors(FS_VOLUME * pVolume, const void *pData, U32 SectorIndex, U32 NumSectors) {
+   \                     FS__WriteSectors:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0260A0E1           MOV      R6,R2
+   \   00000014   0370A0E1           MOV      R7,R3
+    266            FS_DEVICE  * pDevice;
+    267            int r;
+    268          
+    269            r = -1;
+   \   00000018   0000E0E3           MVN      R0,#+0
+    270            if (pVolume) {
+   \   0000001C   000054E3           CMP      R4,#+0
+   \   00000020   0800000A           BEQ      ??FS__WriteSectors_0
+    271              pDevice = &pVolume->Partition.Device;
+    272              FS_LOCK_DRIVER(pDevice);
+    273              FS_LB_InitMediumIfRequired(pDevice);
+   \   00000024   0400A0E1           MOV      R0,R4
+   \   00000028   ........           BL       FS_LB_InitMediumIfRequired
+    274              r = FS_LB_WriteBurst(pDevice, SectorIndex, NumSectors, pData, FS_SECTOR_TYPE_DATA);
+   \   0000002C   0000A0E3           MOV      R0,#+0
+   \   00000030   00008DE5           STR      R0,[SP, #+0]
+   \   00000034   0530A0E1           MOV      R3,R5
+   \   00000038   0720A0E1           MOV      R2,R7
+   \   0000003C   0610A0E1           MOV      R1,R6
+   \   00000040   0400A0E1           MOV      R0,R4
+   \   00000044   ........           BL       FS_LB_WriteBurst
+    275              FS_UNLOCK_DRIVER(pDevice);
+    276            }
+    277            return r;
+   \                     ??FS__WriteSectors_0:
+   \   00000048   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   0000004C   F080BDE8           POP      {R4-R7,PC}       ;; return
+    278          }
+    279          
+    280          /*********************************************************************
+    281          *
+    282          *       FS__ReadSectors
+    283          *
+    284          *  Function description:
+    285          *    Reads multiple sectors from a volume.
+    286          *
+    287          *  Return value:
+    288          *       0             O.K.
+    289          *    != 0             Error
+    290          */
+
+   \                                 In section .text, align 4, keep-with-next
+    291          int FS__ReadSectors(FS_VOLUME * pVolume, void *pData, U32 SectorIndex, U32 NumSectors) {
+   \                     FS__ReadSectors:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0260A0E1           MOV      R6,R2
+   \   00000014   0370A0E1           MOV      R7,R3
+    292            FS_DEVICE  * pDevice;
+    293            int r;
+    294          
+    295            r = -1;
+   \   00000018   0000E0E3           MVN      R0,#+0
+    296            if (pVolume) {
+   \   0000001C   000054E3           CMP      R4,#+0
+   \   00000020   0800000A           BEQ      ??FS__ReadSectors_0
+    297              pDevice = &pVolume->Partition.Device;
+    298              FS_LOCK_DRIVER(pDevice);
+    299              FS_LB_InitMediumIfRequired(pDevice);
+   \   00000024   0400A0E1           MOV      R0,R4
+   \   00000028   ........           BL       FS_LB_InitMediumIfRequired
+    300              r = FS_LB_ReadBurst(pDevice, SectorIndex, NumSectors, pData, FS_SECTOR_TYPE_DATA);
+   \   0000002C   0000A0E3           MOV      R0,#+0
+   \   00000030   00008DE5           STR      R0,[SP, #+0]
+   \   00000034   0530A0E1           MOV      R3,R5
+   \   00000038   0720A0E1           MOV      R2,R7
+   \   0000003C   0610A0E1           MOV      R1,R6
+   \   00000040   0400A0E1           MOV      R0,R4
+   \   00000044   ........           BL       FS_LB_ReadBurst
+    301              FS_UNLOCK_DRIVER(pDevice);
+    302            }
+    303            return r;
+   \                     ??FS__ReadSectors_0:
+   \   00000048   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   0000004C   F080BDE8           POP      {R4-R7,PC}       ;; return
+    304          }
+    305          
+    306          
+    307          /*********************************************************************
+    308          *
+    309          *       FS__GetVolumeStatus
+    310          *
+    311          *  Function description:
+    312          *    Internal version of FS_GetVolumeStatus
+    313          *    Returns the status of a volume.
+    314          *
+    315          *  Parameters
+    316          *    pVolume           - Pointer to a FS_VOLUME structure.
+    317          *                        Can be NULL
+    318          *
+    319          *  Return value:
+    320          *     FS_MEDIA_NOT_PRESENT     - Volume is not present.
+    321          *     FS_MEDIA_IS_PRESENT      - Volume is present.
+    322          *     FS_MEDIA_STATE_UNKNOWN   - Volume state is unknown.
+    323          *
+    324          */
+
+   \                                 In section .text, align 4, keep-with-next
+    325          int FS__GetVolumeStatus(FS_VOLUME * pVolume) {
+   \                     FS__GetVolumeStatus:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   \   00000004   0040B0E1           MOVS     R4,R0
+    326            int r;
+    327          
+    328            r = FS_MEDIA_STATE_UNKNOWN;
+   \   00000008   0200A0E3           MOV      R0,#+2
+    329            if (pVolume) {
+   \   0000000C   0500000A           BEQ      ??FS__GetVolumeStatus_0
+    330              FS_DEVICE * pDevice;
+    331          
+    332              pDevice = &pVolume->Partition.Device;
+    333              FS_LOCK_DRIVER(pDevice);
+    334              FS_LB_InitMediumIfRequired(pDevice);
+   \   00000010   0400A0E1           MOV      R0,R4
+   \   00000014   ........           BL       FS_LB_InitMediumIfRequired
+    335              r = pDevice->pType->pfGetStatus(pDevice->Data.Unit);
+   \   00000018   001094E5           LDR      R1,[R4, #+0]
+   \   0000001C   0400D4E5           LDRB     R0,[R4, #+4]
+   \   00000020   181091E5           LDR      R1,[R1, #+24]
+   \   00000024   31FF2FE1           BLX      R1
+    336              FS_UNLOCK_DRIVER(pDevice);
+    337            }
+    338            return r;
+   \                     ??FS__GetVolumeStatus_0:
+   \   00000028   1080BDE8           POP      {R4,PC}          ;; return
+    339          }
+    340          
+    341          /*********************************************************************
+    342          *
+    343          *       FS__GetDeviceInfo
+    344          *
+    345          *  Function description:
+    346          *    Internal version of FS_GetDeviceInfo
+    347          *    Retrieves device information of a volume.
+    348          *
+    349          *  Return value:
+    350          *      0     - O.K.
+    351          *     -1     - Device is not ready or general error.
+    352          */
+
+   \                                 In section .text, align 4, keep-with-next
+    353          int FS__GetDeviceInfo(FS_VOLUME * pVolume, FS_DEV_INFO * pDevInfo) {
+   \                     FS__GetDeviceInfo:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0150A0E1           MOV      R5,R1
+    354            int         r;
+    355          
+    356            r =  -1;  // Set as error so far
+   \   00000010   0000E0E3           MVN      R0,#+0
+    357            if (pVolume) {
+   \   00000014   000054E3           CMP      R4,#+0
+   \   00000018   0700000A           BEQ      ??FS__GetDeviceInfo_0
+    358              FS_DEVICE * pDevice;
+    359          
+    360              pDevice = &pVolume->Partition.Device;
+    361              FS_LOCK_DRIVER(pDevice);
+    362              FS_MEMSET(pDevInfo, 0, sizeof(FS_DEV_INFO));
+   \   0000001C   0C10A0E3           MOV      R1,#+12
+   \   00000020   0500A0E1           MOV      R0,R5
+   \   00000024   ........           BL       __aeabi_memclr
+    363              FS_LB_InitMediumIfRequired(pDevice);
+   \   00000028   0400A0E1           MOV      R0,R4
+   \   0000002C   ........           BL       FS_LB_InitMediumIfRequired
+    364              r = FS_LB_GetDeviceInfo(pDevice, pDevInfo);
+   \   00000030   0510A0E1           MOV      R1,R5
+   \   00000034   0400A0E1           MOV      R0,R4
+   \   00000038   ........           BL       FS_LB_GetDeviceInfo
+    365              FS_UNLOCK_DRIVER(pDevice);
+    366            }
+    367            return r;
+   \                     ??FS__GetDeviceInfo_0:
+   \   0000003C   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000040   3080BDE8           POP      {R4,R5,PC}       ;; return
+    368          }
+    369          
+    370          
+    371          /*********************************************************************
+    372          *
+    373          *       FS__AddPhysDevice
+    374          *
+    375          *  Description:
+    376          *    Adds a device driver to the file system.
+    377          *
+    378          *  Parameters:
+    379          *
+    380          *  Return value:
+    381          *     >= 0    Unit no of the device.
+    382          *     <= 0    Error.
+    383          */
+
+   \                                 In section .text, align 4, keep-with-next
+    384          int FS__AddPhysDevice(const FS_DEVICE_TYPE * pDevType) {
+   \                     FS__AddPhysDevice:
+   \   00000000   00402DE9           PUSH     {LR}
+    385            int Unit;
+    386          
+    387            Unit = -1;
+    388            if (pDevType->pfAddDevice) {
+   \   00000004   040090E5           LDR      R0,[R0, #+4]
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0010E0E3           MVN      R1,#+0
+   \   00000010   000050E3           CMP      R0,#+0
+   \   00000014   0100000A           BEQ      ??FS__AddPhysDevice_0
+    389              Unit = pDevType->pfAddDevice();
+   \   00000018   30FF2FE1           BLX      R0
+   \   0000001C   0010A0E1           MOV      R1,R0
+    390              if (Unit < 0) {
+    391                FS_DEBUG_ERROROUT((FS_MTYPE_API, "FS__AddPhysDevice: Could not add device.\n"));
+    392              } else {
+    393                FS_OS_ADD_DRIVER(pDevType);
+    394              }
+    395            }
+    396            return Unit;
+   \                     ??FS__AddPhysDevice_0:
+   \   00000020   0100A0E1           MOV      R0,R1
+   \   00000024   04D08DE2           ADD      SP,SP,#+4
+   \   00000028   0080BDE8           POP      {PC}             ;; return
+    397          }
+    398          
+    399          /*********************************************************************
+    400          *
+    401          *       FS__AddDevice
+    402          *
+    403          *  Description:
+    404          *    Internal version of FS_AddDevice.
+    405          *    Adds a device driver to the file system.
+    406          *
+    407          *  Parameters:
+    408          *
+    409          *  Return value:
+    410          */
+
+   \                                 In section .text, align 4, keep-with-next
+    411          FS_VOLUME * FS__AddDevice(const FS_DEVICE_TYPE * pDevType) {
+   \                     FS__AddDevice:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+    412            FS_VOLUME * pVolume;
+    413            int Unit;
+    414          
+    415            pVolume = _AllocVolumeHandle();
+   \   00000004   ........           LDR      R5,??DataTable7
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   1C6085E2           ADD      R6,R5,#+28
+   \                     ??FS__AddDevice_0:
+   \   00000010   5F00D6E5           LDRB     R0,[R6, #+95]
+   \   00000014   000050E3           CMP      R0,#+0
+   \   00000018   0D00000A           BEQ      ??FS__AddDevice_1
+   \   0000001C   600096E5           LDR      R0,[R6, #+96]
+   \   00000020   000050E3           CMP      R0,#+0
+   \   00000024   0600001A           BNE      ??FS__AddDevice_2
+   \   00000028   6400A0E3           MOV      R0,#+100
+   \   0000002C   ........           BL       FS_TryAlloc
+   \   00000030   600086E5           STR      R0,[R6, #+96]
+   \   00000034   000050E3           CMP      R0,#+0
+   \   00000038   0100000A           BEQ      ??FS__AddDevice_2
+   \   0000003C   6410A0E3           MOV      R1,#+100
+   \   00000040   ........           BL       __aeabi_memclr4
+   \                     ??FS__AddDevice_2:
+   \   00000044   606096E5           LDR      R6,[R6, #+96]
+   \   00000048   000056E3           CMP      R6,#+0
+   \   0000004C   EFFFFF1A           BNE      ??FS__AddDevice_0
+   \   00000050   150000EA           B        ??FS__AddDevice_3
+   \                     ??FS__AddDevice_1:
+   \   00000054   608096E5           LDR      R8,[R6, #+96]
+   \   00000058   6410A0E3           MOV      R1,#+100
+   \   0000005C   0600A0E1           MOV      R0,R6
+   \   00000060   ........           BL       __aeabi_memclr4
+   \   00000064   0170A0E3           MOV      R7,#+1
+   \   00000068   5F70C6E5           STRB     R7,[R6, #+95]
+   \   0000006C   608086E5           STR      R8,[R6, #+96]
+    416            if (pVolume) {
+   \   00000070   000056E3           CMP      R6,#+0
+    417              Unit = FS__AddPhysDevice(pDevType);
+   \   00000074   04009415           LDRNE    R0,[R4, #+4]
+   \   00000078   00005013           CMPNE    R0,#+0
+   \   0000007C   0A00000A           BEQ      ??FS__AddDevice_3
+   \   00000080   30FF2FE1           BLX      R0
+    418              if (Unit >= 0) {
+   \   00000084   000050E3           CMP      R0,#+0
+   \   00000088   0700004A           BMI      ??FS__AddDevice_3
+    419                FS_DEVICE * pDevice;
+    420          
+    421                FS_Global.NumVolumes++;
+   \   0000008C   801095E5           LDR      R1,[R5, #+128]
+   \   00000090   011081E2           ADD      R1,R1,#+1
+   \   00000094   801085E5           STR      R1,[R5, #+128]
+    422                pDevice = &pVolume->Partition.Device;
+    423                pDevice->pType     = pDevType;
+   \   00000098   004086E5           STR      R4,[R6, #+0]
+    424                pDevice->Data.Unit = (U8)Unit;
+   \   0000009C   0400C6E5           STRB     R0,[R6, #+4]
+    425                pVolume->InUse     = 1;
+   \   000000A0   5F70C6E5           STRB     R7,[R6, #+95]
+    426                pVolume->AllowAutoMount = FS_MOUNT_RW;
+   \   000000A4   0300A0E3           MOV      R0,#+3
+   \   000000A8   5E00C6E5           STRB     R0,[R6, #+94]
+    427              } else {
+    428                FS_DEBUG_ERROROUT((FS_MTYPE_API, "FS__AddDevice: FS__AddPhysDevice failed.\n"));
+    429              }
+    430            } else {
+    431              FS_DEBUG_ERROROUT((FS_MTYPE_API, "FS__AddDevice: Add. driver could not be added.\n"));
+    432            }
+    433            return pVolume;
+   \                     ??FS__AddDevice_3:
+   \   000000AC   0600A0E1           MOV      R0,R6
+   \   000000B0   F081BDE8           POP      {R4-R8,PC}       ;; return
+    434          }
+    435          
+    436          /*********************************************************************
+    437          *
+    438          *       FS__IsLLFormatted
+    439          *
+    440          *  Function description:
+    441          *    Internal version of FS_IsLLFormatted
+    442          *    Returns if a volume is low-level formatted or not.
+    443          *
+    444          *  Return value:
+    445          *      1     - Volume is low-level formatted.
+    446          *      0     - Volume is not low-level formatted.
+    447          *     -1     - Low level format not supported by volume.
+    448          */
+
+   \                                 In section .text, align 4, keep-with-next
+    449          int FS__IsLLFormatted(FS_VOLUME * pVolume) {
+   \                     FS__IsLLFormatted:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0040B0E1           MOVS     R4,R0
+    450            int r;
+    451          
+    452            r = FS__IoCtl(pVolume, FS_CMD_REQUIRES_FORMAT, 0, NULL);
+   \   0000000C   0050E0E3           MVN      R5,#+0
+   \   00000010   0900000A           BEQ      ??FS__IsLLFormatted_0
+   \   00000014   ........           BL       FS_LB_GetStatus
+   \   00000018   000050E3           CMP      R0,#+0
+   \   0000001C   0600004A           BMI      ??FS__IsLLFormatted_0
+   \   00000020   EB10A0E3           MOV      R1,#+235
+   \   00000024   0030A0E3           MOV      R3,#+0
+   \   00000028   0020A0E3           MOV      R2,#+0
+   \   0000002C   C01F81E3           ORR      R1,R1,#0x300
+   \   00000030   0400A0E1           MOV      R0,R4
+   \   00000034   ........           BL       FS_LB_Ioctl
+   \   00000038   0050A0E1           MOV      R5,R0
+    453            if (r == 0) {
+   \                     ??FS__IsLLFormatted_0:
+   \   0000003C   000055E3           CMP      R5,#+0
+    454              r = 1;
+   \   00000040   0150A003           MOVEQ    R5,#+1
+   \   00000044   0100000A           BEQ      ??FS__IsLLFormatted_1
+    455            } else if (r == 1) {
+   \   00000048   010055E3           CMP      R5,#+1
+    456              r = 0;
+   \   0000004C   0050A003           MOVEQ    R5,#+0
+    457            }
+    458            return r;
+   \                     ??FS__IsLLFormatted_1:
+   \   00000050   0500A0E1           MOV      R0,R5
+   \   00000054   04D08DE2           ADD      SP,SP,#+4
+   \   00000058   3080BDE8           POP      {R4,R5,PC}       ;; return
+    459          }
+    460          
+    461          /*********************************************************************
+    462          *
+    463          *       FS__FindVolume
+    464          *
+    465          *  Description:
+    466          *    Finds a volume based on the fully qualified filename.
+    467          *
+    468          *  Parameters:
+    469          *    pFullName   - Fully qualified name.
+    470          *    pFilename   - Address of a pointer, which is modified to point to
+    471          *                  the file name part of pFullName.
+    472          *
+    473          *  Return value:
+    474          *    NULL        - No matching volume found
+    475          *    else        - pointer to volume containing the file
+    476          *
+    477          *  Add. info:
+    478          *    pFullname can be as follows:
+    479          *    - "filename.ext"           e.g. "file.txt"
+    480          *    - "dev:filename.ext"       e.g. "mmc:file.txt"
+    481          *    - "dev:unit:filename.ext"  e.g. "mmc:0:file.txt"
+    482          */
+
+   \                                 In section .text, align 4, keep-with-next
+    483          FS_VOLUME * FS__FindVolume(const char *pFullName, const char * * ppFileName) {
+   \                     FS__FindVolume:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   0150A0E1           MOV      R5,R1
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0040A0E1           MOV      R4,R0
+    484            const char * s;
+    485            FS_VOLUME  * pVolume;
+    486            unsigned     m;
+    487            U8           Unit;
+    488          
+    489            pVolume = &FS_Global.FirstVolume;
+   \   00000010   ........           LDR      R6,??DataTable7_1
+    490            /* Find correct FSL (device:unit:name) */
+    491            s = FS__strchr(pFullName, ':');
+   \   00000014   3A10A0E3           MOV      R1,#+58
+   \   00000018   ........           BL       FS__strchr
+   \   0000001C   0070B0E1           MOVS     R7,R0
+    492            if (s != NULL) {
+   \   00000020   2000000A           BEQ      ??FS__FindVolume_0
+    493              m    = (int)((U32)(s) - (U32)(pFullName));      /* Compute length of specified device name */
+    494              Unit = 0;
+    495              if (*s != '\0') {
+   \   00000024   0000D7E5           LDRB     R0,[R7, #+0]
+   \   00000028   048047E0           SUB      R8,R7,R4
+   \   0000002C   0090A0E3           MOV      R9,#+0
+   \   00000030   000050E3           CMP      R0,#+0
+    496                //
+    497                // Find the correct unit
+    498                //
+    499                s++;
+    500                if ((*s != '\0') && (*(s+1) == ':')) {
+   \   00000034   0100F715           LDRBNE   R0,[R7, #+1]!
+   \   00000038   00005013           CMPNE    R0,#+0
+   \   0000003C   0400000A           BEQ      ??FS__FindVolume_1
+   \   00000040   0100D7E5           LDRB     R0,[R7, #+1]
+   \   00000044   3A0050E3           CMP      R0,#+58
+    501                  Unit = *s - '0';
+   \   00000048   0200D704           LDRBEQ   R0,[R7], #+2
+   \   0000004C   30904002           SUBEQ    R9,R0,#+48
+   \   00000050   FF900902           ANDEQ    R9,R9,#0xFF
+    502                  s += 2;        
+    503                } 
+    504              }
+    505              //
+    506              // Scan for device name
+    507              //
+    508              do {
+    509                const FS_DEVICE_TYPE * pDevice;
+    510                FS_DEVICE_DATA       * pDevData;
+    511                const char           * sVolName;
+    512          
+    513                pDevice  = pVolume->Partition.Device.pType;
+   \                     ??FS__FindVolume_1:
+   \   00000054   001096E5           LDR      R1,[R6, #+0]
+    514                pDevData = &pVolume->Partition.Device.Data;
+   \   00000058   04A086E2           ADD      R10,R6,#+4
+    515                sVolName = pDevice->pfGetName(pDevData->Unit);
+   \   0000005C   0000DAE5           LDRB     R0,[R10, #+0]
+   \   00000060   001091E5           LDR      R1,[R1, #+0]
+   \   00000064   31FF2FE1           BLX      R1
+   \   00000068   00B0A0E1           MOV      R11,R0
+    516                if (FS_STRLEN(sVolName) == m) {
+   \   0000006C   ........           BL       strlen
+   \   00000070   080050E1           CMP      R0,R8
+   \   00000074   0700001A           BNE      ??FS__FindVolume_2
+    517                  if (FS_STRNCMP(sVolName, pFullName, m) == 0) {
+   \   00000078   0820A0E1           MOV      R2,R8
+   \   0000007C   0410A0E1           MOV      R1,R4
+   \   00000080   0B00A0E1           MOV      R0,R11
+   \   00000084   ........           BL       strncmp
+   \   00000088   000050E3           CMP      R0,#+0
+    518                    if (Unit == pDevData->Unit) {
+   \   0000008C   0000DA05           LDRBEQ   R0,[R10, #+0]
+   \   00000090   00005901           CMPEQ    R9,R0
+   \   00000094   0400000A           BEQ      ??FS__FindVolume_3
+    519                      break;
+    520                    }
+    521                  }
+    522                }
+    523                pVolume = pVolume->pNext;
+   \                     ??FS__FindVolume_2:
+   \   00000098   606096E5           LDR      R6,[R6, #+96]
+    524              } while (pVolume);
+   \   0000009C   000056E3           CMP      R6,#+0
+   \   000000A0   EBFFFF1A           BNE      ??FS__FindVolume_1
+   \   000000A4   000000EA           B        ??FS__FindVolume_3
+    525            } else {
+    526              //
+    527              // use 1st FSL as default
+    528              //
+    529              s = pFullName;
+   \                     ??FS__FindVolume_0:
+   \   000000A8   0470A0E1           MOV      R7,R4
+    530            }
+    531            if (ppFileName) {
+   \                     ??FS__FindVolume_3:
+   \   000000AC   000055E3           CMP      R5,#+0
+    532              *ppFileName = s;
+   \   000000B0   00708515           STRNE    R7,[R5, #+0]
+    533            }
+    534            return pVolume;
+   \   000000B4   0600A0E1           MOV      R0,R6
+   \   000000B8   04D08DE2           ADD      SP,SP,#+4
+   \   000000BC   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    535          }
+    536          
+    537          
+    538          /*********************************************************************
+    539          *
+    540          *       FS_FindVolume
+    541          *
+    542          *  Description:
+    543          *    Finds a volume based on the fully qualified filename.
+    544          *    Format needs to be "device:<unit>", e.g. "nand:0" or "nand:"
+    545          *
+    546          */
+
+   \                                 In section .text, align 4, keep-with-next
+    547          FS_VOLUME * FS_FindVolume(const char * sVolume) {
+   \                     FS_FindVolume:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0040B0E1           MOVS     R4,R0
+    548            const char * s;
+    549            const char * sDevice;
+    550            FS_VOLUME  * pVolume;
+    551            unsigned     DeviceNameLen;
+    552            unsigned     Unit;
+    553          
+    554            pVolume = &FS_Global.FirstVolume;
+   \   00000008   ........           LDR      R5,??DataTable7_1
+    555            if (sVolume) {
+   \   0000000C   1E00000A           BEQ      ??FS_FindVolume_0
+    556              s = FS__strchr(sVolume, ':');
+   \   00000010   3A10A0E3           MOV      R1,#+58
+   \   00000014   ........           BL       FS__strchr
+    557              DeviceNameLen = s - sVolume;
+   \   00000018   046040E0           SUB      R6,R0,R4
+    558              if (s) {
+   \   0000001C   000050E3           CMP      R0,#+0
+   \   00000020   1900000A           BEQ      ??FS_FindVolume_0
+    559                Unit = *(s + 1) - '0';
+   \   00000024   0100D0E5           LDRB     R0,[R0, #+1]
+   \   00000028   307040E2           SUB      R7,R0,#+48
+    560                if (Unit > 9) {
+   \   0000002C   0A0057E3           CMP      R7,#+10
+   \   00000030   0200003A           BCC      ??FS_FindVolume_1
+    561                  Unit = 0;
+   \   00000034   0070A0E3           MOV      R7,#+0
+   \   00000038   000000EA           B        ??FS_FindVolume_1
+    562                }
+    563                do {
+    564                  const FS_DEVICE_TYPE * pDevice;
+    565                  FS_DEVICE_DATA       * pDevData;
+    566          
+    567                  if (pVolume == (FS_VOLUME *)NULL) {
+    568                    break;                                         /* No matching device found */
+    569                  }
+    570                  pDevice  = pVolume->Partition.Device.pType;
+    571                  pDevData = &pVolume->Partition.Device.Data;
+    572                  if (pDevData->Unit == Unit) {
+    573                    sDevice = pDevice->pfGetName(pDevData->Unit);
+    574                    if (strlen(sDevice) == DeviceNameLen) {
+    575                      if (FS_MEMCMP(sDevice, sVolume, DeviceNameLen) == 0) {
+    576                        break;                                       // Found device
+    577                      }
+    578                    }
+    579                  }
+    580                  pVolume = pVolume->pNext;
+   \                     ??FS_FindVolume_2:
+   \   0000003C   605095E5           LDR      R5,[R5, #+96]
+    581                } while (1);
+   \                     ??FS_FindVolume_1:
+   \   00000040   000055E3           CMP      R5,#+0
+   \   00000044   1000000A           BEQ      ??FS_FindVolume_0
+   \   00000048   040085E2           ADD      R0,R5,#+4
+   \   0000004C   0000D0E5           LDRB     R0,[R0, #+0]
+   \   00000050   001095E5           LDR      R1,[R5, #+0]
+   \   00000054   070050E1           CMP      R0,R7
+   \   00000058   F7FFFF1A           BNE      ??FS_FindVolume_2
+   \   0000005C   001091E5           LDR      R1,[R1, #+0]
+   \   00000060   31FF2FE1           BLX      R1
+   \   00000064   0080A0E1           MOV      R8,R0
+   \   00000068   ........           BL       strlen
+   \   0000006C   060050E1           CMP      R0,R6
+   \   00000070   F1FFFF1A           BNE      ??FS_FindVolume_2
+   \   00000074   0620A0E1           MOV      R2,R6
+   \   00000078   0410A0E1           MOV      R1,R4
+   \   0000007C   0800A0E1           MOV      R0,R8
+   \   00000080   ........           BL       memcmp
+   \   00000084   000050E3           CMP      R0,#+0
+   \   00000088   EBFFFF1A           BNE      ??FS_FindVolume_2
+    582              }
+    583            }
+    584            return pVolume;
+   \                     ??FS_FindVolume_0:
+   \   0000008C   0500A0E1           MOV      R0,R5
+   \   00000090   F081BDE8           POP      {R4-R8,PC}       ;; return
+    585          }
+    586          
+    587          /*********************************************************************
+    588          *
+    589          *       FS_GetNumVolumes
+    590          *
+    591          *  Description:
+    592          *    Returns the number of available volumes.
+    593          */
+
+   \                                 In section .text, align 4, keep-with-next
+    594          int FS__GetNumVolumes(void) {
+    595            return FS_Global.NumVolumes;
+   \                     FS__GetNumVolumes:
+   \   00000000   ........           LDR      R0,??DataTable7
+   \   00000004   800090E5           LDR      R0,[R0, #+128]
+   \   00000008   1EFF2FE1           BX       LR               ;; return
+    596          }
+    597          
+    598          
+    599          /*********************************************************************
+    600          *
+    601          *       FS__UnmountLL
+    602          *
+    603          *  Description:
+    604          *    Internal version of unmounting a volume at driver layer.
+    605          *    Sends an unmount command to the driver, marks the volume 
+    606          *    as unmounted and uninitialized.
+    607          *
+    608          *  Parameters:
+    609          *    pVolume       Volume to unmount. Must be valid, may not be NULL.
+    610          */
+
+   \                                 In section .text, align 4, keep-with-next
+    611          void FS__UnmountLL(FS_VOLUME * pVolume) {
+   \                     FS__UnmountLL:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    612            FS_DEVICE * pDevice;
+    613          
+    614            pDevice = &pVolume->Partition.Device;
+    615            //
+    616            // Check if we need to low-level-unmount
+    617            //
+    618            if ((pDevice->Data.IsInited) == 0 && (pVolume->IsMounted == 0)) {
+   \   00000008   0500D4E5           LDRB     R0,[R4, #+5]
+   \   0000000C   000050E3           CMP      R0,#+0
+   \   00000010   5D00D405           LDRBEQ   R0,[R4, #+93]
+   \   00000014   00005003           CMPEQ    R0,#+0
+   \   00000018   0600000A           BEQ      ??FS__UnmountLL_0
+    619              return;
+    620            }
+    621            FS_LOCK_DRIVER(pDevice);
+    622            FS__IoCtlNL(pVolume, FS_CMD_UNMOUNT, 0, NULL);    // Send unmount command to driver
+   \   0000001C   0030A0E3           MOV      R3,#+0
+   \   00000020   0020A0E3           MOV      R2,#+0
+   \   00000024   FC1FA0E3           MOV      R1,#+1008
+   \   00000028   0400A0E1           MOV      R0,R4
+   \   0000002C   ........           BL       FS_LB_Ioctl
+    623            FS_LOCK_SYS();
+    624            pDevice->Data.IsInited = 0;
+   \   00000030   0000A0E3           MOV      R0,#+0
+   \   00000034   0500C4E5           STRB     R0,[R4, #+5]
+    625            FS_UNLOCK_SYS();
+    626            FS_UNLOCK_DRIVER(pDevice);
+    627          }
+   \                     ??FS__UnmountLL_0:
+   \   00000038   1080BDE8           POP      {R4,PC}          ;; return
+    628          
+    629          /*********************************************************************
+    630          *
+    631          *       FS__UnmountForcedLL
+    632          *
+    633          *  Description:
+    634          *    Internal version of force-unmounting a volume at driver layer.
+    635          *    Sends a forced unmount command to the driver, marks the volume 
+    636          *    as unmounted and uninitialized.
+    637          *
+    638          *  Parameters:
+    639          *    pVolume       Volume to unmount. Must be valid, may not be NULL.
+    640          */
+
+   \                                 In section .text, align 4, keep-with-next
+    641          void FS__UnmountForcedLL(FS_VOLUME * pVolume) {
+   \                     FS__UnmountForcedLL:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    642            FS_DEVICE * pDevice;
+    643          
+    644            pDevice = &pVolume->Partition.Device;
+    645            //
+    646            // Check if we need to low-level-unmount
+    647            //
+    648            if ((pDevice->Data.IsInited) == 0 && (pVolume->IsMounted == 0)) {
+   \   00000008   0500D4E5           LDRB     R0,[R4, #+5]
+   \   0000000C   000050E3           CMP      R0,#+0
+   \   00000010   5D00D405           LDRBEQ   R0,[R4, #+93]
+   \   00000014   00005003           CMPEQ    R0,#+0
+   \   00000018   0700000A           BEQ      ??FS__UnmountForcedLL_0
+    649              return;
+    650            }
+    651            FS_LOCK_DRIVER(pDevice);
+    652            FS__IoCtlNL(pVolume, FS_CMD_UNMOUNT_FORCED, 0, NULL);    // Send forced unmount command to driver
+   \   0000001C   F110A0E3           MOV      R1,#+241
+   \   00000020   0030A0E3           MOV      R3,#+0
+   \   00000024   0020A0E3           MOV      R2,#+0
+   \   00000028   C01F81E3           ORR      R1,R1,#0x300
+   \   0000002C   0400A0E1           MOV      R0,R4
+   \   00000030   ........           BL       FS_LB_Ioctl
+    653            FS_LOCK_SYS();
+    654            pDevice->Data.IsInited = 0;
+   \   00000034   0000A0E3           MOV      R0,#+0
+   \   00000038   0500C4E5           STRB     R0,[R4, #+5]
+    655            FS_UNLOCK_SYS();
+    656            FS_UNLOCK_DRIVER(pDevice);
+    657          }
+   \                     ??FS__UnmountForcedLL_0:
+   \   0000003C   1080BDE8           POP      {R4,PC}          ;; return
+    658          
+    659          /*********************************************************************
+    660          *
+    661          *       FS__STORAGE_Sync
+    662          *
+    663          *  Function description:
+    664          *    Cleans all caches related to the volume.
+    665          *    Informs the driver driver about the sync operation
+    666          *    thru IOCTL command FS_CMD_SYNC_VOLUME
+    667          *
+    668          *  Notes
+    669          *    There can be 2 types of caches related to the volume:
+    670          *      - High level (above driver)
+    671          *      - Low level (inside of driver)
+    672          */
+
+   \                                 In section .text, align 4, keep-with-next
+    673          void FS__STORAGE_Sync(FS_VOLUME * pVolume) {
+   \                     FS__STORAGE_Sync:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   \   00000004   0040B0E1           MOVS     R4,R0
+    674            if (pVolume) {
+   \   00000008   0900000A           BEQ      ??FS__STORAGE_Sync_0
+    675          #if FS_SUPPORT_CACHE
+    676              FS__CACHE_CommandVolume(pVolume, FS_CMD_CACHE_CLEAN, NULL);
+   \   0000000C   7110A0E3           MOV      R1,#+113
+   \   00000010   0020A0E3           MOV      R2,#+0
+   \   00000014   5C1D81E3           ORR      R1,R1,#0x1700
+   \   00000018   ........           BL       FS__CACHE_CommandVolume
+    677          #endif
+    678              FS__IoCtl              (pVolume, FS_CMD_SYNC, 0, NULL);
+   \   0000001C   F210A0E3           MOV      R1,#+242
+   \   00000020   0030A0E3           MOV      R3,#+0
+   \   00000024   0020A0E3           MOV      R2,#+0
+   \   00000028   C01F81E3           ORR      R1,R1,#0x300
+   \   0000002C   0400A0E1           MOV      R0,R4
+   \   00000030   ........           BL       FS_LB_Ioctl
+    679            } else {
+    680              FS_DEBUG_WARN((FS_MTYPE_STORAGE, "FS_STORAGE_Sync: pVolume is invalid"));
+    681            }
+    682          }
+   \                     ??FS__STORAGE_Sync_0:
+   \   00000034   1080BDE8           POP      {R4,PC}          ;; return
+    683          
+    684          /*********************************************************************
+    685          *
+    686          *       Public code, API functions
+    687          *
+    688          **********************************************************************
+    689          */
+    690          /*********************************************************************
+    691          *
+    692          *       FS_STORAGE_WriteSector
+    693          *
+    694          *  Function description:
+    695          *    Writes a sector to a device
+    696          *
+    697          *  Return value:
+    698          *       0             O.K.
+    699          *    != 0             Error
+    700          */
+
+   \                                 In section .text, align 4, keep-with-next
+    701          int FS_STORAGE_WriteSector(const char *sVolume, const void *pData, U32 SectorIndex) {
+   \                     FS_STORAGE_WriteSector:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0260A0E1           MOV      R6,R2
+    702            int r;
+    703            FS_VOLUME  * pVolume;
+    704          
+    705            FS_LOCK();
+   \   00000014   0000A0E3           MOV      R0,#+0
+   \   00000018   ........           BL       FS_OS_Lock
+    706            pVolume = FS__FindVolume(sVolume, NULL);
+   \   0000001C   0010A0E3           MOV      R1,#+0
+   \   00000020   0400A0E1           MOV      R0,R4
+   \   00000024   ........           BL       FS__FindVolume
+   \   00000028   0040B0E1           MOVS     R4,R0
+    707            r = FS__WriteSector(pVolume, pData, SectorIndex);
+   \   0000002C   0070E0E3           MVN      R7,#+0
+   \   00000030   0600000A           BEQ      ??FS_STORAGE_WriteSector_0
+   \   00000034   ........           BL       FS_LB_InitMediumIfRequired
+   \   00000038   0030A0E3           MOV      R3,#+0
+   \   0000003C   0520A0E1           MOV      R2,R5
+   \   00000040   0610A0E1           MOV      R1,R6
+   \   00000044   0400A0E1           MOV      R0,R4
+   \   00000048   ........           BL       FS_LB_WriteDevice
+   \   0000004C   0070A0E1           MOV      R7,R0
+    708            FS_UNLOCK();
+   \                     ??FS_STORAGE_WriteSector_0:
+   \   00000050   0000A0E3           MOV      R0,#+0
+   \   00000054   ........           BL       FS_OS_Unlock
+    709            return r;
+   \   00000058   0700A0E1           MOV      R0,R7
+   \   0000005C   04D08DE2           ADD      SP,SP,#+4
+   \   00000060   F080BDE8           POP      {R4-R7,PC}       ;; return
+    710          }
+    711          
+    712          /*********************************************************************
+    713          *
+    714          *       FS_STORAGE_ReadSector
+    715          *
+    716          *  Function description:
+    717          *    Reads a sector from a device
+    718          *
+    719          *  Return value:
+    720          *       0             O.K.
+    721          *    != 0             Error
+    722          */
+
+   \                                 In section .text, align 4, keep-with-next
+    723          int FS_STORAGE_ReadSector(const char * sVolume, void *pData, U32 SectorIndex) {
+   \                     FS_STORAGE_ReadSector:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0260A0E1           MOV      R6,R2
+    724            int r;
+    725            FS_VOLUME  * pVolume;
+    726          
+    727            FS_LOCK();
+   \   00000014   0000A0E3           MOV      R0,#+0
+   \   00000018   ........           BL       FS_OS_Lock
+    728            pVolume = FS__FindVolume(sVolume, NULL);
+   \   0000001C   0010A0E3           MOV      R1,#+0
+   \   00000020   0400A0E1           MOV      R0,R4
+   \   00000024   ........           BL       FS__FindVolume
+   \   00000028   0040B0E1           MOVS     R4,R0
+    729            r = FS__ReadSector(pVolume, pData, SectorIndex);
+   \   0000002C   0070E0E3           MVN      R7,#+0
+   \   00000030   0600000A           BEQ      ??FS_STORAGE_ReadSector_0
+   \   00000034   ........           BL       FS_LB_InitMediumIfRequired
+   \   00000038   0030A0E3           MOV      R3,#+0
+   \   0000003C   0520A0E1           MOV      R2,R5
+   \   00000040   0610A0E1           MOV      R1,R6
+   \   00000044   0400A0E1           MOV      R0,R4
+   \   00000048   ........           BL       FS_LB_ReadDevice
+   \   0000004C   0070A0E1           MOV      R7,R0
+    730            FS_UNLOCK();
+   \                     ??FS_STORAGE_ReadSector_0:
+   \   00000050   0000A0E3           MOV      R0,#+0
+   \   00000054   ........           BL       FS_OS_Unlock
+    731            return r;
+   \   00000058   0700A0E1           MOV      R0,R7
+   \   0000005C   04D08DE2           ADD      SP,SP,#+4
+   \   00000060   F080BDE8           POP      {R4-R7,PC}       ;; return
+    732          }
+    733          
+    734          /*********************************************************************
+    735          *
+    736          *       FS_STORAGE_WriteSectors
+    737          *
+    738          *  Function description:
+    739          *    Writes a sector to a device
+    740          *
+    741          *  Return value:
+    742          *       0             O.K.
+    743          *    != 0             Error
+    744          */
+
+   \                                 In section .text, align 4, keep-with-next
+    745          int FS_STORAGE_WriteSectors(const char *sVolume, const void * pData, U32 FirstSector, U32 NumSectors) {
+   \                     FS_STORAGE_WriteSectors:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   08D04DE2           SUB      SP,SP,#+8
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0260A0E1           MOV      R6,R2
+   \   00000014   0370A0E1           MOV      R7,R3
+    746            int r;
+    747            FS_VOLUME  * pVolume;
+    748          
+    749            FS_LOCK();
+   \   00000018   0000A0E3           MOV      R0,#+0
+   \   0000001C   ........           BL       FS_OS_Lock
+    750            pVolume = FS__FindVolume(sVolume, NULL);
+   \   00000020   0010A0E3           MOV      R1,#+0
+   \   00000024   0400A0E1           MOV      R0,R4
+   \   00000028   ........           BL       FS__FindVolume
+   \   0000002C   0040B0E1           MOVS     R4,R0
+    751            r = FS__WriteSectors(pVolume, pData, FirstSector, NumSectors);
+   \   00000030   0080E0E3           MVN      R8,#+0
+   \   00000034   0800000A           BEQ      ??FS_STORAGE_WriteSectors_0
+   \   00000038   ........           BL       FS_LB_InitMediumIfRequired
+   \   0000003C   0000A0E3           MOV      R0,#+0
+   \   00000040   00008DE5           STR      R0,[SP, #+0]
+   \   00000044   0530A0E1           MOV      R3,R5
+   \   00000048   0720A0E1           MOV      R2,R7
+   \   0000004C   0610A0E1           MOV      R1,R6
+   \   00000050   0400A0E1           MOV      R0,R4
+   \   00000054   ........           BL       FS_LB_WriteBurst
+   \   00000058   0080A0E1           MOV      R8,R0
+    752            FS_UNLOCK();
+   \                     ??FS_STORAGE_WriteSectors_0:
+   \   0000005C   0000A0E3           MOV      R0,#+0
+   \   00000060   ........           BL       FS_OS_Unlock
+    753            return r;
+   \   00000064   0800A0E1           MOV      R0,R8
+   \   00000068   08D08DE2           ADD      SP,SP,#+8
+   \   0000006C   F081BDE8           POP      {R4-R8,PC}       ;; return
+    754          }
+    755          
+    756          /*********************************************************************
+    757          *
+    758          *       FS_STORAGE_ReadSectors
+    759          *
+    760          *  Function description:
+    761          *    Reads a sector from a device
+    762          *
+    763          *  Return value:
+    764          *       0             O.K.
+    765          *    != 0             Error
+    766          */
+
+   \                                 In section .text, align 4, keep-with-next
+    767          int FS_STORAGE_ReadSectors(const char *sVolume, void * pData, U32 FirstSector, U32 NumSectors) {
+   \                     FS_STORAGE_ReadSectors:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   08D04DE2           SUB      SP,SP,#+8
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0260A0E1           MOV      R6,R2
+   \   00000014   0370A0E1           MOV      R7,R3
+    768            int r;
+    769            FS_VOLUME  * pVolume;
+    770          
+    771            FS_LOCK();
+   \   00000018   0000A0E3           MOV      R0,#+0
+   \   0000001C   ........           BL       FS_OS_Lock
+    772            pVolume = FS__FindVolume(sVolume, NULL);
+   \   00000020   0010A0E3           MOV      R1,#+0
+   \   00000024   0400A0E1           MOV      R0,R4
+   \   00000028   ........           BL       FS__FindVolume
+   \   0000002C   0040B0E1           MOVS     R4,R0
+    773            r = FS__ReadSectors(pVolume, pData, FirstSector, NumSectors);
+   \   00000030   0080E0E3           MVN      R8,#+0
+   \   00000034   0800000A           BEQ      ??FS_STORAGE_ReadSectors_0
+   \   00000038   ........           BL       FS_LB_InitMediumIfRequired
+   \   0000003C   0000A0E3           MOV      R0,#+0
+   \   00000040   00008DE5           STR      R0,[SP, #+0]
+   \   00000044   0530A0E1           MOV      R3,R5
+   \   00000048   0720A0E1           MOV      R2,R7
+   \   0000004C   0610A0E1           MOV      R1,R6
+   \   00000050   0400A0E1           MOV      R0,R4
+   \   00000054   ........           BL       FS_LB_ReadBurst
+   \   00000058   0080A0E1           MOV      R8,R0
+    774            FS_UNLOCK();
+   \                     ??FS_STORAGE_ReadSectors_0:
+   \   0000005C   0000A0E3           MOV      R0,#+0
+   \   00000060   ........           BL       FS_OS_Unlock
+    775            return r;
+   \   00000064   0800A0E1           MOV      R0,R8
+   \   00000068   08D08DE2           ADD      SP,SP,#+8
+   \   0000006C   F081BDE8           POP      {R4-R8,PC}       ;; return
+    776          }
+    777          
+    778          /*********************************************************************
+    779          *
+    780          *       FS_STORAGE_Unmount
+    781          *
+    782          *  Description:
+    783          *    Unmountis a given volume at driver layer.
+    784          *    Sends an unmount command to the driver, marks the volume as unmounted
+    785          *    and uninitialized.
+    786          *
+    787          *  Parameters:
+    788          *    sVolume            - The volume name
+    789          *
+    790          */
+
+   \                                 In section .text, align 4, keep-with-next
+    791          void FS_STORAGE_Unmount(const char * sVolume) {
+   \                     FS_STORAGE_Unmount:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    792            FS_VOLUME * pVolume;
+    793          
+    794            FS_LOCK();
+   \   00000008   0000A0E3           MOV      R0,#+0
+   \   0000000C   ........           BL       FS_OS_Lock
+    795            pVolume = FS__FindVolume(sVolume, NULL);
+   \   00000010   0010A0E3           MOV      R1,#+0
+   \   00000014   0400A0E1           MOV      R0,R4
+   \   00000018   ........           BL       FS__FindVolume
+   \   0000001C   0040B0E1           MOVS     R4,R0
+    796            if (pVolume) {
+   \   00000020   0B00000A           BEQ      ??FS_STORAGE_Unmount_0
+    797              FS__UnmountLL(pVolume);
+   \   00000024   0500D4E5           LDRB     R0,[R4, #+5]
+   \   00000028   000050E3           CMP      R0,#+0
+   \   0000002C   5D00D405           LDRBEQ   R0,[R4, #+93]
+   \   00000030   00005003           CMPEQ    R0,#+0
+   \   00000034   0700000A           BEQ      ??FS_STORAGE_Unmount_1
+   \   00000038   0030A0E3           MOV      R3,#+0
+   \   0000003C   0020A0E3           MOV      R2,#+0
+   \   00000040   FC1FA0E3           MOV      R1,#+1008
+   \   00000044   0400A0E1           MOV      R0,R4
+   \   00000048   ........           BL       FS_LB_Ioctl
+   \   0000004C   0000A0E3           MOV      R0,#+0
+   \   00000050   0500C4E5           STRB     R0,[R4, #+5]
+    798            }
+    799            FS_UNLOCK();
+   \                     ??FS_STORAGE_Unmount_0:
+   \   00000054   0000A0E3           MOV      R0,#+0
+   \                     ??FS_STORAGE_Unmount_1:
+   \   00000058   1040BDE8           POP      {R4,LR}
+   \   0000005C   ........           B        FS_OS_Unlock     ;; tailcall
+    800          }
+    801          
+    802          /*********************************************************************
+    803          *
+    804          *       FS_UnmountForced
+    805          *
+    806          *  Description:
+    807          *    Unmounts a device
+    808          *    Closes all open file and directory handles to the volume, marks the volume as unmounted
+    809          *
+    810          *  Parameters:
+    811          *    sVolume            - The volume name.
+    812          */
+
+   \                                 In section .text, align 4, keep-with-next
+    813          void FS_STORAGE_UnmountForced(const char * sVolume) {
+   \                     FS_STORAGE_UnmountForced:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    814            FS_VOLUME * pVolume;
+    815          
+    816            FS_LOCK();
+   \   00000008   0000A0E3           MOV      R0,#+0
+   \   0000000C   ........           BL       FS_OS_Lock
+    817            pVolume = FS__FindVolume(sVolume, NULL);
+   \   00000010   0010A0E3           MOV      R1,#+0
+   \   00000014   0400A0E1           MOV      R0,R4
+   \   00000018   ........           BL       FS__FindVolume
+   \   0000001C   0040B0E1           MOVS     R4,R0
+    818            if (pVolume) {
+   \   00000020   0C00000A           BEQ      ??FS_STORAGE_UnmountForced_0
+    819              FS__UnmountForcedLL(pVolume);
+   \   00000024   0500D4E5           LDRB     R0,[R4, #+5]
+   \   00000028   000050E3           CMP      R0,#+0
+   \   0000002C   5D00D405           LDRBEQ   R0,[R4, #+93]
+   \   00000030   00005003           CMPEQ    R0,#+0
+   \   00000034   0800000A           BEQ      ??FS_STORAGE_UnmountForced_1
+   \   00000038   F110A0E3           MOV      R1,#+241
+   \   0000003C   0030A0E3           MOV      R3,#+0
+   \   00000040   0020A0E3           MOV      R2,#+0
+   \   00000044   C01F81E3           ORR      R1,R1,#0x300
+   \   00000048   0400A0E1           MOV      R0,R4
+   \   0000004C   ........           BL       FS_LB_Ioctl
+   \   00000050   0000A0E3           MOV      R0,#+0
+   \   00000054   0500C4E5           STRB     R0,[R4, #+5]
+    820            }
+    821            FS_UNLOCK();
+   \                     ??FS_STORAGE_UnmountForced_0:
+   \   00000058   0000A0E3           MOV      R0,#+0
+   \                     ??FS_STORAGE_UnmountForced_1:
+   \   0000005C   1040BDE8           POP      {R4,LR}
+   \   00000060   ........           B        FS_OS_Unlock     ;; tailcall
+    822          }
+    823          
+    824          
+    825          /*********************************************************************
+    826          *
+    827          *       FS_STORAGE_Sync
+    828          *
+    829          *  Function description:
+    830          *    Cleans all caches related to the volume.
+    831          *    Informs the driver driver about the sync operation
+    832          *    thru IOCTL command FS_CMD_SYNC_VOLUME
+    833          *
+    834          *  Notes
+    835          *    There can be 2 types of caches related to the volume:
+    836          *      - High level (above driver)
+    837          *      - Low level (inside of driver)
+    838          */
+
+   \                                 In section .text, align 4, keep-with-next
+    839          void FS_STORAGE_Sync(const char * sVolume) {
+   \                     FS_STORAGE_Sync:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    840            FS_VOLUME * pVolume;
+    841          
+    842            FS_LOCK();
+   \   00000008   0000A0E3           MOV      R0,#+0
+   \   0000000C   ........           BL       FS_OS_Lock
+    843            pVolume = FS__FindVolume(sVolume, NULL);
+   \   00000010   0010A0E3           MOV      R1,#+0
+   \   00000014   0400A0E1           MOV      R0,R4
+   \   00000018   ........           BL       FS__FindVolume
+   \   0000001C   0040B0E1           MOVS     R4,R0
+    844            FS__STORAGE_Sync(pVolume);
+   \   00000020   0900000A           BEQ      ??FS_STORAGE_Sync_0
+   \   00000024   7110A0E3           MOV      R1,#+113
+   \   00000028   0020A0E3           MOV      R2,#+0
+   \   0000002C   5C1D81E3           ORR      R1,R1,#0x1700
+   \   00000030   ........           BL       FS__CACHE_CommandVolume
+   \   00000034   F210A0E3           MOV      R1,#+242
+   \   00000038   0030A0E3           MOV      R3,#+0
+   \   0000003C   0020A0E3           MOV      R2,#+0
+   \   00000040   C01F81E3           ORR      R1,R1,#0x300
+   \   00000044   0400A0E1           MOV      R0,R4
+   \   00000048   ........           BL       FS_LB_Ioctl
+    845            FS_UNLOCK();
+   \                     ??FS_STORAGE_Sync_0:
+   \   0000004C   1040BDE8           POP      {R4,LR}
+   \   00000050   0000A0E3           MOV      R0,#+0
+   \   00000054   ........           B        FS_OS_Unlock     ;; tailcall
+    846          }
+    847          
+    848          /*********************************************************************
+    849          *
+    850          *       FS_STORAGE_GetDeviceInfo
+    851          *
+    852          *  Function description:
+    853          *    Retrieves device information of a volume.
+    854          *
+    855          *  Return value:
+    856          *      0     - O.K.
+    857          *     -1     - Device is not ready or general error.
+    858          */
+
+   \                                 In section .text, align 4, keep-with-next
+    859          int FS_STORAGE_GetDeviceInfo(const char * sVolume, FS_DEV_INFO * pDevInfo) {
+   \                     FS_STORAGE_GetDeviceInfo:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   0150A0E1           MOV      R5,R1
+    860            FS_VOLUME * pVolume;
+    861            int         r;
+    862          
+    863            FS_LOCK();
+   \   0000000C   0000A0E3           MOV      R0,#+0
+   \   00000010   ........           BL       FS_OS_Lock
+    864            pVolume = FS__FindVolume(sVolume, NULL);
+   \   00000014   0010A0E3           MOV      R1,#+0
+   \   00000018   0400A0E1           MOV      R0,R4
+   \   0000001C   ........           BL       FS__FindVolume
+   \   00000020   0040B0E1           MOVS     R4,R0
+    865            r = FS__GetDeviceInfo(pVolume, pDevInfo);
+   \   00000024   0060E0E3           MVN      R6,#+0
+   \   00000028   0800000A           BEQ      ??FS_STORAGE_GetDeviceInfo_0
+   \   0000002C   0C10A0E3           MOV      R1,#+12
+   \   00000030   0500A0E1           MOV      R0,R5
+   \   00000034   ........           BL       __aeabi_memclr
+   \   00000038   0400A0E1           MOV      R0,R4
+   \   0000003C   ........           BL       FS_LB_InitMediumIfRequired
+   \   00000040   0510A0E1           MOV      R1,R5
+   \   00000044   0400A0E1           MOV      R0,R4
+   \   00000048   ........           BL       FS_LB_GetDeviceInfo
+   \   0000004C   0060A0E1           MOV      R6,R0
+    866            FS_UNLOCK();
+   \                     ??FS_STORAGE_GetDeviceInfo_0:
+   \   00000050   0000A0E3           MOV      R0,#+0
+   \   00000054   ........           BL       FS_OS_Unlock
+    867            return r;
+   \   00000058   0600A0E1           MOV      R0,R6
+   \   0000005C   7080BDE8           POP      {R4-R6,PC}       ;; return
+    868          }
+    869          
+    870          /*********************************************************************
+    871          *
+    872          *       FS_IoCtl
+    873          *
+    874          *  Function description:
+    875          *    Execute device command.
+    876          *
+    877          *  Parameters:
+    878          *    pDevName    - Fully qualified directory name.
+    879          *    Cmd         - Command to be executed.
+    880          *    Aux         - Parameter depending on command.
+    881          *    pBuffer     - Pointer to a buffer used for the command.
+    882          *
+    883          *  Return value:
+    884          *    Command specific. In general a negative value means an error.
+    885          */
+
+   \                                 In section .text, align 4, keep-with-next
+    886          int FS_IoCtl(const char *pDevName, I32 Cmd, I32 Aux, void *pBuffer) {
+   \                     FS_IoCtl:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   08D04DE2           SUB      SP,SP,#+8
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0260A0E1           MOV      R6,R2
+   \   00000014   0370A0E1           MOV      R7,R3
+    887            const char * s;
+    888            int r;
+    889            FS_VOLUME  * pVolume;
+    890          
+    891            FS_LOCK();
+   \   00000018   0000A0E3           MOV      R0,#+0
+   \   0000001C   ........           BL       FS_OS_Lock
+    892            pVolume = FS__FindVolume(pDevName, &s);
+   \   00000020   0D10A0E1           MOV      R1,SP
+   \   00000024   0400A0E1           MOV      R0,R4
+   \   00000028   ........           BL       FS__FindVolume
+   \   0000002C   0040B0E1           MOVS     R4,R0
+    893            r = FS__IoCtl(pVolume, Cmd, Aux, pBuffer);
+   \   00000030   0080E0E3           MVN      R8,#+0
+   \   00000034   0C00000A           BEQ      ??FS_IoCtl_0
+   \   00000038   FC0F45E2           SUB      R0,R5,#+1008
+   \   0000003C   030050E3           CMP      R0,#+3
+   \   00000040   0300009A           BLS      ??FS_IoCtl_1
+   \   00000044   0400A0E1           MOV      R0,R4
+   \   00000048   ........           BL       FS_LB_GetStatus
+   \   0000004C   000050E3           CMP      R0,#+0
+   \   00000050   0500004A           BMI      ??FS_IoCtl_0
+   \                     ??FS_IoCtl_1:
+   \   00000054   0730A0E1           MOV      R3,R7
+   \   00000058   0620A0E1           MOV      R2,R6
+   \   0000005C   0510A0E1           MOV      R1,R5
+   \   00000060   0400A0E1           MOV      R0,R4
+   \   00000064   ........           BL       FS_LB_Ioctl
+   \   00000068   0080A0E1           MOV      R8,R0
+    894            FS_UNLOCK();
+   \                     ??FS_IoCtl_0:
+   \   0000006C   0000A0E3           MOV      R0,#+0
+   \   00000070   ........           BL       FS_OS_Unlock
+    895            return r;
+   \   00000074   0800A0E1           MOV      R0,R8
+   \   00000078   08D08DE2           ADD      SP,SP,#+8
+   \   0000007C   F081BDE8           POP      {R4-R8,PC}       ;; return
+    896          }
+    897          
+    898          /*********************************************************************
+    899          *
+    900          *       FS_FormatLow
+    901          *
+    902          *  Function description:
+    903          *    Low-level format the medium
+    904          *
+    905          *  Parameters:
+    906          *    pDevice       Device specifier (string). "" refers to the first device.
+    907          *  
+    908          *  Return value:
+    909          *    ==0         - O.K.: Low level format successful
+    910          *    !=0         - ERROR
+    911          */
+
+   \                                 In section .text, align 4, keep-with-next
+    912          int FS_FormatLow(const char *pDevice) {
+   \                     FS_FormatLow:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+    913            int         r;
+    914            FS_VOLUME * pVolume;
+    915          
+    916            FS_LOCK();
+   \   0000000C   0000A0E3           MOV      R0,#+0
+   \   00000010   ........           BL       FS_OS_Lock
+    917            r = -1;
+   \   00000014   0050E0E3           MVN      R5,#+0
+    918            pVolume = FS__FindVolume(pDevice, NULL);
+   \   00000018   0010A0E3           MOV      R1,#+0
+   \   0000001C   0400A0E1           MOV      R0,R4
+   \   00000020   ........           BL       FS__FindVolume
+   \   00000024   0040B0E1           MOVS     R4,R0
+    919            if (pVolume) { 
+   \   00000028   0B00000A           BEQ      ??FS_FormatLow_0
+    920              r = FS__FormatLow(pVolume);
+   \   0000002C   ........           BL       FS__UnmountForcedNL
+   \   00000030   0400A0E1           MOV      R0,R4
+   \   00000034   ........           BL       FS_LB_GetStatus
+   \   00000038   000050E3           CMP      R0,#+0
+   \   0000003C   0600004A           BMI      ??FS_FormatLow_0
+   \   00000040   ED10A0E3           MOV      R1,#+237
+   \   00000044   0030A0E3           MOV      R3,#+0
+   \   00000048   0020A0E3           MOV      R2,#+0
+   \   0000004C   C01F81E3           ORR      R1,R1,#0x300
+   \   00000050   0400A0E1           MOV      R0,R4
+   \   00000054   ........           BL       FS_LB_Ioctl
+   \   00000058   0050A0E1           MOV      R5,R0
+    921            }
+    922            FS_UNLOCK();
+   \                     ??FS_FormatLow_0:
+   \   0000005C   0000A0E3           MOV      R0,#+0
+   \   00000060   ........           BL       FS_OS_Unlock
+    923            return r;
+   \   00000064   0500A0E1           MOV      R0,R5
+   \   00000068   04D08DE2           ADD      SP,SP,#+4
+   \   0000006C   3080BDE8           POP      {R4,R5,PC}       ;; return
+    924          }
+    925          
+    926          
+    927          /*********************************************************************
+    928          *
+    929          *       FS_FormatLLIfRequired
+    930          *
+    931          *  Function description:
+    932          *    Low-level format the medium
+    933          *
+    934          *  Parameters:
+    935          *    pDevice       Device specifier (string). "" refers to the first device.
+    936          *  
+    937          *  Return value:
+    938          *    == 0         - O.K.: Low level format successful.
+    939          *    == 1         - low-level format not required.
+    940          *    ==-1         - ERROR, low-level format not supported.
+    941          */
+
+   \                                 In section .text, align 4, keep-with-next
+    942          int FS_FormatLLIfRequired(const char * sVolName) {
+   \                     FS_FormatLLIfRequired:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    943            int r;
+    944          
+    945            r = FS_IsLLFormatted(sVolName);
+   \   00000008   0000A0E3           MOV      R0,#+0
+   \   0000000C   ........           BL       FS_OS_Lock
+   \   00000010   0050E0E3           MVN      R5,#+0
+   \   00000014   0010A0E3           MOV      R1,#+0
+   \   00000018   0400A0E1           MOV      R0,R4
+   \   0000001C   ........           BL       FS__FindVolume
+   \   00000020   0060B0E1           MOVS     R6,R0
+   \   00000024   1000000A           BEQ      ??FS_FormatLLIfRequired_0
+   \   00000028   ........           BL       FS_LB_GetStatus
+   \   0000002C   000050E3           CMP      R0,#+0
+   \   00000030   0600004A           BMI      ??FS_FormatLLIfRequired_1
+   \   00000034   EB10A0E3           MOV      R1,#+235
+   \   00000038   0030A0E3           MOV      R3,#+0
+   \   0000003C   0020A0E3           MOV      R2,#+0
+   \   00000040   C01F81E3           ORR      R1,R1,#0x300
+   \   00000044   0600A0E1           MOV      R0,R6
+   \   00000048   ........           BL       FS_LB_Ioctl
+   \   0000004C   0050A0E1           MOV      R5,R0
+   \                     ??FS_FormatLLIfRequired_1:
+   \   00000050   000055E3           CMP      R5,#+0
+   \   00000054   0300000A           BEQ      ??FS_FormatLLIfRequired_2
+   \   00000058   010055E3           CMP      R5,#+1
+   \   0000005C   0200001A           BNE      ??FS_FormatLLIfRequired_0
+   \   00000060   0050A0E3           MOV      R5,#+0
+   \   00000064   000000EA           B        ??FS_FormatLLIfRequired_0
+   \                     ??FS_FormatLLIfRequired_2:
+   \   00000068   0150A0E3           MOV      R5,#+1
+   \                     ??FS_FormatLLIfRequired_0:
+   \   0000006C   0000A0E3           MOV      R0,#+0
+   \   00000070   ........           BL       FS_OS_Unlock
+    946            if (r == 0) {
+   \   00000074   000055E3           CMP      R5,#+0
+   \   00000078   1500001A           BNE      ??FS_FormatLLIfRequired_3
+    947              FS_DEBUG_LOG((FS_MTYPE_API, "FS_FormatLLIfRequired: Low-level-formatting volume"));
+    948              r = FS_FormatLow(sVolName);
+   \   0000007C   0000A0E3           MOV      R0,#+0
+   \   00000080   ........           BL       FS_OS_Lock
+   \   00000084   0050E0E3           MVN      R5,#+0
+   \   00000088   0010A0E3           MOV      R1,#+0
+   \   0000008C   0400A0E1           MOV      R0,R4
+   \   00000090   ........           BL       FS__FindVolume
+   \   00000094   0040B0E1           MOVS     R4,R0
+   \   00000098   0B00000A           BEQ      ??FS_FormatLLIfRequired_4
+   \   0000009C   ........           BL       FS__UnmountForcedNL
+   \   000000A0   0400A0E1           MOV      R0,R4
+   \   000000A4   ........           BL       FS_LB_GetStatus
+   \   000000A8   000050E3           CMP      R0,#+0
+   \   000000AC   0600004A           BMI      ??FS_FormatLLIfRequired_4
+   \   000000B0   ED10A0E3           MOV      R1,#+237
+   \   000000B4   0030A0E3           MOV      R3,#+0
+   \   000000B8   0020A0E3           MOV      R2,#+0
+   \   000000BC   C01F81E3           ORR      R1,R1,#0x300
+   \   000000C0   0400A0E1           MOV      R0,R4
+   \   000000C4   ........           BL       FS_LB_Ioctl
+   \   000000C8   0050A0E1           MOV      R5,R0
+   \                     ??FS_FormatLLIfRequired_4:
+   \   000000CC   0000A0E3           MOV      R0,#+0
+   \   000000D0   ........           BL       FS_OS_Unlock
+    949            }
+    950            return r;
+   \                     ??FS_FormatLLIfRequired_3:
+   \   000000D4   0500A0E1           MOV      R0,R5
+   \   000000D8   7080BDE8           POP      {R4-R6,PC}       ;; return
+    951          }
+    952          
+    953          /*********************************************************************
+    954          *
+    955          *       FS_AddDevice
+    956          *
+    957          *  Description:
+    958          *    Adds a device driver to the file system.
+    959          *
+    960          *  Parameters:
+    961          *
+    962          *  Return value:
+    963          */
+
+   \                                 In section .text, align 4, keep-with-next
+    964          FS_VOLUME * FS_AddDevice(const FS_DEVICE_TYPE * pDevType) {
+    965            FS_VOLUME * pVolume;
+    966            pVolume = FS__AddDevice(pDevType);
+    967            return pVolume;
+   \                     FS_AddDevice:
+   \   00000000   ........           B        FS__AddDevice    ;; tailcall
+    968          }
+    969          
+    970          /*********************************************************************
+    971          *
+    972          *       FS_AddDevice
+    973          *
+    974          *  Description:
+    975          *    Adds a device driver to the file system.
+    976          *
+    977          *  Parameters:
+    978          *
+    979          *  Return value:
+    980          */
+
+   \                                 In section .text, align 4, keep-with-next
+    981          int FS_AddPhysDevice(const FS_DEVICE_TYPE * pDevType) {
+   \                     FS_AddPhysDevice:
+   \   00000000   00402DE9           PUSH     {LR}
+    982            int r;
+    983            r = FS__AddPhysDevice(pDevType);
+   \   00000004   040090E5           LDR      R0,[R0, #+4]
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0010E0E3           MVN      R1,#+0
+   \   00000010   000050E3           CMP      R0,#+0
+   \   00000014   0100000A           BEQ      ??FS_AddPhysDevice_0
+   \   00000018   30FF2FE1           BLX      R0
+   \   0000001C   0010A0E1           MOV      R1,R0
+    984            return r;
+   \                     ??FS_AddPhysDevice_0:
+   \   00000020   0100A0E1           MOV      R0,R1
+   \   00000024   04D08DE2           ADD      SP,SP,#+4
+   \   00000028   0080BDE8           POP      {PC}             ;; return
+    985          }
+    986          
+    987          /*********************************************************************
+    988          *
+    989          *       FS_GetNumVolumes
+    990          *
+    991          *  Description:
+    992          *    Returns the number of available volumes.
+    993          */
+
+   \                                 In section .text, align 4, keep-with-next
+    994          int FS_GetNumVolumes(void) {
+   \                     FS_GetNumVolumes:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+    995            int r;
+    996            FS_LOCK();
+   \   00000004   0000A0E3           MOV      R0,#+0
+   \   00000008   ........           BL       FS_OS_Lock
+    997            r =  FS_Global.NumVolumes;
+   \   0000000C   ........           LDR      R0,??DataTable7
+   \   00000010   804090E5           LDR      R4,[R0, #+128]
+    998            FS_UNLOCK();
+   \   00000014   0000A0E3           MOV      R0,#+0
+   \   00000018   ........           BL       FS_OS_Unlock
+    999            return r;
+   \   0000001C   0400A0E1           MOV      R0,R4
+   \   00000020   1080BDE8           POP      {R4,PC}          ;; return
+   1000          }
+   1001          
+   1002          /*********************************************************************
+   1003          *
+   1004          *       FS_IsLLFormatted
+   1005          *
+   1006          *  Function description:
+   1007          *    Returns if a volume is low-level formatted or not.
+   1008          *
+   1009          *  Return value:
+   1010          *      1     - Volume is low-level formatted.
+   1011          *      0     - Volume is not low-level formatted.
+   1012          *     -1     - Low level format not supported by volume.
+   1013          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1014          int FS_IsLLFormatted(const char * sVolume) {
+   \                     FS_IsLLFormatted:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   1015            FS_VOLUME * pVolume;
+   1016            int         r;
+   1017          
+   1018            FS_LOCK();
+   \   0000000C   0000A0E3           MOV      R0,#+0
+   \   00000010   ........           BL       FS_OS_Lock
+   1019            r       = -1;  // Set as error so far
+   \   00000014   0050E0E3           MVN      R5,#+0
+   1020            pVolume = FS__FindVolume(sVolume, NULL);
+   \   00000018   0010A0E3           MOV      R1,#+0
+   \   0000001C   0400A0E1           MOV      R0,R4
+   \   00000020   ........           BL       FS__FindVolume
+   \   00000024   0040B0E1           MOVS     R4,R0
+   1021            if (pVolume) {
+   \   00000028   1000000A           BEQ      ??FS_IsLLFormatted_0
+   1022              r = FS__IsLLFormatted(pVolume);
+   \   0000002C   ........           BL       FS_LB_GetStatus
+   \   00000030   000050E3           CMP      R0,#+0
+   \   00000034   0600004A           BMI      ??FS_IsLLFormatted_1
+   \   00000038   EB10A0E3           MOV      R1,#+235
+   \   0000003C   0030A0E3           MOV      R3,#+0
+   \   00000040   0020A0E3           MOV      R2,#+0
+   \   00000044   C01F81E3           ORR      R1,R1,#0x300
+   \   00000048   0400A0E1           MOV      R0,R4
+   \   0000004C   ........           BL       FS_LB_Ioctl
+   \   00000050   0050A0E1           MOV      R5,R0
+   \                     ??FS_IsLLFormatted_1:
+   \   00000054   000055E3           CMP      R5,#+0
+   \   00000058   0300000A           BEQ      ??FS_IsLLFormatted_2
+   \   0000005C   010055E3           CMP      R5,#+1
+   \   00000060   0200001A           BNE      ??FS_IsLLFormatted_0
+   \   00000064   0050A0E3           MOV      R5,#+0
+   \   00000068   000000EA           B        ??FS_IsLLFormatted_0
+   \                     ??FS_IsLLFormatted_2:
+   \   0000006C   0150A0E3           MOV      R5,#+1
+   1023            }
+   1024            FS_UNLOCK();
+   \                     ??FS_IsLLFormatted_0:
+   \   00000070   0000A0E3           MOV      R0,#+0
+   \   00000074   ........           BL       FS_OS_Unlock
+   1025            return r;
+   \   00000078   0500A0E1           MOV      R0,R5
+   \   0000007C   04D08DE2           ADD      SP,SP,#+4
+   \   00000080   3080BDE8           POP      {R4,R5,PC}       ;; return
+   1026          }
+   1027          
+   1028          /*********************************************************************
+   1029          *
+   1030          *       FS_GetVolumeName
+   1031          *
+   1032          *  Description:
+   1033          *    Returns the name of a volume
+   1034          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1035          int FS_GetVolumeName(int Index, char * pBuffer, int MaxSize) {
+   \                     FS_GetVolumeName:
+   \   00000000   F0432DE9           PUSH     {R4-R9,LR}
+   \   00000004   0060A0E1           MOV      R6,R0
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0140A0E1           MOV      R4,R1
+   \   00000010   0250A0E1           MOV      R5,R2
+   1036            FS_VOLUME            * pVolume;
+   1037            const FS_DEVICE_TYPE * pType;
+   1038            FS_DEVICE_DATA       * pDevData;
+   1039            const char           * pDevName;
+   1040            int                    r;
+   1041            int                    i;
+   1042          
+   1043            FS_LOCK();
+   \   00000014   0000A0E3           MOV      R0,#+0
+   \   00000018   ........           BL       FS_OS_Lock
+   1044            pVolume = &FS_Global.FirstVolume;
+   \   0000001C   ........           LDR      R0,??DataTable7_1
+   1045            for (i = 0; i < Index; i++) {
+   \   00000020   010056E3           CMP      R6,#+1
+   \   00000024   020000BA           BLT      ??FS_GetVolumeName_0
+   1046              pVolume = pVolume->pNext;
+   \                     ??FS_GetVolumeName_1:
+   \   00000028   600090E5           LDR      R0,[R0, #+96]
+   1047            }   
+   \   0000002C   016056E2           SUBS     R6,R6,#+1
+   \   00000030   FCFFFF1A           BNE      ??FS_GetVolumeName_1
+   1048            pType    = pVolume->Partition.Device.pType;
+   \                     ??FS_GetVolumeName_0:
+   \   00000034   001090E5           LDR      R1,[R0, #+0]
+   1049            pDevData = &pVolume->Partition.Device.Data;
+   \   00000038   046080E2           ADD      R6,R0,#+4
+   1050            pDevName = pType->pfGetName(pDevData->Unit);
+   \   0000003C   0000D6E5           LDRB     R0,[R6, #+0]
+   \   00000040   001091E5           LDR      R1,[R1, #+0]
+   \   00000044   31FF2FE1           BLX      R1
+   \   00000048   0080A0E1           MOV      R8,R0
+   1051            r        = 0;
+   \   0000004C   0070A0E3           MOV      R7,#+0
+   1052            if (pBuffer)  {
+   \   00000050   000054E3           CMP      R4,#+0
+   \   00000054   1600000A           BEQ      ??FS_GetVolumeName_2
+   1053              int LenReq;
+   1054              LenReq = FS_STRLEN(pDevName) + 5;
+   \   00000058   ........           BL       strlen
+   \   0000005C   059080E2           ADD      R9,R0,#+5
+   1055              if ((LenReq) > MaxSize) {
+   \   00000060   090055E1           CMP      R5,R9
+   \   00000064   030000AA           BGE      ??FS_GetVolumeName_3
+   1056                FS_UNLOCK();
+   \   00000068   0000A0E3           MOV      R0,#+0
+   \   0000006C   ........           BL       FS_OS_Unlock
+   1057                return LenReq;
+   \   00000070   0900A0E1           MOV      R0,R9
+   \   00000074   110000EA           B        ??FS_GetVolumeName_4
+   1058              }
+   1059              /*
+   1060               * Copy the device name
+   1061               */
+   1062              do {
+   1063                *pBuffer++ = *pDevName++;
+   \                     ??FS_GetVolumeName_3:
+   \   00000078   0000D8E5           LDRB     R0,[R8, #+0]
+   1064                r++;
+   \   0000007C   017087E2           ADD      R7,R7,#+1
+   \   00000080   0100C4E4           STRB     R0,[R4], #+1
+   1065              } while (*pDevName);
+   \   00000084   0100F8E5           LDRB     R0,[R8, #+1]!
+   \   00000088   000050E3           CMP      R0,#+0
+   \   0000008C   F9FFFF1A           BNE      ??FS_GetVolumeName_3
+   1066              /*
+   1067               * Add ':'
+   1068               */
+   1069              *pBuffer++ = ':';
+   \   00000090   3A00A0E3           MOV      R0,#+58
+   \   00000094   0000C4E5           STRB     R0,[R4, #+0]
+   1070              /*
+   1071               * Add Unit number
+   1072               */
+   1073              *pBuffer++ = (U8) ('0' + pDevData->Unit);
+   \   00000098   0010D6E5           LDRB     R1,[R6, #+0]
+   1074              /*
+   1075               * Add ':'
+   1076               */
+   1077              *pBuffer++ = ':';
+   1078              r += 3;
+   \   0000009C   037087E2           ADD      R7,R7,#+3
+   \   000000A0   301081E2           ADD      R1,R1,#+48
+   \   000000A4   0110E4E5           STRB     R1,[R4, #+1]!
+   \   000000A8   0100E4E5           STRB     R0,[R4, #+1]!
+   1079              /*
+   1080               * Add '\0'
+   1081               */
+   1082              *pBuffer = 0;
+   \   000000AC   0000A0E3           MOV      R0,#+0
+   \   000000B0   0100E4E5           STRB     R0,[R4, #+1]!
+   1083            }
+   1084            FS_UNLOCK();
+   \                     ??FS_GetVolumeName_2:
+   \   000000B4   0000A0E3           MOV      R0,#+0
+   \   000000B8   ........           BL       FS_OS_Unlock
+   1085            return r;
+   \   000000BC   0700A0E1           MOV      R0,R7
+   \                     ??FS_GetVolumeName_4:
+   \   000000C0   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   000000C4   F083BDE8           POP      {R4-R9,PC}       ;; return
+   1086          }
+   1087          
+   1088          /*********************************************************************
+   1089          *
+   1090          *       FS_GetVolumeStatus
+   1091          *
+   1092          *  Function description:
+   1093          *    Returns the status of a volume.
+   1094          *
+   1095          *  Parameters
+   1096          *    sVolume           - Pointer to a string containing the name of the volume.
+   1097          *
+   1098          *  Return value:
+   1099          *     FS_MEDIA_NOT_PRESENT     - Volume is not present.
+   1100          *     FS_MEDIA_IS_PRESENT      - Volume is present.
+   1101          *     FS_MEDIA_STATE_UNKNOWN   - Volume state is unknown.
+   1102          *
+   1103          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1104          int FS_GetVolumeStatus(const char  * sVolume) {
+   \                     FS_GetVolumeStatus:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   1105           FS_VOLUME * pVolume;
+   1106           int         r;
+   1107          
+   1108           FS_LOCK();
+   \   0000000C   0000A0E3           MOV      R0,#+0
+   \   00000010   ........           BL       FS_OS_Lock
+   1109           pVolume = FS__FindVolume(sVolume, NULL);
+   \   00000014   0010A0E3           MOV      R1,#+0
+   \   00000018   0400A0E1           MOV      R0,R4
+   \   0000001C   ........           BL       FS__FindVolume
+   \   00000020   0040B0E1           MOVS     R4,R0
+   1110           r = FS__GetVolumeStatus(pVolume);
+   \   00000024   0250A0E3           MOV      R5,#+2
+   \   00000028   0500000A           BEQ      ??FS_GetVolumeStatus_0
+   \   0000002C   ........           BL       FS_LB_InitMediumIfRequired
+   \   00000030   001094E5           LDR      R1,[R4, #+0]
+   \   00000034   0400D4E5           LDRB     R0,[R4, #+4]
+   \   00000038   181091E5           LDR      R1,[R1, #+24]
+   \   0000003C   31FF2FE1           BLX      R1
+   \   00000040   0050A0E1           MOV      R5,R0
+   1111           FS_UNLOCK();
+   \                     ??FS_GetVolumeStatus_0:
+   \   00000044   0000A0E3           MOV      R0,#+0
+   \   00000048   ........           BL       FS_OS_Unlock
+   1112           return r;
+   \   0000004C   0500A0E1           MOV      R0,R5
+   \   00000050   04D08DE2           ADD      SP,SP,#+4
+   \   00000054   3080BDE8           POP      {R4,R5,PC}       ;; return
+   1113          
+   1114          }
+   1115          
+   1116          /*********************************************************************
+   1117          *
+   1118          *       FS_SetOnDeviceActivityHook
+   1119          *
+   1120          *  Function description:
+   1121          *    Allows to setup a hook function in order to see which sectors are
+   1122          *    actually written/read.
+   1123          *    The hook function prototype:
+   1124          *      void (FS_ONDEVICEACTIVITYHOOK)(FS_DEVICE * pDevice, 
+   1125          *                                     unsigned Operation, 
+   1126          *                                     U32 StartSector, 
+   1127          *                                     U32 NumSectors, 
+   1128          *                                     int Sectortype);
+   1129          *    where:  Operation is either  FS_OPERATION_READ or FS_OPERATION_WRITE
+   1130          *            Sectortype is  either FS_SECTOR_TYPE_DATA
+   1131          *                               or FS_SECTOR_TYPE_MAN
+   1132          *                               or FS_SECTOR_TYPE_DIR
+   1133          *
+   1134          *
+   1135          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1136          void FS_SetOnDeviceActivityHook(const char * sVolume, FS_ONDEVICEACTIVITYHOOK * pfOnDeviceActivityHook) {
+   \                     FS_SetOnDeviceActivityHook:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0150A0E1           MOV      R5,R1
+   1137           FS_VOLUME * pVolume;
+   1138          
+   1139           FS_LOCK();
+   \   00000010   0000A0E3           MOV      R0,#+0
+   \   00000014   ........           BL       FS_OS_Lock
+   1140           pVolume = FS__FindVolume(sVolume, NULL);
+   \   00000018   0010A0E3           MOV      R1,#+0
+   \   0000001C   0400A0E1           MOV      R0,R4
+   \   00000020   ........           BL       FS__FindVolume
+   1141           if (pVolume) {
+   \   00000024   000050E3           CMP      R0,#+0
+   1142              FS_LOCK_SYS();
+   1143              pVolume->Partition.Device.Data.pfOnDeviceActivityHook = pfOnDeviceActivityHook;
+   \   00000028   10508015           STRNE    R5,[R0, #+16]
+   1144              FS_UNLOCK_SYS(); 
+   1145           }
+   1146           FS_UNLOCK();
+   \   0000002C   0000A013           MOVNE    R0,#+0
+   \   00000030   ........           BL       FS_OS_Unlock
+   1147            
+   1148          }
+   \   00000034   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000038   3080BDE8           POP      {R4,R5,PC}       ;; return
+   1149          
+   1150          /*********************************************************************
+   1151          *
+   1152          *       FS_STORAGE_GetCounters
+   1153          *
+   1154          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1155          void FS_STORAGE_GetCounters(FS_STORAGE_COUNTERS * pStat) {
+   \                     FS_STORAGE_GetCounters:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   1156          #if FS_DEBUG_LEVEL >= FS_DEBUG_LEVEL_CHECK_PARA
+   1157            *pStat = FS_STORAGE_Counters;
+   \   00000004   ........           LDR      R1,??DataTable7_2
+   \   00000008   1C50B1E8           LDM      R1!,{R2-R4,R12,LR}
+   \   0000000C   1C50A0E8           STM      R0!,{R2-R4,R12,LR}
+   1158          #else
+   1159            FS_MEMSET(pStat, 0, sizeof(FS_STORAGE_COUNTERS));
+   1160          #endif
+   1161          }
+   \   00000010   1080BDE8           POP      {R4,PC}          ;; return
+   1162          
+   1163          /*********************************************************************
+   1164          *
+   1165          *       FS_STORAGE_ResetCounters
+   1166          *
+   1167          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1168          void FS_STORAGE_ResetCounters(void) {
+   1169          #if FS_DEBUG_LEVEL >= FS_DEBUG_LEVEL_CHECK_PARA
+   1170            FS_MEMSET(&FS_STORAGE_Counters, 0, sizeof(FS_STORAGE_COUNTERS));
+   \                     FS_STORAGE_ResetCounters:
+   \   00000000   ........           LDR      R0,??DataTable7_2
+   \   00000004   0010A0E3           MOV      R1,#+0
+   \   00000008   0020A0E3           MOV      R2,#+0
+   \   0000000C   0030A0E3           MOV      R3,#+0
+   \   00000010   0E00A0E8           STM      R0!,{R1-R3}
+   \   00000014   0600A0E8           STM      R0!,{R1,R2}
+   1171          #endif
+   1172          }
+   \   00000018   1EFF2FE1           BX       LR               ;; return
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable7:
+   \   00000000   ........           DC32     FS_Global
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable7_1:
+   \   00000000   ........           DC32     FS_Global+0x1C
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable7_2:
+   \   00000000   ........           DC32     FS_STORAGE_Counters
+   1173          
+   1174          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function                   .cstack
+     --------                   -------
+     FS_AddDevice                    8
+     FS_AddPhysDevice                8
+     FS_FindVolume                  24
+     FS_FormatLLIfRequired          16
+     FS_FormatLow                   16
+     FS_GetNumVolumes                8
+     FS_GetVolumeName               32
+     FS_GetVolumeStatus             16
+     FS_IoCtl                       32
+     FS_IsLLFormatted               16
+     FS_STORAGE_GetCounters          8
+     FS_STORAGE_GetDeviceInfo       16
+     FS_STORAGE_ReadSector          24
+     FS_STORAGE_ReadSectors         32
+     FS_STORAGE_ResetCounters        0
+     FS_STORAGE_Sync                 8
+     FS_STORAGE_Unmount              8
+     FS_STORAGE_UnmountForced        8
+     FS_STORAGE_WriteSector         24
+     FS_STORAGE_WriteSectors        32
+     FS_SetOnDeviceActivityHook     16
+     FS__AddDevice                  24
+     FS__AddPhysDevice               8
+     FS__FindVolume                 40
+     FS__FormatLow                  16
+     FS__GetDeviceInfo              16
+     FS__GetNumVolumes               0
+     FS__GetVolumeStatus             8
+     FS__IoCtl                      24
+     FS__IoCtlNL                    24
+     FS__IsLLFormatted              16
+     FS__ReadSector                 16
+     FS__ReadSectors                24
+     FS__STORAGE_Sync                8
+     FS__UnmountForcedLL             8
+     FS__UnmountLL                   8
+     FS__WriteSector                16
+     FS__WriteSectors               24
+
+
+   Section sizes:
+
+     Function/Label             Bytes
+     --------------             -----
+     FS_STORAGE_Counters          20
+     FS__IoCtlNL                  92
+     FS__IoCtl                    92
+     FS__FormatLow                84
+     FS__WriteSector              60
+     FS__ReadSector               60
+     FS__WriteSectors             80
+     FS__ReadSectors              80
+     FS__GetVolumeStatus          44
+     FS__GetDeviceInfo            68
+     FS__AddPhysDevice            44
+     FS__AddDevice               180
+     FS__IsLLFormatted            92
+     FS__FindVolume              192
+     FS_FindVolume               148
+     FS__GetNumVolumes            12
+     FS__UnmountLL                60
+     FS__UnmountForcedLL          64
+     FS__STORAGE_Sync             56
+     FS_STORAGE_WriteSector      100
+     FS_STORAGE_ReadSector       100
+     FS_STORAGE_WriteSectors     112
+     FS_STORAGE_ReadSectors      112
+     FS_STORAGE_Unmount           96
+     FS_STORAGE_UnmountForced    100
+     FS_STORAGE_Sync              88
+     FS_STORAGE_GetDeviceInfo     96
+     FS_IoCtl                    128
+     FS_FormatLow                112
+     FS_FormatLLIfRequired       220
+     FS_AddDevice                  4
+     FS_AddPhysDevice             44
+     FS_GetNumVolumes             36
+     FS_IsLLFormatted            132
+     FS_GetVolumeName            200
+     FS_GetVolumeStatus           88
+     FS_SetOnDeviceActivityHook   60
+     FS_STORAGE_GetCounters       20
+     FS_STORAGE_ResetCounters     28
+     ??DataTable7                  4
+     ??DataTable7_1                4
+     ??DataTable7_2                4
+
+ 
+    20 bytes in section .bss
+ 3 396 bytes in section .text
+ 
+ 3 396 bytes of CODE memory
+    20 bytes of DATA memory
+
+Errors: none
+Warnings: none

@@ -1,0 +1,741 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.1.52143/W32 for ARM     10/Mar/2011  08:04:48 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\DUII\LapTimerTask with autocross.c               #
+#    Command line =  "C:\DUII\DUII\LapTimerTask with autocross.c" -D DEBUG=1  #
+#                    -D SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -lCN              #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files\IAR Systems\Embedded Workbench         #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ --cpu_mode arm -Ohs --use_c++_inline         #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Release\List\LapTimerTask with          #
+#                    autocross.lst                                            #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\LapTimerTask with           #
+#                    autocross.o                                              #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\DUII\LapTimerTask with autocross.c
+      1          #define LAPTIMER_MAIN
+      2          
+      3          #include <stdio.h>
+      4          #include <string.h>
+      5          #include <math.h>
+      6          #include "WM.h"
+      7          #include "DUII.h"
+      8          #include "LapTimerTask.h"
+      9          #include "DataHandler.h"
+     10          #include "FlashReadWrite.h"
+     11          #include "commondefs.h"
+     12          #include "tmtypes.h"
+     13          
+     14          #ifndef _WINDOWS
+     15          #include "RTOS.h"
+     16          #include "FS.h"
+     17          #endif
+     18          
+     19          static void InitLapTimerVariables(void) {
+     20          
+     21          	DataValues[PREDICTIVE_LAP].fVal = 0.0;
+     22          	DataValues[LAP_TIME].iVal = 0;
+     23          	DataValues[LAST_LAP_TIME].iVal = 0;
+     24          	DataValues[ELAPSED_TIME].iVal = 0;
+     25          	DataValues[ELAPSED_RACE_TIME].iVal = 0;
+     26          	DataValues[LAP_NUMBER].iVal = 0;
+     27          	DataValues[EW_DISTANCE].fVal = 0.0;
+     28          	DataValues[NS_DISTANCE].fVal = 0.0;
+     29          	DataValues[LAP_DISTANCE].fVal = 0.0;
+     30          	DataValues[TOTAL_DISTANCE].fVal = 0.0;
+     31          					
+     32          } // InitLapTimerVariables
+     33          
+     34          //#define ALL_LAPTIMER_EVENTS ((1 << DU2_MODE_CHANGE) | (1 << DU2_CONFIG_CHANGE) | (1 << DU2_START_SET) | (1 << DU2_FINISH_SET) |(1 << DU@_NEW_GPS))
+     35          
+     36          // 4/8/2005 - changed lap_dist from 30 to 35 & lap_head from 20 to 30 based on VIR test
+     37          // 10/12/2005 - changed lap_dist from 35 to 40, lap_alt from 80 to 100 based on customer feedback
+     38          // 3/28/2006 - changed lap_dist from 40 to 45
+     39          //
+     40          // Lap Timer Parameters
+     41          #define LAP_DISTRANGE	45	// matching error for start/finish distance for lat and lon in meters
+     42          #define LAP_ALTRANGE	100	// matching error for start/finish altitude in meters
+     43          #define LAP_HEADRANGE	40	// matching error for start/finish heading in degrees
+     44          
+     45          #define AUTOXSETHDGTIME	2000	// 2 second = number of ms to delay from launch before recording heading
+     46          #define AUTOX_DISTRANGE	10		// matching error for finish line distance for lat and lon in meters
+     47          #define AUTOX_HEADRANGE	30		// matching error for finish heading in degrees
+     48          
+     49          typedef struct {
+     50          	double lat;
+     51          	double lon;
+     52          	float heading;
+     53          } gpspostype;
+     54          
+     55          typedef struct {
+     56          //	s32 timer;					// current lap time in msec
+     57          	s32 besttime;				// best lap time in this session
+     58          //	u32 lastlap;				// last programmed lap number (1 based)
+     59          	gpspostype currentpos;		// where we are now
+     60          	gpspostype previouspos;		// position of last sample
+     61          //	float startheading;			// heading in integer degrees of start position
+     62          //	float finishheading;		// heading in integer degrees of finish position
+     63          //	float previousheading;		// heading in integer degrees of previous position
+     64          //	u16 currentlap;				// current lap number (1 based)
+     65          //	float distance;				// current lap distance in meters
+     66          	s32 timernminus1;			// lap time at last gps sample in msec
+     67          } laptype;
+     68          
+     69          typedef struct {
+     70          	BOOL quarter;				// TRUE if 1/4 mile, FALSE if 1/8 mile
+     71          	u16 sixtyfoot;				// 60 foot time in seconds * 100
+     72          	u16 zerosixty;				// 0-60 mph time in seconds * 100
+     73          	u16 zerohundred;			// 0-100 mph time in seconds * 100
+     74          	u16 threethirty;			// 330 foot time in seconds * 100
+     75          	u16 eighthmile;				// 1/8 mile time in seconds * 100
+     76          	u16 quartermile;			// 1/4 mile time in seconds * 100
+     77          	u16 eighthtrap;				// 1/8 mile trap speed in mph * 10
+     78          	u16 quartertrap;			// 1/4 mile trap speed in mph * 10
+     79          	s16 reaction;				// reaction time in seconds * 100
+     80          	u16 launchg;				// launch g force * 100
+     81          	u16 horsepower;				// horsepower during run
+     82          	u16 torque;					// torque during run
+     83          } dragracetype;
+     84          
+     85          #if 0
+     86          typedef struct {
+     87          	s32 bestsectortimes[NUMSECTORS];	// 128 = 4 * 32 all intermediate sector times for a given track in msec
+     88          	s32 bestlapever;					// 4            lap time associated with those sectors in msec
+     89          } storedtimestype;						// 132
+     90          
+     91          				// stored best sector and lap times in msec for one fourth of tracks. need 4 of these.
+     92          typedef storedtimestype storedsectortype[NUMTRACKS/4];	// 528 = 132 * 4
+     93          #endif
+     94          
+     95          /* times laps and sets the following global variables in DataValues
+     96          	EW_DISTANCE,		// f, distance in E+/W- direction from S/F in meters
+     97          	NS_DISTANCE,		// f, distance in N+/S- direction from S/F in meters
+     98          	LAP_DISTANCE,		// f, in meters, since passing s/f
+     99          	TOTAL_DISTANCE,		// f, in meters, since session started
+    100          	TOTAL_DISTANCE_EVER,	// f, in meters, cumulative until reset
+    101          	PREDICTIVE_LAP,		// f, pace ahead or behind in seconds
+    102          	LAP_TIME,			// u, in msec since passing s/f
+    103          	LAST_LAP_TIME,		// u, in msec since passing s/f
+    104          	ELAPSED_TIME,		// u, in msec since session started
+    105          	ELAPSED_RACE_TIME,	// u, in msec since first passing s/f or launch
+    106          	TOTAL_TIME_EVER,	// u, in seconds, cumulative until reset
+    107          	LAP_NUMBER,			// i, lap we are currently on. 0 = s/f not yet found, -1 = not in lapping mode
+    108          */
+    109          
+    110          #pragma optimize=none
+    111          void LapTimerTask( void ) {
+    112          	unsigned char which_event;		 		// bitmask of events that occured
+    113          //	static u32 sessionStartTimer;
+    114          	static u32 lastTimerValue;
+    115          	u32 currentTimerValue;
+    116          	u32 elapsedTime;
+    117          	static BOOL inrange = FALSE;
+    118          	static laptype lap;						// timing of lap
+    119          	static laplisttype laplist;				// one sessions worth of laps
+    120          	static sectortype sector[NUMSECTORS];	// intermediate values for predictive lap timing
+    121          	static int refsectornum;				// which sector are we comparing to
+    122          	static int cursectornum;				// which sector are we in
+    123          	static float lastdist;					// previous samples distance measurement for predictive lap timing
+    124          //	unsigned int bestLapEver;				// 4 lap time associated with the sectors in msec
+    125          	float seeklat;					// what point are we watching for. could be start or finish
+    126          	float seeklon;
+    127          	float seekhdg;
+    128          	static BOOL writeTracks = FALSE;
+    129          	
+    130            	InitLapTimerVariables();
+    131          
+    132          //	sessionStartTimer = OS_GetTime32();			// starting time in ticks. all lap times will be an offset from this
+    133          	
+    134          	while (1) {
+    135          		// wait for something to happen. wake up in 1/20 second to check where we are
+    136          		which_event = OS_WaitSingleEventTimed( (unsigned char) (1 << DU2_NEW_GPS) , 50 );
+    137          	
+    138          		if (which_event)		// if got gps, add on the du2_start if it occurred
+    139          			which_event = which_event | OS_ClearEvents(NULL);
+    140          		
+    141          		// get ready to go live
+    142          		if ((DU2_LAPS_WAITSTART == unsavedSysData.systemMode) || (DU2_LAPS_WAITNOSF == unsavedSysData.systemMode)) {
+    143          			
+    144          			// make sure data appears clear if we are sitting still
+    145          			DataValues[LAP_TIME].uVal = 0;
+    146          			DataValues[LAP_NUMBER].uVal = 0;
+    147          			lastTimerValue = 0;
+    148          			
+    149          		} // if
+    150          		// update the timing
+    151          		else if (DU2_LAPS == unsavedSysData.systemMode) {
+    152          			// request use of global data
+    153          			OS_Use(&SEMA_GlobalData);
+    154          	
+    155          			// timed out so up the times
+    156          			elapsedTime = (currentTimerValue = OS_GetTime32()) - lastTimerValue;
+    157          			DataValues[LAP_TIME].iVal += elapsedTime;
+    158          			DataValues[ELAPSED_TIME].iVal += elapsedTime;
+    159          			DataValues[ELAPSED_RACE_TIME].iVal += elapsedTime;
+    160          
+    161          			lastTimerValue = currentTimerValue;
+    162          	
+    163          #if defined _WINDOWS || defined _DEMO			
+    164          #define ROLLOVER_TIME		85700				
+    165          				
+    166          			if ((DataValues[LAP_TIME].iVal >= ROLLOVER_TIME)) {
+    167          				DataValues[LAST_LAP_TIME].iVal = ROLLOVER_TIME;
+    168          				DataValues[PREDICTIVE_LAP].fVal = 0.0;
+    169          				DataValues[LAP_TIME].iVal = 0;
+    170          				DataValues[LAP_NUMBER].iVal++;
+    171          			} // if
+    172          #endif					
+    173          			// relinquish global data
+    174          			OS_Unuse(&SEMA_GlobalData);		
+    175          		} // if
+    176          		else {	// no longer timing so save the track SF
+    177          			if (writeTracks) {
+    178          				writeTracks = FALSE;
+    179          				WriteDataStructures(TRACK_DATA);
+    180          			} // if
+    181          		} // else
+    182          
+    183          #if !defined _WINDOWS && !defined _DEMO		
+    184          
+    185          		if (which_event & (1 << DU2_NEW_GPS)) {			// comm received a new GPS position		
+    186          			if (which_event & (1 << DU2_START_SET)) {	// user set the start or start/finish and we have new gps
+    187          
+    188          				if (DU2_LAPS_WAITNOSF == unsavedSysData.systemMode) {
+    189          					// we are in range
+    190          					inrange = TRUE;
+    191          
+    192          					InitLapTimerVariables();
+    193          					elapsedTime = 0;
+    194          					lastTimerValue = OS_GetTime32();
+    195          					DataValues[LAP_NUMBER].iVal = 1;
+    196          					
+    197          					lap.besttime = 0xFFFFFFFF;
+    198          					lastdist = 0.0;
+    199          				
+    200          					// initialize lap storage
+    201          					for (cursectornum = 0; cursectornum < NUMLAPS; cursectornum++)
+    202          						laplist[cursectornum] = 0xFFFFFFFF;
+    203          				
+    204          					// initialize sectors
+    205          					for (cursectornum = 0; cursectornum < NUMSECTORS; cursectornum++)
+    206          						sector[cursectornum].reference =
+    207          						sector[cursectornum].current = 0;
+    208          					cursectornum = 0;
+    209          					refsectornum = 0;
+    210          		
+    211          					// save starting position for this track
+    212          					lap.currentpos.lat = trackData.startLineLat = GetValue(LATITUDE).dVal;
+    213          					lap.currentpos.lon = trackData.startLineLong = GetValue(LONGITUDE).dVal;
+    214          					lap.currentpos.heading = trackData.startLineHeading = GetValue(HEADING).fVal;
+    215          					writeTracks = TRUE;
+    216          					unsavedSysData.systemMode = DU2_LAPS;
+    217          				} // if
+    218          			} // if set s/f
+    219          
+    220          #ifdef ENABLE_AUTOX
+    221          			// do we need a finish line?
+    222          			else if (AUTOXREADY == tm_state || HILLCLIMB == tm_state) {			
+    223          					// has finish been set?
+    224          					if (0L == trackData.finishLineLat) {									
+    225          						// no finish line so get ready to get finish line			
+    226          						Write_Text(3, 1, "Hit SELECT at Finish", '-');
+    227          						button_overlay[SEL] = markfinish;
+    228          						if (HILLCLIMB == tm_state)
+    229          							tm_state = HILLCLIMBGETFINISH;
+    230          						else
+    231          //							tm_state = AUTOXGETFINISH;
+    232          					} // if
+    233          					else {	// got a finish line - can't happen in hillclimb mode
+    234          						tm_state = AUTOXFINISH;
+    235          						
+    236          						// get ready to find the finish
+    237          	
+    238          					} // else
+    239          				} // if
+    240          				else if (DRAGREADY == tm_state) {
+    241          //					tm_state = DRAGFINISH;
+    242          				} // if
+    243          				else {	// not AUTOXGETFINISH or HILLCLIMB
+    244          					// find this starting line again next lap
+    245          				} // else
+    246          			else if (which_event & (1 << DU2_FINISH_SET)) {	// user set the finish line position
+    247          				// finishandgear / autox run over. hold the time on the display
+    248          				if (HILLCLIMBGETFINISH == tm_state) {
+    249          					seeklat = trackData.startLineLat;
+    250          					seeklon = trackData.startLineLong;
+    251          					seekhdg = lap.startpos.heading;
+    252          					tm_state = HILLCLIMBSTART;
+    253          	
+    254          					// save as best lap
+    255          		
+    256          					// put checker up on screen
+    257          		
+    258          					// make current lap the reference lap
+    259          	
+    260          				} // if
+    261          				else {
+    262          //					tm_state = AUTOXHOLDTIME;
+    263          					// note that we have set the line on the screen
+    264          					Write_Text(3, 4, "* Finish Line Set *", '-');
+    265          				} // else			
+    266          	
+    267          				// save the lap
+    268          		
+    269          				// get the track finish info
+    270          			
+    271          				// save the finish information and set up to find the start
+    272          	
+    273          				// write finish line to flash
+    274          			} // else if finish
+    275          #endif
+    276          			else {		// new gps and no special conditions
+    277          				float fdeltalat, fdeltalon;
+    278          				
+    279          #ifdef ENABLE_AUTOX
+    280          				// in launch mode, now that we are moving, save the heading shortly after launch
+    281          				// limit to small window just in case we are headed due East
+    282          				if ((AUTOXGETFINISH == tm_state || AUTOXFINISH == tm_state || DRAGFINISH == tm_state)) {
+    283          					if ((0 == trackData.startLineHeading) && (DataValues[LAP_TIME].iVal >= AUTOXSETHDGTIME) && (DataValues[LAP_TIME].iVal <= (1000 + AUTOXSETHDGTIME))) {
+    284          						// save starting heading for this track
+    285          						// get the track info
+    286          			
+    287          						// initialize and save the information
+    288          		
+    289          						// write it out
+    290          					} // if
+    291          				} // if
+    292          #endif
+    293          				lap.previouspos = lap.currentpos;
+    294          				lap.currentpos.lat = GetValue(LATITUDE).dVal;
+    295          				lap.currentpos.lon = GetValue(LONGITUDE).dVal;
+    296          				lap.currentpos.heading = GetValue(LATITUDE).fVal;
+    297          	
+    298          #ifdef ENABLE_AUTOX
+    299          				// don't look for starting line in AutoX or Drag
+    300          				if (AUTOXSTAGE == tm_state || DRAGSTAGE == tm_state) return;
+    301          #endif	
+    302          				// skip all this if we are not moving to eliminate divide by zero
+    303          				if (0.0 != GetValue(SPEED).fVal) {
+    304          					int headrange;
+    305          					int distrange;
+    306          
+    307          					// use a smaller range circle for segment timing and autocross
+    308          					if (DU2_LAPS == unsavedSysData.systemMode) {
+    309          						headrange = LAP_HEADRANGE;
+    310          						distrange = LAP_DISTRANGE;
+    311          					} // if
+    312          					else {	// autox or dragrace							
+    313          						headrange = AUTOX_HEADRANGE;
+    314          						distrange = AUTOX_DISTRANGE;
+    315          					} // else
+    316          	
+    317          					// calculate lap distance
+    318          					// find difference in meters of lat, lon
+    319          					fdeltalat = (lap.currentpos.lat - lap.previouspos.lat) * LATMET;
+    320          					fdeltalon = (lap.currentpos.lon - lap.previouspos.lon) * LONMET(lap.currentpos.lon);
+    321          	
+    322          					// remember the distance at the last sample point
+    323          					lastdist = DataValues[LAP_DISTANCE].fVal;
+    324          
+    325          					// add on distance traveled in this sample
+    326          					DataValues[LAP_DISTANCE].fVal += sqrt(fdeltalat * fdeltalat + fdeltalon * fdeltalon);
+    327          	
+    328          					if (DataValues[LAP_TIME].iVal > 0 && lastdist > 0.0) {	// only process after passing S/F and collecting one more sample
+    329          						int lapdist = ((int) DataValues[LAP_DISTANCE].fVal) % SECTOR_SIZE;
+    330          	
+    331          						// get just the remainder in this sector
+    332          						lastdist = (float) ((int) lastdist % SECTOR_SIZE);
+    333          	
+    334          #ifdef ENABLE_AUTOX
+    335          						if (TIMING == tm_state ||
+    336          							HILLCLIMBFINISH == tm_state ||
+    337          							HILLCLIMBGETFINISH == tm_state ||
+    338          							AUTOXGETFINISH == tm_state ||
+    339          							AUTOXFINISH == tm_state ||
+    340          							DRAGFINISH == tm_state) {
+    341          #endif
+    342          						// process sectors if we are in a lap
+    343          						if (DU2_LAPS == unsavedSysData.systemMode) {
+    344          							if (lapdist < lastdist) {	// crossed sector boundary
+    345          								float sectoradd;		// bit to add to last timing measurement to get to sector bounday
+    346          								// interpolate and save the time
+    347          								sectoradd = (float) (SECTOR_SIZE - lastdist) /
+    348          											(float) (lapdist + SECTOR_SIZE - lastdist); // ratio between points
+    349          								sectoradd = sectoradd * (float) (DataValues[LAP_TIME].iVal - lap.timernminus1); // time in ms to add to previous
+    350          		
+    351          								// if no best time then reference sectors all zero. otherwise check them
+    352          								if (0xFFFFFFFF != lap.besttime) {
+    353          									// are we out of comparison sectors?
+    354          									if (0L == sector[refsectornum].reference && refsectornum > 0)
+    355          										// if so, back up a sector
+    356          										refsectornum--;
+    357          								} // if
+    358          	
+    359          								// store interpolated sector time as current for comparison
+    360          								sector[cursectornum].current = lap.timernminus1 + (s32) sectoradd;
+    361          		
+    362          								// only update graph until we run out of sectors
+    363          								if (cursectornum < (NUMSECTORS-1)) {
+    364          									// if sector data loaded then compare progress and display graph						
+    365          									if (0xFFFFFFFF != lap.besttime) {
+    366          										// determine how much ahead / behind. + is ahead, - is behind
+    367          										sectoradd = (float) (sector[refsectornum].reference - sector[cursectornum].current) / 1000.0;
+    368          	
+    369          									} // if
+    370          									cursectornum++;
+    371          								} // if
+    372          								if (refsectornum < (NUMSECTORS-1))
+    373          									refsectornum++;
+    374          							} // if
+    375          						} // if
+    376          					} // if
+    377          					// save the current timer for future interpolation
+    378          					lap.timernminus1 = DataValues[LAP_TIME].iVal;
+    379          
+    380          #ifdef ENABLE_AUTOX
+    381          					// if we are waiting for user action, don't bother going any further
+    382          					if (HILLCLIMBGETFINISH == tm_state || AUTOXGETFINISH == tm_state)
+    383          						return;
+    384          	
+    385          					if (DRAGFINISH == tm_state) {
+    386          						// look for distances and record them
+    387          // ***** THIS SHOULD BE INTERPOLATED USING ACCELERATION RATES
+    388          	
+    389          						// calculate speed in meters/msec
+    390          	
+    391          						// 60 foot time = 18.46 meters
+    392          						if (0 == dragnumbers.sixtyfoot && DataValues[LAP_DISTANCE] > 18.46) {
+    393          							dragnumbers.sixtyfoot = (u16) (DataValues[LAP_TIME]) / 10;
+    394          						} // if
+    395          	
+    396          						// 60 mph = 26.92 mps
+    397          						if (0 == dragnumbers.zerosixty && speed > 26.92) {
+    398          							dragnumbers.zerosixty = (u16) (DataValues[LAP_TIME]) / 10;
+    399          						} // if
+    400          							
+    401          						// 100 mph = 44.70 mps
+    402          						if (0 == dragnumbers.zerohundred && speed > 44.70)
+    403          							dragnumbers.zerohundred = (u16) (DataValues[LAP_TIME].iVal / 10);
+    404          	
+    405          						// 330 foot time = 101.53 meters
+    406          						if (0 == dragnumbers.threethirty && DataValues[LAP_DISTANCE] > 101.53) {
+    407          							dragnumbers.threethirty = (u16) (DataValues[LAP_TIME].iVal / 10);
+    408          						} // if
+    409          	
+    410          						// 1/8 mile time = 203.06 meters
+    411          						if (0 == dragnumbers.eighthmile && DataValues[LAP_DISTANCE] > 203.06) {
+    412          	
+    413          							dragnumbers.eighthmile = (u16) (DataValues[LAP_TIME].iVal / 10);
+    414          							dragnumbers.eighthtrap = (u16) (speed * 22.356);		// record speed in mph * 10
+    415          							
+    416          							else {		// 1/8 mile run so stop here
+    417          								tm_state = DRAGHOLDTIME;
+    418          								button_overlay[SEL] = displaydragnums;
+    419          		
+    420          								// save the lap
+    421          								laplist[0] = (u32) DataValues[LAP_TIME];
+    422          						
+    423          								// get the track finish info
+    424          								DataFlash_Page_Read(MAX_PAGE_SIZE, tempflash.bigbuff, TRACKFINPAGE);		
+    425          							
+    426          								// save the finish information
+    427          								// write to flash
+    428          								// put checker up
+    429          								// give them a clue
+    430          							} // else
+    431          						} // if
+    432          	
+    433          						// 1/4 mile time = 406.12 meters
+    434          						if (0 == dragnumbers.quartermile && DataValues[LAP_DISTANCE] > 406.12) {
+    435          							tm_state = DRAGHOLDTIME;
+    436          							button_overlay[SEL] = displaydragnums;
+    437          	
+    438          							dragnumbers.quartermile = (u16) (DataValues[LAP_TIME].iVal / 10);
+    439          							dragnumbers.quartertrap = (u16) (speed * 22.356);		// record speed in mph * 10
+    440          							
+    441          							// save the lap
+    442          							laplist[0] = (u32) DataValues[LAP_TIME];
+    443          					
+    444          							// get the track finish info
+    445          							DataFlash_Page_Read(MAX_PAGE_SIZE, tempflash.bigbuff, TRACKFINPAGE);		
+    446          						
+    447          							// save the finish information
+    448          							trackData.finishLineLat = tempflash.finishandgear.trackfinish[lap.tracknum].finishlat = lap.currentpos.lat;
+    449          							trackData.finishLineLong = tempflash.finishandgear.trackfinish[lap.tracknum].finishlon = lap.currentpos.lon;
+    450          							trackData.finishLineHeading = tempflash.finishandgear.trackfinish[lap.tracknum].finishhead = lap.currentpos.heading;
+    451          	
+    452          							// write to flash
+    453          							DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, tempflash.bigbuff, TRACKFINPAGE);	
+    454          							
+    455          							// put checker up
+    456          							Write_Flag(TRUE);
+    457          	
+    458          							// give them a clue
+    459          							Write_Text(3, 4, "Hit SELECT For Data", '-');
+    460          						} // if
+    461          					} // if dragfinish
+    462          
+    463          					// if current heading matches the start/finish heading then check for position
+    464          					// while allowing for headings near 0 (due east)
+    465          					else if (FLOATABS(lap.currentpos.heading - seekhdg) < headrange ||
+    466          						FLOATABS(lap.currentpos.heading - seekhdg) > (360.0 - headrange)) {
+    467          #else
+    468          					if (FLOATABS(lap.currentpos.heading - seekhdg) < headrange ||
+    469          					FLOATABS(lap.currentpos.heading - seekhdg) > (360.0 - headrange)) {
+    470          #endif
+    471          						// find difference in meters of lat, lon
+    472          						fdeltalat = (lap.currentpos.lat - seeklat) * LATMET;
+    473          						fdeltalon = (lap.currentpos.lon - seeklon) * LONMET(seeklat);
+    474          	
+    475          						if (FLOATABS(fdeltalat) < distrange && FLOATABS(fdeltalon) < distrange) {
+    476          							// found either the Start or the Finish
+    477          							if (!inrange) {
+    478          								float distance;
+    479          								float speed;
+    480          								s32 offset;
+    481          								BOOL dofirststart = FALSE;
+    482          								BOOL dostart = FALSE;
+    483          								BOOL dofinish = FALSE;
+    484          	
+    485          								// now we are in range
+    486          								inrange = TRUE;
+    487          	
+    488          								// find the actual distance to start/finish in meters
+    489          								distance = sqrt(fdeltalat * fdeltalat + fdeltalon * fdeltalon);
+    490          	
+    491          								// calculate speed in meters/msec
+    492          								speed = GetValue(SPEED).fVal;
+    493          	
+    494          								// fix up the timer and lap distance based on our speed, rounding up the hundredth
+    495          								offset = (s32) (50.0 + (1000.0 * distance) / speed);
+    496          	
+    497          								// process the incoming states							
+    498          								switch (unsavedSysData.systemMode) {
+    499          									case DU2_LAPS:
+    500          										dostart = TRUE;
+    501          										dofinish = TRUE;
+    502          										break;
+    503          									case DU2_LAPS_WAITSTART:
+    504          										dofirststart = TRUE;
+    505          										dofinish = FALSE;
+    506          										break;
+    507          #ifdef ENABLE_AUTOX
+    508          									case HILLCLIMB_WAITSTART:
+    509          										dofirststart = TRUE;
+    510          										break;
+    511          									case HILLCLIMBSTART:
+    512          										dostart = TRUE;
+    513          										break;
+    514          									case TIMING:
+    515          										dostart = TRUE;
+    516          										dofinish = TRUE;
+    517          										break;
+    518          									case HILLCLIMBFINISH:
+    519          									case AUTOXFINISH:
+    520          									case DRAGFINISH:
+    521          										dofinish = TRUE;
+    522          										break;
+    523          #endif
+    524          								} // switch
+    525          							
+    526          								// first time start line stuff
+    527          								if (dofirststart) {
+    528          									InitLapTimerVariables();
+    529          								} // if
+    530          
+    531          								// general finish line stuff
+    532          								if (dofinish) {
+    533          									// fudge to where time would be when we cross s/f, rounding up
+    534          									DataValues[LAP_TIME].iVal += offset;
+    535          	
+    536          									// store the lap plus a fudge based on our speed
+    537          									if (DataValues[LAP_NUMBER].iVal <= NUMLAPS)
+    538          										laplist[DataValues[LAP_NUMBER].iVal-1] = (u32) DataValues[LAP_TIME].iVal;
+    539          #ifdef ENABLE_AUTOX
+    540          									// autox is single 'lap' so don't show symbols
+    541          									if (AUTOXFINISH != tm_state && DRAGFINISH != tm_state) {	// put up all the symbols and get ready for next lap
+    542          										// clear the graph
+    543          										Write_Icon(0, 23, 122, 8, (u08 *) graphbckgnd, '-');
+    544          		
+    545          										// check for best lap
+    546          										if (DataValues[LAP_TIME].iVal <= (u32) lap.besttime) {
+    547          											lap.besttime = DataValues[LAP_TIME];
+    548          			
+    549          											// put checker up
+    550          											Write_Flag(TRUE);
+    551          	
+    552          											// make current lap the reference lap
+    553          											for (cursectornum = 0; cursectornum < NUMSECTORS; cursectornum++)
+    554          												sector[cursectornum].reference = sector[cursectornum].current;
+    555          										} // if
+    556          										else
+    557          											Write_Flag(FALSE);
+    558          									} // if
+    559          #endif
+    560          								} // if
+    561          
+    562          								// general start line stuff
+    563          								if (dostart || dofirststart) {
+    564          									// initialize to where start will be
+    565          									DataValues[LAP_TIME].iVal = -offset;
+    566          									DataValues[LAST_LAP_TIME].iVal = DataValues[LAP_TIME].iVal;
+    567          									DataValues[LAP_DISTANCE].fVal = -distance;
+    568          									lastdist = 0.0;
+    569          									lap.timernminus1 = 0;
+    570          									// clear the current sector data
+    571          									for (cursectornum = 0; cursectornum < NUMSECTORS; cursectornum++)
+    572          										sector[cursectornum].current = 0;
+    573          									cursectornum = 0;
+    574          									refsectornum = 0;
+    575          
+    576          									elapsedTime = 0;
+    577          									lastTimerValue = OS_GetTime32();
+    578          									
+    579          									// next lap please
+    580          									(DataValues[LAP_NUMBER].iVal)++;
+    581          								} // if
+    582          								
+    583          								switch (unsavedSysData.systemMode) {
+    584          									case DU2_LAPS_WAITSTART:
+    585          										unsavedSysData.systemMode = DU2_LAPS;
+    586          										break;
+    587          								} // switch
+    588          								
+    589          #ifdef ENABLE_AUTOX
+    590          								// do state transitions				
+    591          								switch (tm_state) {
+    592          									case WAITSTART:
+    593          										tm_state = TIMING;
+    594          										Write_Screen((u08 *) predictive, '-');
+    595          										if (0xFFFFFFFF == lap.besttime) {
+    596          											// no sectors
+    597          											Write_Icon(111, 23, 8, 8, (u08 *) plussign, '-');
+    598          											Write_Icon(3, 23, 8, 8, (u08 *) minussign, '-');
+    599          										} // if
+    600          										break;
+    601          									case HILLCLIMBWAITSTART:
+    602          										// has finish line been set?
+    603          										if (0L == trackData.finishLineLat) {
+    604          											tm_state = HILLCLIMBGETFINISH;
+    605          											Clear_Screen();
+    606          											Write_Icon(21, 4, 81, 14, (u08 *) timingicon, '-');
+    607          											Write_Text(3, 1, "Hit SELECT at Finish", '-');
+    608          											button_overlay[SEL] = markfinish;
+    609          										} // if
+    610          										else { // finish line set
+    611          											// set up to find the finish
+    612          											seeklat = trackData.finishLineLat;
+    613          											seeklon = trackData.finishLineLong;
+    614          											seekhdg = trackData.finishLineHeading;
+    615          											tm_state = HILLCLIMBFINISH;
+    616          											Write_Screen((u08 *) predictive, '-');
+    617          											// if no sector times show +- while gathering sectors on next lap
+    618          											if (0xFFFFFFFF == lap.besttime) {
+    619          												// no sectors
+    620          												Write_Icon(111, 23, 8, 8, (u08 *) plussign, '-');
+    621          												Write_Icon(3, 23, 8, 8, (u08 *) minussign, '-');
+    622          											} // if
+    623          											button_overlay[SEL] = NULL;
+    624          										} // else
+    625          										// write lap number on screen
+    626          										Write_Lap();
+    627          										break;
+    628          									case HILLCLIMBSTART:
+    629          										// set up to find the finish
+    630          										seeklat = trackData.finishLineLat;
+    631          										seeklon = trackData.finishLineLong;
+    632          										seekhdg = trackData.finishLineHeading;
+    633          										tm_state = HILLCLIMBFINISH;
+    634          										break;
+    635          									case HILLCLIMBFINISH:
+    636          										// set up to find the start
+    637          										seeklat = trackData.startLineLat;
+    638          										seeklon = trackData.startLineLong;
+    639          										seekhdg = trackData.startLineHeading;
+    640          										tm_state = HILLCLIMBSTART;
+    641          										
+    642          										// put up final adjusted number
+    643          										Write_Timer();
+    644          										break;
+    645          									case AUTOXFINISH:
+    646          										tm_state = AUTOXHOLDTIME;
+    647          	
+    648          										// put up final adjusted number
+    649          										Write_Timer();
+    650          										break;
+    651          									case TIMING:
+    652          										break;
+    653          								} // switch						
+    654          #endif
+    655          							} // if !inrange
+    656          						} // if
+    657          						else // no longer in range
+    658          							inrange = FALSE;
+    659          					} // else if check for heading in range
+    660          				} // if not moving
+    661          			} // else
+    662          		} // else gps position
+    663          #endif
+    664          
+    665          	} // while
+    666          } // LapTimerTask
+    667          
+    668          
+    669          #if 0
+    670          /******************************************************************************
+    671          ** Lap_Store **************************************** GAS 28 JAN 05 ****
+    672          *******************************************************************************
+    673          This function stores the laps collected into flash after a session.
+    674          ******************************************************************************/
+    675          void Lap_Store( void ) {
+    676          
+    677          	// update the index
+    678          	DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, (u08 *) laplist, (LASTLAPPAGE - NUMLAPPAGES + session));
+    679          
+    680          } // Lap_Store
+    681          
+    682          /******************************************************************************
+    683          ** Sector_Store **************************************** GAS 13 APR 07 ****
+    684          *******************************************************************************
+    685          This function stores the lap sectors collected into flash after a session.
+    686          ******************************************************************************/
+    687          void Sector_Store( void ) {
+    688          
+    689          	// get the predictive lap timing sectors for this track
+    690          	DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, PREDPAGESTART + (lap.tracknum / 4));
+    691          		
+    692          	// if lap better than that stored, replace it
+    693          	if ((u32) lap.besttime < (u32) flashpage.storedsectors[lap.tracknum % 4].bestlapever) {
+    694          		int i;
+    695          		
+    696          		// copy lap time
+    697          		storedsectors[lap.tracknum % 4].bestlapever = lap.besttime;
+    698          
+    699          		// copy sector times
+    700          		for (i = 0; i < NUMSECTORS; i++)
+    701          			flashpage.storedsectors[lap.tracknum % 4].bestsectortimes[i] = sector[i].reference;
+    702          
+    703          		// write out new best lap info
+    704          		DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, PREDPAGESTART + (lap.tracknum / 4));
+    705          	} // if
+    706          } // Sector_Store	
+    707          #endif
+
+Errors: 4
+Warnings: none

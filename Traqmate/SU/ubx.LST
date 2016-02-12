@@ -1,0 +1,962 @@
+C51 COMPILER V9.51   UBX                                                                   01/05/2016 18:47:25 PAGE 1   
+
+
+C51 COMPILER V9.51, COMPILATION OF MODULE UBX
+OBJECT MODULE PLACED IN ubx.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE ubx.c OPTIMIZE(SIZE) BROWSE MDU_F120 INCDIR(..\..\C51\INC\;..\CommonFiles\;
+                    -..\SU\) DB OE DEFINE(SENSOR,EXTCLK6,NODEBUG,UBLOX,DISPLAYATTACHED) DEBUG OBJECTEXTEND
+
+line level    source
+
+   1          // Part of traqmate.c
+   2          // 11/15/2004
+   3          // 3/27/2009 added support for Ublox LEA-5 GPS chip
+   4          // Author: GAStephens
+   5          //
+   6          // This file contains the Ublox UBX protocol definitions.
+   7          //
+   8          #include <sensor.h>
+   9          #include <ubx.h>
+  10          
+  11          #define NUMUBLOXMSGS    3                       // number of UBX messages to handle
+  12          #define LEADYNPLAT              4                       // dynamic platform for LEA chip, 4 = car
+  13          
+  14          typedef struct {
+  15                  u16 messageid;
+  16                  u08 enabled;
+  17          } messagelisttype;
+  18          
+  19          void UBXBaudChange() {
+  20   1              u16 i;
+  21   1              u32 timeoutctr;
+  22   1              
+  23   1              // point to the GPS receiver configuration packet
+  24   1              u08 *packet = com[1].txbuff;
+  25   1              
+  26   1              // clear out any junk in the input buffer or messages received
+  27   1              com[1].rxnextidx = com[1].rxfirstidx;
+  28   1      
+  29   1      #ifdef DEBUG
+                      PWRLED = 1;                     // signal that we are trying to communicate with Ublox
+              #endif
+  32   1      
+  33   1              // send a set measuring rate packet just to ensure that we are talking with Ublox
+  34   1              while (1) {     // repeat until we get it right
+  35   2                      i = 0;
+  36   2                      timeoutctr = 0;
+  37   2      
+  38   2                      packet[UBXPAYLOAD+i++] = GPS_MS & 0xFF;                 // lower byte of GPS measurement rate in ms
+  39   2                      packet[UBXPAYLOAD+i++] = GPS_MS >> 8;                   // upper byte of GPS measurement rate in ms
+  40   2                      packet[UBXPAYLOAD+i++] = 1;                                             // 1 report per measurement cycle
+  41   2                      packet[UBXPAYLOAD+i++] = 0;
+  42   2      
+  43   2                      packet[UBXPAYLOAD+i++] = 1;                                             // align to GPS time
+  44   2                      packet[UBXPAYLOAD+i++] = 0;
+  45   2      
+  46   2                      // send configuration message
+  47   2                      UBXSendPacket(CFGRATE, i);
+  48   2      
+  49   2                      // wait for transmission to finish
+  50   2                      while (0 != com[1].txbytes) ;
+  51   2      
+  52   2                      i = clocktick;                  // init message id
+  53   2      
+  54   2                      // wait for a valid ubx response with approx 435 msec timeout (timeoutctr max / 11500)
+C51 COMPILER V9.51   UBX                                                                   01/05/2016 18:47:25 PAGE 2   
+
+  55   2                      do {} while (com[1].rxnextidx == com[1].rxfirstidx && ++timeoutctr < 5000000L) ;
+  56   2      
+  57   2                      if (com[1].rxnextidx != com[1].rxfirstidx)              // got a good message = ublox talking
+  58   2                              break;
+  59   2              } ; // while
+  60   1      
+  61   1      #ifdef DEBUG
+                      RECLED = 1;                     // signal that we have successfully talked at 9600
+              #endif
+  64   1      
+  65   1              // we are talking so now configure protocols and baudrates on port
+  66   1              i = 0;
+  67   1      
+  68   1              packet[UBXPAYLOAD+i++] = 1;                     // 0 port number 1
+  69   1              packet[UBXPAYLOAD+i++] = 0;                     // 1 reserved
+  70   1              packet[UBXPAYLOAD+i++] = 0;                     // 2 reserved
+  71   1              packet[UBXPAYLOAD+i++] = 0;                     // 3 reserved
+  72   1              packet[UBXPAYLOAD+i++] = 0xC0;          // 4 11000000   8 bits
+  73   1              packet[UBXPAYLOAD+i++] = 0x08;          // 5 00001000   1 stop bit, no parity                           
+  74   1              packet[UBXPAYLOAD+i++] = 0;                     // 6 bitmask second byte
+  75   1              packet[UBXPAYLOAD+i++] = 0;                     // 7 bitmask top byte
+  76   1              * (s32 *) (packet + UBXPAYLOAD + i) = SWAP32(UBXBAUD);  // 8 57 Kbps
+  77   1              i += 4;
+  78   1              packet[UBXPAYLOAD+i++] = 0x01;          // 12 bitmask ublox input enabled
+  79   1              packet[UBXPAYLOAD+i++] = 0x00;          // 13 bitmask top byte
+  80   1              packet[UBXPAYLOAD+i++] = 0x01;          // 14 bitmask ublox output enabled
+  81   1              packet[UBXPAYLOAD+i++] = 0x00;          // 15 bitmask top byte
+  82   1              packet[UBXPAYLOAD+i++] = 0;                     // 16 reserved
+  83   1              packet[UBXPAYLOAD+i++] = 0;                     // 17 reserved
+  84   1              packet[UBXPAYLOAD+i++] = 0;                     // 18 reserved
+  85   1              packet[UBXPAYLOAD+i++] = 0;                     // 19 reserved
+  86   1      
+  87   1              // send configuration message
+  88   1              UBXSendPacket(CFGPRT, i);
+  89   1      
+  90   1              // wait for transmission to finish
+  91   1              while (0 != com[1].txbytes) ;
+  92   1      
+  93   1              // create a gap in case uart glitches on baudrate reprogram
+  94   1              DELAY_MS(5);
+  95   1      //      DELAY_MS(30);
+  96   1      
+  97   1      #ifdef DEBUG
+                      GPSLED = 1;                             // signal that baud rate changed
+              #endif
+ 100   1                      
+ 101   1              // change the UART baud rate
+ 102   1              UART_Init(&(com[1]), UBXBAUD);
+ 103   1      
+ 104   1              // breath a moment
+ 105   1              DELAY_MS(40);                   // 40 msec is correct value = verified on o-scope
+ 106   1                      
+ 107   1      } // UBXBaudChange
+ 108          
+ 109          void UBXInit() {
+ 110   1              u16 i;
+ 111   1              u08 msgcnt;
+ 112   1              xdata messagelisttype messagelist[NUMUBLOXMSGS] = {
+ 113   1                      { NAVVELNED, 1 },
+ 114   1                      { NAVSOL, 1 },
+ 115   1                      { NAVPOSLLH, 1 }
+ 116   1                      };
+C51 COMPILER V9.51   UBX                                                                   01/05/2016 18:47:25 PAGE 3   
+
+ 117   1      
+ 118   1              // point to the GPS receiver configuration packet
+ 119   1              u08 *packet = com[1].txbuff;
+ 120   1              
+ 121   1              if (su2) {      // LEA-5A
+ 122   2                      // clear out any junk in the input buffer from baud change
+ 123   2                      com[1].rxnextidx = com[1].rxfirstidx;
+ 124   2              
+ 125   2                      // turn UBX messages on/off
+ 126   2                      for (msgcnt = 0; msgcnt < NUMUBLOXMSGS; msgcnt++) {
+ 127   3                              do {    // repeat until we get it right
+ 128   4                                      i = 0;
+ 129   4                      
+ 130   4                                      packet[UBXPAYLOAD+i++] = (messagelist[msgcnt].messageid >> 8) & 0xFF;   // class
+ 131   4                                      packet[UBXPAYLOAD+i++] = messagelist[msgcnt].messageid & 0xFF;          // id
+ 132   4                                      packet[UBXPAYLOAD+i++] = messagelist[msgcnt].enabled;           // enable?
+ 133   4                      
+ 134   4                                      // send configuration message
+ 135   4                                      UBXSendPacket(CFGMSG, i);
+ 136   4              
+ 137   4                                      // wait for transmission to finish
+ 138   4                                      while (0 != com[1].txbytes) ;
+ 139   4                      
+ 140   4                                      // wait for a UBX message
+ 141   4                                      while (com[1].rxnextidx == com[1].rxfirstidx)
+ 142   4                                              if (10000 == i++) break;
+ 143   4                      
+ 144   4                                      do { // check all queued UBX messages
+ 145   5                                              // get the message id
+ 146   5                                              i = * ((u16 *) (com[1].rxbuff + com[1].rxfirstidx*UBXRXSIZE));
+ 147   5                                                              
+ 148   5                                              // increment counter to point to next inbound message in queue
+ 149   5                                              com[1].rxfirstidx = (com[1].rxfirstidx == (GPSRXBUFCNT-1))? 0 : com[1].rxfirstidx + 1;
+ 150   5              
+ 151   5                                              if (i == ACKACK) break;
+ 152   5                      
+ 153   5                                      } while (com[1].rxnextidx != com[1].rxfirstidx);
+ 154   4                      
+ 155   4                                      DELAY_MS(10);                   // pause a moment
+ 156   4                              } while (i != ACKACK);
+ 157   3      #ifdef DEBUG
+                                      PWRLED = 0;                             // signal that communication has succeeded at 576
+              #endif
+ 160   3                      } // for
+ 161   2              } // if
+ 162   1              else {  // su1 = TIM-LC
+ 163   2                      // turn UBX messages on/off and set the reporting rate
+ 164   2                      // done in two stages to keep the message sizes down
+ 165   2                      do {    // repeat until we get it right
+ 166   3                              i = 0;
+ 167   3              
+ 168   3                              packet[UBXPAYLOAD+i++] = NAV;
+ 169   3                              packet[UBXPAYLOAD+i++] = NAVPOSLLH & 0xFF;              // position information
+ 170   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on target 0
+ 171   3                              packet[UBXPAYLOAD+i++] = 1;                                             // output on uart 1
+ 172   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 2
+ 173   3                              packet[UBXPAYLOAD+i++] = 0;
+ 174   3                              packet[UBXPAYLOAD+i++] = NAV;
+ 175   3                              packet[UBXPAYLOAD+i++] = NAVPOSECEF & 0xFF;             // position information
+ 176   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on target 0
+ 177   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 1
+ 178   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 2
+C51 COMPILER V9.51   UBX                                                                   01/05/2016 18:47:25 PAGE 4   
+
+ 179   3                              packet[UBXPAYLOAD+i++] = 0;
+ 180   3                              packet[UBXPAYLOAD+i++] = NAV;
+ 181   3                              packet[UBXPAYLOAD+i++] = NAVSOL & 0xFF;                 // navigation solution
+ 182   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on target 0
+ 183   3                              packet[UBXPAYLOAD+i++] = 1;                                             // output on uart 1
+ 184   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 2
+ 185   3                              packet[UBXPAYLOAD+i++] = 0;
+ 186   3                              packet[UBXPAYLOAD+i++] = NAV;
+ 187   3                              packet[UBXPAYLOAD+i++] = NAVVELNED & 0xFF;              // velocities
+ 188   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on target 0
+ 189   3                              packet[UBXPAYLOAD+i++] = 1;                                             // output on uart 1
+ 190   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 2
+ 191   3                              packet[UBXPAYLOAD+i++] = 0;
+ 192   3                              packet[UBXPAYLOAD+i++] = NAV;
+ 193   3                              packet[UBXPAYLOAD+i++] = NAVSTATUS & 0xFF;
+ 194   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on target 0
+ 195   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 1
+ 196   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 2
+ 197   3                              packet[UBXPAYLOAD+i++] = 0;
+ 198   3                              packet[UBXPAYLOAD+i++] = NAV;
+ 199   3                              packet[UBXPAYLOAD+i++] = NAVSVINFO & 0xFF;
+ 200   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on target 0
+ 201   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 1
+ 202   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 2
+ 203   3                              packet[UBXPAYLOAD+i++] = 0;
+ 204   3                              packet[UBXPAYLOAD+i++] = NAV;
+ 205   3                              packet[UBXPAYLOAD+i++] = NAVDOP & 0xFF;
+ 206   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on target 0
+ 207   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 1
+ 208   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 2
+ 209   3                              packet[UBXPAYLOAD+i++] = 0;
+ 210   3                              packet[UBXPAYLOAD+i++] = NAV;
+ 211   3                              packet[UBXPAYLOAD+i++] = NAVTIMEGPS & 0xFF;
+ 212   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on target 0
+ 213   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 1
+ 214   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 2
+ 215   3                              packet[UBXPAYLOAD+i++] = 0;
+ 216   3      
+ 217   3                              // send configuration message
+ 218   3                              UBXSendPacket(CFGMSG, i);
+ 219   3              
+ 220   3                              // wait for transmission to finish
+ 221   3                              while (0 != com[1].txbytes) ;
+ 222   3              
+ 223   3                              // wait for a UBX message
+ 224   3                              while (com[1].rxnextidx == com[1].rxfirstidx) ;
+ 225   3              
+ 226   3                              do { // check all queued UBX messages
+ 227   4                                      // get the message id
+ 228   4                                      i = * ((u16 *) (com[1].rxbuff + com[1].rxfirstidx*UBXRXSIZE));
+ 229   4                                                                      
+ 230   4                                      // increment counter to point to next inbound message in queue
+ 231   4                                      com[1].rxfirstidx = (com[1].rxfirstidx == (GPSRXBUFCNT-1))? 0 : com[1].rxfirstidx + 1;
+ 232   4              
+ 233   4                                      if (i == ACKACK) break;
+ 234   4              
+ 235   4                              } while (com[1].rxnextidx != com[1].rxfirstidx);
+ 236   3              
+ 237   3                              DELAY_MS(20);                   // pause a moment
+ 238   3              
+ 239   3                      } while (i != ACKACK);
+ 240   2              
+C51 COMPILER V9.51   UBX                                                                   01/05/2016 18:47:25 PAGE 5   
+
+ 241   2                      // turn UBX messages on/off and set the reporting rate
+ 242   2                      do {    // repeat until we get it right
+ 243   3                              i = 0;
+ 244   3              
+ 245   3                              packet[UBXPAYLOAD+i++] = NAV;
+ 246   3                              packet[UBXPAYLOAD+i++] = NAVVELECEF & 0xFF;
+ 247   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on target 0
+ 248   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 1
+ 249   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 2
+ 250   3                              packet[UBXPAYLOAD+i++] = 0;
+ 251   3                              packet[UBXPAYLOAD+i++] = NAV;
+ 252   3                              packet[UBXPAYLOAD+i++] = NAVTIMEUTC & 0xFF;
+ 253   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on target 0
+ 254   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 1
+ 255   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 2
+ 256   3                              packet[UBXPAYLOAD+i++] = 0;
+ 257   3                              packet[UBXPAYLOAD+i++] = NAV;
+ 258   3                              packet[UBXPAYLOAD+i++] = NAVCLOCK & 0xFF;
+ 259   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on target 0
+ 260   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 1
+ 261   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 2
+ 262   3                              packet[UBXPAYLOAD+i++] = 0;
+ 263   3                              packet[UBXPAYLOAD+i++] = MON;
+ 264   3                              packet[UBXPAYLOAD+i++] = MONRXBUF & 0xFF;
+ 265   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on target 0
+ 266   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 1
+ 267   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 2
+ 268   3                              packet[UBXPAYLOAD+i++] = 0;
+ 269   3                              packet[UBXPAYLOAD+i++] = MON;
+ 270   3                              packet[UBXPAYLOAD+i++] = MONTXBUF & 0xFF;
+ 271   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on target 0
+ 272   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 1
+ 273   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 2
+ 274   3                              packet[UBXPAYLOAD+i++] = 0;
+ 275   3                              packet[UBXPAYLOAD+i++] = MON;
+ 276   3                              packet[UBXPAYLOAD+i++] = MONIO & 0xFF;
+ 277   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on target 0
+ 278   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 1
+ 279   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 2
+ 280   3                              packet[UBXPAYLOAD+i++] = 0;
+ 281   3                              packet[UBXPAYLOAD+i++] = MON;
+ 282   3                              packet[UBXPAYLOAD+i++] = MONHW & 0xFF;
+ 283   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on target 0
+ 284   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 1
+ 285   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 2
+ 286   3                              packet[UBXPAYLOAD+i++] = 0;
+ 287   3                              packet[UBXPAYLOAD+i++] = MON;
+ 288   3                              packet[UBXPAYLOAD+i++] = MONSCHD & 0xFF;
+ 289   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on target 0
+ 290   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 1
+ 291   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 2
+ 292   3                              packet[UBXPAYLOAD+i++] = 0;
+ 293   3                              packet[UBXPAYLOAD+i++] = MON;
+ 294   3                              packet[UBXPAYLOAD+i++] = MONIPC & 0xFF;
+ 295   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on target 0
+ 296   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 1
+ 297   3                              packet[UBXPAYLOAD+i++] = 0;                                             // no output on uart 2
+ 298   3                              packet[UBXPAYLOAD+i++] = 0;
+ 299   3      
+ 300   3                              // send configuration message
+ 301   3                              UBXSendPacket(CFGMSG, i);
+ 302   3              
+C51 COMPILER V9.51   UBX                                                                   01/05/2016 18:47:25 PAGE 6   
+
+ 303   3                              // wait for transmission to finish
+ 304   3                              while (0 != com[1].txbytes) ;
+ 305   3              
+ 306   3                              // wait for a UBX message
+ 307   3                              while (com[1].rxnextidx == com[1].rxfirstidx) ;
+ 308   3              
+ 309   3                              do { // check all queued UBX messages
+ 310   4                                      // get the message id
+ 311   4                                      i = * ((u16 *) (com[1].rxbuff + com[1].rxfirstidx*UBXRXSIZE));
+ 312   4                                                                      
+ 313   4                                      // increment counter to point to next inbound message in queue
+ 314   4                                      com[1].rxfirstidx = (com[1].rxfirstidx == (GPSRXBUFCNT-1))? 0 : com[1].rxfirstidx + 1;
+ 315   4              
+ 316   4                                      if (i == ACKACK) break;
+ 317   4              
+ 318   4                              } while (com[1].rxnextidx != com[1].rxfirstidx);
+ 319   3              
+ 320   3                              DELAY_MS(20);                   // pause a moment
+ 321   3              
+ 322   3                      } while (i != ACKACK);
+ 323   2      
+ 324   2                      // set the measuring rate (done earlier in su2)
+ 325   2                      do {    // repeat until we get it right
+ 326   3                              i = 0;
+ 327   3              
+ 328   3                              packet[UBXPAYLOAD+i++] = GPS_MS & 0xFF;                 // lower byte of GPS measurement rate in ms
+ 329   3                              packet[UBXPAYLOAD+i++] = GPS_MS >> 8;                   // upper byte of GPS measurement rate in ms
+ 330   3                              packet[UBXPAYLOAD+i++] = 1;                                             // 1 report per measurement cycle
+ 331   3                              packet[UBXPAYLOAD+i++] = 0;
+ 332   3              
+ 333   3                              packet[UBXPAYLOAD+i++] = 1;                                             // align to GPS time
+ 334   3                              packet[UBXPAYLOAD+i++] = 0;
+ 335   3                              
+ 336   3                              // send configuration message
+ 337   3                              UBXSendPacket(CFGRATE, i);
+ 338   3              
+ 339   3                              // wait for transmission to finish
+ 340   3                              while (0 != com[1].txbytes) ;
+ 341   3              
+ 342   3                              // wait for a UBX message
+ 343   3                              while (com[1].rxnextidx == com[1].rxfirstidx) ;
+ 344   3              
+ 345   3                              do { // check all queued UBX messages
+ 346   4                                      // get the message id
+ 347   4                                      i = * ((u16 *) (com[1].rxbuff + com[1].rxfirstidx*UBXRXSIZE));
+ 348   4                                                      
+ 349   4                                      // increment counter to point to next inbound message in queue
+ 350   4                                      com[1].rxfirstidx = (com[1].rxfirstidx == (GPSRXBUFCNT-1))? 0 : com[1].rxfirstidx + 1;
+ 351   4              
+ 352   4                                      if (i == ACKACK) break;
+ 353   4              
+ 354   4                              } while (com[1].rxnextidx != com[1].rxfirstidx);
+ 355   3              
+ 356   3                              DELAY_MS(10);                   // pause a moment
+ 357   3              
+ 358   3                      } while (i != ACKACK);
+ 359   2              } // else
+ 360   1              
+ 361   1              // set the pulse parameters
+ 362   1              do {    // repeat until we get it right
+ 363   2                      u32 templong;
+ 364   2                      
+C51 COMPILER V9.51   UBX                                                                   01/05/2016 18:47:25 PAGE 7   
+
+ 365   2                      templong = 10000000L / (long) samps_per_sec;
+ 366   2                      * ((u32 *) &(packet[UBXPAYLOAD])) = SWAP32(templong);   // pulse time interval
+ 367   2      
+ 368   2                      templong = GPS_PULSE_WID;
+ 369   2                      * ((u32 *) &(packet[UBXPAYLOAD+4])) = SWAP32(templong); // pulse time interval
+ 370   2      
+ 371   2                      i = 8;
+ 372   2                      packet[UBXPAYLOAD+i++] = 1;                                             // positive pulse
+ 373   2                      packet[UBXPAYLOAD+i++] = 1;                                             // GPS time
+ 374   2                      packet[UBXPAYLOAD+i++] = 0;                                             // reserved
+ 375   2                      packet[UBXPAYLOAD+i++] = 0;                                             // reserved
+ 376   2                      packet[UBXPAYLOAD+i++] = 50;                                    // 50 ns cable delay (Ublox supplied typical value)
+ 377   2                      packet[UBXPAYLOAD+i++] = 0;
+ 378   2                      packet[UBXPAYLOAD+i++] = 820 & 0xFF;                    // rcvr delay (Ublox supplied value)
+ 379   2                      packet[UBXPAYLOAD+i++] = 820 >> 8;
+ 380   2                      packet[UBXPAYLOAD+i++] = 0;                                             // 0 user delay
+ 381   2                      packet[UBXPAYLOAD+i++] = 0;
+ 382   2                      packet[UBXPAYLOAD+i++] = 0;
+ 383   2                      packet[UBXPAYLOAD+i++] = 0;
+ 384   2                      
+ 385   2                      // send configuration message
+ 386   2                      UBXSendPacket(CFGTP, i);
+ 387   2      
+ 388   2                      // wait for transmission to finish
+ 389   2                      while (0 != com[1].txbytes) ;
+ 390   2      
+ 391   2                      // wait for a UBX message
+ 392   2                      while (com[1].rxnextidx == com[1].rxfirstidx) ;
+ 393   2      
+ 394   2                      do { // check all queued UBX messages
+ 395   3                              // get the message id
+ 396   3                              i = * ((u16 *) (com[1].rxbuff + com[1].rxfirstidx*UBXRXSIZE));
+ 397   3                                                              
+ 398   3                              // increment counter to point to next inbound message in queue
+ 399   3                              com[1].rxfirstidx = (com[1].rxfirstidx == (GPSRXBUFCNT-1))? 0 : com[1].rxfirstidx + 1;
+ 400   3      
+ 401   3                              if (i == ACKACK) break;
+ 402   3      
+ 403   3                      } while (com[1].rxnextidx != com[1].rxfirstidx);
+ 404   2                      
+ 405   2                      DELAY_MS(10);                   // pause a moment
+ 406   2                      
+ 407   2              } while (i != ACKACK);
+ 408   1      
+ 409   1              if (su2) {
+ 410   2      #if 0           // drop this code after V2.20 is successful in field
+                              // change to max performance mode, Ublox firmware V4.00 - undocumented command from
+                              // Ublox document GPS.G5.CS-08022, Ublox5 Power Management Considerations
+                              do {    // repeat until we get it right
+                                      i = 0;
+                              
+                                      packet[UBXPAYLOAD+i++] = 0;
+                                      packet[UBXPAYLOAD+i++] = 0;
+                                      packet[UBXPAYLOAD+i++] = 0;
+                                      packet[UBXPAYLOAD+i++] = 0;
+                                      packet[UBXPAYLOAD+i++] = 0x40;                  
+                                      packet[UBXPAYLOAD+i++] = 0x1F;
+                                      packet[UBXPAYLOAD+i++] = 0xE8;
+                                      packet[UBXPAYLOAD+i++] = 0x03;
+                                      packet[UBXPAYLOAD+i++] = 0x98;
+                                      packet[UBXPAYLOAD+i++] = 0x3A;
+                                      packet[UBXPAYLOAD+i++] = 0xB0;
+C51 COMPILER V9.51   UBX                                                                   01/05/2016 18:47:25 PAGE 8   
+
+                                      packet[UBXPAYLOAD+i++] = 0x04;
+                                      packet[UBXPAYLOAD+i++] = 0xE8;
+                                      packet[UBXPAYLOAD+i++] = 0x03;
+                                      packet[UBXPAYLOAD+i++] = 0x03;                          
+                                      packet[UBXPAYLOAD+i++] = 0;                     
+                                                                                              
+                                      // send configuration message
+                                      UBXSendPacket(CFGUDOC, i);
+                      
+                                      // wait for transmission to finish
+                                      while (0 != com[1].txbytes) ;
+                              
+                                      // wait for a UBX message
+                                      while (com[1].rxnextidx == com[1].rxfirstidx) ;
+                      
+                                      do { // check all queued UBX messages
+                                              // get the message id
+                                              i = * ((u16 *) (com[1].rxbuff + com[1].rxfirstidx*UBXRXSIZE));
+                                                              
+                                              // increment counter to point to next inbound message in queue
+                                              com[1].rxfirstidx = (com[1].rxfirstidx == (GPSRXBUFCNT-1))? 0 : com[1].rxfirstidx + 1;
+                      
+                                              if (i == ACKACK) break;
+                      
+                                      } while (com[1].rxnextidx != com[1].rxfirstidx);
+                      
+                                      DELAY_MS(10);                   // pause a moment
+                              } while (i != ACKACK);
+              
+                              // code trap
+                              i = i + 1;
+              #endif
+ 459   2                      // change to max performance mode, Ublox LEA-5 firmware V5.00 and higher
+ 460   2                      do {    // repeat until we get it right
+ 461   3                              i = 0;
+ 462   3                      
+ 463   3                              packet[UBXPAYLOAD+i++] = 0;                     // 0 reserved
+ 464   3                              packet[UBXPAYLOAD+i++] = 0;                     // 1 Max performance mode
+ 465   3                                                                                                              
+ 466   3                              // send configuration message
+ 467   3                              UBXSendPacket(CFGRXM, i);
+ 468   3              
+ 469   3                              // wait for transmission to finish
+ 470   3                              while (0 != com[1].txbytes) ;
+ 471   3                      
+ 472   3                              // wait for a UBX message
+ 473   3                              while (com[1].rxnextidx == com[1].rxfirstidx) ;
+ 474   3              
+ 475   3                              do { // check all queued UBX messages
+ 476   4                                      // get the message id
+ 477   4                                      i = * ((u16 *) (com[1].rxbuff + com[1].rxfirstidx*UBXRXSIZE));
+ 478   4                                                      
+ 479   4                                      // increment counter to point to next inbound message in queue
+ 480   4                                      com[1].rxfirstidx = (com[1].rxfirstidx == (GPSRXBUFCNT-1))? 0 : com[1].rxfirstidx + 1;
+ 481   4              
+ 482   4                                      if (i == ACKACK) break;
+ 483   4              
+ 484   4                              } while (com[1].rxnextidx != com[1].rxfirstidx);
+ 485   3              
+ 486   3                              DELAY_MS(10);                   // pause a moment
+ 487   3                      } while (i != ACKACK);
+ 488   2      
+C51 COMPILER V9.51   UBX                                                                   01/05/2016 18:47:25 PAGE 9   
+
+ 489   2                      // turn off auto sbas to allow good 4Hz operation
+ 490   2                      do {    // repeat until we get it right
+ 491   3                              i = 0;
+ 492   3              
+ 493   3                              packet[UBXPAYLOAD+i++] = 0;                     // 0 sbas disabled
+ 494   3                              packet[UBXPAYLOAD+i++] = 0;                     // 1 no uses
+ 495   3                              packet[UBXPAYLOAD+i++] = 0;                     // 2 max sbas channels
+ 496   3                              packet[UBXPAYLOAD+i++] = 0;                     // 3 scanmode
+ 497   3                              packet[UBXPAYLOAD+i++] = 0;                     // 4 scanmode
+ 498   3                              packet[UBXPAYLOAD+i++] = 0;                     // 5 scanmode
+ 499   3                              packet[UBXPAYLOAD+i++] = 0;                     // 6 scanmode
+ 500   3                              packet[UBXPAYLOAD+i++] = 0;                     // 7 scanmode
+ 501   3                              
+ 502   3                              // send configuration message
+ 503   3                              UBXSendPacket(CFGSBAS, i);
+ 504   3              
+ 505   3                              // wait for transmission to finish
+ 506   3                              while (0 != com[1].txbytes) ;
+ 507   3              
+ 508   3                              // wait for a UBX message
+ 509   3                              while (com[1].rxnextidx == com[1].rxfirstidx) ;
+ 510   3              
+ 511   3                              do { // check all queued UBX messages
+ 512   4                                      // get the message id
+ 513   4                                      i = * ((u16 *) (com[1].rxbuff + com[1].rxfirstidx*UBXRXSIZE));
+ 514   4                                                                      
+ 515   4                                      // increment counter to point to next inbound message in queue
+ 516   4                                      com[1].rxfirstidx = (com[1].rxfirstidx == (GPSRXBUFCNT-1))? 0 : com[1].rxfirstidx + 1;
+ 517   4                                      
+ 518   4                                      if (i == ACKACK) break;
+ 519   4              
+ 520   4                              } while (com[1].rxnextidx != com[1].rxfirstidx);
+ 521   3              
+ 522   3                              DELAY_MS(10);                   // pause a moment
+ 523   3              
+ 524   3                      } while (i != ACKACK);
+ 525   2              
+ 526   2                      // set the nav engine settings
+ 527   2                      do {    // repeat until we get it right
+ 528   3                              i = 0;
+ 529   3              
+ 530   3                              packet[UBXPAYLOAD+i++] = 0x05;                                  // 0 parameter bitmask lower byte, change dynamic platform & fixmode
+ 531   3                              packet[UBXPAYLOAD+i++] = 0x00;                                  // 1 parameter bitmask upper byte
+ 532   3                              packet[UBXPAYLOAD+i++] = LEADYNPLAT;                    // 2  dynamic platform, 0 = portable, 2 = stationery, 
+ 533   3                                                                                                                              //       3 = pedestrian, 4 = car, 5 = sea, 6 = airborne <1g,
+ 534   3                                                                                                                              //       7 = airborne <2g, 8 = airborne <4g
+ 535   3                              packet[UBXPAYLOAD+i++] = 2;                                             // 3 fixing mode - 3d only
+ 536   3                              * (s32 *) (packet + UBXPAYLOAD + i) = SWAP32(50000L);   // 4 fixed alt - 2d mode only
+ 537   3                              i += 4;
+ 538   3                              * (s32 *) (packet + UBXPAYLOAD + i) = SWAP32(0L);       // 8 fixed alt variance
+ 539   3                              i += 4;
+ 540   3                              packet[UBXPAYLOAD+i++] = 5;                                             // 12 min elevation
+ 541   3                              packet[UBXPAYLOAD+i++] = 0;                                             // 13 dead reckoning max time
+ 542   3                              * (u16 *) (packet + UBXPAYLOAD + i) = SWAP16(250); // 14 position dop mask
+ 543   3                              i += 2;
+ 544   3                              * (u16 *) (packet + UBXPAYLOAD + i) = SWAP16(250); // 16 time dop mask
+ 545   3                              i += 2;
+ 546   3                              * (u16 *) (packet + UBXPAYLOAD + i) = SWAP16(100); // 18 position accuracy mask
+ 547   3                              i += 2;
+ 548   3                              * (u16 *) (packet + UBXPAYLOAD + i) = SWAP16(300); // 20 time accuracy mask
+ 549   3                              i += 2;
+ 550   3                              packet[UBXPAYLOAD+i++] = 0;                                             // 22 static threshold in cm/s, 0 = disable
+C51 COMPILER V9.51   UBX                                                                   01/05/2016 18:47:25 PAGE 10  
+
+ 551   3                              packet[UBXPAYLOAD+i++] = 0;                                             // 23 reserved
+ 552   3                              packet[UBXPAYLOAD+i++] = 0;                                             // 24 reserved 1
+ 553   3                              packet[UBXPAYLOAD+i++] = 0;                                             // 25 reserved 2
+ 554   3                              packet[UBXPAYLOAD+i++] = 0;                                             // 26 reserved 3
+ 555   3                              packet[UBXPAYLOAD+i++] = 0;                                             // 27 reserved 4
+ 556   3                              packet[UBXPAYLOAD+i++] = 0;                                             // 28 reserved 1
+ 557   3                              packet[UBXPAYLOAD+i++] = 0;                                             // 29 reserved 2
+ 558   3                              packet[UBXPAYLOAD+i++] = 0;                                             // 30 reserved 3
+ 559   3                              packet[UBXPAYLOAD+i++] = 0;                                             // 31 reserved 4
+ 560   3                              packet[UBXPAYLOAD+i++] = 0;                                             // 32 reserved 1
+ 561   3                              packet[UBXPAYLOAD+i++] = 0;                                             // 33 reserved 2
+ 562   3                              packet[UBXPAYLOAD+i++] = 0;                                             // 34 reserved 3
+ 563   3                              packet[UBXPAYLOAD+i++] = 0;                                             // 35 reserved 4
+ 564   3                                                              
+ 565   3                              // send configuration message
+ 566   3                              UBXSendPacket(CFGNAV5, i);
+ 567   3              
+ 568   3                              // wait for transmission to finish
+ 569   3                              while (0 != com[1].txbytes) ;
+ 570   3              
+ 571   3                              // wait for a UBX message
+ 572   3                              while (com[1].rxnextidx == com[1].rxfirstidx) ;
+ 573   3              
+ 574   3                                      do { // check all queued UBX messages
+ 575   4                                              // get the message id
+ 576   4                                              i = * ((u16 *) (com[1].rxbuff + com[1].rxfirstidx*UBXRXSIZE));
+ 577   4                                              
+ 578   4                                              // increment counter to point to next inbound message in queue
+ 579   4                                              com[1].rxfirstidx = (com[1].rxfirstidx == (GPSRXBUFCNT-1))? 0 : com[1].rxfirstidx + 1;
+ 580   4                      
+ 581   4                                              if (i == ACKACK) break;
+ 582   4                      
+ 583   4                                      } while (com[1].rxnextidx != com[1].rxfirstidx);
+ 584   3              
+ 585   3                              DELAY_MS(10);                   // pause a moment
+ 586   3              
+ 587   3                      } while (i != ACKACK);  
+ 588   2              } // if
+ 589   1      } // UBXInit
+ 590          
+ 591          void UBXSendPacket(u16 ubxcmd, u16 datalen) {
+ 592   1              int     i;
+ 593   1              u08 cka, ckb;
+ 594   1      
+ 595   1              // first synch char
+ 596   1              com[1].txbuff[0] =      SYNCH1;
+ 597   1              // second synch char
+ 598   1              com[1].txbuff[1] =      SYNCH2;
+ 599   1              // class
+ 600   1              com[1].txbuff[2] =      ubxcmd >> 8;
+ 601   1              // message id
+ 602   1              com[1].txbuff[3] =      ubxcmd & 0xFF;
+ 603   1              // length lsb
+ 604   1              com[1].txbuff[4] =      datalen & 0xFF;
+ 605   1              // length msb
+ 606   1              com[1].txbuff[5] =      datalen >> 8;
+ 607   1      
+ 608   1              // calculate checksum
+ 609   1              cka = ckb = 0;
+ 610   1              for(i=2; i<(datalen+UBXPAYLOAD); i++) {
+ 611   2                      cka = cka + com[1].txbuff[i];
+ 612   2                      ckb = ckb + cka;
+C51 COMPILER V9.51   UBX                                                                   01/05/2016 18:47:25 PAGE 11  
+
+ 613   2              }
+ 614   1              // checksum a
+ 615   1              com[1].txbuff[datalen+UBXPAYLOAD] =     cka;
+ 616   1              // checksum b
+ 617   1              com[1].txbuff[datalen+UBXPAYLOAD+1] = ckb;
+ 618   1      
+ 619   1              // send out     the     packet
+ 620   1              XmitUART(&(com[1]), datalen+UBXPAYLOAD+2);
+ 621   1      }
+ 622          
+ 623          // the following routine will parse a ubx message based on the class and message id
+ 624          void Parse_UBX(u08 *ubxptr, gpstype * gps) {
+ 625   1              static xdata BOOL ubxdone = FALSE;                      // TRUE when ubx has been initialized
+ 626   1              static xdata s16 simevel = 3;                           // e-w velocity for simulation
+ 627   1              static xdata s16 simnvel = -5;                          // n-s velocity for simulation
+ 628   1              static xdata BOOL eastinc = FALSE;                      // TRUE if east velocity increasing
+ 629   1              static xdata BOOL northinc = TRUE;                      // TRUE if north velocity increasing
+ 630   1              static xdata BOOL updaterate = 0;                       // controls change in east and north velocity
+ 631   1              u08 *ptr;                                                                       // general purpose pointer
+ 632   1              int i;                                                                          // counter index
+ 633   1      
+ 634   1              // upon first command, set up the unit
+ 635   1              if (!ubxdone) {
+ 636   2                      ubxdone = TRUE;
+ 637   2                      // initialize the Ublox
+ 638   2                      UBXInit();
+ 639   2              } // if
+ 640   1      
+ 641   1              // switch on the class/message type
+ 642   1              else switch(* ((u16 *) ubxptr)) {
+ 643   2                      case NAVPOSLLH: {                       // position in LLH format (degrees)
+ 644   3                              s32 templong;
+ 645   3                              BOOL negative;
+ 646   3      
+ 647   3      // V2.1 changed 11930L to 11931L which provides a closer approximation by compensating for round-down
+ 648   3                              code long degarray[] = {        1L,
+ 649   3                                                                                      12L,
+ 650   3                                                                                      119L,
+ 651   3                                                                                      1193L,
+ 652   3                                                                                      11931L,
+ 653   3                                                                                      119305L,
+ 654   3                                                                                      1193046L,
+ 655   3                                                                                      11930465L,
+ 656   3                                                                                      119304647L,
+ 657   3                                                                                      1193046471L }; 
+ 658   3      
+ 659   3                              ubxptr += 6;                    // skip message id and time
+ 660   3      
+ 661   3                              // fill in longitude, swapping byte order
+ 662   3                              ptr = ((u08 *) &(templong))+3;
+ 663   3                              for (i = 0; i < 4; i++)
+ 664   3                                      *ptr-- = *ubxptr++;
+ 665   3      
+ 666   3      // what we are doing is converting from degrees x 10^7 scaled from -1800000000 to 1800000000
+ 667   3      // to -2^31 to 2^31 to match the original specification
+ 668   3      
+ 669   3      // 2^31 / 1800000000 = 1.193046471
+ 670   3      
+ 671   3                              negative = (templong < 0);
+ 672   3                              templong = ABS(templong);
+ 673   3                              gps->lon = 0L;
+ 674   3      
+C51 COMPILER V9.51   UBX                                                                   01/05/2016 18:47:25 PAGE 12  
+
+ 675   3                              // for each of the ten digits, multiply and accumulate
+ 676   3                              for (i = 0; i < 10; i++) {
+ 677   4                                      gps->lon += (templong % 10L) * degarray[i];
+ 678   4                                      templong = templong / 10L;              // drop a digit
+ 679   4                              } // for
+ 680   3      
+ 681   3                              if (negative) gps->lon = -gps->lon;
+ 682   3      
+ 683   3                              // fill in latitude, swapping byte order
+ 684   3                              ptr = ((u08 *) &(templong))+3;
+ 685   3                              for (i = 0; i < 4; i++)
+ 686   3                                      *ptr-- = *ubxptr++;
+ 687   3      
+ 688   3                              negative = (templong < 0);
+ 689   3                              templong = ABS(templong);
+ 690   3                              gps->lat = 0L;
+ 691   3      
+ 692   3                              // for each of the ten digits, multiply and accumulate
+ 693   3                              for (i = 0; i < 10; i++) {
+ 694   4                                      gps->lat += (templong % 10L) * degarray[i];
+ 695   4                                      templong = templong / 10L;              // drop a digit
+ 696   4                              } // for
+ 697   3      
+ 698   3                              if (negative) gps->lat = -gps->lat;
+ 699   3      
+ 700   3                              // use mean sea level for alt so skip ht above elipsoid
+ 701   3                              ubxptr += 4;
+ 702   3      
+ 703   3                              ptr = ((u08 *) &templong)+3;
+ 704   3                              for (i = 0; i < 4; i++)
+ 705   3                                      *ptr-- = *ubxptr++;
+ 706   3      
+ 707   3                              templong /= 1000L;
+ 708   3      
+ 709   3                              // get the long version of altitude (mm) and convert to meters
+ 710   3                              gps->alt = (s16) templong;
+ 711   3      
+ 712   3      
+ 713   3                              ubxfullset |= 0x04;
+ 714   3      
+ 715   3                      } // NAVPOSLLH
+ 716   2                      break;
+ 717   2      
+ 718   2                      case NAVSOL: {          // GPS solution info and time
+ 719   3                              // get DOP
+ 720   3                              dop = ubxptr[44+2] + ((ubxptr[45+2] & 0xFF) << 8);
+ 721   3              
+ 722   3                              // get number of SVs
+ 723   3                              gpslock = ubxptr[47+2]; // position + 2 chars for message id
+ 724   3      
+ 725   3                              ubxptr += 2;    // skip over message id
+ 726   3      
+ 727   3                              // skip if solution not valid
+ 728   3                              if (0x0D != (0x0D & *(ubxptr + 11)))    // 1101 = mask for GPSOK, WEEK OK, TIME OK
+ 729   3                                      gpslock = 0;
+ 730   3                              else {          // good solution
+ 731   4                                      // fill in time of week in ms
+ 732   4                                      ptr = ((u08 *) &(gps->time))+3;
+ 733   4                                      for (i = 0; i < 4; i++)
+ 734   4                                              *ptr-- = *ubxptr++;
+ 735   4              
+ 736   4      #ifndef DISPLAYATTACHED
+C51 COMPILER V9.51   UBX                                                                   01/05/2016 18:47:25 PAGE 13  
+
+                                              // save first good date as starting date
+                                              ptr++;
+                                              if (gpslock && 0xFFFFFFFF == sessstarttime &&
+                                                      0L != *((u32 *) ptr) &&
+                                                      0xFFFFFFFF != *((u32 *) ptr))
+                                                              sessstarttime = *((u32 *) ptr);
+                      
+                                              // keep last good date as ending date
+                                              if (gpslock && 0L != *((u32 *) ptr) &&
+                                                      0xFFFFFFFF != *((u32 *) ptr))
+                                                              sessendtime = *((u32 *) ptr);
+              #endif
+ 749   4                                      // skip over fraction
+ 750   4                                      ubxptr += 4;
+ 751   4              
+ 752   4                                      // fill in week number
+ 753   4                                      ptr = ((u08 *) &(gps->weeks))+1;
+ 754   4                                      for (i = 0; i < 2; i++)
+ 755   4                                              *ptr-- = *ubxptr++;
+ 756   4              
+ 757   4      #ifndef DISPLAYATTACHED
+                                              // save first good week as starting week
+                                              ptr++;
+                                              if (gpslock && 0xFFFF == sessstartweeks &&
+                                                      0 != *((u16 *) ptr) &&
+                                                      0xFFFF != *((u16 *) ptr))
+                                                              sessstartweeks = *((u16 *) ptr);
+                      
+                                              // keep last good week as ending week
+                                              if (gpslock && 0 != *((u16 *) ptr) &&
+                                                      0xFFFF != *((u16 *) ptr))
+                                                              sessendweeks = *((u16 *) ptr);
+              #endif
+ 770   4                              } // if 
+ 771   3      
+ 772   3                              // mark that we got a navsol even if we didn't use it
+ 773   3                              ubxfullset |= 0x02;
+ 774   3                      } // NAVSOL
+ 775   2                      break;
+ 776   2      
+ 777   2                      case NAVVELNED: {               // GPS velocities
+ 778   3                              s32 templong;
+ 779   3                              s16 eastvel, northvel, vertvel;
+ 780   3      
+ 781   3                              ubxptr += 6;                    // skip over message id and time
+ 782   3      
+ 783   3                              // get velocity, flip byte order, and scale from cm/s to m/s
+ 784   3                              templong = * (s32 *) (ubxptr);
+ 785   3                              templong = SWAP32((u32) templong);
+ 786   3                              templong /= 100;
+ 787   3                              northvel = (s16) templong;
+ 788   3      
+ 789   3                              ubxptr += 4;
+ 790   3      
+ 791   3                              // get velocity, flip byte order, and scale from cm/s to m/s
+ 792   3                              templong = * (s32 *) (ubxptr);
+ 793   3                              templong = SWAP32((u32) templong);
+ 794   3                              templong /= 100;
+ 795   3                              eastvel = (s16) templong;
+ 796   3      
+ 797   3                              ubxptr += 4;
+ 798   3      
+C51 COMPILER V9.51   UBX                                                                   01/05/2016 18:47:25 PAGE 14  
+
+ 799   3                              // get velocity, flip byte order, scale from cm/s to m/s, and invert
+ 800   3                              templong = * (s32 *) (ubxptr);
+ 801   3                              templong = SWAP32((u32) templong);
+ 802   3                              templong /= 100;
+ 803   3                              vertvel = - (s16) templong;
+ 804   3      
+ 805   3                              // pack the velocity data
+ 806   3                              gps->velpack[0] = (u08) ((((u16) eastvel) & 0x0700) >> 3);
+ 807   3                              gps->velpack[0] += (u08) ((((u16) northvel) & 0x0700) >> 6);
+ 808   3                              gps->velpack[0] += (u08) ((((u16) vertvel) & 0x0300) >> 8);
+ 809   3                              gps->velpack[1] = ((u16) eastvel) & 0xFF;
+ 810   3                              gps->velpack[2] = ((u16) northvel) & 0xFF;
+ 811   3                              gps->velpack[3] = ((u16) vertvel) & 0xFF;
+ 812   3      
+ 813   3                              ubxfullset |= 0x01;
+ 814   3      
+ 815   3                      } // NAVVELNED
+ 816   2                      break;
+ 817   2      
+ 818   2                      default:
+ 819   2                              // breakpoint trap
+ 820   2                              i = 1;
+ 821   2                              break;
+ 822   2              } // switch
+ 823   1      
+ 824   1      // basic 2.10 include dead reckoning #ifdef DISPLAYATTACHED
+ 825   1              if (0x07 == ubxfullset) {               // got all 3 messages
+ 826   2      
+ 827   2                      // clear message list (can also be done at gpspulse)
+ 828   2                      ubxfullset = 0;
+ 829   2      
+ 830   2                      // if no gpslock then interpolate
+ 831   2                      if (!gpslock) {
+ 832   3      
+ 833   3                              // copy the last one for a start
+ 834   3                              *gps = previousgps[lastgps];
+ 835   3                      
+ 836   3                              // adjust the time by the GPS sample rate
+ 837   3                              // NOTE: does not compensate for event of data loss at week boundary
+ 838   3                              gps->time = gps->time + (1000 / GPS_RATE);
+ 839   3      
+ 840   3                              // don't interpolate if not enough good history
+ 841   3                              if (0L != previousgps[1-lastgps].time) {        
+ 842   4                                      // interpolate the lat and lon. factor in gps recording freq
+ 843   4                                      gps->lat = gps->lat + (previousgps[lastgps].lat - previousgps[1-lastgps].lat);
+ 844   4                                      gps->lon = gps->lon + (previousgps[lastgps].lon - previousgps[1-lastgps].lon);
+ 845   4                              } // if
+ 846   3                      } // if
+ 847   2                      
+ 848   2                      // store latest gps for historical purposes
+ 849   2                      lastgps = 1 - lastgps;                  // swap buffers to oldest one
+ 850   2                      previousgps[lastgps] = *gps;    // overwrite with latest
+ 851   2      
+ 852   2      #ifdef DISPLAYATTACHED          
+ 853   2                      // copy data into transmit buffer
+ 854   2                      if (simgps)     {
+ 855   3                              gpslock = 6;
+ 856   3                              gps->time = 10000L;                     // fake day and time
+ 857   3                              gps->weeks = 1710;              // end of 2012
+ 858   3                              gps->lat = 12348023L;           // fake latitude
+ 859   3                              gps->lon = 2763743L;            // fake longitude
+ 860   3                              gps->alt = 300;                 // altitude in meters
+C51 COMPILER V9.51   UBX                                                                   01/05/2016 18:47:25 PAGE 15  
+
+ 861   3                              
+ 862   3                              updaterate++;
+ 863   3                              // animated velocities and headings
+ 864   3                              if (simevel >= 50) {    // e-w velocity m/s
+ 865   4                                      eastinc = FALSE;
+ 866   4                              } // if
+ 867   3                              else if (simevel <= -50) {
+ 868   4                                      eastinc = TRUE;
+ 869   4                              } // else if
+ 870   3                              if (updaterate % 5) {
+ 871   4                                      if (eastinc)
+ 872   4                                              simevel += 1;
+ 873   4                                      else
+ 874   4                                              simevel -= 1;
+ 875   4                              } // if
+ 876   3                              
+ 877   3                              if (simnvel >= 50) {    // e-w velocity m/s
+ 878   4                                      northinc = FALSE;
+ 879   4                              } // if
+ 880   3                              else if (simnvel <= -50) {
+ 881   4                                      northinc = TRUE;
+ 882   4                              } // else if
+ 883   3                              if (updaterate+2 % 5) {
+ 884   4                                      if (northinc)
+ 885   4                                              simnvel += 1;
+ 886   4                                      else
+ 887   4                                              simnvel -= 1;
+ 888   4                              } // if
+ 889   3                              
+ 890   3                              // pack the velocity data
+ 891   3                              gps->velpack[0] = (u08) ((((u16) simevel) & 0x0700) >> 3);
+ 892   3                              gps->velpack[0] += (u08) ((((u16) simnvel) & 0x0700) >> 6);
+ 893   3                              gps->velpack[1] = ((u16) simevel) & 0xFF;
+ 894   3                              gps->velpack[2] = ((u16) simnvel) & 0xFF;
+ 895   3      
+ 896   3                              gps->velpack[3] = 1;            // z velocity
+ 897   3                              gps->temp = 25;                 // temperature
+ 898   3                      } // if
+ 899   2      
+ 900   2                      // copy data into transmit buffer
+ 901   2                      ptr = com[msgrouting[DISPLAY_UNIT]].txbuff+DATA_START;
+ 902   2                      *ptr++ = (u08) gpslock;
+ 903   2                      *((gpstype *) ptr) = *gps;
+ 904   2      
+ 905   2                      // tell the display unit
+ 906   2                      SendMessage((u08) SENSOR_UNIT, (u08) DISPLAY_UNIT, (u08) GPS_DATA, 1+sizeof(gpstype));
+ 907   2      #endif
+ 908   2              } // if
+ 909   1      // basic 2.10 #endif
+ 910   1      } // Parse_UBX
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   9109    ----
+   CONSTANT SIZE    =     49    ----
+   XDATA SIZE       =      8      49
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      46
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

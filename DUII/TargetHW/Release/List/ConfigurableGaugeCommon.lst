@@ -1,0 +1,1894 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     02/Feb/2016  18:29:25 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\DUII\ConfigurableGaugeCommon.c                   #
+#    Command line =  C:\DUII\DUII\ConfigurableGaugeCommon.c -D DEBUG=1 -D     #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\ConfigurableGaugeCommon.ls #
+#                    t                                                        #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\ConfigurableGaugeCommon.o   #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\DUII\ConfigurableGaugeCommon.c
+      1          
+      2          #include <stdio.h>
+      3          #include <string.h>
+      4          #include "DUII.h"
+      5          #include "GUI.h"
+      6          #include "commondefs.h"
+      7          #include "RunningGauges.h"
+      8          #include "DataHandler.h"
+      9          #include "ConfigurableGaugeCommon.h"
+     10          #include "InputScreens.h"
+     11          #include "GMeterScreen.h"
+     12          #include "Utilities.h"
+     13          
+     14          /*********************************************************************
+     15          *
+     16          *       Public data Definitions
+     17          *
+     18          **********************************************************************
+     19          */
+
+   \                                 In section .bss, align 4
+     20          char configureGaugeMode = false;
+     21          char drawFlag;
+     22          int boxStartTime;
+   \                     boxStartTime:
+   \   00000000                      DS8 4
+   \                     configureGaugeMode:
+   \   00000004                      DS8 1
+   \                     drawFlag:
+   \   00000005                      DS8 1
+     23          
+     24          
+     25          /*********************************************************************
+     26          *
+     27          *       Local Constants Definitions
+     28          *
+     29          **********************************************************************
+     30          */
+     31          #define	LINE_HEIGHT	20
+     32          
+     33          /*********************************************************************
+     34          *
+     35          *       External data and code
+     36          *
+     37          **********************************************************************
+     38          */
+     39          int GetCurrentScreenID(void);
+     40          
+     41          
+     42          /*********************************************************************
+     43          *
+     44          *       Public code
+     45          *
+     46          **********************************************************************
+     47          */
+     48          
+     49          /*********************************************************************
+     50          *
+     51          *       Local Prototypes
+     52          *
+     53          **********************************************************************
+     54          */
+     55          GlobalDataIndexType GetInputID(int input);
+     56          char ButtonPressIsOnConfigurableGauge(int lastx, int lasty);
+     57          void ShowOtherInput(const struct CONFIG_ARGS *config, GlobalDataIndexType input, char *pLabel, char *pUnits);
+     58          void ShowInput(const struct CONFIG_ARGS *config, int input);
+     59          void ShowDigitalInput(const struct CONFIG_ARGS *config, int input);
+     60          void ShowTime(const struct CONFIG_ARGS *config, GlobalDataIndexType item);
+     61          
+     62          /*********************************************************************
+     63          *
+     64          *       Local Variables
+     65          *
+     66          **********************************************************************
+     67          */
+     68          
+
+   \                                 In section .text, align 4, keep-with-next
+     69          char ScreenIsConfigurable(int screenID)
+     70          {
+     71          	if ((screenID == ANALOG_GAUGE) || (screenID == RPM_SWEEP_GAUGE) || (screenID == DIGITAL_GAUGE) || (screenID == GMETER))
+   \                     ScreenIsConfigurable:
+   \   00000000   010050E3           CMP      R0,#+1
+   \   00000004   0600000A           BEQ      ??ScreenIsConfigurable_0
+   \   00000008   060050E3           CMP      R0,#+6
+   \   0000000C   07005013           CMPNE    R0,#+7
+   \   00000010   00005013           CMPNE    R0,#+0
+   \   00000014   0100001A           BNE      ??ScreenIsConfigurable_1
+     72          		return true;
+   \   00000018   0100A0E3           MOV      R0,#+1
+   \   0000001C   1EFF2FE1           BX       LR
+     73          	else return false;
+   \                     ??ScreenIsConfigurable_1:
+   \   00000020   0000A0E3           MOV      R0,#+0
+   \                     ??ScreenIsConfigurable_0:
+   \   00000024   1EFF2FE1           BX       LR               ;; return
+     74          }
+     75          
+     76          //
+     77          // Center of screen hit - enter gauge configuration mode
+     78          // NOTE: This routein applies to BOTH this (GaugeScreen) screen and RPMSweepScreen
+
+   \                                 In section .text, align 4, keep-with-next
+     79          void ConfigureGauge(void)
+     80          {
+   \                     ConfigureGauge:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+     81          	configureGaugeMode = true;
+   \   00000004   ........           LDR      R4,??DataTable43_3
+   \   00000008   0100A0E3           MOV      R0,#+1
+   \   0000000C   0400C4E5           STRB     R0,[R4, #+4]
+     82          	drawFlag = true;
+   \   00000010   0500C4E5           STRB     R0,[R4, #+5]
+     83          	boxStartTime = GUI_GetTime();
+   \   00000014   ........           BL       GUI_GetTime
+   \   00000018   000084E5           STR      R0,[R4, #+0]
+     84          }
+   \   0000001C   1080BDE8           POP      {R4,PC}          ;; return
+     85          
+     86          //
+     87          // See if the current screen touch is on the configurable gauge on this screen
+     88          //
+     89          // I'm sure there's a better (C++) way to do this but it looks like the screens
+     90          // themselves are not classes which would have made this a cinch.  Off the top
+     91          // of my head I didn't see a cleaner way to do this - and I know this will work.
+     92          //
+
+   \                                 In section .text, align 4, keep-with-next
+     93          char ButtonPressIsOnConfigurableGauge(int lastx, int lasty)
+     94          {
+   \                     ButtonPressIsOnConfigurableGauge:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0150A0E1           MOV      R5,R1
+     95          	int screenID;
+     96          
+     97          	if ((screenID = GetCurrentScreenID()) == ANALOG_GAUGE)
+   \   00000010   ........           BL       GetCurrentScreenID
+   \   00000014   010050E3           CMP      R0,#+1
+   \   00000018   0300001A           BNE      ??ButtonPressIsOnConfigurableGauge_0
+     98          		return IfAnalogConfigGaugePressed(lastx, lasty);
+   \   0000001C   0510A0E1           MOV      R1,R5
+   \   00000020   0400A0E1           MOV      R0,R4
+   \   00000024   ........           BL       IfAnalogConfigGaugePressed
+   \   00000028   120000EA           B        ??ButtonPressIsOnConfigurableGauge_1
+     99          	else if (screenID == RPM_SWEEP_GAUGE)
+   \                     ??ButtonPressIsOnConfigurableGauge_0:
+   \   0000002C   060050E3           CMP      R0,#+6
+   \   00000030   0300001A           BNE      ??ButtonPressIsOnConfigurableGauge_2
+    100          		return IfRPMSweepConfigGaugePressed(lastx, lasty);
+   \   00000034   0510A0E1           MOV      R1,R5
+   \   00000038   0400A0E1           MOV      R0,R4
+   \   0000003C   ........           BL       IfRPMSweepConfigGaugePressed
+   \   00000040   0C0000EA           B        ??ButtonPressIsOnConfigurableGauge_1
+    101          	else if (screenID == DIGITAL_GAUGE)
+   \                     ??ButtonPressIsOnConfigurableGauge_2:
+   \   00000044   070050E3           CMP      R0,#+7
+   \   00000048   0300001A           BNE      ??ButtonPressIsOnConfigurableGauge_3
+    102          		return IfDigitalConfigGaugePressed(lastx, lasty);
+   \   0000004C   0510A0E1           MOV      R1,R5
+   \   00000050   0400A0E1           MOV      R0,R4
+   \   00000054   ........           BL       IfDigitalConfigGaugePressed
+   \   00000058   060000EA           B        ??ButtonPressIsOnConfigurableGauge_1
+    103          	else if (screenID == GMETER)
+   \                     ??ButtonPressIsOnConfigurableGauge_3:
+   \   0000005C   000050E3           CMP      R0,#+0
+   \   00000060   0300001A           BNE      ??ButtonPressIsOnConfigurableGauge_4
+    104          		return IfGMeterConfigGaugePressed(lastx, lasty);
+   \   00000064   0510A0E1           MOV      R1,R5
+   \   00000068   0400A0E1           MOV      R0,R4
+   \   0000006C   ........           BL       IfGMeterConfigGaugePressed
+   \   00000070   000000EA           B        ??ButtonPressIsOnConfigurableGauge_1
+    105          	else return false;
+   \                     ??ButtonPressIsOnConfigurableGauge_4:
+   \   00000074   0000A0E3           MOV      R0,#+0
+   \                     ??ButtonPressIsOnConfigurableGauge_1:
+   \   00000078   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   0000007C   3080BDE8           POP      {R4,R5,PC}       ;; return
+    106          }
+    107          
+    108          
+    109          //
+    110          // Screen hit somewhere while in gauge mode - process accordingly depending on 
+    111          // position relative to configurable gauges
+    112          //
+
+   \                                 In section .text, align 4, keep-with-next
+    113          void ProcessGaugeButton(int lastx, int lasty)
+    114          {
+   \                     ProcessGaugeButton:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0150A0E1           MOV      R5,R1
+    115          	if (ButtonPressIsOnConfigurableGauge(lastx, lasty))
+   \   00000010   ........           BL       GetCurrentScreenID
+   \   00000014   010050E3           CMP      R0,#+1
+   \   00000018   1100000A           BEQ      ??ProcessGaugeButton_1
+   \   0000001C   060050E3           CMP      R0,#+6
+   \   00000020   0B00000A           BEQ      ??ProcessGaugeButton_2
+   \   00000024   070050E3           CMP      R0,#+7
+   \   00000028   0500000A           BEQ      ??ProcessGaugeButton_3
+   \   0000002C   000050E3           CMP      R0,#+0
+   \   00000030   A600001A           BNE      ??ProcessGaugeButton_4
+   \   00000034   0510A0E1           MOV      R1,R5
+   \   00000038   0400A0E1           MOV      R0,R4
+   \   0000003C   ........           BL       IfGMeterConfigGaugePressed
+   \   00000040   0A0000EA           B        ??ProcessGaugeButton_5
+   \                     ??ProcessGaugeButton_3:
+   \   00000044   0510A0E1           MOV      R1,R5
+   \   00000048   0400A0E1           MOV      R0,R4
+   \   0000004C   ........           BL       IfDigitalConfigGaugePressed
+   \   00000050   060000EA           B        ??ProcessGaugeButton_5
+   \                     ??ProcessGaugeButton_2:
+   \   00000054   0510A0E1           MOV      R1,R5
+   \   00000058   0400A0E1           MOV      R0,R4
+   \   0000005C   ........           BL       IfRPMSweepConfigGaugePressed
+   \   00000060   020000EA           B        ??ProcessGaugeButton_5
+   \                     ??ProcessGaugeButton_1:
+   \   00000064   0510A0E1           MOV      R1,R5
+   \   00000068   0400A0E1           MOV      R0,R4
+   \   0000006C   ........           BL       IfAnalogConfigGaugePressed
+   \                     ??ProcessGaugeButton_5:
+   \   00000070   000050E3           CMP      R0,#+0
+   \   00000074   9500000A           BEQ      ??ProcessGaugeButton_4
+    116          	{
+    117          		boxStartTime = GUI_GetTime();		// Restart timer
+   \   00000078   ........           BL       GUI_GetTime
+   \   0000007C   ........           LDR      R1,??DataTable43_3
+   \   00000080   000081E5           STR      R0,[R1, #+0]
+    118          		switch (GetConfigurableItem())			// Go to next control item
+   \   00000084   ........           LDR      R0,??DataTable43_6
+   \   00000088   E81090E5           LDR      R1,[R0, #+232]
+   \   0000008C   FF2001E2           AND      R2,R1,#0xFF
+   \   00000090   510052E3           CMP      R2,#+81
+   \   00000094   02F18F90           ADDLS    PC,PC,R2, LSL #+2
+   \                     ??ProcessGaugeButton_0:
+   \   00000098   5100008A           BHI      ??ProcessGaugeButton_6
+   \   0000009C   6A0000EA           B        ??ProcessGaugeButton_7
+   \   000000A0   6C0000EA           B        ??ProcessGaugeButton_8
+   \   000000A4   6E0000EA           B        ??ProcessGaugeButton_9
+   \   000000A8   4D0000EA           B        ??ProcessGaugeButton_6
+   \   000000AC   4C0000EA           B        ??ProcessGaugeButton_6
+   \   000000B0   4B0000EA           B        ??ProcessGaugeButton_6
+   \   000000B4   4A0000EA           B        ??ProcessGaugeButton_6
+   \   000000B8   490000EA           B        ??ProcessGaugeButton_6
+   \   000000BC   480000EA           B        ??ProcessGaugeButton_6
+   \   000000C0   470000EA           B        ??ProcessGaugeButton_6
+   \   000000C4   460000EA           B        ??ProcessGaugeButton_6
+   \   000000C8   450000EA           B        ??ProcessGaugeButton_6
+   \   000000CC   440000EA           B        ??ProcessGaugeButton_6
+   \   000000D0   430000EA           B        ??ProcessGaugeButton_6
+   \   000000D4   770000EA           B        ??ProcessGaugeButton_10
+   \   000000D8   410000EA           B        ??ProcessGaugeButton_6
+   \   000000DC   400000EA           B        ??ProcessGaugeButton_6
+   \   000000E0   3F0000EA           B        ??ProcessGaugeButton_6
+   \   000000E4   700000EA           B        ??ProcessGaugeButton_11
+   \   000000E8   690000EA           B        ??ProcessGaugeButton_12
+   \   000000EC   3C0000EA           B        ??ProcessGaugeButton_6
+   \   000000F0   3B0000EA           B        ??ProcessGaugeButton_6
+   \   000000F4   3A0000EA           B        ??ProcessGaugeButton_6
+   \   000000F8   390000EA           B        ??ProcessGaugeButton_6
+   \   000000FC   380000EA           B        ??ProcessGaugeButton_6
+   \   00000100   370000EA           B        ??ProcessGaugeButton_6
+   \   00000104   360000EA           B        ??ProcessGaugeButton_6
+   \   00000108   350000EA           B        ??ProcessGaugeButton_6
+   \   0000010C   340000EA           B        ??ProcessGaugeButton_6
+   \   00000110   330000EA           B        ??ProcessGaugeButton_6
+   \   00000114   320000EA           B        ??ProcessGaugeButton_6
+   \   00000118   570000EA           B        ??ProcessGaugeButton_13
+   \   0000011C   300000EA           B        ??ProcessGaugeButton_6
+   \   00000120   2F0000EA           B        ??ProcessGaugeButton_6
+   \   00000124   5D0000EA           B        ??ProcessGaugeButton_14
+   \   00000128   2D0000EA           B        ??ProcessGaugeButton_6
+   \   0000012C   2C0000EA           B        ??ProcessGaugeButton_6
+   \   00000130   2E0000EA           B        ??ProcessGaugeButton_15
+   \   00000134   2A0000EA           B        ??ProcessGaugeButton_6
+   \   00000138   290000EA           B        ??ProcessGaugeButton_6
+   \   0000013C   280000EA           B        ??ProcessGaugeButton_6
+   \   00000140   270000EA           B        ??ProcessGaugeButton_6
+   \   00000144   260000EA           B        ??ProcessGaugeButton_6
+   \   00000148   250000EA           B        ??ProcessGaugeButton_6
+   \   0000014C   240000EA           B        ??ProcessGaugeButton_6
+   \   00000150   230000EA           B        ??ProcessGaugeButton_6
+   \   00000154   220000EA           B        ??ProcessGaugeButton_6
+   \   00000158   210000EA           B        ??ProcessGaugeButton_6
+   \   0000015C   200000EA           B        ??ProcessGaugeButton_6
+   \   00000160   1F0000EA           B        ??ProcessGaugeButton_6
+   \   00000164   1E0000EA           B        ??ProcessGaugeButton_6
+   \   00000168   1D0000EA           B        ??ProcessGaugeButton_6
+   \   0000016C   1C0000EA           B        ??ProcessGaugeButton_6
+   \   00000170   530000EA           B        ??ProcessGaugeButton_16
+   \   00000174   200000EA           B        ??ProcessGaugeButton_17
+   \   00000178   220000EA           B        ??ProcessGaugeButton_18
+   \   0000017C   240000EA           B        ??ProcessGaugeButton_19
+   \   00000180   260000EA           B        ??ProcessGaugeButton_20
+   \   00000184   280000EA           B        ??ProcessGaugeButton_21
+   \   00000188   2A0000EA           B        ??ProcessGaugeButton_22
+   \   0000018C   140000EA           B        ??ProcessGaugeButton_6
+   \   00000190   130000EA           B        ??ProcessGaugeButton_6
+   \   00000194   120000EA           B        ??ProcessGaugeButton_6
+   \   00000198   110000EA           B        ??ProcessGaugeButton_6
+   \   0000019C   100000EA           B        ??ProcessGaugeButton_6
+   \   000001A0   0F0000EA           B        ??ProcessGaugeButton_6
+   \   000001A4   0E0000EA           B        ??ProcessGaugeButton_6
+   \   000001A8   0D0000EA           B        ??ProcessGaugeButton_6
+   \   000001AC   0C0000EA           B        ??ProcessGaugeButton_6
+   \   000001B0   0B0000EA           B        ??ProcessGaugeButton_6
+   \   000001B4   0A0000EA           B        ??ProcessGaugeButton_6
+   \   000001B8   210000EA           B        ??ProcessGaugeButton_23
+   \   000001BC   080000EA           B        ??ProcessGaugeButton_6
+   \   000001C0   070000EA           B        ??ProcessGaugeButton_6
+   \   000001C4   060000EA           B        ??ProcessGaugeButton_6
+   \   000001C8   050000EA           B        ??ProcessGaugeButton_6
+   \   000001CC   040000EA           B        ??ProcessGaugeButton_6
+   \   000001D0   030000EA           B        ??ProcessGaugeButton_6
+   \   000001D4   020000EA           B        ??ProcessGaugeButton_6
+   \   000001D8   010000EA           B        ??ProcessGaugeButton_6
+   \   000001DC   230000EA           B        ??ProcessGaugeButton_24
+   \   000001E0   280000EA           B        ??ProcessGaugeButton_25
+    119          		{
+    120          		default:
+    121          		case VMAX:				SetConfigurableItem( VMIN );				break;
+   \                     ??ProcessGaugeButton_6:
+   \   000001E4   FF10C1E3           BIC      R1,R1,#0xFF
+   \   000001E8   251081E3           ORR      R1,R1,#0x25
+   \   000001EC   360000EA           B        ??ProcessGaugeButton_26
+    122          		case VMIN:				SetConfigurableItem( ANALOG_INPUT_0 );		break;
+   \                     ??ProcessGaugeButton_15:
+   \   000001F0   FF10C1E3           BIC      R1,R1,#0xFF
+   \   000001F4   361081E3           ORR      R1,R1,#0x36
+   \   000001F8   330000EA           B        ??ProcessGaugeButton_26
+    123          		case ANALOG_INPUT_0:	SetConfigurableItem( ANALOG_INPUT_1 );		break;
+   \                     ??ProcessGaugeButton_17:
+   \   000001FC   FF10C1E3           BIC      R1,R1,#0xFF
+   \   00000200   371081E3           ORR      R1,R1,#0x37
+   \   00000204   300000EA           B        ??ProcessGaugeButton_26
+    124          		case ANALOG_INPUT_1:	SetConfigurableItem( ANALOG_INPUT_2 );		break;
+   \                     ??ProcessGaugeButton_18:
+   \   00000208   FF10C1E3           BIC      R1,R1,#0xFF
+   \   0000020C   381081E3           ORR      R1,R1,#0x38
+   \   00000210   2D0000EA           B        ??ProcessGaugeButton_26
+    125          		case ANALOG_INPUT_2:	SetConfigurableItem( ANALOG_INPUT_3 );		break;
+   \                     ??ProcessGaugeButton_19:
+   \   00000214   FF10C1E3           BIC      R1,R1,#0xFF
+   \   00000218   391081E3           ORR      R1,R1,#0x39
+   \   0000021C   2A0000EA           B        ??ProcessGaugeButton_26
+    126          		case ANALOG_INPUT_3:	SetConfigurableItem( DIGITAL_INPUT_4 );		break;
+   \                     ??ProcessGaugeButton_20:
+   \   00000220   FF10C1E3           BIC      R1,R1,#0xFF
+   \   00000224   3A1081E3           ORR      R1,R1,#0x3A
+   \   00000228   270000EA           B        ??ProcessGaugeButton_26
+    127          		case DIGITAL_INPUT_4:	SetConfigurableItem( DIGITAL_INPUT_5 );		break;
+   \                     ??ProcessGaugeButton_21:
+   \   0000022C   FF10C1E3           BIC      R1,R1,#0xFF
+   \   00000230   3B1081E3           ORR      R1,R1,#0x3B
+   \   00000234   240000EA           B        ??ProcessGaugeButton_26
+    128          		case DIGITAL_INPUT_5:	SetConfigurableItem( VEHICLE_12V );			break;
+   \                     ??ProcessGaugeButton_22:
+   \   00000238   FF10C1E3           BIC      R1,R1,#0xFF
+   \   0000023C   471081E3           ORR      R1,R1,#0x47
+   \   00000240   210000EA           B        ??ProcessGaugeButton_26
+    129          		case VEHICLE_12V:		SetConfigurableItem( X_G );					break;
+   \                     ??ProcessGaugeButton_23:
+   \   00000244   FF10C1E3           BIC      R1,R1,#0xFF
+   \   00000248   1F0000EA           B        ??ProcessGaugeButton_26
+    130          		case X_G:				SetConfigurableItem( Y_G );					break;
+   \                     ??ProcessGaugeButton_7:
+   \   0000024C   FF10C1E3           BIC      R1,R1,#0xFF
+   \   00000250   011081E3           ORR      R1,R1,#0x1
+   \   00000254   1C0000EA           B        ??ProcessGaugeButton_26
+    131          		case Y_G:				SetConfigurableItem( Z_G );					break;
+   \                     ??ProcessGaugeButton_8:
+   \   00000258   FF10C1E3           BIC      R1,R1,#0xFF
+   \   0000025C   021081E3           ORR      R1,R1,#0x2
+   \   00000260   190000EA           B        ??ProcessGaugeButton_26
+    132          		case Z_G:				SetConfigurableItem( COMBINED_G );			break;
+   \                     ??ProcessGaugeButton_9:
+   \   00000264   FF10C1E3           BIC      R1,R1,#0xFF
+   \   00000268   501081E3           ORR      R1,R1,#0x50
+   \   0000026C   160000EA           B        ??ProcessGaugeButton_26
+    133          		case COMBINED_G:		SetConfigurableItem( PREDICTIVE_LAP );		break;
+   \                     ??ProcessGaugeButton_24:
+   \   00000270   FF10C1E3           BIC      R1,R1,#0xFF
+   \   00000274   1F1081E3           ORR      R1,R1,#0x1F
+   \   00000278   130000EA           B        ??ProcessGaugeButton_26
+    134          		case PREDICTIVE_LAP:	SetConfigurableItem( BEST_SESSION_LAP );	break;
+   \                     ??ProcessGaugeButton_13:
+   \   0000027C   FF10C1E3           BIC      R1,R1,#0xFF
+   \   00000280   511081E3           ORR      R1,R1,#0x51
+   \   00000284   100000EA           B        ??ProcessGaugeButton_26
+    135          		case BEST_SESSION_LAP:	SetConfigurableItem( ALTITUDE );			break;
+   \                     ??ProcessGaugeButton_25:
+   \   00000288   FF10C1E3           BIC      R1,R1,#0xFF
+   \   0000028C   131081E3           ORR      R1,R1,#0x13
+   \   00000290   0D0000EA           B        ??ProcessGaugeButton_26
+    136          		case ALTITUDE:			SetConfigurableItem( ELAPSED_TIME );		break;
+   \                     ??ProcessGaugeButton_12:
+   \   00000294   FF10C1E3           BIC      R1,R1,#0xFF
+   \   00000298   221081E3           ORR      R1,R1,#0x22
+   \   0000029C   0A0000EA           B        ??ProcessGaugeButton_26
+    137          		case ELAPSED_TIME:		SetConfigurableItem( GPS_TIME );			break;
+   \                     ??ProcessGaugeButton_14:
+   \   000002A0   FF10C1E3           BIC      R1,R1,#0xFF
+   \   000002A4   121081E3           ORR      R1,R1,#0x12
+   \   000002A8   070000EA           B        ??ProcessGaugeButton_26
+    138          		case GPS_TIME:			SetConfigurableItem( SPEED );				break;
+   \                     ??ProcessGaugeButton_11:
+   \   000002AC   FF10C1E3           BIC      R1,R1,#0xFF
+   \   000002B0   0E1081E3           ORR      R1,R1,#0xE
+   \   000002B4   040000EA           B        ??ProcessGaugeButton_26
+    139          		case SPEED:				SetConfigurableItem( VEHICLE_RPM );			break;
+   \                     ??ProcessGaugeButton_10:
+   \   000002B8   FF10C1E3           BIC      R1,R1,#0xFF
+   \   000002BC   351081E3           ORR      R1,R1,#0x35
+   \   000002C0   010000EA           B        ??ProcessGaugeButton_26
+    140          		case VEHICLE_RPM:		SetConfigurableItem( VMAX );				break;
+   \                     ??ProcessGaugeButton_16:
+   \   000002C4   FF10C1E3           BIC      R1,R1,#0xFF
+   \   000002C8   261081E3           ORR      R1,R1,#0x26
+   \                     ??ProcessGaugeButton_26:
+   \   000002CC   E81080E5           STR      R1,[R0, #+232]
+    141          		}
+    142          	}
+    143          }
+   \                     ??ProcessGaugeButton_4:
+   \   000002D0   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   000002D4   3080BDE8           POP      {R4,R5,PC}       ;; return
+    144          
+
+   \                                 In section .text, align 4, keep-with-next
+    145          GlobalDataIndexType GetConfigurableItem(void)
+    146          {
+    147          	return ((GlobalDataIndexType)(sysData.multiSettings_1 & 0x000000FF));
+   \                     GetConfigurableItem:
+   \   00000000   ........           LDR      R0,??DataTable43_6
+   \   00000004   E80090E5           LDR      R0,[R0, #+232]
+   \   00000008   FF0000E2           AND      R0,R0,#0xFF
+   \   0000000C   1EFF2FE1           BX       LR               ;; return
+    148          }
+    149          
+
+   \                                 In section .text, align 4, keep-with-next
+    150          void SetConfigurableItem(GlobalDataIndexType item)
+    151          {
+    152          	sysData.multiSettings_1 = (sysData.multiSettings_1 & 0xFFFFFF00) | item;
+   \                     SetConfigurableItem:
+   \   00000000   ........           LDR      R1,??DataTable43_6
+   \   00000004   E82091E5           LDR      R2,[R1, #+232]
+   \   00000008   2224A0E1           LSR      R2,R2,#+8
+   \   0000000C   020480E1           ORR      R0,R0,R2, LSL #+8
+   \   00000010   E80081E5           STR      R0,[R1, #+232]
+    153          }
+   \   00000014   1EFF2FE1           BX       LR               ;; return
+    154          
+    155          
+    156          //
+    157          // Display one of the four analog inputs in the position and as specified by the input parameters
+    158          //
+    159          // Input:	CONFIG_ARGS *config - see description in header file
+    160          //			input	number (0-3) of the analog input to display
+    161          //
+
+   \                                 In section .text, align 4, keep-with-next
+    162          void ShowInput(const struct CONFIG_ARGS *config, int input)
+    163          {
+   \                     ShowInput:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    164          	float ftemp;
+    165          	char scratch[30], *pStr;
+    166          
+    167          	if (vehicleData.analogInput[input].enabled)
+   \   00000008   ........           LDR      R0,??DataTable43_10
+   \   0000000C   0160A0E1           MOV      R6,R1
+   \   00000010   065380E0           ADD      R5,R0,R6, LSL #+6
+   \   00000014   9300D5E5           LDRB     R0,[R5, #+147]
+   \   00000018   28D04DE2           SUB      SP,SP,#+40
+   \   0000001C   000050E3           CMP      R0,#+0
+   \   00000020   7200000A           BEQ      ??ShowInput_0
+    168          	{
+    169          		// Display value
+    170          		GUI_SetColor(config->pData->color);
+   \   00000024   000094E5           LDR      R0,[R4, #+0]
+   \   00000028   0C0090E5           LDR      R0,[R0, #+12]
+   \   0000002C   ........           BL       GUI_SetColor
+    171          		ftemp = GetValue(GetInputID(input)).fVal;
+   \   00000030   010056E3           CMP      R6,#+1
+   \   00000034   0800000A           BEQ      ??ShowInput_1
+   \   00000038   0900003A           BCC      ??ShowInput_2
+   \   0000003C   030056E3           CMP      R6,#+3
+   \   00000040   0100000A           BEQ      ??ShowInput_3
+   \   00000044   0200003A           BCC      ??ShowInput_4
+   \   00000048   050000EA           B        ??ShowInput_2
+   \                     ??ShowInput_3:
+   \   0000004C   3910A0E3           MOV      R1,#+57
+   \   00000050   040000EA           B        ??ShowInput_5
+   \                     ??ShowInput_4:
+   \   00000054   3810A0E3           MOV      R1,#+56
+   \   00000058   020000EA           B        ??ShowInput_5
+   \                     ??ShowInput_1:
+   \   0000005C   3710A0E3           MOV      R1,#+55
+   \   00000060   000000EA           B        ??ShowInput_5
+   \                     ??ShowInput_2:
+   \   00000064   3610A0E3           MOV      R1,#+54
+   \                     ??ShowInput_5:
+   \   00000068   0D00A0E1           MOV      R0,SP
+   \   0000006C   ........           BL       GetValue
+    172          		FormatAnalogData(scratch, ftemp);
+   \   00000070   00009DE5           LDR      R0,[SP, #+0]
+   \   00000074   0010A0E3           MOV      R1,#+0
+   \   00000078   ........           BL       __aeabi_cfcmpeq
+   \   0000007C   2B00000A           BEQ      ??ShowInput_6
+   \   00000080   5113A0E3           MOV      R1,#+1140850689
+   \   00000084   7A1881E3           ORR      R1,R1,#0x7A0000
+   \   00000088   ........           BL       __aeabi_cfrcmple
+   \   0000008C   2100009A           BLS      ??ShowInput_7
+   \   00000090   C014A0E3           MOV      R1,#-1073741824
+   \   00000094   B21781E3           ORR      R1,R1,#0x2C80000
+   \   00000098   ........           BL       __aeabi_cfcmple
+   \   0000009C   1D00003A           BCC      ??ShowInput_7
+   \   000000A0   5013A0E3           MOV      R1,#+1073741825
+   \   000000A4   B21781E3           ORR      R1,R1,#0x2C80000
+   \   000000A8   ........           BL       __aeabi_cfrcmple
+   \   000000AC   1900009A           BLS      ??ShowInput_7
+   \   000000B0   C014A0E3           MOV      R1,#-1073741824
+   \   000000B4   481781E3           ORR      R1,R1,#0x1200000
+   \   000000B8   ........           BL       __aeabi_cfcmple
+   \   000000BC   1500003A           BCC      ??ShowInput_7
+   \   000000C0   5013A0E3           MOV      R1,#+1073741825
+   \   000000C4   481781E3           ORR      R1,R1,#0x1200000
+   \   000000C8   ........           BL       __aeabi_cfrcmple
+   \   000000CC   0B00009A           BLS      ??ShowInput_8
+   \   000000D0   8014A0E3           MOV      R1,#-2147483648
+   \   000000D4   FE1581E3           ORR      R1,R1,#0x3F800000
+   \   000000D8   ........           BL       __aeabi_cfcmple
+   \   000000DC   0700003A           BCC      ??ShowInput_8
+   \   000000E0   ........           BL       __aeabi_f2d
+   \   000000E4   0130A0E1           MOV      R3,R1
+   \   000000E8   0020A0E1           MOV      R2,R0
+   \   000000EC   ............       ADRL     R1,`?<Constant "%0.2f">`
+   \              ....        
+   \                     ??ShowInput_9:
+   \   000000F4   08008DE2           ADD      R0,SP,#+8
+   \   000000F8   ........           BL       sprintf
+   \   000000FC   110000EA           B        ??ShowInput_10
+   \                     ??ShowInput_8:
+   \   00000100   ........           BL       __aeabi_f2d
+   \   00000104   0130A0E1           MOV      R3,R1
+   \   00000108   0020A0E1           MOV      R2,R0
+   \   0000010C   ............       ADRL     R1,`?<Constant "%0.1f">`
+   \              ....        
+   \   00000114   F6FFFFEA           B        ??ShowInput_9
+   \                     ??ShowInput_7:
+   \   00000118   ........           BL       __aeabi_f2d
+   \   0000011C   0020A0E1           MOV      R2,R0
+   \   00000120   0130A0E1           MOV      R3,R1
+   \   00000124   ............       ADRL     R1,`?<Constant "%0.0f">`
+   \              ....        
+   \   0000012C   F0FFFFEA           B        ??ShowInput_9
+   \                     ??ShowInput_6:
+   \   00000130   ........           ADR      R0,??DataTable40  ;; "0"
+   \   00000134   0020D0E5           LDRB     R2,[R0, #0]
+   \   00000138   08108DE2           ADD      R1,SP,#+8
+   \   0000013C   0020C1E5           STRB     R2,[R1, #+0]
+   \   00000140   0120D0E5           LDRB     R2,[R0, #+1]
+   \   00000144   0120C1E5           STRB     R2,[R1, #+1]
+    173          		GUI_SetFont(config->pData->pFont);
+   \                     ??ShowInput_10:
+   \   00000148   000094E5           LDR      R0,[R4, #+0]
+   \   0000014C   100090E5           LDR      R0,[R0, #+16]
+   \   00000150   ........           BL       GUI_SetFont
+    174          		GUI_DispStringInRect(scratch, &config->pData->box, config->pData->justification);
+   \   00000154   001094E5           LDR      R1,[R4, #+0]
+   \   00000158   08008DE2           ADD      R0,SP,#+8
+   \   0000015C   082091E5           LDR      R2,[R1, #+8]
+   \   00000160   ........           BL       GUI_DispStringInRect
+    175          
+    176          		// Display Name
+    177          		GUI_SetColor(config->pName->color);
+   \   00000164   040094E5           LDR      R0,[R4, #+4]
+   \   00000168   0C0090E5           LDR      R0,[R0, #+12]
+   \   0000016C   ........           BL       GUI_SetColor
+    178          		GUI_SetFont(config->pName->pFont);
+   \   00000170   040094E5           LDR      R0,[R4, #+4]
+   \   00000174   100090E5           LDR      R0,[R0, #+16]
+   \   00000178   ........           BL       GUI_SetFont
+    179          		// To shorten strings to fit in most windows remove leading AEM or PLX from name
+    180          		if ((strncmp(vehicleData.analogInput[input].Name, "AEM ", 4) == 0) || (strncmp(vehicleData.analogInput[input].Name, "PLX ", 4) == 0))
+   \   0000017C   0420A0E3           MOV      R2,#+4
+   \   00000180   ............       ADRL     R1,`?<Constant "AEM ">`
+   \              ....        
+   \   00000188   780085E2           ADD      R0,R5,#+120
+   \   0000018C   ........           BL       strncmp
+   \   00000190   000050E3           CMP      R0,#+0
+   \   00000194   0600000A           BEQ      ??ShowInput_11
+   \   00000198   0420A0E3           MOV      R2,#+4
+   \   0000019C   ............       ADRL     R1,`?<Constant "PLX ">`
+   \              ....        
+   \   000001A4   780085E2           ADD      R0,R5,#+120
+   \   000001A8   ........           BL       strncmp
+   \   000001AC   000050E3           CMP      R0,#+0
+   \   000001B0   0100001A           BNE      ??ShowInput_12
+    181          			pStr = vehicleData.analogInput[input].Name + 4;
+   \                     ??ShowInput_11:
+   \   000001B4   7C0085E2           ADD      R0,R5,#+124
+   \   000001B8   000000EA           B        ??ShowInput_13
+    182          		else pStr = vehicleData.analogInput[input].Name;
+   \                     ??ShowInput_12:
+   \   000001BC   780085E2           ADD      R0,R5,#+120
+    183          		GUI_DispStringInRect(pStr, &config->pName->box, config->pName->justification);
+   \                     ??ShowInput_13:
+   \   000001C0   041094E5           LDR      R1,[R4, #+4]
+   \   000001C4   082091E5           LDR      R2,[R1, #+8]
+   \   000001C8   ........           BL       GUI_DispStringInRect
+    184          
+    185          		// Display Units
+    186          		GUI_SetColor(config->pUnits->color);
+   \   000001CC   080094E5           LDR      R0,[R4, #+8]
+   \   000001D0   0C0090E5           LDR      R0,[R0, #+12]
+   \   000001D4   ........           BL       GUI_SetColor
+    187          		GUI_SetFont(config->pUnits->pFont);
+   \   000001D8   080094E5           LDR      R0,[R4, #+8]
+   \   000001DC   100090E5           LDR      R0,[R0, #+16]
+   \   000001E0   ........           BL       GUI_SetFont
+    188          		GUI_DispStringInRect(vehicleData.analogInput[input].Units, &config->pUnits->box, config->pUnits->justification);
+   \   000001E4   081094E5           LDR      R1,[R4, #+8]
+   \   000001E8   890085E2           ADD      R0,R5,#+137
+   \   000001EC   170000EA           B        ??ShowInput_14
+    189          	}
+    190          	else 
+    191          	{
+    192          		// Display Input Number
+    193          		GUI_SetColor(config->pName->color);
+   \                     ??ShowInput_0:
+   \   000001F0   040094E5           LDR      R0,[R4, #+4]
+   \   000001F4   0C0090E5           LDR      R0,[R0, #+12]
+   \   000001F8   ........           BL       GUI_SetColor
+    194          		GUI_SetFont(config->pName->pFont);
+   \   000001FC   040094E5           LDR      R0,[R4, #+4]
+   \   00000200   100090E5           LDR      R0,[R0, #+16]
+   \   00000204   ........           BL       GUI_SetFont
+    195          		sprintf(scratch, "Analog %d", input);
+   \   00000208   0620A0E1           MOV      R2,R6
+   \   0000020C   ............       ADRL     R1,`?<Constant "Analog %d">`
+   \              ....        
+   \   00000214   08008DE2           ADD      R0,SP,#+8
+   \   00000218   ........           BL       sprintf
+    196          		GUI_DispStringInRect(scratch, &config->pName->box, config->pName->justification);
+   \   0000021C   041094E5           LDR      R1,[R4, #+4]
+   \   00000220   08008DE2           ADD      R0,SP,#+8
+   \   00000224   082091E5           LDR      R2,[R1, #+8]
+   \   00000228   ........           BL       GUI_DispStringInRect
+    197          
+    198          		// Display Input Disabled
+    199          		GUI_SetColor(config->pUnits->color);
+   \   0000022C   080094E5           LDR      R0,[R4, #+8]
+   \   00000230   0C0090E5           LDR      R0,[R0, #+12]
+   \   00000234   ........           BL       GUI_SetColor
+    200          		GUI_SetFont(config->pUnits->pFont);
+   \   00000238   080094E5           LDR      R0,[R4, #+8]
+   \   0000023C   100090E5           LDR      R0,[R0, #+16]
+   \   00000240   ........           BL       GUI_SetFont
+    201          		GUI_DispStringInRect("Disabled", &config->pUnits->box, config->pUnits->justification);
+   \   00000244   081094E5           LDR      R1,[R4, #+8]
+   \   00000248   ............       ADRL     R0,`?<Constant "Disabled">`
+   \              ....        
+   \                     ??ShowInput_14:
+   \   00000250   082091E5           LDR      R2,[R1, #+8]
+   \   00000254   ........           BL       GUI_DispStringInRect
+    202          	}
+    203          }
+   \   00000258   28D08DE2           ADD      SP,SP,#+40       ;; stack cleaning
+   \   0000025C   7080BDE8           POP      {R4-R6,PC}       ;; return
+    204          
+    205          //
+    206          // Display one of the two digital inputs in the position and as specified by the input parameters
+    207          //
+    208          // Input:	CONFIG_ARGS *config - see description in header file
+    209          //			input - number (0-1) of the digital input to display
+    210          //
+
+   \                                 In section .text, align 4, keep-with-next
+    211          void ShowDigitalInput(const struct CONFIG_ARGS *config, int input)
+    212          {
+   \                     ShowDigitalInput:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   0160A0E1           MOV      R6,R1
+    213          	char scratch[30];
+    214          
+    215          	if (vehicleData.digitalInput[input].enabled)
+   \   0000000C   2F00A0E3           MOV      R0,#+47
+   \   00000010   ........           LDR      R1,??DataTable43_10
+   \   00000014   901625E0           MLA      R5,R0,R6,R1
+   \   00000018   20D04DE2           SUB      SP,SP,#+32
+   \   0000001C   A301D5E5           LDRB     R0,[R5, #+419]
+   \   00000020   000050E3           CMP      R0,#+0
+   \   00000024   1300000A           BEQ      ??ShowDigitalInput_0
+    216          	{
+    217          		// Display Value
+    218          		GUI_SetColor(config->pData->color);
+   \   00000028   000094E5           LDR      R0,[R4, #+0]
+   \   0000002C   0C0090E5           LDR      R0,[R0, #+12]
+   \   00000030   ........           BL       GUI_SetColor
+    219          		GUI_SetFont(&GUI_Font32B_ASCII);		// Select largest alpha/numeric font available to display text
+   \   00000034   ........           LDR      R0,??DataTable43_11
+   \   00000038   ........           BL       GUI_SetFont
+    220          		GUI_DispStringInRect(GetDigitalText(USER, input), &config->pData->box, config->pData->justification);
+   \   0000003C   0610A0E1           MOV      R1,R6
+   \   00000040   0100A0E3           MOV      R0,#+1
+   \   00000044   ........           BL       GetDigitalText
+   \   00000048   001094E5           LDR      R1,[R4, #+0]
+   \   0000004C   082091E5           LDR      R2,[R1, #+8]
+   \   00000050   ........           BL       GUI_DispStringInRect
+    221          
+    222          		// Draw Name
+    223          		GUI_SetColor(config->pName->color);
+   \   00000054   040094E5           LDR      R0,[R4, #+4]
+   \   00000058   0C0090E5           LDR      R0,[R0, #+12]
+   \   0000005C   ........           BL       GUI_SetColor
+    224          		GUI_SetFont(config->pName->pFont);
+   \   00000060   040094E5           LDR      R0,[R4, #+4]
+   \   00000064   100090E5           LDR      R0,[R0, #+16]
+   \   00000068   ........           BL       GUI_SetFont
+    225          		GUI_DispStringInRect(vehicleData.digitalInput[input].Name, &config->pName->box, config->pName->justification);
+   \   0000006C   041094E5           LDR      R1,[R4, #+4]
+   \   00000070   5E0F85E2           ADD      R0,R5,#+376
+   \   00000074   170000EA           B        ??ShowDigitalInput_1
+    226          	}
+    227          	else 
+    228          	{
+    229          		// Draw Input Number
+    230          		GUI_SetColor(config->pName->color);
+   \                     ??ShowDigitalInput_0:
+   \   00000078   040094E5           LDR      R0,[R4, #+4]
+   \   0000007C   0C0090E5           LDR      R0,[R0, #+12]
+   \   00000080   ........           BL       GUI_SetColor
+    231          		GUI_SetFont(config->pName->pFont);
+   \   00000084   040094E5           LDR      R0,[R4, #+4]
+   \   00000088   100090E5           LDR      R0,[R0, #+16]
+   \   0000008C   ........           BL       GUI_SetFont
+    232          		sprintf(scratch, "Digital %d", input + 4);
+   \   00000090   042086E2           ADD      R2,R6,#+4
+   \   00000094   ............       ADRL     R1,`?<Constant "Digital %d">`
+   \              ....        
+   \   0000009C   0D00A0E1           MOV      R0,SP
+   \   000000A0   ........           BL       sprintf
+    233          		GUI_DispStringInRect(scratch, &config->pName->box, config->pName->justification);
+   \   000000A4   041094E5           LDR      R1,[R4, #+4]
+   \   000000A8   0D00A0E1           MOV      R0,SP
+   \   000000AC   082091E5           LDR      R2,[R1, #+8]
+   \   000000B0   ........           BL       GUI_DispStringInRect
+    234          
+    235          		// Draw Disabled
+    236          		GUI_SetColor(config->pUnits->color);
+   \   000000B4   080094E5           LDR      R0,[R4, #+8]
+   \   000000B8   0C0090E5           LDR      R0,[R0, #+12]
+   \   000000BC   ........           BL       GUI_SetColor
+    237          		GUI_SetFont(config->pUnits->pFont);
+   \   000000C0   080094E5           LDR      R0,[R4, #+8]
+   \   000000C4   100090E5           LDR      R0,[R0, #+16]
+   \   000000C8   ........           BL       GUI_SetFont
+    238          		GUI_DispStringInRect("Disabled", &config->pUnits->box, config->pUnits->justification);
+   \   000000CC   081094E5           LDR      R1,[R4, #+8]
+   \   000000D0   ............       ADRL     R0,`?<Constant "Disabled">`
+   \              ....        
+   \                     ??ShowDigitalInput_1:
+   \   000000D8   082091E5           LDR      R2,[R1, #+8]
+   \   000000DC   ........           BL       GUI_DispStringInRect
+    239          	}
+    240          }
+   \   000000E0   20D08DE2           ADD      SP,SP,#+32       ;; stack cleaning
+   \   000000E4   7080BDE8           POP      {R4-R6,PC}       ;; return
+    241          
+    242          
+
+   \                                 In section .text, align 4, keep-with-next
+    243          void ShowOtherInput(const struct CONFIG_ARGS *config, GlobalDataIndexType input, char *pLabel, char *pUnits)
+    244          {
+   \                     ShowOtherInput:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   28D04DE2           SUB      SP,SP,#+40
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0280A0E1           MOV      R8,R2
+   \   00000014   0360A0E1           MOV      R6,R3
+    245          	float ftemp;
+    246          	char scratch[30];
+    247          
+    248          	// Format Data Value
+    249          	if (input == VEHICLE_RPM)
+   \   00000018   350055E3           CMP      R5,#+53
+   \   0000001C   0D00A0E1           MOV      R0,SP
+   \   00000020   2400001A           BNE      ??ShowOtherInput_0
+    250          		sprintf(scratch, "%d", GetValue(VEHICLE_RPM).iVal);
+   \   00000024   ........           BL       GetValue
+   \   00000028   00209DE5           LDR      R2,[SP, #+0]
+   \   0000002C   ........           ADR      R1,??DataTable42  ;; 0x25, 0x64, 0x00, 0x00
+   \   00000030   08008DE2           ADD      R0,SP,#+8
+   \   00000034   ........           BL       sprintf
+    251          	else
+    252          	{
+    253          		ftemp = GetValue(input).fVal;
+    254          		if ((input == ALTITUDE) || (input == SPEED))	// Altitude and speed too big for decimal place, just display integer portion
+    255          			sprintf(scratch, "%d", (int)ftemp);
+    256          		else if ((input == PREDICTIVE_LAP) || (input == COMBINED_G) || (input == X_G) || (input == Y_G) || (input == Z_G))
+    257          			sprintf(scratch, "%0.2f", ftemp);
+    258          		else sprintf(scratch, "%0.1f", ftemp);
+    259          	}
+    260          
+    261          	// Set text color based on data type and value
+    262          	if (input == PREDICTIVE_LAP)
+    263          	{
+    264          		if (ftemp < 0)
+    265          			GUI_SetColor(GUI_GREEN);
+    266          		else GUI_SetColor(GUI_RED);
+    267          	}
+    268          	else GUI_SetColor(config->pData->color);
+   \                     ??ShowOtherInput_1:
+   \   00000038   000094E5           LDR      R0,[R4, #+0]
+   \   0000003C   0C0090E5           LDR      R0,[R0, #+12]
+   \                     ??ShowOtherInput_2:
+   \   00000040   ........           BL       GUI_SetColor
+    269          
+    270          	// Display Data Value
+    271          	GUI_SetFont(config->pData->pFont);
+   \   00000044   000094E5           LDR      R0,[R4, #+0]
+   \   00000048   100090E5           LDR      R0,[R0, #+16]
+   \   0000004C   ........           BL       GUI_SetFont
+    272          	GUI_DispStringInRect(scratch, &config->pData->box, config->pData->justification);
+   \   00000050   001094E5           LDR      R1,[R4, #+0]
+   \   00000054   08008DE2           ADD      R0,SP,#+8
+   \   00000058   082091E5           LDR      R2,[R1, #+8]
+   \   0000005C   ........           BL       GUI_DispStringInRect
+    273          
+    274          	// Display Name
+    275          	GUI_SetColor(config->pName->color);
+   \   00000060   040094E5           LDR      R0,[R4, #+4]
+   \   00000064   0C0090E5           LDR      R0,[R0, #+12]
+   \   00000068   ........           BL       GUI_SetColor
+    276          	GUI_SetFont(config->pName->pFont);
+   \   0000006C   040094E5           LDR      R0,[R4, #+4]
+   \   00000070   100090E5           LDR      R0,[R0, #+16]
+   \   00000074   ........           BL       GUI_SetFont
+    277          	GUI_DispStringInRect(pLabel, &config->pName->box, config->pName->justification);
+   \   00000078   041094E5           LDR      R1,[R4, #+4]
+   \   0000007C   0800A0E1           MOV      R0,R8
+   \   00000080   082091E5           LDR      R2,[R1, #+8]
+   \   00000084   ........           BL       GUI_DispStringInRect
+    278          
+    279          	// Display Units
+    280          	GUI_SetColor(config->pUnits->color);
+   \   00000088   080094E5           LDR      R0,[R4, #+8]
+   \   0000008C   0C0090E5           LDR      R0,[R0, #+12]
+   \   00000090   ........           BL       GUI_SetColor
+    281          	GUI_SetFont(config->pUnits->pFont);
+   \   00000094   080094E5           LDR      R0,[R4, #+8]
+   \   00000098   100090E5           LDR      R0,[R0, #+16]
+   \   0000009C   ........           BL       GUI_SetFont
+    282          	GUI_DispStringInRect(pUnits, &config->pUnits->box, config->pUnits->justification);
+   \   000000A0   081094E5           LDR      R1,[R4, #+8]
+   \   000000A4   0600A0E1           MOV      R0,R6
+   \   000000A8   082091E5           LDR      R2,[R1, #+8]
+   \   000000AC   ........           BL       GUI_DispStringInRect
+    283          }
+   \   000000B0   28D08DE2           ADD      SP,SP,#+40       ;; stack cleaning
+   \   000000B4   F081BDE8           POP      {R4-R8,PC}       ;; return
+   \                     ??ShowOtherInput_0:
+   \   000000B8   ........           BL       GetValue
+   \   000000BC   130055E3           CMP      R5,#+19
+   \   000000C0   00709DE5           LDR      R7,[SP, #+0]
+   \   000000C4   0E005513           CMPNE    R5,#+14
+   \   000000C8   0D00001A           BNE      ??ShowOtherInput_3
+   \   000000CC   0700A0E1           MOV      R0,R7
+   \   000000D0   ........           BL       __aeabi_f2iz
+   \   000000D4   0020A0E1           MOV      R2,R0
+   \   000000D8   ........           ADR      R1,??DataTable42  ;; 0x25, 0x64, 0x00, 0x00
+   \   000000DC   08008DE2           ADD      R0,SP,#+8
+   \   000000E0   ........           BL       sprintf
+   \                     ??ShowOtherInput_4:
+   \   000000E4   1F0055E3           CMP      R5,#+31
+   \   000000E8   D2FFFF1A           BNE      ??ShowOtherInput_1
+   \   000000EC   0700A0E1           MOV      R0,R7
+   \   000000F0   0010A0E3           MOV      R1,#+0
+   \   000000F4   ........           BL       __aeabi_cfcmple
+   \   000000F8   FF0CA033           MOVCC    R0,#+65280
+   \   000000FC   FF00A023           MOVCS    R0,#+255
+   \   00000100   CEFFFFEA           B        ??ShowOtherInput_2
+   \                     ??ShowOtherInput_3:
+   \   00000104   1F0055E3           CMP      R5,#+31
+   \   00000108   50005513           CMPNE    R5,#+80
+   \   0000010C   00005513           CMPNE    R5,#+0
+   \   00000110   01005513           CMPNE    R5,#+1
+   \   00000114   02005513           CMPNE    R5,#+2
+   \   00000118   0800001A           BNE      ??ShowOtherInput_5
+   \   0000011C   0700A0E1           MOV      R0,R7
+   \   00000120   ........           BL       __aeabi_f2d
+   \   00000124   0020A0E1           MOV      R2,R0
+   \   00000128   0130A0E1           MOV      R3,R1
+   \   0000012C   ............       ADRL     R1,`?<Constant "%0.2f">`
+   \              ....        
+   \   00000134   08008DE2           ADD      R0,SP,#+8
+   \   00000138   ........           BL       sprintf
+   \   0000013C   E8FFFFEA           B        ??ShowOtherInput_4
+   \                     ??ShowOtherInput_5:
+   \   00000140   0700A0E1           MOV      R0,R7
+   \   00000144   ........           BL       __aeabi_f2d
+   \   00000148   0020A0E1           MOV      R2,R0
+   \   0000014C   0130A0E1           MOV      R3,R1
+   \   00000150   ............       ADRL     R1,`?<Constant "%0.1f">`
+   \              ....        
+   \   00000158   08008DE2           ADD      R0,SP,#+8
+   \   0000015C   ........           BL       sprintf
+   \   00000160   B4FFFFEA           B        ??ShowOtherInput_1
+    284          
+    285          //
+    286          // Format string - essentially copied from LinearGauge.cpp but without the font setting
+    287          //
+    288          // Input:	pointer to character buffer to receive characters
+    289          //			floating point value to format
+    290          //
+
+   \                                 In section .text, align 4, keep-with-next
+    291          void FormatAnalogData(char *pStr, float dValue)
+    292          {
+   \                     FormatAnalogData:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    293          	if (dValue == 0.0)
+   \   00000008   0100A0E1           MOV      R0,R1
+   \   0000000C   0010A0E3           MOV      R1,#+0
+   \   00000010   ........           BL       __aeabi_cfcmpeq
+   \   00000014   0500001A           BNE      ??FormatAnalogData_0
+    294          		strcpy(pStr, "0");					// 1 character
+   \   00000018   ........           ADR      R0,??DataTable42_1  ;; "0"
+   \   0000001C   0010D0E5           LDRB     R1,[R0, #0]
+   \   00000020   0010C4E5           STRB     R1,[R4, #+0]
+   \   00000024   0110D0E5           LDRB     R1,[R0, #+1]
+   \   00000028   0110C4E5           STRB     R1,[R4, #+1]
+   \   0000002C   1080BDE8           POP      {R4,PC}
+    295          	else if ((dValue > 1000.0) || (dValue < -100.0))
+   \                     ??FormatAnalogData_0:
+   \   00000030   5113A0E3           MOV      R1,#+1140850689
+   \   00000034   7A1881E3           ORR      R1,R1,#0x7A0000
+   \   00000038   ........           BL       __aeabi_cfrcmple
+   \   0000003C   0300009A           BLS      ??FormatAnalogData_1
+   \   00000040   C014A0E3           MOV      R1,#-1073741824
+   \   00000044   B21781E3           ORR      R1,R1,#0x2C80000
+   \   00000048   ........           BL       __aeabi_cfcmple
+   \   0000004C   0500002A           BCS      ??FormatAnalogData_2
+    296          		sprintf(pStr, "%0.0f", dValue);		// 4 or more characters
+   \                     ??FormatAnalogData_1:
+   \   00000050   ........           BL       __aeabi_f2d
+   \   00000054   0130A0E1           MOV      R3,R1
+   \   00000058   0020A0E1           MOV      R2,R0
+   \   0000005C   ............       ADRL     R1,`?<Constant "%0.0f">`
+   \              ....        
+   \   00000064   1A0000EA           B        ??FormatAnalogData_3
+    297          	else if ((dValue > 100.0) || (dValue < -10.0))
+   \                     ??FormatAnalogData_2:
+   \   00000068   5013A0E3           MOV      R1,#+1073741825
+   \   0000006C   B21781E3           ORR      R1,R1,#0x2C80000
+   \   00000070   ........           BL       __aeabi_cfrcmple
+   \   00000074   F5FFFF9A           BLS      ??FormatAnalogData_1
+   \   00000078   C014A0E3           MOV      R1,#-1073741824
+   \   0000007C   481781E3           ORR      R1,R1,#0x1200000
+   \   00000080   ........           BL       __aeabi_cfcmple
+   \   00000084   F1FFFF3A           BCC      ??FormatAnalogData_1
+    298          		sprintf(pStr, "%0.0f", dValue);		// 3 characters
+    299          	else if ((dValue > 10.0) || (dValue < -1.0))
+   \   00000088   5013A0E3           MOV      R1,#+1073741825
+   \   0000008C   481781E3           ORR      R1,R1,#0x1200000
+   \   00000090   ........           BL       __aeabi_cfrcmple
+   \   00000094   0300009A           BLS      ??FormatAnalogData_4
+   \   00000098   8014A0E3           MOV      R1,#-2147483648
+   \   0000009C   FE1581E3           ORR      R1,R1,#0x3F800000
+   \   000000A0   ........           BL       __aeabi_cfcmple
+   \   000000A4   0500002A           BCS      ??FormatAnalogData_5
+    300          		sprintf(pStr, "%0.1f", dValue);		// 3 characters
+   \                     ??FormatAnalogData_4:
+   \   000000A8   ........           BL       __aeabi_f2d
+   \   000000AC   0130A0E1           MOV      R3,R1
+   \   000000B0   0020A0E1           MOV      R2,R0
+   \   000000B4   ............       ADRL     R1,`?<Constant "%0.1f">`
+   \              ....        
+   \   000000BC   040000EA           B        ??FormatAnalogData_3
+    301          	else if ((dValue > 1.0) || (dValue < -0.1))
+    302          		sprintf(pStr, "%0.2f", dValue);		// 3 characters
+   \                     ??FormatAnalogData_5:
+   \   000000C0   ........           BL       __aeabi_f2d
+   \   000000C4   0130A0E1           MOV      R3,R1
+   \   000000C8   0020A0E1           MOV      R2,R0
+   \   000000CC   ............       ADRL     R1,`?<Constant "%0.2f">`
+   \              ....        
+   \                     ??FormatAnalogData_3:
+   \   000000D4   0400A0E1           MOV      R0,R4
+   \   000000D8   1040BDE8           POP      {R4,LR}
+   \   000000DC   ........           B        sprintf          ;; tailcall
+    303          	else sprintf(pStr, "%0.2f", dValue);	// 3 digits (or 2 plus minus sign)
+    304          }
+    305          
+    306          
+
+   \                                 In section .text, align 4, keep-with-next
+    307          void ShowTime(const struct CONFIG_ARGS *config, GlobalDataIndexType item)
+    308          {
+   \                     ShowTime:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0150A0E1           MOV      R5,R1
+   \   00000008   1CD04DE2           SUB      SP,SP,#+28
+   \   0000000C   0040A0E1           MOV      R4,R0
+    309          	char scratch[10], *pText1, *pText2;
+    310          	
+    311          	if (item == BEST_SESSION_LAP)
+   \   00000010   510055E3           CMP      R5,#+81
+   \   00000014   0800001A           BNE      ??ShowTime_0
+    312          	{
+    313          		strcpy(scratch, formatLapTime(GetValue(item).uVal, false));
+   \   00000018   0D00A0E1           MOV      R0,SP
+   \   0000001C   ........           BL       GetValue
+   \   00000020   0010A0E3           MOV      R1,#+0
+   \   00000024   00009DE5           LDR      R0,[SP, #+0]
+   \   00000028   ........           BL       formatLapTime
+   \   0000002C   0010A0E1           MOV      R1,R0
+   \   00000030   08008DE2           ADD      R0,SP,#+8
+   \   00000034   ........           BL       strcpy
+   \   00000038   210000EA           B        ??ShowTime_1
+    314          	}
+    315          	else if (item == GPS_TIME)
+   \                     ??ShowTime_0:
+   \   0000003C   120055E3           CMP      R5,#+18
+   \   00000040   0300001A           BNE      ??ShowTime_2
+    316          	{
+    317          		GetTimeString(SHORT12, scratch);
+   \   00000044   08108DE2           ADD      R1,SP,#+8
+   \   00000048   0300A0E3           MOV      R0,#+3
+   \   0000004C   ........           BL       GetTimeString
+   \   00000050   1B0000EA           B        ??ShowTime_1
+    318          	}
+    319          	else
+    320          	{
+    321          		unsigned int time;
+    322          
+    323          		time = GetValue(item).uVal / 1000;		// time = time in seconds
+   \                     ??ShowTime_2:
+   \   00000054   0D00A0E1           MOV      R0,SP
+   \   00000058   ........           BL       GetValue
+   \   0000005C   00009DE5           LDR      R0,[SP, #+0]
+   \   00000060   ........           LDR      R2,??DataTable43_12  ;; 0x83126e98
+    324          		
+    325          		// Up to 99 minutes, 59 seconds display minutes and seconds, then display hours and minutes
+    326          		if (time < 6000)
+   \   00000064   70C0A0E3           MOV      R12,#+112
+   \   00000068   902281E0           UMULL    R2,R1,R0,R2
+   \   0000006C   ........           LDR      R2,??DataTable43_13  ;; 0x88888889
+   \   00000070   A104A0E1           LSR      R0,R1,#+9
+   \   00000074   902281E0           UMULL    R2,R1,R0,R2
+   \   00000078   5CCD8CE3           ORR      R12,R12,#0x1700
+   \   0000007C   A122A0E1           LSR      R2,R1,#+5
+   \   00000080   3C30A0E3           MOV      R3,#+60
+   \   00000084   0C0050E1           CMP      R0,R12
+    327          			sprintf(scratch, "%02d:%02d", time / 60, time % 60);
+   \   00000088   93020C30           MULCC    R12,R3,R2
+   \   0000008C   ............       ADRL     R1,`?<Constant "%02d:%02d">`
+   \              ....        
+   \   00000094   0C304030           SUBCC    R3,R0,R12
+   \   00000098   0700003A           BCC      ??ShowTime_3
+    328          		else sprintf(scratch, "%02d:%02d", time/3600, (time/60)%60);
+   \   0000009C   ........           LDR      LR,??DataTable43_13  ;; 0x88888889
+   \   000000A0   92EE8CE0           UMULL    LR,R12,R2,LR
+   \   000000A4   ACC2A0E1           LSR      R12,R12,#+5
+   \   000000A8   830C6CE1           SMULBB   R12,R3,R12
+   \   000000AC   0C3042E0           SUB      R3,R2,R12
+   \   000000B0   ........           LDR      R12,??DataTable43_14  ;; 0x91a2b3c5
+   \   000000B4   90CC82E0           UMULL    R12,R2,R0,R12
+   \   000000B8   A225A0E1           LSR      R2,R2,#+11
+   \                     ??ShowTime_3:
+   \   000000BC   08008DE2           ADD      R0,SP,#+8
+   \   000000C0   ........           BL       sprintf
+    329          	}
+    330          
+    331          	// Display Data Value
+    332          	GUI_SetColor(config->pData->color);
+   \                     ??ShowTime_1:
+   \   000000C4   000094E5           LDR      R0,[R4, #+0]
+   \   000000C8   0C0090E5           LDR      R0,[R0, #+12]
+   \   000000CC   ........           BL       GUI_SetColor
+    333          	GUI_SetFont(config->pData->pFont);
+   \   000000D0   000094E5           LDR      R0,[R4, #+0]
+   \   000000D4   100090E5           LDR      R0,[R0, #+16]
+   \   000000D8   ........           BL       GUI_SetFont
+    334          	GUI_DispStringInRect(scratch, &config->pData->box, config->pData->justification);
+   \   000000DC   001094E5           LDR      R1,[R4, #+0]
+   \   000000E0   08008DE2           ADD      R0,SP,#+8
+   \   000000E4   082091E5           LDR      R2,[R1, #+8]
+   \   000000E8   ........           BL       GUI_DispStringInRect
+    335          
+    336          	// Display text
+    337          	GUI_SetColor(config->pName->color);
+   \   000000EC   040094E5           LDR      R0,[R4, #+4]
+   \   000000F0   0C0090E5           LDR      R0,[R0, #+12]
+   \   000000F4   ........           BL       GUI_SetColor
+    338          	GUI_SetFont(config->pName->pFont);
+   \   000000F8   040094E5           LDR      R0,[R4, #+4]
+   \   000000FC   100090E5           LDR      R0,[R0, #+16]
+   \   00000100   ........           BL       GUI_SetFont
+    339          	switch (item)
+   \   00000104   125055E2           SUBS     R5,R5,#+18
+   \   00000108   0900000A           BEQ      ??ShowTime_4
+   \   0000010C   115055E2           SUBS     R5,R5,#+17
+   \   00000110   0200000A           BEQ      ??ShowTime_5
+   \   00000114   2E5055E2           SUBS     R5,R5,#+46
+   \   00000118   0700000A           BEQ      ??ShowTime_6
+   \   0000011C   0A0000EA           B        ??ShowTime_7
+    340          	{
+    341          		case ELAPSED_RACE_TIME:	pText1 = "elapsed";	pText2 = "time";	break;
+   \                     ??ShowTime_5:
+   \   00000120   ............       ADRL     R0,`?<Constant "elapsed">`
+   \              ....        
+   \                     ??ShowTime_8:
+   \   00000128   ............       ADRL     R5,`?<Constant "time">`
+   \              ....        
+   \   00000130   070000EA           B        ??ShowTime_9
+    342          		case GPS_TIME:			pText1 = "GPS";		pText2 = "time";	break;
+   \                     ??ShowTime_4:
+   \   00000134   ........           ADR      R0,??DataTable43  ;; "GPS"
+   \   00000138   FAFFFFEA           B        ??ShowTime_8
+    343          		case BEST_SESSION_LAP:	pText1 = "Best";	pText2 = "Lap";		break;
+   \                     ??ShowTime_6:
+   \   0000013C   ............       ADRL     R0,`?<Constant "Best">`
+   \              ....        
+   \   00000144   ........           ADR      R5,??DataTable43_1  ;; "Lap"
+   \   00000148   010000EA           B        ??ShowTime_9
+    344          		default:				pText1 = "";		pText2 = "";		break;
+   \                     ??ShowTime_7:
+   \   0000014C   ........           ADR      R0,??DataTable43_2  ;; ""
+   \   00000150   0050A0E1           MOV      R5,R0
+    345          	}
+    346          	GUI_DispStringInRect(pText1, &config->pName->box, config->pName->justification);
+   \                     ??ShowTime_9:
+   \   00000154   041094E5           LDR      R1,[R4, #+4]
+   \   00000158   082091E5           LDR      R2,[R1, #+8]
+   \   0000015C   ........           BL       GUI_DispStringInRect
+    347          	GUI_DispStringInRect(pText2, &config->pUnits->box, config->pUnits->justification);
+   \   00000160   081094E5           LDR      R1,[R4, #+8]
+   \   00000164   0500A0E1           MOV      R0,R5
+   \   00000168   082091E5           LDR      R2,[R1, #+8]
+   \   0000016C   ........           BL       GUI_DispStringInRect
+    348          }
+   \   00000170   1CD08DE2           ADD      SP,SP,#+28       ;; stack cleaning
+   \   00000174   3080BDE8           POP      {R4,R5,PC}       ;; return
+    349          
+    350          //
+    351          // Redefined here in pure C rather than C++
+    352          //
+
+   \                                 In section .text, align 4, keep-with-next
+    353          GlobalDataIndexType GetInputID(int input)
+    354          {
+    355          	switch (input)
+   \                     GetInputID:
+   \   00000000   010050E3           CMP      R0,#+1
+   \   00000004   0500000A           BEQ      ??GetInputID_0
+   \   00000008   0200003A           BCC      ??GetInputID_1
+   \   0000000C   030050E3           CMP      R0,#+3
+   \   00000010   0600000A           BEQ      ??GetInputID_2
+   \   00000014   0300003A           BCC      ??GetInputID_3
+    356          	{
+    357          	default:
+    358          	case 0:	return ANALOG_INPUT_0;
+   \                     ??GetInputID_1:
+   \   00000018   3600A0E3           MOV      R0,#+54
+   \   0000001C   1EFF2FE1           BX       LR
+    359          	case 1:	return ANALOG_INPUT_1;
+   \                     ??GetInputID_0:
+   \   00000020   3700A0E3           MOV      R0,#+55
+   \   00000024   1EFF2FE1           BX       LR
+    360          	case 2:	return ANALOG_INPUT_2;
+   \                     ??GetInputID_3:
+   \   00000028   3800A0E3           MOV      R0,#+56
+   \   0000002C   1EFF2FE1           BX       LR
+    361          	case 3:	return ANALOG_INPUT_3;
+   \                     ??GetInputID_2:
+   \   00000030   3900A0E3           MOV      R0,#+57
+   \   00000034   1EFF2FE1           BX       LR               ;; return
+    362          	}
+    363          }
+    364          
+    365          //
+    366          // Display (configurable) data item in the position and as specified by the input parameters
+    367          //
+    368          // Input:	item - data item to display
+    369          //			CONFIG_ARGS *config - see description in header file
+    370          //
+
+   \                                 In section .text, align 4, keep-with-next
+    371          void DisplayConfigurableItem(const struct CONFIG_ARGS *config)
+    372          {
+   \                     DisplayConfigurableItem:
+   \   00000000   00402DE9           PUSH     {LR}
+    373          	switch (GetConfigurableItem())
+   \   00000004   ........           LDR      R1,??DataTable43_6
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   E82091E5           LDR      R2,[R1, #+232]
+   \   00000010   FF2002E2           AND      R2,R2,#0xFF
+   \   00000014   510052E3           CMP      R2,#+81
+   \   00000018   02F18F90           ADDLS    PC,PC,R2, LSL #+2
+   \                     ??DisplayConfigurableItem_0:
+   \   0000001C   5100008A           BHI      ??DisplayConfigurableItem_1
+   \   00000020   620000EA           B        ??DisplayConfigurableItem_2
+   \   00000024   650000EA           B        ??DisplayConfigurableItem_3
+   \   00000028   680000EA           B        ??DisplayConfigurableItem_4
+   \   0000002C   4D0000EA           B        ??DisplayConfigurableItem_1
+   \   00000030   4C0000EA           B        ??DisplayConfigurableItem_1
+   \   00000034   4B0000EA           B        ??DisplayConfigurableItem_1
+   \   00000038   4A0000EA           B        ??DisplayConfigurableItem_1
+   \   0000003C   490000EA           B        ??DisplayConfigurableItem_1
+   \   00000040   480000EA           B        ??DisplayConfigurableItem_1
+   \   00000044   470000EA           B        ??DisplayConfigurableItem_1
+   \   00000048   460000EA           B        ??DisplayConfigurableItem_1
+   \   0000004C   450000EA           B        ??DisplayConfigurableItem_1
+   \   00000050   440000EA           B        ??DisplayConfigurableItem_1
+   \   00000054   430000EA           B        ??DisplayConfigurableItem_1
+   \   00000058   880000EA           B        ??DisplayConfigurableItem_5
+   \   0000005C   410000EA           B        ??DisplayConfigurableItem_1
+   \   00000060   400000EA           B        ??DisplayConfigurableItem_1
+   \   00000064   3F0000EA           B        ??DisplayConfigurableItem_1
+   \   00000068   800000EA           B        ??DisplayConfigurableItem_6
+   \   0000006C   630000EA           B        ??DisplayConfigurableItem_7
+   \   00000070   3C0000EA           B        ??DisplayConfigurableItem_1
+   \   00000074   3B0000EA           B        ??DisplayConfigurableItem_1
+   \   00000078   3A0000EA           B        ??DisplayConfigurableItem_1
+   \   0000007C   390000EA           B        ??DisplayConfigurableItem_1
+   \   00000080   380000EA           B        ??DisplayConfigurableItem_1
+   \   00000084   370000EA           B        ??DisplayConfigurableItem_1
+   \   00000088   360000EA           B        ??DisplayConfigurableItem_1
+   \   0000008C   350000EA           B        ??DisplayConfigurableItem_1
+   \   00000090   340000EA           B        ??DisplayConfigurableItem_1
+   \   00000094   330000EA           B        ??DisplayConfigurableItem_1
+   \   00000098   320000EA           B        ??DisplayConfigurableItem_1
+   \   0000009C   530000EA           B        ??DisplayConfigurableItem_8
+   \   000000A0   300000EA           B        ??DisplayConfigurableItem_1
+   \   000000A4   2F0000EA           B        ??DisplayConfigurableItem_1
+   \   000000A8   6D0000EA           B        ??DisplayConfigurableItem_9
+   \   000000AC   2D0000EA           B        ??DisplayConfigurableItem_1
+   \   000000B0   2C0000EA           B        ??DisplayConfigurableItem_1
+   \   000000B4   320000EA           B        ??DisplayConfigurableItem_10
+   \   000000B8   2A0000EA           B        ??DisplayConfigurableItem_1
+   \   000000BC   290000EA           B        ??DisplayConfigurableItem_1
+   \   000000C0   280000EA           B        ??DisplayConfigurableItem_1
+   \   000000C4   270000EA           B        ??DisplayConfigurableItem_1
+   \   000000C8   260000EA           B        ??DisplayConfigurableItem_1
+   \   000000CC   250000EA           B        ??DisplayConfigurableItem_1
+   \   000000D0   240000EA           B        ??DisplayConfigurableItem_1
+   \   000000D4   230000EA           B        ??DisplayConfigurableItem_1
+   \   000000D8   220000EA           B        ??DisplayConfigurableItem_1
+   \   000000DC   210000EA           B        ??DisplayConfigurableItem_1
+   \   000000E0   200000EA           B        ??DisplayConfigurableItem_1
+   \   000000E4   1F0000EA           B        ??DisplayConfigurableItem_1
+   \   000000E8   1E0000EA           B        ??DisplayConfigurableItem_1
+   \   000000EC   1D0000EA           B        ??DisplayConfigurableItem_1
+   \   000000F0   1C0000EA           B        ??DisplayConfigurableItem_1
+   \   000000F4   480000EA           B        ??DisplayConfigurableItem_11
+   \   000000F8   4B0000EA           B        ??DisplayConfigurableItem_12
+   \   000000FC   4D0000EA           B        ??DisplayConfigurableItem_13
+   \   00000100   4E0000EA           B        ??DisplayConfigurableItem_14
+   \   00000104   4F0000EA           B        ??DisplayConfigurableItem_15
+   \   00000108   500000EA           B        ??DisplayConfigurableItem_16
+   \   0000010C   520000EA           B        ??DisplayConfigurableItem_17
+   \   00000110   140000EA           B        ??DisplayConfigurableItem_1
+   \   00000114   130000EA           B        ??DisplayConfigurableItem_1
+   \   00000118   120000EA           B        ??DisplayConfigurableItem_1
+   \   0000011C   110000EA           B        ??DisplayConfigurableItem_1
+   \   00000120   100000EA           B        ??DisplayConfigurableItem_1
+   \   00000124   0F0000EA           B        ??DisplayConfigurableItem_1
+   \   00000128   0E0000EA           B        ??DisplayConfigurableItem_1
+   \   0000012C   0D0000EA           B        ??DisplayConfigurableItem_1
+   \   00000130   0C0000EA           B        ??DisplayConfigurableItem_1
+   \   00000134   0B0000EA           B        ??DisplayConfigurableItem_1
+   \   00000138   0A0000EA           B        ??DisplayConfigurableItem_1
+   \   0000013C   170000EA           B        ??DisplayConfigurableItem_18
+   \   00000140   080000EA           B        ??DisplayConfigurableItem_1
+   \   00000144   070000EA           B        ??DisplayConfigurableItem_1
+   \   00000148   060000EA           B        ??DisplayConfigurableItem_1
+   \   0000014C   050000EA           B        ??DisplayConfigurableItem_1
+   \   00000150   040000EA           B        ??DisplayConfigurableItem_1
+   \   00000154   030000EA           B        ??DisplayConfigurableItem_1
+   \   00000158   020000EA           B        ??DisplayConfigurableItem_1
+   \   0000015C   010000EA           B        ??DisplayConfigurableItem_1
+   \   00000160   1E0000EA           B        ??DisplayConfigurableItem_19
+   \   00000164   430000EA           B        ??DisplayConfigurableItem_20
+    374          	{
+    375          	default:
+    376          	case VMAX:
+    377          		ShowOtherInput(config, VMAX, "vmax", sysData.units == STD ? "mph" : "kph");
+   \                     ??DisplayConfigurableItem_1:
+   \   00000168   641091E5           LDR      R1,[R1, #+100]
+   \   0000016C   ........           ADR      R2,`?<Constant "vmax">`
+   \   00000170   000051E3           CMP      R1,#+0
+   \   00000174   ........           ADREQ    R3,??DataTable43_4  ;; "mph"
+   \   00000178   ........           ADRNE    R3,??DataTable43_5  ;; "kph"
+   \   0000017C   2610A0E3           MOV      R1,#+38
+   \   00000180   440000EA           B        ??DisplayConfigurableItem_21
+    378          		break;
+    379          
+    380          	case VMIN:
+    381          		ShowOtherInput(config, VMIN, "vmin", sysData.units == STD ? "mph" : "kph");
+   \                     ??DisplayConfigurableItem_10:
+   \   00000184   641091E5           LDR      R1,[R1, #+100]
+   \   00000188   ........           ADR      R2,`?<Constant "vmin">`
+   \   0000018C   000051E3           CMP      R1,#+0
+   \   00000190   ........           ADREQ    R3,??DataTable43_4  ;; "mph"
+   \   00000194   ........           ADRNE    R3,??DataTable43_5  ;; "kph"
+   \   00000198   2510A0E3           MOV      R1,#+37
+   \   0000019C   3D0000EA           B        ??DisplayConfigurableItem_21
+    382          		break;
+    383          
+    384          	case VEHICLE_12V:
+    385          		ShowOtherInput(config, VEHICLE_12V, "Battery", "Volts");
+   \                     ??DisplayConfigurableItem_18:
+   \   000001A0   ........           ADR      R3,`?<Constant "Volts">`
+   \   000001A4   ........           ADR      R2,`?<Constant "Battery">`
+   \   000001A8   4710A0E3           MOV      R1,#+71
+   \   000001AC   390000EA           B        ??DisplayConfigurableItem_21
+    386          		break;
+    387          
+    388          	case X_G:
+    389          		ShowOtherInput(config, X_G, "Accel/Bk", "Gs");
+   \                     ??DisplayConfigurableItem_2:
+   \   000001B0   ........           ADR      R3,??DataTable43_7  ;; 0x47, 0x73, 0x00, 0x00
+   \   000001B4   ........           ADR      R2,`?<Constant "Accel/Bk">`
+   \   000001B8   0010A0E3           MOV      R1,#+0
+   \   000001BC   350000EA           B        ??DisplayConfigurableItem_21
+    390          		break;
+    391          
+    392          	case Y_G:
+    393          		ShowOtherInput(config, Y_G, "Lateral", "Gs");
+   \                     ??DisplayConfigurableItem_3:
+   \   000001C0   ........           ADR      R3,??DataTable43_7  ;; 0x47, 0x73, 0x00, 0x00
+   \   000001C4   ........           ADR      R2,`?<Constant "Lateral">`
+   \   000001C8   0110A0E3           MOV      R1,#+1
+   \   000001CC   310000EA           B        ??DisplayConfigurableItem_21
+    394          		break;
+    395          
+    396          	case Z_G:
+    397          		ShowOtherInput(config, Z_G, "Vertical", "Gs");
+   \                     ??DisplayConfigurableItem_4:
+   \   000001D0   ........           ADR      R3,??DataTable43_7  ;; 0x47, 0x73, 0x00, 0x00
+   \   000001D4   ........           ADR      R2,`?<Constant "Vertical">`
+   \   000001D8   0210A0E3           MOV      R1,#+2
+   \   000001DC   2D0000EA           B        ??DisplayConfigurableItem_21
+    398          		break;
+    399          
+    400          	case COMBINED_G:
+    401          		ShowOtherInput(config, COMBINED_G, "Total", "Gs");
+   \                     ??DisplayConfigurableItem_19:
+   \   000001E0   ........           ADR      R3,??DataTable43_7  ;; 0x47, 0x73, 0x00, 0x00
+   \   000001E4   ........           ADR      R2,`?<Constant "Total">`
+   \   000001E8   5010A0E3           MOV      R1,#+80
+   \   000001EC   290000EA           B        ??DisplayConfigurableItem_21
+    402          		break;
+    403          
+    404          	case PREDICTIVE_LAP:
+    405          		ShowOtherInput(config, PREDICTIVE_LAP, "Gap", "secs");
+   \                     ??DisplayConfigurableItem_8:
+   \   000001F0   ........           ADR      R3,`?<Constant "secs">`
+   \   000001F4   ........           ADR      R2,??DataTable43_8  ;; "Gap"
+   \   000001F8   1F10A0E3           MOV      R1,#+31
+   \   000001FC   250000EA           B        ??DisplayConfigurableItem_21
+    406          		break;
+    407          
+    408          	case ALTITUDE:
+    409          		ShowOtherInput(config, ALTITUDE, "Altitude", sysData.units == STD ? "feet" : "meters");
+   \                     ??DisplayConfigurableItem_7:
+   \   00000200   641091E5           LDR      R1,[R1, #+100]
+   \   00000204   ........           ADR      R2,`?<Constant "Altitude">`
+   \   00000208   000051E3           CMP      R1,#+0
+   \   0000020C   ........           ADREQ    R3,`?<Constant "feet">`
+   \   00000210   ........           ADRNE    R3,`?<Constant "meters">`
+   \   00000214   1310A0E3           MOV      R1,#+19
+   \   00000218   1E0000EA           B        ??DisplayConfigurableItem_21
+    410          		break;
+    411          
+    412          	case VEHICLE_RPM:
+    413          		ShowOtherInput(config, VEHICLE_RPM, "rpm", "");
+   \                     ??DisplayConfigurableItem_11:
+   \   0000021C   ........           ADR      R3,??DataTable43_2  ;; ""
+   \   00000220   ........           ADR      R2,??DataTable43_9  ;; "rpm"
+   \   00000224   3510A0E3           MOV      R1,#+53
+   \   00000228   1A0000EA           B        ??DisplayConfigurableItem_21
+    414          		break;
+    415          
+    416          	case ANALOG_INPUT_0:
+    417          		ShowInput(config, 0);
+   \                     ??DisplayConfigurableItem_12:
+   \   0000022C   0010A0E3           MOV      R1,#+0
+   \                     ??DisplayConfigurableItem_22:
+   \   00000230   ........           BL       ShowInput
+    418          		break;
+   \   00000234   180000EA           B        ??DisplayConfigurableItem_23
+    419          
+    420          	case ANALOG_INPUT_1:
+    421          		ShowInput(config, 1);
+   \                     ??DisplayConfigurableItem_13:
+   \   00000238   0110A0E3           MOV      R1,#+1
+   \   0000023C   FBFFFFEA           B        ??DisplayConfigurableItem_22
+    422          		break;
+    423          
+    424          	case ANALOG_INPUT_2:
+    425          		ShowInput(config, 2);
+   \                     ??DisplayConfigurableItem_14:
+   \   00000240   0210A0E3           MOV      R1,#+2
+   \   00000244   F9FFFFEA           B        ??DisplayConfigurableItem_22
+    426          		break;
+    427          
+    428          	case ANALOG_INPUT_3:
+    429          		ShowInput(config, 3);
+   \                     ??DisplayConfigurableItem_15:
+   \   00000248   0310A0E3           MOV      R1,#+3
+   \   0000024C   F7FFFFEA           B        ??DisplayConfigurableItem_22
+    430          		break;
+    431          
+    432          	case DIGITAL_INPUT_4:
+    433          		ShowDigitalInput(config, 0);
+   \                     ??DisplayConfigurableItem_16:
+   \   00000250   0010A0E3           MOV      R1,#+0
+   \                     ??DisplayConfigurableItem_24:
+   \   00000254   ........           BL       ShowDigitalInput
+    434          		break;
+   \   00000258   0F0000EA           B        ??DisplayConfigurableItem_23
+    435          
+    436          	case DIGITAL_INPUT_5:
+    437          		ShowDigitalInput(config, 1);
+   \                     ??DisplayConfigurableItem_17:
+   \   0000025C   0110A0E3           MOV      R1,#+1
+   \   00000260   FBFFFFEA           B        ??DisplayConfigurableItem_24
+    438          		break;
+    439          
+    440          	case ELAPSED_TIME:
+    441          		ShowTime(config, ELAPSED_RACE_TIME);
+   \                     ??DisplayConfigurableItem_9:
+   \   00000264   2310A0E3           MOV      R1,#+35
+   \                     ??DisplayConfigurableItem_25:
+   \   00000268   ........           BL       ShowTime
+    442          		break;
+   \   0000026C   0A0000EA           B        ??DisplayConfigurableItem_23
+    443          
+    444          	case GPS_TIME:
+    445          		ShowTime(config, GPS_TIME);
+   \                     ??DisplayConfigurableItem_6:
+   \   00000270   1210A0E3           MOV      R1,#+18
+   \   00000274   FBFFFFEA           B        ??DisplayConfigurableItem_25
+    446          		break;
+    447          
+    448          	case BEST_SESSION_LAP:
+    449          		ShowTime(config, BEST_SESSION_LAP);
+   \                     ??DisplayConfigurableItem_20:
+   \   00000278   5110A0E3           MOV      R1,#+81
+   \   0000027C   F9FFFFEA           B        ??DisplayConfigurableItem_25
+    450          		break;
+    451          
+    452          	case SPEED:
+    453          		// For speed only display units in the name field because the only screen we really 
+    454          		// want this input on is more symmetrical with units in the top position.  Other
+    455          		// screens that use the configurable gauge item already have speed on them so the
+    456          		// format of this input is not a priority on those screens.
+    457          		ShowOtherInput(config, SPEED, sysData.units == STD ? "mph" : "kph", "");
+   \                     ??DisplayConfigurableItem_5:
+   \   00000280   641091E5           LDR      R1,[R1, #+100]
+   \   00000284   ........           ADR      R3,??DataTable43_2  ;; ""
+   \   00000288   000051E3           CMP      R1,#+0
+   \   0000028C   ........           ADREQ    R2,??DataTable43_4  ;; "mph"
+   \   00000290   ........           ADRNE    R2,??DataTable43_5  ;; "kph"
+   \   00000294   0E10A0E3           MOV      R1,#+14
+   \                     ??DisplayConfigurableItem_21:
+   \   00000298   ........           BL       ShowOtherInput
+    458          		break;
+    459          	}
+    460          }
+   \                     ??DisplayConfigurableItem_23:
+   \   0000029C   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   000002A0   0080BDE8           POP      {PC}             ;; return
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable40:
+   \   00000000   30000000           DC8      "0",0x0,0x0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable42:
+   \   00000000   25640000           DC8      0x25, 0x64, 0x00, 0x00
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable42_1:
+   \   00000000   30000000           DC8      "0",0x0,0x0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable43:
+   \   00000000   47505300           DC8      "GPS"
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable43_1:
+   \   00000000   4C617000           DC8      "Lap"
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable43_2:
+   \   00000000   00000000           DC8      "",0x0,0x0,0x0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable43_3:
+   \   00000000   ........           DC32     boxStartTime
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable43_4:
+   \   00000000   6D706800           DC8      "mph"
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable43_5:
+   \   00000000   6B706800           DC8      "kph"
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable43_6:
+   \   00000000   ........           DC32     sysData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable43_7:
+   \   00000000   47730000           DC8      0x47, 0x73, 0x00, 0x00
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable43_8:
+   \   00000000   47617000           DC8      "Gap"
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable43_9:
+   \   00000000   72706D00           DC8      "rpm"
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable43_10:
+   \   00000000   ........           DC32     vehicleData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable43_11:
+   \   00000000   ........           DC32     GUI_Font32B_ASCII
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable43_12:
+   \   00000000   986E1283           DC32     0x83126e98
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable43_13:
+   \   00000000   89888888           DC32     0x88888889
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable43_14:
+   \   00000000   C5B3A291           DC32     0x91a2b3c5
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "%d">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   25640000           DC8 37, 100, 0, 0
+
+   \                                 In section .rodata, align 2, keep-with-next
+   \                     `?<Constant "0">`:
+   \   00000000                      ; Initializer data, 2 bytes
+   \   00000000   3000               DC8 48, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "AEM ">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   41454D200000       DC8 65, 69, 77, 32, 0, 0, 0, 0
+   \              0000        
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "GPS">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   47505300           DC8 71, 80, 83, 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "Lap">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   4C617000           DC8 76, 97, 112, 0
+
+   \                                 In section .rodata, align 1, keep-with-next
+   \                     `?<Constant "">`:
+   \   00000000                      ; Initializer data, 1 bytes
+   \   00000000   00                 DC8 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "PLX ">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   504C58200000       DC8 80, 76, 88, 32, 0, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Analog %d">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   416E616C6F67       DC8 65, 110, 97, 108, 111, 103, 32, 37, 100, 0
+   \              20256400    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Disabled">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   44697361626C       DC8 68, 105, 115, 97, 98, 108, 101, 100, 0, 0
+   \              65640000    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Digital %d">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   446967697461       DC8 68, 105, 103, 105, 116, 97, 108, 32, 37, 100
+   \              6C202564    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "%0.2f">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   25302E326600       DC8 37, 48, 46, 50, 102, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "%0.1f">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   25302E316600       DC8 37, 48, 46, 49, 102, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "%0.0f">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   25302E306600       DC8 37, 48, 46, 48, 102, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "%02d:%02d">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   253032643A25       DC8 37, 48, 50, 100, 58, 37, 48, 50, 100, 0
+   \              30326400    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "elapsed">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   656C61707365       DC8 101, 108, 97, 112, 115, 101, 100, 0
+   \              6400        
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "mph">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   6D706800           DC8 109, 112, 104, 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "kph">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   6B706800           DC8 107, 112, 104, 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "Gs">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   47730000           DC8 71, 115, 0, 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "Gap">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   47617000           DC8 71, 97, 112, 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "rpm">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   72706D00           DC8 114, 112, 109, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "time">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   74696D650000       DC8 116, 105, 109, 101, 0, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Best">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   426573740000       DC8 66, 101, 115, 116, 0, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "vmax">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   766D61780000       DC8 118, 109, 97, 120, 0, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "vmin">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   766D696E0000       DC8 118, 109, 105, 110, 0, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Battery">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   426174746572       DC8 66, 97, 116, 116, 101, 114, 121, 0
+   \              7900        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Volts">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   566F6C747300       DC8 86, 111, 108, 116, 115, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Accel/Bk">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   416363656C2F       DC8 65, 99, 99, 101, 108, 47, 66, 107, 0, 0
+   \              426B0000    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Lateral">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   4C6174657261       DC8 76, 97, 116, 101, 114, 97, 108, 0
+   \              6C00        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Vertical">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   566572746963       DC8 86, 101, 114, 116, 105, 99, 97, 108, 0, 0
+   \              616C0000    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Total">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   546F74616C00       DC8 84, 111, 116, 97, 108, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "secs">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   736563730000       DC8 115, 101, 99, 115, 0, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Altitude">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   416C74697475       DC8 65, 108, 116, 105, 116, 117, 100, 101, 0, 0
+   \              64650000    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "feet">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   666565740000       DC8 102, 101, 101, 116, 0, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "meters">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   6D6574657273       DC8 109, 101, 116, 101, 114, 115, 0, 0
+   \              0000        
+
+   Maximum stack usage in bytes:
+
+     Function                       .cstack
+     --------                       -------
+     ButtonPressIsOnConfigurableGauge
+                                        16
+     ConfigureGauge                      8
+     DisplayConfigurableItem             8
+     FormatAnalogData                    8
+     GetConfigurableItem                 0
+     GetInputID                          0
+     ProcessGaugeButton                 16
+     ScreenIsConfigurable                0
+     SetConfigurableItem                 0
+     ShowDigitalInput                   48
+     ShowInput                          56
+     ShowOtherInput                     64
+     ShowTime                           40
+
+
+   Section sizes:
+
+     Function/Label                 Bytes
+     --------------                 -----
+     boxStartTime                      6
+     configureGaugeMode
+     drawFlag
+     ScreenIsConfigurable             40
+     ConfigureGauge                   32
+     ButtonPressIsOnConfigurableGauge
+                                     128
+     ProcessGaugeButton              728
+     GetConfigurableItem              16
+     SetConfigurableItem              24
+     ShowInput                       608
+     ShowDigitalInput                232
+     ShowOtherInput                  356
+     FormatAnalogData                224
+     ShowTime                        376
+     GetInputID                       56
+     DisplayConfigurableItem         676
+     ??DataTable40                     4
+     ??DataTable42                     4
+     ??DataTable42_1                   4
+     ??DataTable43                     4
+     ??DataTable43_1                   4
+     ??DataTable43_2                   4
+     ??DataTable43_3                   4
+     ??DataTable43_4                   4
+     ??DataTable43_5                   4
+     ??DataTable43_6                   4
+     ??DataTable43_7                   4
+     ??DataTable43_8                   4
+     ??DataTable43_9                   4
+     ??DataTable43_10                  4
+     ??DataTable43_11                  4
+     ??DataTable43_12                  4
+     ??DataTable43_13                  4
+     ??DataTable43_14                  4
+     ?<Constant "%d">                  4
+     ?<Constant "0">                   2
+     ?<Constant "AEM ">                8
+     ?<Constant "GPS">                 4
+     ?<Constant "Lap">                 4
+     ?<Constant "">                    1
+     ?<Constant "PLX ">                8
+     ?<Constant "Analog %d">          12
+     ?<Constant "Disabled">           12
+     ?<Constant "Digital %d">         12
+     ?<Constant "%0.2f">               8
+     ?<Constant "%0.1f">               8
+     ?<Constant "%0.0f">               8
+     ?<Constant "%02d:%02d">          12
+     ?<Constant "elapsed">             8
+     ?<Constant "mph">                 4
+     ?<Constant "kph">                 4
+     ?<Constant "Gs">                  4
+     ?<Constant "Gap">                 4
+     ?<Constant "rpm">                 4
+     ?<Constant "time">                8
+     ?<Constant "Best">                8
+     ?<Constant "vmax">                8
+     ?<Constant "vmin">                8
+     ?<Constant "Battery">             8
+     ?<Constant "Volts">               8
+     ?<Constant "Accel/Bk">           12
+     ?<Constant "Lateral">             8
+     ?<Constant "Vertical">           12
+     ?<Constant "Total">               8
+     ?<Constant "secs">                8
+     ?<Constant "Altitude">           12
+     ?<Constant "feet">                8
+     ?<Constant "meters">              8
+
+ 
+     6 bytes in section .bss
+    35 bytes in section .rodata
+ 3 788 bytes in section .text
+ 
+ 3 788 bytes of CODE  memory
+    35 bytes of CONST memory
+     6 bytes of DATA  memory
+
+Errors: none
+Warnings: none

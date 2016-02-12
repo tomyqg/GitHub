@@ -1,0 +1,1599 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     02/Feb/2016  18:32:05 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\DUII\RPMSweepScreen.cpp                          #
+#    Command line =  C:\DUII\DUII\RPMSweepScreen.cpp -D DEBUG=1 -D            #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --eec++                              #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\RP #
+#                    MSweepScreen.lst                                         #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\RPM #
+#                    SweepScreen.o                                            #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\DUII\RPMSweepScreen.cpp
+      1          #include <stdio.h>
+      2          #include <stdlib.h>
+      3          #include "DUII.h"
+      4          #include "GUI.h"
+      5          #include "GeneralConfig.h"
+      6          #include "commondefs.h"
+      7          #include "ConfigScreens.h"
+      8          #include "RunningGauges.h"
+      9          #include "DataHandler.h"
+     10          #include "RPMSweep.hpp"
+     11          #include "RPMSweepScreen.h"
+     12          #include "DigitalDisplay.hpp"
+     13          #include "PredictiveLapTimer.hpp"
+     14          #include "DigitalStringOutput.hpp"
+     15          #include <time.h>
+     16          #include "Utilities.h"
+     17          #include "LEDHandler.h"
+     18          #include "ConfigurableGaugeCommon.h"
+     19          
+     20          void UpdatePredictiveLapControl(PredictiveLapTimer *pPredictiveLap, float predictiveLap);
+     21          
+
+   \                                 In section .bss, align 4
+     22          static WM_HWIN hRPMScreen;
+   \                     hRPMScreen:
+   \   00000000                      DS8 4
+   \   00000004                      DS8 4
+   \   00000008                      DS8 4
+   \   0000000C                      DS8 4
+   \   00000010                      DS8 4
+   \   00000014                      DS8 4
+   \   00000018                      DS8 4
+   \   0000001C                      DS8 4
+   \   00000020                      DS8 4
+     23          
+     24          static RPMSweep *pSweep = 0;
+     25          static DigitalDisplay *pMPH = 0;
+     26          //static DigitalDisplay *pLapCounter = 0;
+     27          static DigitalStringOutput *pLapTimer = 0;
+     28          static PredictiveLapTimer *pPredictiveLap = 0;
+     29          
+     30          static WM_HTIMER hScreenTimer;
+     31          
+     32          static Alarm *pYellow = 0;
+     33          static Alarm *pRed = 0;
+     34          #ifdef	SHOW_GREEN_LINE
+     35          static Alarm *pGreen = 0;
+     36          #endif
+     37          
+     38          static bool firsttimethrough;
+     39          
+     40          static GUI_MEMDEV_Handle mem;
+     41          
+     42          #ifdef __cplusplus
+     43          extern "C" {
+     44          extern char lockupSemaphore;
+     45          extern GUI_CONST_STORAGE GUI_BITMAP bmBestLapEver;
+     46          extern GUI_CONST_STORAGE GUI_BITMAP bmBestLapSession;
+     47          }
+     48          #endif
+     49          int rpm, gear, lap, holding, lapTime;
+   \                     rpm:
+   \   00000024                      DS8 4
+   \                     gear:
+   \   00000028                      DS8 4
+   \                     lap:
+   \   0000002C                      DS8 4
+   \                     holding:
+   \   00000030                      DS8 4
+   \                     lapTime:
+   \   00000034                      DS8 4
+     50          float speed, predictiveLap, altitude;
+   \                     speed:
+   \   00000038                      DS8 4
+   \                     predictiveLap:
+   \   0000003C                      DS8 4
+   \                     altitude:
+   \   00000040                      DS8 4
+   \   00000044                      DS8 1
+     51          
+
+   \                                 In section .text, align 4, keep-with-next
+     52          static const GUI_RECT LapRect = { 340, 113, 465, 155 };
+   \                     LapRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   54017100D101       DC16 340, 113, 465, 155
+   \              9B00        
+     53          
+     54          // Comment out the BIG_NUMBERS definition to use the original small text and numbers for the configurable
+     55          // data item or leave commented for Ken's recommended larger fonts which match the fonts of the speed.
+     56          #define	BIG_NUMBERS
+     57          
+     58          #ifdef BIG_NUMBERS
+
+   \                                 In section .text, align 4, keep-with-next
+     59          const GUI_RECT DataElementRect =   { 5,  60, 140,  92 };
+   \                     DataElementRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   05003C008C00       DC16 5, 60, 140, 92
+   \              5C00        
+
+   \                                 In section .text, align 4, keep-with-next
+     60          const GUI_RECT NameRect =		   { 5, 100, 140, 120 };
+   \                     NameRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   050064008C00       DC16 5, 100, 140, 120
+   \              7800        
+
+   \                                 In section .text, align 4, keep-with-next
+     61          const GUI_RECT UnitsRect =		   { 5, 120, 140, 140 };
+   \                     UnitsRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   050078008C00       DC16 5, 120, 140, 140
+   \              8C00        
+     62          const GUI_RECT SweepTachEditRect = { 0,  60,  90, 135 };
+     63          
+
+   \                                 In section .data, align 4
+     64          const static DISPLAY_ELEMENT pData =	{ DataElementRect,	GUI_TA_LEFT,	GUI_ORANGE,		&GUI_FontD32 };
+   \                     pData:
+   \   00000000   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0
+   \              0000        
+   \   00000008   00000000FF80       DC32 0, 33023, GUI_FontD32
+   \              0000........
+     65          const static DISPLAY_ELEMENT pName =	{ NameRect,			GUI_TA_LEFT,	GUI_LIGHTGRAY,	&GUI_Font20B_ASCII };
+   \                     pName:
+   \   00000014   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0
+   \              0000        
+   \   0000001C   00000000D3D3       DC32 0, 13882323, GUI_Font20B_ASCII
+   \              D300........
+     66          const static DISPLAY_ELEMENT pUnits =	{ UnitsRect,		GUI_TA_LEFT,	GUI_LIGHTGRAY,	&GUI_Font20B_ASCII };
+   \                     pUnits:
+   \   00000028   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0
+   \              0000        
+   \   00000030   00000000D3D3       DC32 0, 13882323, GUI_Font20B_ASCII
+   \              D300........
+     67          #else
+     68          const GUI_RECT NameRect =		   { 5,  60, 140,  80 };
+     69          const GUI_RECT UnitsRect =		   { 5,  80, 140, 100 };
+     70          const GUI_RECT DataElementRect =   { 5, 100, 140, 132 };
+     71          const GUI_RECT SweepTachEditRect = { 0,  60,  90, 130 };
+     72          
+     73          const static DISPLAY_ELEMENT pData =	{ DataElementRect,	GUI_TA_LEFT,	GUI_WHITE,	&GUI_Font32B_ASCII };
+     74          const static DISPLAY_ELEMENT pName =	{ NameRect,			GUI_TA_LEFT,	GUI_GRAY,	&GUI_Font20B_ASCII };
+     75          const static DISPLAY_ELEMENT pUnits =	{ UnitsRect,		GUI_TA_LEFT,	GUI_GRAY,	&GUI_Font20B_ASCII };
+     76          #endif
+     77          
+
+   \                                 In section .text, align 4, keep-with-next
+     78          const CONFIG_ARGS config = { (DISPLAY_ELEMENT *)&pData, (DISPLAY_ELEMENT *)&pName, (DISPLAY_ELEMENT *)&pUnits };
+   \                     config:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   ............       DC32 pData, pName, pUnits
+   \              ............
+     79          
+
+   \                                 In section .text, align 4, keep-with-next
+     80          void SweepHighlightConfigGauge(void)
+     81          {
+   \                     _Z25SweepHighlightConfigGaugev:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+     82          	GUI_SetColor(GUI_RED);
+   \   00000008   FF00A0E3           MOV      R0,#+255
+   \   0000000C   ........           BL       GUI_SetColor
+     83          	GUI_DrawRect(SweepTachEditRect.x0, SweepTachEditRect.y0 - 2, SweepTachEditRect.x1 + 20, SweepTachEditRect.y1 + 4);		// Start box some pixels above the actual rectangle because
+   \   00000010   8B30A0E3           MOV      R3,#+139
+   \   00000014   6E20A0E3           MOV      R2,#+110
+   \   00000018   3A10A0E3           MOV      R1,#+58
+   \   0000001C   0000A0E3           MOV      R0,#+0
+   \   00000020   ........           BL       GUI_DrawRect
+     84          	// the text is draw butted up against the top of the rect and there is free space on the bottom.  This makes it look centered.
+     85          	// Draw second rect one pixel inside first to make box two pixels wide
+     86          	GUI_DrawRect(SweepTachEditRect.x0 + 1, SweepTachEditRect.y0 - 1, SweepTachEditRect.x1 + 19, SweepTachEditRect.y1 + 3);
+   \   00000024   04D08DE2           ADD      SP,SP,#+4
+   \   00000028   0040BDE8           POP      {LR}
+   \   0000002C   8A30A0E3           MOV      R3,#+138
+   \   00000030   6D20A0E3           MOV      R2,#+109
+   \   00000034   3B10A0E3           MOV      R1,#+59
+   \   00000038   0100A0E3           MOV      R0,#+1
+   \   0000003C   ........           B        GUI_DrawRect     ;; tailcall
+     87          }
+     88          
+
+   \                                 In section .text, align 4, keep-with-next
+     89          void _cbRPMSweepCallback(WM_MESSAGE * pMsg)
+     90          {
+   \                     _cbRPMSweepCallback:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+     91          	switch(pMsg->MsgId)
+   \   00000004   001090E5           LDR      R1,[R0, #+0]
+   \   00000008   4CD04DE2           SUB      SP,SP,#+76
+   \   0000000C   0B1051E2           SUBS     R1,R1,#+11
+   \   00000010   5901000A           BEQ      ??_cbRPMSweepCallback_0
+   \   00000014   041051E2           SUBS     R1,R1,#+4
+   \   00000018   4400000A           BEQ      ??_cbRPMSweepCallback_1
+   \   0000001C   411F51E2           SUBS     R1,R1,#+260
+   \   00000020   8101001A           BNE      ??_cbRPMSweepCallback_2
+     92          	{
+     93          	case WM_TIMER:
+     94          		if (pMsg->Data.v == hScreenTimer)
+   \   00000024   ........           LDR      R4,??DataTable19_4
+   \   00000028   0C0090E5           LDR      R0,[R0, #+12]
+   \   0000002C   142094E5           LDR      R2,[R4, #+20]
+   \   00000030   020050E1           CMP      R0,R2
+   \   00000034   7D01001A           BNE      ??_cbRPMSweepCallback_3
+     95          		{
+     96          			WM_RestartTimer(hScreenTimer, GAUGE_SCREEN_REFRESH_TIME);
+   \   00000038   1910A0E3           MOV      R1,#+25
+   \   0000003C   0200A0E1           MOV      R0,R2
+   \   00000040   ........           BL       WM_RestartTimer
+     97          			WM_InvalidateWindow(hRPMScreen);
+   \   00000044   000094E5           LDR      R0,[R4, #+0]
+   \   00000048   ........           BL       WM_InvalidateWindow
+     98          
+     99          			// Check "box timer" if running
+    100          			if (drawFlag)
+   \   0000004C   ........           LDR      R5,??DataTable19_5
+   \   00000050   0000D5E5           LDRB     R0,[R5, #+0]
+   \   00000054   000050E3           CMP      R0,#+0
+   \   00000058   0B00000A           BEQ      ??_cbRPMSweepCallback_4
+    101          			{
+    102          				if ((GUI_GetTime() - boxStartTime) > BOX_PERSIST_TIME)
+   \   0000005C   ........           BL       GUI_GetTime
+   \   00000060   ........           LDR      R1,??DataTable19_6
+   \   00000064   001091E5           LDR      R1,[R1, #+0]
+   \   00000068   010040E0           SUB      R0,R0,R1
+   \   0000006C   8910A0E3           MOV      R1,#+137
+   \   00000070   4C1D81E3           ORR      R1,R1,#0x1300
+   \   00000074   010050E1           CMP      R0,R1
+   \   00000078   030000BA           BLT      ??_cbRPMSweepCallback_4
+    103          				{
+    104          					configureGaugeMode = false;
+   \   0000007C   ........           LDR      R1,??DataTable19_7
+   \   00000080   0000A0E3           MOV      R0,#+0
+   \   00000084   0000C1E5           STRB     R0,[R1, #+0]
+    105          					drawFlag = false;
+   \   00000088   0000C5E5           STRB     R0,[R5, #+0]
+    106          				}
+    107          			}
+    108          
+    109          			// Update all values for next paint (to spread the load)
+    110          			rpm = GetValue(VEHICLE_RPM).iVal;
+   \                     ??_cbRPMSweepCallback_4:
+   \   0000008C   3510A0E3           MOV      R1,#+53
+   \   00000090   0D00A0E1           MOV      R0,SP
+   \   00000094   ........           BL       GetValue
+   \   00000098   00009DE5           LDR      R0,[SP, #+0]
+    111          			gear = GetValue(GEAR).iVal;
+   \   0000009C   4A10A0E3           MOV      R1,#+74
+   \   000000A0   240084E5           STR      R0,[R4, #+36]
+   \   000000A4   0D00A0E1           MOV      R0,SP
+   \   000000A8   ........           BL       GetValue
+   \   000000AC   00009DE5           LDR      R0,[SP, #+0]
+    112          			speed = GetValue(SPEED).fVal;
+   \   000000B0   0E10A0E3           MOV      R1,#+14
+   \   000000B4   280084E5           STR      R0,[R4, #+40]
+   \   000000B8   0D00A0E1           MOV      R0,SP
+   \   000000BC   ........           BL       GetValue
+   \   000000C0   00009DE5           LDR      R0,[SP, #+0]
+    113          			lap = GetValue(LAP_NUMBER).iVal;
+   \   000000C4   2410A0E3           MOV      R1,#+36
+   \   000000C8   380084E5           STR      R0,[R4, #+56]
+   \   000000CC   0D00A0E1           MOV      R0,SP
+   \   000000D0   ........           BL       GetValue
+   \   000000D4   00009DE5           LDR      R0,[SP, #+0]
+    114          			holding = GetValue(HOLDING).uVal;
+   \   000000D8   4E10A0E3           MOV      R1,#+78
+   \   000000DC   2C0084E5           STR      R0,[R4, #+44]
+   \   000000E0   0D00A0E1           MOV      R0,SP
+   \   000000E4   ........           BL       GetValue
+   \   000000E8   00009DE5           LDR      R0,[SP, #+0]
+    115          			predictiveLap = GetValue(PREDICTIVE_LAP).fVal;
+   \   000000EC   1F10A0E3           MOV      R1,#+31
+   \   000000F0   300084E5           STR      R0,[R4, #+48]
+   \   000000F4   0D00A0E1           MOV      R0,SP
+   \   000000F8   ........           BL       GetValue
+   \   000000FC   00009DE5           LDR      R0,[SP, #+0]
+    116          			lapTime = GetValue(LAP_TIME).uVal;
+   \   00000100   2010A0E3           MOV      R1,#+32
+   \   00000104   3C0084E5           STR      R0,[R4, #+60]
+   \   00000108   0D00A0E1           MOV      R0,SP
+   \   0000010C   ........           BL       GetValue
+   \   00000110   00009DE5           LDR      R0,[SP, #+0]
+    117          			altitude = GetValue(ALTITUDE).fVal;
+   \   00000114   1310A0E3           MOV      R1,#+19
+   \   00000118   340084E5           STR      R0,[R4, #+52]
+   \   0000011C   0D00A0E1           MOV      R0,SP
+   \   00000120   ........           BL       GetValue
+   \   00000124   00009DE5           LDR      R0,[SP, #+0]
+   \   00000128   400084E5           STR      R0,[R4, #+64]
+   \   0000012C   3F0100EA           B        ??_cbRPMSweepCallback_3
+    118          		}
+    119          		break;
+    120          
+    121          	case WM_PAINT:
+    122          		if (CS_IsVisible(RPM_SWEEP_GAUGE) || firsttimethrough)
+   \                     ??_cbRPMSweepCallback_1:
+   \   00000130   0600A0E3           MOV      R0,#+6
+   \   00000134   ........           BL       CS_IsVisible
+   \   00000138   000050E3           CMP      R0,#+0
+   \   0000013C   0300001A           BNE      ??_cbRPMSweepCallback_5
+   \   00000140   ........           LDR      R0,??DataTable19_4
+   \   00000144   4400D0E5           LDRB     R0,[R0, #+68]
+   \   00000148   000050E3           CMP      R0,#+0
+   \   0000014C   3701000A           BEQ      ??_cbRPMSweepCallback_3
+    123          		{
+    124          			if (!lockupSemaphore)			// If main has not run since our last paint - exit!
+   \                     ??_cbRPMSweepCallback_5:
+   \   00000150   ........           LDR      R0,??DataTable19_8
+   \   00000154   0010D0E5           LDRB     R1,[R0, #+0]
+   \   00000158   000051E3           CMP      R1,#+0
+   \   0000015C   3301001A           BNE      ??_cbRPMSweepCallback_3
+    125          			{
+    126          				lockupSemaphore = true;
+   \   00000160   0110A0E3           MOV      R1,#+1
+   \   00000164   0010C0E5           STRB     R1,[R0, #+0]
+    127          			
+    128          				firsttimethrough = FALSE;
+   \   00000168   ........           LDR      R4,??DataTable19_4
+   \   0000016C   0000A0E3           MOV      R0,#+0
+   \   00000170   4400C4E5           STRB     R0,[R4, #+68]
+    129          	
+    130          				GUI_MEMDEV_Select(mem);
+   \   00000174   200094E5           LDR      R0,[R4, #+32]
+   \   00000178   ........           BL       GUI_MEMDEV_Select
+    131          				GUI_Clear();
+   \   0000017C   ........           BL       GUI_Clear
+    132          				
+    133          				pSweep->SetValue(rpm);
+   \   00000180   240094E5           LDR      R0,[R4, #+36]
+   \   00000184   ........           BL       __aeabi_i2f
+   \   00000188   0010A0E1           MOV      R1,R0
+   \   0000018C   040094E5           LDR      R0,[R4, #+4]
+   \   00000190   ........           BL       _ZN8RPMSweep8SetValueEf
+    134          				if (vehicleData.diffRatio != 0.0)
+   \   00000194   ........           LDR      R0,??DataTable19_9
+   \   00000198   0010A0E3           MOV      R1,#+0
+   \   0000019C   500090E5           LDR      R0,[R0, #+80]
+   \   000001A0   ........           BL       __aeabi_cfcmpeq
+   \   000001A4   0200000A           BEQ      ??_cbRPMSweepCallback_6
+    135          					pSweep->SetGear(gear);
+   \   000001A8   281094E5           LDR      R1,[R4, #+40]
+   \   000001AC   040094E5           LDR      R0,[R4, #+4]
+   \   000001B0   ........           BL       _ZN8RPMSweep7SetGearEi
+    136          				pSweep->DrawControl();		
+   \                     ??_cbRPMSweepCallback_6:
+   \   000001B4   040094E5           LDR      R0,[R4, #+4]
+   \   000001B8   ........           BL       _ZN8RPMSweep11DrawControlEv
+    137          	
+    138          				pMPH->SetValue(speed);
+   \   000001BC   381094E5           LDR      R1,[R4, #+56]
+   \   000001C0   080094E5           LDR      R0,[R4, #+8]
+   \   000001C4   ........           BL       _ZN14DigitalDisplay8SetValueEf
+    139          				pMPH->DrawControl();
+   \   000001C8   080094E5           LDR      R0,[R4, #+8]
+   \   000001CC   ........           BL       _ZN14DigitalDisplay11DrawControlEv
+    140          	
+    141          				if (selectedRaceMode == ROADRACE_MODE)
+   \   000001D0   ........           LDR      R0,??DataTable19_10
+   \   000001D4   ........           LDR      R5,??DataTable19_11
+   \   000001D8   0000D0E5           LDRB     R0,[R0, #+0]
+   \   000001DC   000050E3           CMP      R0,#+0
+   \   000001E0   7200001A           BNE      ??_cbRPMSweepCallback_7
+    142          				{
+    143          					char scratch[30];
+    144          					int pos;
+    145          	
+    146          					// Draw "lap" text
+    147          					GUI_SetFont(&GUI_Font32B_ASCII);
+   \   000001E4   0500A0E1           MOV      R0,R5
+   \   000001E8   ........           BL       GUI_SetFont
+    148          					GUI_SetColor(GUI_CYAN);
+   \   000001EC   FF08A0E3           MOV      R0,#+16711680
+   \   000001F0   FF0C80E3           ORR      R0,R0,#0xFF00
+   \   000001F4   ........           BL       GUI_SetColor
+    149          					sprintf(scratch, "%d", lap);
+   \   000001F8   2C2094E5           LDR      R2,[R4, #+44]
+   \   000001FC   DC1F8FE2           ADR      R1,??_cbRPMSweepCallback_8  ;; 0x25, 0x64, 0x00, 0x00
+   \   00000200   28008DE2           ADD      R0,SP,#+40
+   \   00000204   ........           BL       sprintf
+    150          					if (lap > 99)
+   \   00000208   2C0094E5           LDR      R0,[R4, #+44]
+    151          						pos = 340;
+    152          					else pos = 360;
+    153          					GUI_DispStringAt("Lap", pos, 118);
+   \   0000020C   7620A0E3           MOV      R2,#+118
+   \   00000210   640050E3           CMP      R0,#+100
+   \   00000214   551FA0A3           MOVGE    R1,#+340
+   \   00000218   5A1FA0B3           MOVLT    R1,#+360
+   \   0000021C   D50F8FE2           ADR      R0,??_cbRPMSweepCallback_8+0x4  ;; "Lap"
+   \   00000220   ........           BL       GUI_DispStringAt
+    154          					GUI_SetFont(&GUI_FontD32);
+   \   00000224   ........           LDR      R6,??DataTable19_12
+   \   00000228   0600A0E1           MOV      R0,R6
+   \   0000022C   ........           BL       GUI_SetFont
+    155          					GUI_DispStringInRect(scratch, (GUI_RECT *)&LapRect, GUI_TA_RIGHT);
+   \   00000230   0120A0E3           MOV      R2,#+1
+   \   00000234   ............       ADRL     R1,LapRect
+   \              ....        
+   \   0000023C   28008DE2           ADD      R0,SP,#+40
+   \   00000240   ........           BL       GUI_DispStringInRect
+    156          	
+    157          					// Draw best lap icon
+    158          					if (holding)		// If currently in lap hold time
+   \   00000244   300094E5           LDR      R0,[R4, #+48]
+   \   00000248   000050E3           CMP      R0,#+0
+   \   0000024C   0F00000A           BEQ      ??_cbRPMSweepCallback_9
+    159          						switch (DataValues[BEST_LAP].uVal) {
+   \   00000250   ........           LDR      R0,??DataTable19_13
+   \   00000254   780290E5           LDR      R0,[R0, #+632]
+   \   00000258   010050E3           CMP      R0,#+1
+   \   0000025C   0300000A           BEQ      ??_cbRPMSweepCallback_10
+   \   00000260   0A00003A           BCC      ??_cbRPMSweepCallback_9
+   \   00000264   020050E3           CMP      R0,#+2
+   \   00000268   0400000A           BEQ      ??_cbRPMSweepCallback_11
+   \   0000026C   070000EA           B        ??_cbRPMSweepCallback_9
+    160          							case 0:
+    161          								// undraw icon when lap hold time expires
+    162          								break;
+    163          							case 1:
+    164          								// draw best lap of session icon (checker)
+    165          								GUI_DrawBitmap(&bmBestLapSession, LapRect.x0 - 40, LapRect.y0 + 5);
+   \                     ??_cbRPMSweepCallback_10:
+   \   00000270   7620A0E3           MOV      R2,#+118
+   \   00000274   4B1FA0E3           MOV      R1,#+300
+   \   00000278   ........           LDR      R0,??DataTable19_14
+   \   0000027C   020000EA           B        ??_cbRPMSweepCallback_12
+    166          								break;
+    167          							case 2:
+    168          								// draw best lap ever icon (gold cup)
+    169          								GUI_DrawBitmap(&bmBestLapEver, LapRect.x0 - 40, LapRect.y0 + 5);
+   \                     ??_cbRPMSweepCallback_11:
+   \   00000280   7620A0E3           MOV      R2,#+118
+   \   00000284   4B1FA0E3           MOV      R1,#+300
+   \   00000288   ........           LDR      R0,??DataTable19_15
+   \                     ??_cbRPMSweepCallback_12:
+   \   0000028C   ........           BL       GUI_DrawBitmap
+    170          								break;
+    171          						} // switch
+    172          	
+    173          					GUI_SetFont(&GUI_FontD32);
+   \                     ??_cbRPMSweepCallback_9:
+   \   00000290   0600A0E1           MOV      R0,R6
+   \   00000294   ........           BL       GUI_SetFont
+    174          					GUI_SetColor(GUI_WHITE);
+   \   00000298   FF04E0E3           MVN      R0,#-16777216
+   \   0000029C   ........           BL       GUI_SetColor
+    175          	
+    176          					// Update Predictive Lap Control
+    177          					UpdatePredictiveLapControl(pPredictiveLap, predictiveLap);
+   \   000002A0   ........           LDR      R0,??DataTable19_16
+   \   000002A4   3C1094E5           LDR      R1,[R4, #+60]
+   \   000002A8   D520D0E5           LDRB     R2,[R0, #+213]
+   \   000002AC   106094E5           LDR      R6,[R4, #+16]
+   \   000002B0   000052E3           CMP      R2,#+0
+   \   000002B4   2100000A           BEQ      ??_cbRPMSweepCallback_13
+   \   000002B8   ........           LDR      R7,??DataTable19_17
+   \   000002BC   EC0097E5           LDR      R0,[R7, #+236]
+   \   000002C0   2008A0E1           LSR      R0,R0,#+16
+   \   000002C4   ........           BL       __aeabi_ui2f
+   \   000002C8   0010A0E1           MOV      R1,R0
+   \   000002CC   640097E5           LDR      R0,[R7, #+100]
+   \   000002D0   000050E3           CMP      R0,#+0
+   \   000002D4   0400001A           BNE      ??_cbRPMSweepCallback_14
+   \   000002D8   ........           LDR      R0,??DataTable19_18  ;; 0x3f1f122f
+   \   000002DC   ........           BL       __aeabi_fmul
+   \   000002E0   0010A0E1           MOV      R1,R0
+   \   000002E4   ........           ADR      R3,??DataTable17  ;; "mph"
+   \   000002E8   000000EA           B        ??_cbRPMSweepCallback_15
+   \                     ??_cbRPMSweepCallback_14:
+   \   000002EC   ........           ADR      R3,??DataTable17_1  ;; "kph"
+   \                     ??_cbRPMSweepCallback_15:
+   \   000002F0   0370A0E1           MOV      R7,R3
+   \   000002F4   0100A0E1           MOV      R0,R1
+   \   000002F8   ........           BL       __aeabi_f2d
+   \   000002FC   0130A0E1           MOV      R3,R1
+   \   00000300   0020A0E1           MOV      R2,R0
+   \   00000304   C015A0E3           MOV      R1,#+805306368
+   \   00000308   0000A0E3           MOV      R0,#+0
+   \   0000030C   FE1681E3           ORR      R1,R1,#0xFE00000
+   \   00000310   ........           BL       __aeabi_dadd
+   \   00000314   ........           BL       __aeabi_d2iz
+   \   00000318   0020A0E1           MOV      R2,R0
+   \   0000031C   0730A0E1           MOV      R3,R7
+   \   00000320   ............       ADRL     R1,`?<Constant "Recording Starts: %d%s">`
+   \              ....        
+   \   00000328   0D00A0E1           MOV      R0,SP
+   \   0000032C   ........           BL       sprintf
+   \                     ??_cbRPMSweepCallback_16:
+   \   00000330   0D10A0E1           MOV      R1,SP
+   \   00000334   0600A0E1           MOV      R0,R6
+   \   00000338   ........           BL       _ZN18PredictiveLapTimer8SetValueEPc
+   \   0000033C   100000EA           B        ??_cbRPMSweepCallback_17
+   \                     ??_cbRPMSweepCallback_13:
+   \   00000340   D82090E5           LDR      R2,[R0, #+216]
+   \   00000344   000052E3           CMP      R2,#+0
+   \   00000348   0400000A           BEQ      ??_cbRPMSweepCallback_18
+   \   0000034C   ............       ADRL     R1,`?<Constant "Recording Stops: %ds">`
+   \              ....        
+   \   00000354   0D00A0E1           MOV      R0,SP
+   \   00000358   ........           BL       sprintf
+   \   0000035C   F3FFFFEA           B        ??_cbRPMSweepCallback_16
+   \                     ??_cbRPMSweepCallback_18:
+   \   00000360   2C0094E5           LDR      R0,[R4, #+44]
+   \   00000364   000050E3           CMP      R0,#+0
+   \   00000368   0200000A           BEQ      ??_cbRPMSweepCallback_19
+   \   0000036C   0600A0E1           MOV      R0,R6
+   \   00000370   ........           BL       _ZN18PredictiveLapTimer8SetValueEf
+   \   00000374   020000EA           B        ??_cbRPMSweepCallback_17
+   \                     ??_cbRPMSweepCallback_19:
+   \   00000378   ........           LDR      R1,??DataTable19_19
+   \   0000037C   0600A0E1           MOV      R0,R6
+   \   00000380   ........           BL       _ZN18PredictiveLapTimer8SetValueEPc
+   \                     ??_cbRPMSweepCallback_17:
+   \   00000384   0600A0E1           MOV      R0,R6
+   \   00000388   ........           BL       _ZN18PredictiveLapTimer11DrawControlEv
+    178          
+    179          					// Update Lap Timer Display
+    180          					pLapTimer->SetValue(formatLapTime(lapTime, false));
+   \   0000038C   0010A0E3           MOV      R1,#+0
+   \   00000390   340094E5           LDR      R0,[R4, #+52]
+   \   00000394   ........           BL       formatLapTime
+   \   00000398   0010A0E1           MOV      R1,R0
+   \   0000039C   0C0094E5           LDR      R0,[R4, #+12]
+   \   000003A0   ........           BL       _ZN19DigitalStringOutput8SetValueEPc
+    181          					pLapTimer->DrawControl();
+   \   000003A4   0C0094E5           LDR      R0,[R4, #+12]
+   \   000003A8   ........           BL       _ZN19DigitalStringOutput11DrawControlEv
+   \   000003AC   460000EA           B        ??_cbRPMSweepCallback_20
+    182          				}
+    183          				else
+    184          				{
+    185          				// Since elapsed time does not use a memory device it must be drawn down here after all memory device objects are handled
+    186          					int time;
+    187          					char scratch[30];
+    188          	
+    189          					// Draw "session time" text
+    190          					GUI_SetColor(GUI_LIGHTGRAY);
+   \                     ??_cbRPMSweepCallback_7:
+   \   000003B0   ........           LDR      R0,??DataTable19_20  ;; 0xd3d3d3
+   \   000003B4   ........           BL       GUI_SetColor
+    191          					GUI_SetFont(&GUI_Font32B_ASCII);
+   \   000003B8   0500A0E1           MOV      R0,R5
+   \   000003BC   ........           BL       GUI_SetFont
+    192          					GUI_DispStringAt("session time", 270, 160);
+   \   000003C0   A020A0E3           MOV      R2,#+160
+   \   000003C4   6E1082E2           ADD      R1,R2,#+110
+   \   000003C8   ............       ADRL     R0,`?<Constant "session time">`
+   \              ....        
+   \   000003D0   ........           BL       GUI_DispStringAt
+    193          	
+    194          					// Draw elapsed time
+    195          					time = DataValues[ELAPSED_TIME].uVal / 1000;
+   \   000003D4   ........           LDR      R0,??DataTable19_13
+   \   000003D8   ........           LDR      R2,??DataTable19_21  ;; 0x83126e98
+   \   000003DC   100190E5           LDR      R0,[R0, #+272]
+   \   000003E0   902281E0           UMULL    R2,R1,R0,R2
+    196          					if (time < 3600)
+   \   000003E4   ........           LDR      R0,??DataTable19_22  ;; 0x88888889
+   \   000003E8   A134A0E1           LSR      R3,R1,#+9
+   \   000003EC   9310C0E0           SMULL    R1,R0,R3,R0
+   \   000003F0   3C10A0E3           MOV      R1,#+60
+   \   000003F4   030080E0           ADD      R0,R0,R3
+   \   000003F8   C002B0E1           ASRS     R0,R0,#+5
+   \   000003FC   01008042           ADDMI    R0,R0,#+1
+   \   00000400   E10E53E3           CMP      R3,#+3600
+   \   00000404   050000AA           BGE      ??_cbRPMSweepCallback_21
+    197          						sprintf(scratch, "%02d:%02d", time / 60, time % 60);
+   \   00000408   910002E0           MUL      R2,R1,R0
+   \   0000040C   ............       ADRL     R1,`?<Constant "%02d:%02d">`
+   \              ....        
+   \   00000414   023043E0           SUB      R3,R3,R2
+   \   00000418   0020A0E1           MOV      R2,R0
+   \   0000041C   200000EA           B        ??_cbRPMSweepCallback_22
+    198          					else if (time < 36000)
+   \                     ??_cbRPMSweepCallback_21:
+   \   00000420   ........           LDR      R2,??DataTable19_23  ;; 0x91a2b3c5
+   \   00000424   93C2C2E0           SMULL    R12,R2,R3,R2
+   \   00000428   A0C0A0E3           MOV      R12,#+160
+   \   0000042C   032082E0           ADD      R2,R2,R3
+   \   00000430   C225B0E1           ASRS     R2,R2,#+11
+   \   00000434   01208242           ADDMI    R2,R2,#+1
+   \   00000438   8CCC8CE3           ORR      R12,R12,#0x8C00
+   \   0000043C   0C0053E1           CMP      R3,R12
+   \   00000440   0E0000AA           BGE      ??_cbRPMSweepCallback_23
+    199          						sprintf(scratch, "%d:%02d:%02d", time/3600, (time/60)%60, time % 60);
+   \   00000444   91000CE0           MUL      R12,R1,R0
+   \   00000448   0C3043E0           SUB      R3,R3,R12
+   \   0000044C   00308DE5           STR      R3,[SP, #+0]
+   \   00000450   ........           LDR      R3,??DataTable19_22  ;; 0x88888889
+   \   00000454   90C3C3E0           SMULL    R12,R3,R0,R3
+   \   00000458   003083E0           ADD      R3,R3,R0
+   \   0000045C   C332B0E1           ASRS     R3,R3,#+5
+   \   00000460   01308342           ADDMI    R3,R3,#+1
+   \   00000464   910303E0           MUL      R3,R1,R3
+   \   00000468   ............       ADRL     R1,`?<Constant "%d:%02d:%02d">`
+   \              ....        
+   \   00000470   033040E0           SUB      R3,R0,R3
+   \   00000474   04008DE2           ADD      R0,SP,#+4
+   \   00000478   ........           BL       sprintf
+   \   0000047C   0A0000EA           B        ??_cbRPMSweepCallback_24
+    200          					else 		// > 10 hours
+    201          						sprintf(scratch, "%d:%02d", time/3600, (time/60)%60);
+   \                     ??_cbRPMSweepCallback_23:
+   \   00000480   ........           LDR      R3,??DataTable19_22  ;; 0x88888889
+   \   00000484   90C3C3E0           SMULL    R12,R3,R0,R3
+   \   00000488   003083E0           ADD      R3,R3,R0
+   \   0000048C   C332B0E1           ASRS     R3,R3,#+5
+   \   00000490   01308342           ADDMI    R3,R3,#+1
+   \   00000494   910303E0           MUL      R3,R1,R3
+   \   00000498   ............       ADRL     R1,`?<Constant "%d:%02d">`
+   \              ....        
+   \   000004A0   033040E0           SUB      R3,R0,R3
+   \                     ??_cbRPMSweepCallback_22:
+   \   000004A4   04008DE2           ADD      R0,SP,#+4
+   \   000004A8   ........           BL       sprintf
+    202          					GUI_SetColor(GUI_WHITE);
+   \                     ??_cbRPMSweepCallback_24:
+   \   000004AC   FF04E0E3           MVN      R0,#-16777216
+   \   000004B0   ........           BL       GUI_SetColor
+    203          					GUI_SetFont(&GUI_FontD48);
+   \   000004B4   ........           LDR      R0,??DataTable19_24
+   \   000004B8   ........           BL       GUI_SetFont
+    204          					GUI_DispStringHCenterAt(scratch, 348, 200);
+   \   000004BC   C820A0E3           MOV      R2,#+200
+   \   000004C0   571FA0E3           MOV      R1,#+348
+   \   000004C4   04008DE2           ADD      R0,SP,#+4
+   \   000004C8   ........           BL       GUI_DispStringHCenterAt
+    205          				}
+    206          	
+    207          				// Display the selected configurable gauge item
+    208          				if (GetConfigurableItem() == ALTITUDE)
+   \                     ??_cbRPMSweepCallback_20:
+   \   000004CC   ........           BL       GetConfigurableItem
+   \   000004D0   130050E3           CMP      R0,#+19
+   \   000004D4   0600001A           BNE      ??_cbRPMSweepCallback_25
+    209          					if (altitude >= 1000.0)			// If 4 or more digits to display
+   \   000004D8   4414A0E3           MOV      R1,#+1140850688
+   \   000004DC   400094E5           LDR      R0,[R4, #+64]
+   \   000004E0   7A1881E3           ORR      R1,R1,#0x7A0000
+   \   000004E4   ........           BL       __aeabi_cfrcmple
+   \   000004E8   0100008A           BHI      ??_cbRPMSweepCallback_25
+    210          						GUI_SetFont(&GUI_Font32B_ASCII);			// Then use a smaller font
+   \   000004EC   0500A0E1           MOV      R0,R5
+   \   000004F0   ........           BL       GUI_SetFont
+    211          				DisplayConfigurableItem( &config );
+   \                     ??_cbRPMSweepCallback_25:
+   \   000004F4   ............       ADRL     R0,config
+   \              ....        
+   \   000004FC   ........           BL       DisplayConfigurableItem
+    212          				
+    213          				// Draw box around programmable gauge member(s) if requested
+    214          				if (drawFlag)
+   \   00000500   ........           LDR      R0,??DataTable19_5
+   \   00000504   0000D0E5           LDRB     R0,[R0, #+0]
+   \   00000508   000050E3           CMP      R0,#+0
+   \   0000050C   0B00000A           BEQ      ??_cbRPMSweepCallback_26
+    215          					SweepHighlightConfigGauge();
+   \   00000510   FF00A0E3           MOV      R0,#+255
+   \   00000514   ........           BL       GUI_SetColor
+   \   00000518   8B30A0E3           MOV      R3,#+139
+   \   0000051C   6E20A0E3           MOV      R2,#+110
+   \   00000520   3A10A0E3           MOV      R1,#+58
+   \   00000524   0000A0E3           MOV      R0,#+0
+   \   00000528   ........           BL       GUI_DrawRect
+   \   0000052C   8A30A0E3           MOV      R3,#+138
+   \   00000530   6D20A0E3           MOV      R2,#+109
+   \   00000534   3B10A0E3           MOV      R1,#+59
+   \   00000538   0100A0E3           MOV      R0,#+1
+   \   0000053C   ........           BL       GUI_DrawRect
+    216          	
+    217          #ifdef	INCLUDE_RACE_HELP
+    218          				// If the help screen is still being displayed then show the appropriate help screen
+    219          				if (raceTimerActive)
+    220          				{
+    221          					CheckRaceHelpScreen(RPM_SWEEP_GAUGE);
+    222          					SweepHighlightConfigGauge();
+    223          				}
+    224          #endif
+    225          
+    226          				CheckWarningPopups();
+   \                     ??_cbRPMSweepCallback_26:
+   \   00000540   ........           BL       CheckWarningPopups
+    227          	
+    228          				if (SlideOutVisible())
+   \   00000544   ........           BL       SlideOutVisible
+   \   00000548   000050E3           CMP      R0,#+0
+   \   0000054C   0000000A           BEQ      ??_cbRPMSweepCallback_27
+    229          					DrawSignalStrength();
+   \   00000550   ........           BL       DrawSignalStrength
+    230          	
+    231          				GUI_DrawBitmap(&bmthreewayarrow, 0, 229);
+   \                     ??_cbRPMSweepCallback_27:
+   \   00000554   E520A0E3           MOV      R2,#+229
+   \   00000558   0010A0E3           MOV      R1,#+0
+   \   0000055C   ........           LDR      R0,??DataTable19_25
+   \   00000560   ........           BL       GUI_DrawBitmap
+    232          
+    233          				GUI_MEMDEV_CopyToLCD(mem);
+   \   00000564   200094E5           LDR      R0,[R4, #+32]
+   \   00000568   ........           BL       GUI_MEMDEV_CopyToLCD
+    234          				GUI_SelectLCD();
+   \   0000056C   ........           BL       GUI_SelectLCD
+   \   00000570   2E0000EA           B        ??_cbRPMSweepCallback_3
+   \                     ??_cbRPMSweepCallback_8:
+   \   00000574   25640000           DC8      0x25, 0x64, 0x00, 0x00
+   \   00000578   4C617000           DC8      "Lap"
+    235          			}
+    236          		}
+    237          		break;
+    238          
+    239          	case WM_DELETE:
+    240          		if (pMPH)
+   \                     ??_cbRPMSweepCallback_0:
+   \   0000057C   ........           LDR      R4,??DataTable19_4
+   \   00000580   080094E5           LDR      R0,[R4, #+8]
+   \   00000584   000050E3           CMP      R0,#+0
+   \   00000588   0300000A           BEQ      ??_cbRPMSweepCallback_28
+    241          		{
+    242          			delete pMPH;
+   \   0000058C   ........           BL       _ZN14DigitalDisplayD1Ev
+   \   00000590   ........           BL       _ZdlPv
+    243          			pMPH = 0;
+   \   00000594   0000A0E3           MOV      R0,#+0
+   \   00000598   080084E5           STR      R0,[R4, #+8]
+    244          		}
+    245          		if (pSweep)
+   \                     ??_cbRPMSweepCallback_28:
+   \   0000059C   040094E5           LDR      R0,[R4, #+4]
+   \   000005A0   000050E3           CMP      R0,#+0
+   \   000005A4   0300000A           BEQ      ??_cbRPMSweepCallback_29
+    246          		{
+    247          			delete pSweep;
+   \   000005A8   ........           BL       _ZN8RPMSweepD1Ev
+   \   000005AC   ........           BL       _ZdlPv
+    248          			pSweep = 0;
+   \   000005B0   0000A0E3           MOV      R0,#+0
+   \   000005B4   040084E5           STR      R0,[R4, #+4]
+    249          		}
+    250          #ifdef	SHOW_GREEN_LINE
+    251          		if (pGreen)
+    252          		{
+    253          			delete pGreen;
+    254          			pGreen = 0;
+    255          		}
+    256          #endif
+    257          		if (pYellow)
+   \                     ??_cbRPMSweepCallback_29:
+   \   000005B8   180094E5           LDR      R0,[R4, #+24]
+   \   000005BC   000050E3           CMP      R0,#+0
+   \   000005C0   0200000A           BEQ      ??_cbRPMSweepCallback_30
+    258          		{
+    259          			delete pYellow;
+   \   000005C4   ........           BL       _ZdlPv
+    260          			pYellow = 0;
+   \   000005C8   0000A0E3           MOV      R0,#+0
+   \   000005CC   180084E5           STR      R0,[R4, #+24]
+    261          		}
+    262          		if (pRed)
+   \                     ??_cbRPMSweepCallback_30:
+   \   000005D0   1C0094E5           LDR      R0,[R4, #+28]
+   \   000005D4   000050E3           CMP      R0,#+0
+   \   000005D8   0200000A           BEQ      ??_cbRPMSweepCallback_31
+    263          		{
+    264          			delete pRed;
+   \   000005DC   ........           BL       _ZdlPv
+    265          			pRed = 0;
+   \   000005E0   0000A0E3           MOV      R0,#+0
+   \   000005E4   1C0084E5           STR      R0,[R4, #+28]
+    266          		}
+    267          		if (pPredictiveLap)
+   \                     ??_cbRPMSweepCallback_31:
+   \   000005E8   100094E5           LDR      R0,[R4, #+16]
+   \   000005EC   000050E3           CMP      R0,#+0
+   \   000005F0   0300000A           BEQ      ??_cbRPMSweepCallback_32
+    268          		{
+    269          			delete pPredictiveLap;
+   \   000005F4   ........           BL       _ZN18PredictiveLapTimerD1Ev
+   \   000005F8   ........           BL       _ZdlPv
+    270          			pPredictiveLap = 0;
+   \   000005FC   0000A0E3           MOV      R0,#+0
+   \   00000600   100084E5           STR      R0,[R4, #+16]
+    271          		}
+    272          		if(pLapTimer)
+   \                     ??_cbRPMSweepCallback_32:
+   \   00000604   0C0094E5           LDR      R0,[R4, #+12]
+   \   00000608   000050E3           CMP      R0,#+0
+   \   0000060C   0300000A           BEQ      ??_cbRPMSweepCallback_33
+    273          		{
+    274          			delete pLapTimer;
+   \   00000610   ........           BL       _ZN19DigitalStringOutputD1Ev
+   \   00000614   ........           BL       _ZdlPv
+    275          			pLapTimer = 0;
+   \   00000618   0000A0E3           MOV      R0,#+0
+   \   0000061C   0C0084E5           STR      R0,[R4, #+12]
+    276          		}
+    277          		GUI_MEMDEV_Delete(mem);
+   \                     ??_cbRPMSweepCallback_33:
+   \   00000620   200094E5           LDR      R0,[R4, #+32]
+   \   00000624   ........           BL       GUI_MEMDEV_Delete
+    278          
+    279          		break;
+   \   00000628   000000EA           B        ??_cbRPMSweepCallback_3
+    280          
+    281          	default:
+    282          		  WM_DefaultProc(pMsg);
+   \                     ??_cbRPMSweepCallback_2:
+   \   0000062C   ........           BL       WM_DefaultProc
+    283          	};
+    284          }
+   \                     ??_cbRPMSweepCallback_3:
+   \   00000630   4CD08DE2           ADD      SP,SP,#+76       ;; stack cleaning
+   \   00000634   F080BDE8           POP      {R4-R7,PC}       ;; return
+    285          
+
+   \                                 In section .text, align 4, keep-with-next
+    286          WM_HWIN Display_RPMSweepScreen(WM_HWIN hParent)
+    287          {
+   \                     Display_RPMSweepScreen:
+   \   00000000   F0432DE9           PUSH     {R4-R9,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   74D04DE2           SUB      SP,SP,#+116
+    288          #ifdef	SHOW_GREEN_LINE
+    289          	if (vehicleData.tach.greenStart != 0)
+    290          		pGreen = new Alarm(true, vehicleData.tach.greenStart, vehicleData.tach.upperYellowStart, GUI_GREEN, GUI_DARKGREEN, NORMAL, NULL, NULL);
+    291          	else pGreen = 0;
+    292          	pYellow = new Alarm(true, vehicleData.tach.upperYellowStart, vehicleData.tach.upperRedStart, GUI_YELLOW, GUI_DARKYELLOW, NORMAL, pGreen, NULL);
+    293          #else
+    294          	pYellow = new Alarm(true, vehicleData.tach.upperYellowStart, vehicleData.tach.upperRedStart, GUI_YELLOW, GUI_DARKYELLOW, NORMAL, NULL, NULL);
+   \   0000000C   2000A0E3           MOV      R0,#+32
+   \   00000010   ........           BL       _Znwj
+   \   00000014   0060B0E1           MOVS     R6,R0
+   \   00000018   0050A0E3           MOV      R5,#+0
+   \   0000001C   1500000A           BEQ      ??Display_RPMSweepScreen_0
+   \   00000020   0100A0E3           MOV      R0,#+1
+   \   00000024   08008DE5           STR      R0,[SP, #+8]
+   \   00000028   8000A0E3           MOV      R0,#+128
+   \   0000002C   800C80E3           ORR      R0,R0,#0x8000
+   \   00000030   04008DE5           STR      R0,[SP, #+4]
+   \   00000034   FF00A0E3           MOV      R0,#+255
+   \   00000038   ........           LDR      R7,??DataTable19_9
+   \   0000003C   FF0C80E3           ORR      R0,R0,#0xFF00
+   \   00000040   00008DE5           STR      R0,[SP, #+0]
+   \   00000044   10508DE5           STR      R5,[SP, #+16]
+   \   00000048   0C508DE5           STR      R5,[SP, #+12]
+   \   0000004C   240097E5           LDR      R0,[R7, #+36]
+   \   00000050   ........           BL       __aeabi_i2f
+   \   00000054   0080A0E1           MOV      R8,R0
+   \   00000058   200097E5           LDR      R0,[R7, #+32]
+   \   0000005C   ........           BL       __aeabi_i2f
+   \   00000060   0020A0E1           MOV      R2,R0
+   \   00000064   0830A0E1           MOV      R3,R8
+   \   00000068   0110A0E3           MOV      R1,#+1
+   \   0000006C   0600A0E1           MOV      R0,R6
+   \   00000070   ........           BL       _ZN5AlarmC1Ebffmm9AlarmTypePS_S1_
+   \   00000074   000000EA           B        ??Display_RPMSweepScreen_1
+   \                     ??Display_RPMSweepScreen_0:
+   \   00000078   0000A0E3           MOV      R0,#+0
+   \                     ??Display_RPMSweepScreen_1:
+   \   0000007C   ........           LDR      R6,??DataTable19_4
+   \   00000080   180086E5           STR      R0,[R6, #+24]
+    295          #endif
+    296          	pRed = new Alarm(true, vehicleData.tach.upperRedStart, CalculateScaleTop(vehicleData.tach.scaleEnd), GUI_RED, GUI_DARKRED, HIGH, pYellow, NULL);
+   \   00000084   2000A0E3           MOV      R0,#+32
+   \   00000088   ........           BL       _Znwj
+   \   0000008C   0080B0E1           MOVS     R8,R0
+   \   00000090   1500000A           BEQ      ??Display_RPMSweepScreen_2
+   \   00000094   ........           LDR      R7,??DataTable19_9
+   \   00000098   140097E5           LDR      R0,[R7, #+20]
+   \   0000009C   ........           BL       CalculateScaleTop
+   \   000000A0   181096E5           LDR      R1,[R6, #+24]
+   \   000000A4   10508DE5           STR      R5,[SP, #+16]
+   \   000000A8   0C108DE5           STR      R1,[SP, #+12]
+   \   000000AC   0310A0E3           MOV      R1,#+3
+   \   000000B0   08108DE5           STR      R1,[SP, #+8]
+   \   000000B4   8010A0E3           MOV      R1,#+128
+   \   000000B8   04108DE5           STR      R1,[SP, #+4]
+   \   000000BC   FF10A0E3           MOV      R1,#+255
+   \   000000C0   00108DE5           STR      R1,[SP, #+0]
+   \   000000C4   ........           BL       __aeabi_i2f
+   \   000000C8   0090A0E1           MOV      R9,R0
+   \   000000CC   240097E5           LDR      R0,[R7, #+36]
+   \   000000D0   ........           BL       __aeabi_i2f
+   \   000000D4   0020A0E1           MOV      R2,R0
+   \   000000D8   0930A0E1           MOV      R3,R9
+   \   000000DC   0110A0E3           MOV      R1,#+1
+   \   000000E0   0800A0E1           MOV      R0,R8
+   \   000000E4   ........           BL       _ZN5AlarmC1Ebffmm9AlarmTypePS_S1_
+   \   000000E8   000000EA           B        ??Display_RPMSweepScreen_3
+   \                     ??Display_RPMSweepScreen_2:
+   \   000000EC   0000A0E3           MOV      R0,#+0
+   \                     ??Display_RPMSweepScreen_3:
+   \   000000F0   1C0086E5           STR      R0,[R6, #+28]
+    297          
+    298          	firsttimethrough = true;
+    299          	drawFlag = false;
+   \   000000F4   ........           LDR      R0,??DataTable19_5
+   \   000000F8   0170A0E3           MOV      R7,#+1
+   \   000000FC   0050C0E5           STRB     R5,[R0, #+0]
+    300          	lapTime = holding = lap = gear = rpm = 0;			// Initialize data variables
+    301          	altitude = predictiveLap = speed = 0.0;
+    302          
+    303          	if ((hRPMScreen = WM_CreateWindowAsChild(0, 0, XSIZE_PHYS, YSIZE_PHYS, hParent, WM_CF_SHOW, _cbRPMSweepCallback, 0)) <= 0)
+   \   00000100   ........           LDR      R0,??DataTable19_26
+   \   00000104   4470C6E5           STRB     R7,[R6, #+68]
+   \   00000108   08008DE5           STR      R0,[SP, #+8]
+   \   0000010C   0200A0E3           MOV      R0,#+2
+   \   00000110   04008DE5           STR      R0,[SP, #+4]
+   \   00000114   245086E5           STR      R5,[R6, #+36]
+   \   00000118   285086E5           STR      R5,[R6, #+40]
+   \   0000011C   2C5086E5           STR      R5,[R6, #+44]
+   \   00000120   305086E5           STR      R5,[R6, #+48]
+   \   00000124   345086E5           STR      R5,[R6, #+52]
+   \   00000128   385086E5           STR      R5,[R6, #+56]
+   \   0000012C   3C5086E5           STR      R5,[R6, #+60]
+   \   00000130   405086E5           STR      R5,[R6, #+64]
+   \   00000134   0C508DE5           STR      R5,[SP, #+12]
+   \   00000138   00408DE5           STR      R4,[SP, #+0]
+   \   0000013C   443FA0E3           MOV      R3,#+272
+   \   00000140   782FA0E3           MOV      R2,#+480
+   \   00000144   0010A0E3           MOV      R1,#+0
+   \   00000148   0000A0E3           MOV      R0,#+0
+   \   0000014C   ........           BL       WM_CreateWindowAsChild
+   \   00000150   000086E5           STR      R0,[R6, #+0]
+   \   00000154   010050E3           CMP      R0,#+1
+   \   00000158   000000AA           BGE      ??Display_RPMSweepScreen_4
+    304          		SystemError();
+   \   0000015C   ........           BL       SystemError
+    305          
+    306          	if ((pSweep = new RPMSweep(0, 0, 480, 272, 0, CalculateScaleTop(vehicleData.tach.scaleEnd), 1000, 500, pRed, (DataValues[GEAR].iVal >= 0 && vehicleData.diffRatio > 0.0))) <= 0)
+   \                     ??Display_RPMSweepScreen_4:
+   \   00000160   8400A0E3           MOV      R0,#+132
+   \   00000164   ........           BL       _Znwj
+   \   00000168   0040B0E1           MOVS     R4,R0
+   \   0000016C   2000000A           BEQ      ??Display_RPMSweepScreen_5
+   \   00000170   ........           LDR      R0,??DataTable19_13
+   \   00000174   500290E5           LDR      R0,[R0, #+592]
+   \   00000178   000050E3           CMP      R0,#+0
+   \   0000017C   0400004A           BMI      ??Display_RPMSweepScreen_6
+   \   00000180   ........           LDR      R0,??DataTable19_9
+   \   00000184   0010A0E3           MOV      R1,#+0
+   \   00000188   500090E5           LDR      R0,[R0, #+80]
+   \   0000018C   ........           BL       __aeabi_cfrcmple
+   \   00000190   0000003A           BCC      ??Display_RPMSweepScreen_7
+   \                     ??Display_RPMSweepScreen_6:
+   \   00000194   0070A0E3           MOV      R7,#+0
+   \                     ??Display_RPMSweepScreen_7:
+   \   00000198   ........           LDR      R0,??DataTable19_9
+   \   0000019C   140090E5           LDR      R0,[R0, #+20]
+   \   000001A0   ........           BL       CalculateScaleTop
+   \   000001A4   1C1096E5           LDR      R1,[R6, #+28]
+   \   000001A8   08008DE5           STR      R0,[SP, #+8]
+   \   000001AC   14108DE5           STR      R1,[SP, #+20]
+   \   000001B0   7D1FA0E3           MOV      R1,#+500
+   \   000001B4   10108DE5           STR      R1,[SP, #+16]
+   \   000001B8   FA1FA0E3           MOV      R1,#+1000
+   \   000001BC   440FA0E3           MOV      R0,#+272
+   \   000001C0   0C108DE5           STR      R1,[SP, #+12]
+   \   000001C4   00008DE5           STR      R0,[SP, #+0]
+   \   000001C8   18708DE5           STR      R7,[SP, #+24]
+   \   000001CC   04508DE5           STR      R5,[SP, #+4]
+   \   000001D0   783FA0E3           MOV      R3,#+480
+   \   000001D4   0020A0E3           MOV      R2,#+0
+   \   000001D8   0010A0E3           MOV      R1,#+0
+   \   000001DC   0400A0E1           MOV      R0,R4
+   \   000001E0   ........           BL       _ZN8RPMSweepC1EiiiiiiiiP5Alarmb
+   \   000001E4   040086E5           STR      R0,[R6, #+4]
+   \   000001E8   000050E3           CMP      R0,#+0
+   \   000001EC   0200001A           BNE      ??Display_RPMSweepScreen_8
+   \   000001F0   000000EA           B        ??Display_RPMSweepScreen_9
+   \                     ??Display_RPMSweepScreen_5:
+   \   000001F4   045086E5           STR      R5,[R6, #+4]
+    307          		SystemError();
+   \                     ??Display_RPMSweepScreen_9:
+   \   000001F8   ........           BL       SystemError
+    308          
+    309          	if ((pMPH = new DigitalDisplay(5, 5, 150, 50, "", sysData.units == METRIC ? "kph" : "mph",
+    310          			0, 250, 0, 0, Left, NULL, false, GUI_FontD32, GUI_Font32B_ASCII, hRPMScreen)) <= 0)
+   \                     ??Display_RPMSweepScreen_8:
+   \   000001FC   D800A0E3           MOV      R0,#+216
+   \   00000200   ........           BL       _Znwj
+   \   00000204   0040B0E1           MOVS     R4,R0
+   \   00000208   2500000A           BEQ      ??Display_RPMSweepScreen_10
+   \   0000020C   ........           LDR      R0,??DataTable19_17
+   \   00000210   ........           LDR      R1,??DataTable19_11
+   \   00000214   640090E5           LDR      R0,[R0, #+100]
+   \   00000218   2420A0E3           MOV      R2,#+36
+   \   0000021C   010050E3           CMP      R0,#+1
+   \   00000220   000096E5           LDR      R0,[R6, #+0]
+   \   00000224   ........           ADREQ    R7,??DataTable19  ;; "kph"
+   \   00000228   70008DE5           STR      R0,[SP, #+112]
+   \   0000022C   ........           ADRNE    R7,??DataTable19_1  ;; "mph"
+   \   00000230   4C008DE2           ADD      R0,SP,#+76
+   \   00000234   ........           BL       __aeabi_memcpy4
+   \   00000238   ........           LDR      R1,??DataTable19_12
+   \   0000023C   28008DE2           ADD      R0,SP,#+40
+   \   00000240   2420A0E3           MOV      R2,#+36
+   \   00000244   ........           BL       __aeabi_memcpy4
+   \   00000248   4304A0E3           MOV      R0,#+1124073472
+   \   0000024C   7A0880E3           ORR      R0,R0,#0x7A0000
+   \   00000250   10008DE5           STR      R0,[SP, #+16]
+   \   00000254   ........           ADR      R0,??DataTable19_2  ;; ""
+   \   00000258   04008DE5           STR      R0,[SP, #+4]
+   \   0000025C   3200A0E3           MOV      R0,#+50
+   \   00000260   00008DE5           STR      R0,[SP, #+0]
+   \   00000264   24508DE5           STR      R5,[SP, #+36]
+   \   00000268   20508DE5           STR      R5,[SP, #+32]
+   \   0000026C   1C508DE5           STR      R5,[SP, #+28]
+   \   00000270   18508DE5           STR      R5,[SP, #+24]
+   \   00000274   14508DE5           STR      R5,[SP, #+20]
+   \   00000278   0C508DE5           STR      R5,[SP, #+12]
+   \   0000027C   08708DE5           STR      R7,[SP, #+8]
+   \   00000280   9630A0E3           MOV      R3,#+150
+   \   00000284   0520A0E3           MOV      R2,#+5
+   \   00000288   0510A0E3           MOV      R1,#+5
+   \   0000028C   0400A0E1           MOV      R0,R4
+   \   00000290   ........           BL       _ZN14DigitalDisplayC1EiiiiPcS0_ffii14DigitalOptionsP5Alarmb8GUI_FONTS4_l
+   \   00000294   080086E5           STR      R0,[R6, #+8]
+   \   00000298   000050E3           CMP      R0,#+0
+   \   0000029C   0200001A           BNE      ??Display_RPMSweepScreen_11
+   \   000002A0   000000EA           B        ??Display_RPMSweepScreen_12
+   \                     ??Display_RPMSweepScreen_10:
+   \   000002A4   085086E5           STR      R5,[R6, #+8]
+    311          		SystemError();
+   \                     ??Display_RPMSweepScreen_12:
+   \   000002A8   ........           BL       SystemError
+    312          
+    313          	if (selectedRaceMode == ROADRACE_MODE)
+   \                     ??Display_RPMSweepScreen_11:
+   \   000002AC   ........           LDR      R0,??DataTable19_10
+   \   000002B0   0000D0E5           LDRB     R0,[R0, #+0]
+   \   000002B4   000050E3           CMP      R0,#+0
+   \   000002B8   3300001A           BNE      ??Display_RPMSweepScreen_13
+    314          	{
+    315          		if ((pPredictiveLap = new PredictiveLapTimer(130, 220, 345, 50, GetPredictiveScale(), -GetPredictiveScale(), hRPMScreen)) <= 0)
+   \   000002BC   3400A0E3           MOV      R0,#+52
+   \   000002C0   ........           BL       _Znwj
+   \   000002C4   0040B0E1           MOVS     R4,R0
+   \   000002C8   1300000A           BEQ      ??Display_RPMSweepScreen_14
+   \   000002CC   ........           BL       GetPredictiveScale
+   \   000002D0   0070A0E1           MOV      R7,R0
+   \   000002D4   ........           BL       GetPredictiveScale
+   \   000002D8   001096E5           LDR      R1,[R6, #+0]
+   \   000002DC   04008DE5           STR      R0,[SP, #+4]
+   \   000002E0   0C108DE5           STR      R1,[SP, #+12]
+   \   000002E4   801427E2           EOR      R1,R7,#0x80000000
+   \   000002E8   3200A0E3           MOV      R0,#+50
+   \   000002EC   08108DE5           STR      R1,[SP, #+8]
+   \   000002F0   00008DE5           STR      R0,[SP, #+0]
+   \   000002F4   5930A0E3           MOV      R3,#+89
+   \   000002F8   403F83E3           ORR      R3,R3,#0x100
+   \   000002FC   DC20A0E3           MOV      R2,#+220
+   \   00000300   8210A0E3           MOV      R1,#+130
+   \   00000304   0400A0E1           MOV      R0,R4
+   \   00000308   ........           BL       _ZN18PredictiveLapTimerC1Eiiiiffl
+   \   0000030C   100086E5           STR      R0,[R6, #+16]
+   \   00000310   000050E3           CMP      R0,#+0
+   \   00000314   0200001A           BNE      ??Display_RPMSweepScreen_15
+   \   00000318   000000EA           B        ??Display_RPMSweepScreen_16
+   \                     ??Display_RPMSweepScreen_14:
+   \   0000031C   105086E5           STR      R5,[R6, #+16]
+    316          			SystemError();
+   \                     ??Display_RPMSweepScreen_16:
+   \   00000320   ........           BL       SystemError
+    317          
+    318          		if ((pLapTimer = new DigitalStringOutput(225, 160, 245, 60, Left, hRPMScreen, GUI_FontD48, GUI_WHITE)) <= 0)
+   \                     ??Display_RPMSweepScreen_15:
+   \   00000324   470FA0E3           MOV      R0,#+284
+   \   00000328   ........           BL       _Znwj
+   \   0000032C   0040B0E1           MOVS     R4,R0
+   \   00000330   1300000A           BEQ      ??Display_RPMSweepScreen_17
+   \   00000334   FF04E0E3           MVN      R0,#-16777216
+   \   00000338   30008DE5           STR      R0,[SP, #+48]
+   \   0000033C   ........           LDR      R1,??DataTable19_24
+   \   00000340   0C008DE2           ADD      R0,SP,#+12
+   \   00000344   2420A0E3           MOV      R2,#+36
+   \   00000348   ........           BL       __aeabi_memcpy4
+   \   0000034C   000096E5           LDR      R0,[R6, #+0]
+   \   00000350   04508DE5           STR      R5,[SP, #+4]
+   \   00000354   08008DE5           STR      R0,[SP, #+8]
+   \   00000358   3C00A0E3           MOV      R0,#+60
+   \   0000035C   00008DE5           STR      R0,[SP, #+0]
+   \   00000360   F530A0E3           MOV      R3,#+245
+   \   00000364   A020A0E3           MOV      R2,#+160
+   \   00000368   E110A0E3           MOV      R1,#+225
+   \   0000036C   0400A0E1           MOV      R0,R4
+   \   00000370   ........           BL       _ZN19DigitalStringOutputC1Eiiii14DigitalOptionsl8GUI_FONTm
+   \   00000374   0C0086E5           STR      R0,[R6, #+12]
+   \   00000378   000050E3           CMP      R0,#+0
+   \   0000037C   0200001A           BNE      ??Display_RPMSweepScreen_13
+   \   00000380   000000EA           B        ??Display_RPMSweepScreen_18
+   \                     ??Display_RPMSweepScreen_17:
+   \   00000384   0C5086E5           STR      R5,[R6, #+12]
+    319          			SystemError();
+   \                     ??Display_RPMSweepScreen_18:
+   \   00000388   ........           BL       SystemError
+    320          	}
+    321          
+    322          	hScreenTimer = WM_CreateTimer(hRPMScreen, 0, GAUGE_SCREEN_REFRESH_TIME, 0);
+   \                     ??Display_RPMSweepScreen_13:
+   \   0000038C   0030A0E3           MOV      R3,#+0
+   \   00000390   1920A0E3           MOV      R2,#+25
+   \   00000394   0010A0E3           MOV      R1,#+0
+   \   00000398   000096E5           LDR      R0,[R6, #+0]
+   \   0000039C   ........           BL       WM_CreateTimer
+   \   000003A0   140086E5           STR      R0,[R6, #+20]
+    323          
+    324          	// create a memory area to reduce flicker on paint.
+    325          	mem = GUI_MEMDEV_Create(0, 0, XSIZE_PHYS, YSIZE_PHYS);
+   \   000003A4   443FA0E3           MOV      R3,#+272
+   \   000003A8   782FA0E3           MOV      R2,#+480
+   \   000003AC   0010A0E3           MOV      R1,#+0
+   \   000003B0   0000A0E3           MOV      R0,#+0
+   \   000003B4   ........           BL       GUI_MEMDEV_Create
+   \   000003B8   200086E5           STR      R0,[R6, #+32]
+    326          
+    327          	return hRPMScreen;
+   \   000003BC   000096E5           LDR      R0,[R6, #+0]
+   \   000003C0   74D08DE2           ADD      SP,SP,#+116
+   \   000003C4   F083BDE8           POP      {R4-R9,PC}       ;; return
+    328          }
+    329          
+    330          //
+    331          // Return true if screen touch in on the configurable gauge item
+    332          //
+
+   \                                 In section .text, align 4, keep-with-next
+    333          char IfRPMSweepConfigGaugePressed(int lastx, int lasty)
+    334          {
+    335          	if ((lastx >= SweepTachEditRect.x0) && (lastx <= SweepTachEditRect.x1) && (lasty >= SweepTachEditRect.y0) && (lasty <= SweepTachEditRect.y1))
+   \                     IfRPMSweepConfigGaugePressed:
+   \   00000000   000050E3           CMP      R0,#+0
+   \   00000004   0700004A           BMI      ??IfRPMSweepConfigGaugePressed_0
+   \   00000008   5B0050E3           CMP      R0,#+91
+   \   0000000C   050000AA           BGE      ??IfRPMSweepConfigGaugePressed_0
+   \   00000010   3C0051E3           CMP      R1,#+60
+   \   00000014   030000BA           BLT      ??IfRPMSweepConfigGaugePressed_0
+   \   00000018   880051E3           CMP      R1,#+136
+   \   0000001C   010000AA           BGE      ??IfRPMSweepConfigGaugePressed_0
+    336          		return true;
+   \   00000020   0100A0E3           MOV      R0,#+1
+   \   00000024   1EFF2FE1           BX       LR
+    337          	else return false;
+   \                     ??IfRPMSweepConfigGaugePressed_0:
+   \   00000028   0000A0E3           MOV      R0,#+0
+   \   0000002C   1EFF2FE1           BX       LR               ;; return
+    338          }
+    339          
+    340          //
+    341          // Update Predictive Lap Control
+    342          //	Handles alternate text display of Predictive Lap Control in the following way:
+    343          //		If waiting for start record speed display waiting message
+    344          //		If waiting for stop timer then display remaining time
+    345          //		If waiting for Lap 1 display track name
+    346          //		else display predictive time
+    347          //
+
+   \                                 In section .text, align 4, keep-with-next
+    348          void UpdatePredictiveLapControl(PredictiveLapTimer *pPredictiveLap, float predictiveLap)
+    349          {
+   \                     _Z26UpdatePredictiveLapControlP18PredictiveLapTimerf:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    350          	char scratch[40];
+    351          
+    352          	// During the first lap write the name of the track in the predictive lap box.
+    353          	if (unsavedSysData.waitingForRecordSpeed) {
+   \   00000008   ........           LDR      R0,??DataTable19_16
+   \   0000000C   2CD04DE2           SUB      SP,SP,#+44
+   \   00000010   D520D0E5           LDRB     R2,[R0, #+213]
+   \   00000014   000052E3           CMP      R2,#+0
+   \   00000018   1D00000A           BEQ      ??UpdatePredictiveLapControl_0
+    354          		float ftemp = (float) ((sysData.multiSettings_2 & 0xFFFF0000) >> 16);
+   \   0000001C   ........           LDR      R5,??DataTable19_17
+   \   00000020   EC0095E5           LDR      R0,[R5, #+236]
+   \   00000024   2008A0E1           LSR      R0,R0,#+16
+   \   00000028   ........           BL       __aeabi_ui2f
+    355          		if (STD == sysData.units)
+   \   0000002C   641095E5           LDR      R1,[R5, #+100]
+   \   00000030   000051E3           CMP      R1,#+0
+   \   00000034   0300001A           BNE      ??UpdatePredictiveLapControl_1
+    356          			ftemp *= KILOMETERS_TO_MILES;
+   \   00000038   ........           LDR      R1,??DataTable19_18  ;; 0x3f1f122f
+   \   0000003C   ........           BL       __aeabi_fmul
+   \   00000040   ........           ADR      R3,??DataTable19_1  ;; "mph"
+   \   00000044   000000EA           B        ??UpdatePredictiveLapControl_2
+    357          		
+    358          		sprintf(scratch, "Recording Starts: %d%s", (int) (ftemp + 0.5), (sysData.units == STD ? "mph" : "kph"));
+   \                     ??UpdatePredictiveLapControl_1:
+   \   00000048   ........           ADR      R3,??DataTable19  ;; "kph"
+   \                     ??UpdatePredictiveLapControl_2:
+   \   0000004C   0350A0E1           MOV      R5,R3
+   \   00000050   ........           BL       __aeabi_f2d
+   \   00000054   0130A0E1           MOV      R3,R1
+   \   00000058   0020A0E1           MOV      R2,R0
+   \   0000005C   C015A0E3           MOV      R1,#+805306368
+   \   00000060   0000A0E3           MOV      R0,#+0
+   \   00000064   FE1681E3           ORR      R1,R1,#0xFE00000
+   \   00000068   ........           BL       __aeabi_dadd
+   \   0000006C   ........           BL       __aeabi_d2iz
+   \   00000070   0020A0E1           MOV      R2,R0
+   \   00000074   0530A0E1           MOV      R3,R5
+   \   00000078   ........           ADR      R1,`?<Constant "Recording Starts: %d%s">`
+   \   0000007C   0D00A0E1           MOV      R0,SP
+   \   00000080   ........           BL       sprintf
+    359          		pPredictiveLap->SetValue(scratch);
+   \                     ??UpdatePredictiveLapControl_3:
+   \   00000084   0D10A0E1           MOV      R1,SP
+   \   00000088   0400A0E1           MOV      R0,R4
+   \   0000008C   ........           BL       _ZN18PredictiveLapTimer8SetValueEPc
+   \   00000090   100000EA           B        ??UpdatePredictiveLapControl_4
+    360          	}	
+    361          	else if (unsavedSysData.timeToStopRecording)
+   \                     ??UpdatePredictiveLapControl_0:
+   \   00000094   D82090E5           LDR      R2,[R0, #+216]
+   \   00000098   000052E3           CMP      R2,#+0
+   \   0000009C   0300000A           BEQ      ??UpdatePredictiveLapControl_5
+    362          	{
+    363          		sprintf(scratch, "Recording Stops: %ds", unsavedSysData.timeToStopRecording);
+   \   000000A0   ........           ADR      R1,`?<Constant "Recording Stops: %ds">`
+   \   000000A4   0D00A0E1           MOV      R0,SP
+   \   000000A8   ........           BL       sprintf
+    364          		pPredictiveLap->SetValue(scratch);
+   \   000000AC   F4FFFFEA           B        ??UpdatePredictiveLapControl_3
+    365          	}
+    366          	else if (lap == 0)
+   \                     ??UpdatePredictiveLapControl_5:
+   \   000000B0   ........           LDR      R0,??DataTable19_4
+   \   000000B4   2C0090E5           LDR      R0,[R0, #+44]
+   \   000000B8   000050E3           CMP      R0,#+0
+   \   000000BC   0300001A           BNE      ??UpdatePredictiveLapControl_6
+    367          		pPredictiveLap->SetValue(sysData.track);
+   \   000000C0   ........           LDR      R1,??DataTable19_19
+   \   000000C4   0400A0E1           MOV      R0,R4
+   \   000000C8   ........           BL       _ZN18PredictiveLapTimer8SetValueEPc
+   \   000000CC   010000EA           B        ??UpdatePredictiveLapControl_4
+    368          	else pPredictiveLap->SetValue(predictiveLap);
+   \                     ??UpdatePredictiveLapControl_6:
+   \   000000D0   0400A0E1           MOV      R0,R4
+   \   000000D4   ........           BL       _ZN18PredictiveLapTimer8SetValueEf
+    369          
+    370          	pPredictiveLap->DrawControl();
+   \                     ??UpdatePredictiveLapControl_4:
+   \   000000D8   0400A0E1           MOV      R0,R4
+   \   000000DC   ........           BL       _ZN18PredictiveLapTimer11DrawControlEv
+    371          }
+   \   000000E0   2CD08DE2           ADD      SP,SP,#+44       ;; stack cleaning
+   \   000000E4   3080BDE8           POP      {R4,R5,PC}       ;; return
+
+   \                                 In section .init_array, align 4, keep-with-next, root
+   \   00000000   ........           DC32    RELOC_ARM_TARGET1 __sti__routine
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "%d">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   25640000           DC8 37, 100, 0, 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "Lap">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   4C617000           DC8 76, 97, 112, 0
+
+   \                                 In section .rodata, align 1, keep-with-next
+   \                     `?<Constant "">`:
+   \   00000000                      ; Initializer data, 1 bytes
+   \   00000000   00                 DC8 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "kph">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   6B706800           DC8 107, 112, 104, 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "mph">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   6D706800           DC8 109, 112, 104, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \   static __intrinsic __interwork __softfp void __sti__routine()
+   \                     __sti__routine:
+   \   00000000   ............       ADRL     R1,DataElementRect
+   \              ....        
+   \   00000008   ........           LDR      R0,??DataTable19_3
+   \   0000000C   002091E5           LDR      R2,[R1, #+0]
+   \   00000010   043091E5           LDR      R3,[R1, #+4]
+   \   00000014   ............       ADRL     R1,NameRect
+   \              ....        
+   \   0000001C   0C0080E8           STM      R0,{R2,R3}
+   \   00000020   002091E5           LDR      R2,[R1, #+0]
+   \   00000024   043091E5           LDR      R3,[R1, #+4]
+   \   00000028   ............       ADRL     R1,UnitsRect
+   \              ....        
+   \   00000030   142080E5           STR      R2,[R0, #+20]
+   \   00000034   183080E5           STR      R3,[R0, #+24]
+   \   00000038   002091E5           LDR      R2,[R1, #+0]
+   \   0000003C   043091E5           LDR      R3,[R1, #+4]
+   \   00000040   282080E5           STR      R2,[R0, #+40]
+   \   00000044   2C3080E5           STR      R3,[R0, #+44]
+   \   00000048   1EFF2FE1           BX       LR               ;; return
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17:
+   \   00000000   6D706800           DC8      "mph"
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_1:
+   \   00000000   6B706800           DC8      "kph"
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19:
+   \   00000000   6B706800           DC8      "kph"
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_1:
+   \   00000000   6D706800           DC8      "mph"
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_2:
+   \   00000000   00000000           DC8      "",0x0,0x0,0x0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_3:
+   \   00000000   ........           DC32     pData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_4:
+   \   00000000   ........           DC32     hRPMScreen
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_5:
+   \   00000000   ........           DC32     drawFlag
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_6:
+   \   00000000   ........           DC32     boxStartTime
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_7:
+   \   00000000   ........           DC32     configureGaugeMode
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_8:
+   \   00000000   ........           DC32     lockupSemaphore
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_9:
+   \   00000000   ........           DC32     vehicleData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_10:
+   \   00000000   ........           DC32     selectedRaceMode
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_11:
+   \   00000000   ........           DC32     GUI_Font32B_ASCII
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_12:
+   \   00000000   ........           DC32     GUI_FontD32
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_13:
+   \   00000000   ........           DC32     DataValues
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_14:
+   \   00000000   ........           DC32     bmBestLapSession
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_15:
+   \   00000000   ........           DC32     bmBestLapEver
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_16:
+   \   00000000   ........           DC32     unsavedSysData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_17:
+   \   00000000   ........           DC32     sysData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_18:
+   \   00000000   2F121F3F           DC32     0x3f1f122f
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_19:
+   \   00000000   ........           DC32     sysData+0xA0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_20:
+   \   00000000   D3D3D300           DC32     0xd3d3d3
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_21:
+   \   00000000   986E1283           DC32     0x83126e98
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_22:
+   \   00000000   89888888           DC32     0x88888889
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_23:
+   \   00000000   C5B3A291           DC32     0x91a2b3c5
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_24:
+   \   00000000   ........           DC32     GUI_FontD48
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_25:
+   \   00000000   ........           DC32     bmthreewayarrow
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable19_26:
+   \   00000000   ........           DC32     _cbRPMSweepCallback
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "session time">`:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   73657373696F       DC8 115, 101, 115, 115, 105, 111, 110, 32, 116, 105
+   \              6E207469    
+   \   0000000A   6D6500000000       DC8 109, 101, 0, 0, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "%02d:%02d">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   253032643A25       DC8 37, 48, 50, 100, 58, 37, 48, 50, 100, 0
+   \              30326400    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "%d:%02d:%02d">`:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   25643A253032       DC8 37, 100, 58, 37, 48, 50, 100, 58, 37, 48
+   \              643A2530    
+   \   0000000A   326400000000       DC8 50, 100, 0, 0, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "%d:%02d">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   25643A253032       DC8 37, 100, 58, 37, 48, 50, 100, 0
+   \              6400        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Recording Starts: %d%s">`:
+   \   00000000                      ; Initializer data, 24 bytes
+   \   00000000   5265636F7264       DC8 82, 101, 99, 111, 114, 100, 105, 110, 103, 32
+   \              696E6720    
+   \   0000000A   537461727473       DC8 83, 116, 97, 114, 116, 115, 58, 32, 37, 100
+   \              3A202564    
+   \   00000014   25730000           DC8 37, 115, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Recording Stops: %ds">`:
+   \   00000000                      ; Initializer data, 24 bytes
+   \   00000000   5265636F7264       DC8 82, 101, 99, 111, 114, 100, 105, 110, 103, 32
+   \              696E6720    
+   \   0000000A   53746F70733A       DC8 83, 116, 111, 112, 115, 58, 32, 37, 100, 115
+   \              20256473    
+   \   00000014   00000000           DC8 0, 0, 0, 0
+
+   Maximum stack usage in bytes:
+
+     Function                       .cstack
+     --------                       -------
+     Display_RPMSweepScreen            144
+     IfRPMSweepConfigGaugePressed        0
+     SweepHighlightConfigGauge()         8
+     UpdatePredictiveLapControl(PredictiveLapTimer *, float)
+                                        56
+     __sti__routine()                    0
+     _cbRPMSweepCallback                96
+
+
+   Section sizes:
+
+     Function/Label                       Bytes
+     --------------                       -----
+     hRPMScreen                             69
+     pSweep
+     pMPH
+     pLapTimer
+     pPredictiveLap
+     hScreenTimer
+     pYellow
+     pRed
+     mem
+     rpm
+     gear
+     lap
+     holding
+     lapTime
+     speed
+     predictiveLap
+     altitude
+     firsttimethrough
+     LapRect                                 8
+     DataElementRect                         8
+     NameRect                                8
+     UnitsRect                               8
+     pData                                  60
+     pName
+     pUnits
+     config                                 12
+     SweepHighlightConfigGauge()            64
+     _cbRPMSweepCallback                  1592
+     Display_RPMSweepScreen                968
+     IfRPMSweepConfigGaugePressed           48
+     UpdatePredictiveLapControl(PredictiveLapTimer *, float)
+                                           232
+     ?<Constant "%d">                        4
+     ?<Constant "Lap">                       4
+     ?<Constant "">                          1
+     ?<Constant "kph">                       4
+     ?<Constant "mph">                       4
+     __sti__routine()                       76
+     ??DataTable17                           4
+     ??DataTable17_1                         4
+     ??DataTable19                           4
+     ??DataTable19_1                         4
+     ??DataTable19_2                         4
+     ??DataTable19_3                         4
+     ??DataTable19_4                         4
+     ??DataTable19_5                         4
+     ??DataTable19_6                         4
+     ??DataTable19_7                         4
+     ??DataTable19_8                         4
+     ??DataTable19_9                         4
+     ??DataTable19_10                        4
+     ??DataTable19_11                        4
+     ??DataTable19_12                        4
+     ??DataTable19_13                        4
+     ??DataTable19_14                        4
+     ??DataTable19_15                        4
+     ??DataTable19_16                        4
+     ??DataTable19_17                        4
+     ??DataTable19_18                        4
+     ??DataTable19_19                        4
+     ??DataTable19_20                        4
+     ??DataTable19_21                        4
+     ??DataTable19_22                        4
+     ??DataTable19_23                        4
+     ??DataTable19_24                        4
+     ??DataTable19_25                        4
+     ??DataTable19_26                        4
+     ?<Constant "session time">             16
+     ?<Constant "%02d:%02d">                12
+     ?<Constant "%d:%02d:%02d">             16
+     ?<Constant "%d:%02d">                   8
+     ?<Constant "Recording Starts: %d%s">   24
+     ?<Constant "Recording Stops: %ds">     24
+      Others                                 4
+
+ 
+    69 bytes in section .bss
+    60 bytes in section .data
+     4 bytes in section .init_array
+    17 bytes in section .rodata
+ 3 240 bytes in section .text
+ 
+ 3 244 bytes of CODE  memory
+    17 bytes of CONST memory
+   129 bytes of DATA  memory
+
+Errors: none
+Warnings: none

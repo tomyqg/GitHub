@@ -1,0 +1,3313 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:15:34 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\GUI\GUIDRV_Lin_OXY_16.c                 #
+#    Command line =  C:\DUII\TargetHW\GUI\GUIDRV_Lin_OXY_16.c -D DEBUG=1 -D   #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\GUIDRV_Lin_OXY_16.lst      #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\GUIDRV_Lin_OXY_16.o         #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\GUI\GUIDRV_Lin_OXY_16.c
+      1          /*********************************************************************
+      2          *                SEGGER Microcontroller GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 1996 - 2010  SEGGER Microcontroller GmbH & Co. KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          ** emWin V5.06 - Graphical user interface for embedded applications **
+     13          emWin is protected by international copyright laws.   Knowledge of the
+     14          source code may not be used to write a similar product.  This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : GUIDRV_Lin_OXY_16.c
+     19          Purpose     : Driver for accessing linear video memory
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          #include <stddef.h>
+     24          
+     25          #include "LCD_Private.h"
+     26          #include "GUI_Private.h"
+     27          #include "LCD_SIM.h"
+     28          #include "LCD_ConfDefaults.h"
+     29          
+     30          #include "GUIDRV_Lin.h"
+     31          
+     32          #if (!defined(WIN32) | defined(LCD_SIMCONTROLLER))
+     33          
+     34          /*********************************************************************
+     35          *
+     36          *       Defines
+     37          *
+     38          **********************************************************************
+     39          */
+     40          #ifdef WIN32
+     41            //
+     42            // Simulation prototypes
+     43            //
+     44            U16  SIM_Lin_ReadMem16  (unsigned int Off);
+     45            U32  SIM_Lin_ReadMem32  (unsigned int Off);
+     46            U32  SIM_Lin_ReadMem32p (U32 * p);
+     47            void SIM_Lin_WriteMem16 (unsigned int Off, U16 Data);
+     48            void SIM_Lin_WriteMem32 (unsigned int Off, U32 Data);
+     49            void SIM_Lin_WriteMem16p(U16 * p, U16 Data);
+     50            void SIM_Lin_WriteMem32p(U32 * p, U32 Data);
+     51            void SIM_Lin_memcpy     (void * pDst, const void * pSrc, int Len);
+     52            void SIM_Lin_SetVRAMAddr(int LayerIndex, void * pVRAM);
+     53            void SIM_Lin_SetVRAMSize(int LayerIndex, int xSize, int ySize);
+     54            //
+     55            // Access macro definition for internal simulation
+     56            //
+     57            #define LCD_READ_MEM16(VRAMAddr, Off)        SIM_Lin_ReadMem16(Off)
+     58            #define LCD_READ_MEM32(VRAMAddr, Off)        SIM_Lin_ReadMem32(Off)
+     59            #define LCD_READ_MEM32P(p)                   SIM_Lin_ReadMem32p(p)
+     60            #define LCD_WRITE_MEM16(VRAMAddr, Off, Data) SIM_Lin_WriteMem16(Off, Data)
+     61            #define LCD_WRITE_MEM32(VRAMAddr, Off, Data) SIM_Lin_WriteMem32(Off, Data)
+     62            #define LCD_WRITE_MEM16P(p, Data)            SIM_Lin_WriteMem16p(p, Data)
+     63            #define LCD_WRITE_MEM32P(p, Data)            SIM_Lin_WriteMem32p(p, Data)
+     64            #undef  GUI_MEMCPY
+     65            #define GUI_MEMCPY(pDst, pSrc, Len) SIM_Lin_memcpy(pDst, pSrc, Len)
+     66          #else
+     67            //
+     68            // Access macro definition for hardware
+     69            //
+     70            #define LCD_READ_MEM16(VRAMAddr, Off)        (*((U16 *)VRAMAddr + (U32)Off))
+     71            #define LCD_READ_MEM32(VRAMAddr, Off)        (*((U32 *)VRAMAddr + (U32)Off))
+     72            #define LCD_READ_MEM32P(p)                   (*((U32 *)p))
+     73            #define LCD_WRITE_MEM16(VRAMAddr, Off, Data) *((U16 *)VRAMAddr + (U32)Off) = Data
+     74            #define LCD_WRITE_MEM32(VRAMAddr, Off, Data) *((U32 *)VRAMAddr + (U32)Off) = Data
+     75            #define LCD_WRITE_MEM16P(p, Data)            *((U16 *)p) = Data
+     76            #define LCD_WRITE_MEM32P(p, Data)            *((U32 *)p) = Data
+     77          #endif
+     78          
+     79          #define WRITE_MEM16(VRAMAddr, Off, Data) LCD_WRITE_MEM16(VRAMAddr, Off, Data)
+     80          #define WRITE_MEM32(VRAMAddr, Off, Data) LCD_WRITE_MEM32(VRAMAddr, Off, Data)
+     81          #define READ_MEM16(VRAMAddr, Off)        LCD_READ_MEM16(VRAMAddr, Off)
+     82          #define READ_MEM32(VRAMAddr, Off)        LCD_READ_MEM32(VRAMAddr, Off)
+     83          #define READ_MEM32P(p)                   LCD_READ_MEM32P(p)
+     84          #define WRITE_MEM16P(p, Data)            LCD_WRITE_MEM16P(p, Data)
+     85          #define WRITE_MEM32P(p, Data)            LCD_WRITE_MEM32P(p, Data)
+     86          
+     87          #define OFF2PTR16(VRAMAddr, Off)     (U16 *)((U8 *)VRAMAddr + (Off << 1))
+     88          #define OFF2PTR32(VRAMAddr, Off)     (U32 *)((U8 *)VRAMAddr + (Off << 2))
+     89          
+     90          #define XY2OFF16(vxSizePhys, x, y)    ((U32)y *  vxSizePhys       +       x      )
+     91          #define XY2OFF32(vxSizePhys, x, y)    ((U32)y * (vxSizePhys >> 1) + ((U32)x >> 1))
+     92          
+     93          /*********************************************************************
+     94          *
+     95          *       Types
+     96          *
+     97          **********************************************************************
+     98          */
+     99          typedef struct {
+    100            U32 VRAMAddr;
+    101            int xSize, ySize;
+    102            int vxSize, vySize;
+    103            int vxSizePhys;
+    104            int xPos, yPos;
+    105            int Alpha;
+    106            int IsVisible;
+    107            void (* pfFillRect)(int LayerIndex, int x0, int y0, int x1, int y1, U32 PixelIndex);
+    108          } DRIVER_CONTEXT;
+    109          
+    110          /*********************************************************************
+    111          *
+    112          *       Static functions
+    113          *
+    114          **********************************************************************
+    115          */
+    116          /*********************************************************************
+    117          *
+    118          *       _SetPixelIndex
+    119          *
+    120          * Purpose:
+    121          *   Sets the index of the given pixel. The upper layers
+    122          *   calling this routine make sure that the coordinates are in range, so
+    123          *   that no check on the parameters needs to be performed.
+    124          */
+
+   \                                 In section .text, align 4, keep-with-next
+    125          static void _SetPixelIndex(GUI_DEVICE * pDevice, int x, int y, int PixelIndex) {
+   \                     _SetPixelIndex:
+   \   00000000   00402DE9           PUSH     {LR}
+    126            DRIVER_CONTEXT * pContext;
+    127            U32 Off;
+    128          
+    129            //
+    130            // Get context
+    131            //
+    132            pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+   \   00000004   080090E5           LDR      R0,[R0, #+8]
+    133            //
+    134            // Mirror x
+    135            //
+    136            x = (pContext->vxSize - 1 - (x));
+    137            //
+    138            // Mirror y
+    139            //
+    140            y = (pContext->vySize - 1 - (y));
+    141            //
+    142            // Write into hardware
+    143            //
+    144            Off      = XY2OFF16(pContext->vxSizePhys, x, y);
+    145            WRITE_MEM16(pContext->VRAMAddr, Off, PixelIndex);
+   \   00000008   10C090E5           LDR      R12,[R0, #+16]
+   \   0000000C   0CE090E5           LDR      LR,[R0, #+12]
+   \   00000010   01C04CE2           SUB      R12,R12,#+1
+   \   00000014   02204CE0           SUB      R2,R12,R2
+   \   00000018   14C090E5           LDR      R12,[R0, #+20]
+   \   0000001C   000090E5           LDR      R0,[R0, #+0]
+   \   00000020   9CE222E0           MLA      R2,R12,R2,LR
+   \   00000024   012042E2           SUB      R2,R2,#+1
+   \   00000028   011042E0           SUB      R1,R2,R1
+   \   0000002C   810080E0           ADD      R0,R0,R1, LSL #+1
+   \   00000030   B030C0E1           STRH     R3,[R0, #+0]
+    146          }
+   \   00000034   0080BDE8           POP      {PC}             ;; return
+    147          
+    148          /*********************************************************************
+    149          *
+    150          *       _GetPixelIndex
+    151          *
+    152          * Purpose:
+    153          *   Returns the index of the given pixel. The upper layers
+    154          *   calling this routine make sure that the coordinates are in range, so
+    155          *   that no check on the parameters needs to be performed.
+    156          */
+
+   \                                 In section .text, align 4, keep-with-next
+    157          static unsigned int _GetPixelIndex(GUI_DEVICE * pDevice, int x, int y) {
+    158            DRIVER_CONTEXT * pContext;
+    159            U32 Off;
+    160            LCD_PIXELINDEX PixelIndex;
+    161          
+    162            //
+    163            // Get context
+    164            //
+    165            pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+   \                     _GetPixelIndex:
+   \   00000000   080090E5           LDR      R0,[R0, #+8]
+    166            //
+    167            // Mirror x
+    168            //
+    169            x = (pContext->vxSize - 1 - (x));
+    170            //
+    171            // Mirror y
+    172            //
+    173            y = (pContext->vySize - 1 - (y));
+    174            //
+    175            // Read from hardware
+    176            //
+    177            Off        = XY2OFF16(pContext->vxSizePhys, x, y);
+    178            PixelIndex = READ_MEM16(pContext->VRAMAddr, Off);
+    179            return PixelIndex;
+   \   00000004   103090E5           LDR      R3,[R0, #+16]
+   \   00000008   0CC090E5           LDR      R12,[R0, #+12]
+   \   0000000C   013043E2           SUB      R3,R3,#+1
+   \   00000010   022043E0           SUB      R2,R3,R2
+   \   00000014   143090E5           LDR      R3,[R0, #+20]
+   \   00000018   000090E5           LDR      R0,[R0, #+0]
+   \   0000001C   93C222E0           MLA      R2,R3,R2,R12
+   \   00000020   012042E2           SUB      R2,R2,#+1
+   \   00000024   011042E0           SUB      R1,R2,R1
+   \   00000028   810080E0           ADD      R0,R0,R1, LSL #+1
+   \   0000002C   B000D0E1           LDRH     R0,[R0, #+0]
+   \   00000030   1EFF2FE1           BX       LR               ;; return
+    180          }
+    181          
+    182          /*********************************************************************
+    183          *
+    184          *       _XorPixel
+    185          */
+
+   \                                 In section .text, align 4, keep-with-next
+    186          static void _XorPixel(GUI_DEVICE * pDevice, int x, int y) {
+   \                     _XorPixel:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   0060A0E1           MOV      R6,R0
+    187            LCD_PIXELINDEX PixelIndex;
+    188            LCD_PIXELINDEX IndexMask;
+    189            
+    190            PixelIndex = _GetPixelIndex(pDevice, x, y);
+   \   00000008   080096E5           LDR      R0,[R6, #+8]
+   \   0000000C   0140A0E1           MOV      R4,R1
+   \   00000010   101090E5           LDR      R1,[R0, #+16]
+   \   00000014   0250A0E1           MOV      R5,R2
+   \   00000018   011041E2           SUB      R1,R1,#+1
+   \   0000001C   142090E5           LDR      R2,[R0, #+20]
+   \   00000020   051041E0           SUB      R1,R1,R5
+   \   00000024   0C3090E5           LDR      R3,[R0, #+12]
+   \   00000028   923121E0           MLA      R1,R2,R1,R3
+   \   0000002C   000090E5           LDR      R0,[R0, #+0]
+   \   00000030   011041E2           SUB      R1,R1,#+1
+   \   00000034   041041E0           SUB      R1,R1,R4
+   \   00000038   810080E0           ADD      R0,R0,R1, LSL #+1
+   \   0000003C   B070D0E1           LDRH     R7,[R0, #+0]
+    191            IndexMask  = pDevice->pColorConvAPI->pfGetIndexMask();
+   \   00000040   100096E5           LDR      R0,[R6, #+16]
+   \   00000044   04D04DE2           SUB      SP,SP,#+4
+   \   00000048   080090E5           LDR      R0,[R0, #+8]
+   \   0000004C   30FF2FE1           BLX      R0
+    192            _SetPixelIndex(pDevice, x, y, PixelIndex ^ IndexMask);
+   \   00000050   081096E5           LDR      R1,[R6, #+8]
+   \   00000054   070020E0           EOR      R0,R0,R7
+   \   00000058   102091E5           LDR      R2,[R1, #+16]
+   \   0000005C   143091E5           LDR      R3,[R1, #+20]
+   \   00000060   012042E2           SUB      R2,R2,#+1
+   \   00000064   052042E0           SUB      R2,R2,R5
+   \   00000068   0CC091E5           LDR      R12,[R1, #+12]
+   \   0000006C   93C222E0           MLA      R2,R3,R2,R12
+   \   00000070   001091E5           LDR      R1,[R1, #+0]
+   \   00000074   012042E2           SUB      R2,R2,#+1
+   \   00000078   042042E0           SUB      R2,R2,R4
+   \   0000007C   821081E0           ADD      R1,R1,R2, LSL #+1
+   \   00000080   B000C1E1           STRH     R0,[R1, #+0]
+    193          }
+   \   00000084   04D08DE2           ADD      SP,SP,#+4
+   \   00000088   F080BDE8           POP      {R4-R7,PC}       ;; return
+    194          
+    195          /*********************************************************************
+    196          *
+    197          *       _DrawHLine
+    198          */
+
+   \                                 In section .text, align 4, keep-with-next
+    199          static void _DrawHLine  (GUI_DEVICE * pDevice, int x0, int y,  int x1) {
+   \                     _DrawHLine:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0070A0E1           MOV      R7,R0
+    200            DRIVER_CONTEXT * pContext;
+    201            U32 * pDest;
+    202            U32 Off;
+    203            int RemPixels, temp;
+    204            U32 Data, ColorMask;
+    205            LCD_PIXELINDEX ColorIndex;
+    206          
+    207            if (GUI_Context.DrawMode & LCD_DRAWMODE_XOR) {
+   \   00000008   ........           LDR      R0,??DataTable15
+   \   0000000C   0160A0E1           MOV      R6,R1
+   \   00000010   1000D0E5           LDRB     R0,[R0, #+16]
+   \   00000014   0240A0E1           MOV      R4,R2
+   \   00000018   0350A0E1           MOV      R5,R3
+   \   0000001C   010010E3           TST      R0,#0x1
+   \   00000020   2100000A           BEQ      ??_DrawHLine_0
+   \   00000024   060055E1           CMP      R5,R6
+   \   00000028   580000BA           BLT      ??_DrawHLine_1
+    208              for (; x0 <= x1; x0++) {
+    209                _XorPixel(pDevice, x0, y);
+   \                     ??_DrawHLine_2:
+   \   0000002C   080097E5           LDR      R0,[R7, #+8]
+   \   00000030   102090E5           LDR      R2,[R0, #+16]
+   \   00000034   143090E5           LDR      R3,[R0, #+20]
+   \   00000038   012042E2           SUB      R2,R2,#+1
+   \   0000003C   0C1090E5           LDR      R1,[R0, #+12]
+   \   00000040   042042E0           SUB      R2,R2,R4
+   \   00000044   931221E0           MLA      R1,R3,R2,R1
+   \   00000048   000090E5           LDR      R0,[R0, #+0]
+   \   0000004C   011041E2           SUB      R1,R1,#+1
+   \   00000050   061041E0           SUB      R1,R1,R6
+   \   00000054   810080E0           ADD      R0,R0,R1, LSL #+1
+   \   00000058   B080D0E1           LDRH     R8,[R0, #+0]
+   \   0000005C   100097E5           LDR      R0,[R7, #+16]
+   \   00000060   080090E5           LDR      R0,[R0, #+8]
+   \   00000064   30FF2FE1           BLX      R0
+   \   00000068   081097E5           LDR      R1,[R7, #+8]
+   \   0000006C   080020E0           EOR      R0,R0,R8
+   \   00000070   103091E5           LDR      R3,[R1, #+16]
+   \   00000074   14C091E5           LDR      R12,[R1, #+20]
+   \   00000078   013043E2           SUB      R3,R3,#+1
+   \   0000007C   0C2091E5           LDR      R2,[R1, #+12]
+   \   00000080   043043E0           SUB      R3,R3,R4
+   \   00000084   9C2322E0           MLA      R2,R12,R3,R2
+   \   00000088   001091E5           LDR      R1,[R1, #+0]
+   \   0000008C   012042E2           SUB      R2,R2,#+1
+   \   00000090   062042E0           SUB      R2,R2,R6
+   \   00000094   821081E0           ADD      R1,R1,R2, LSL #+1
+    210              }
+   \   00000098   016086E2           ADD      R6,R6,#+1
+   \   0000009C   B000C1E1           STRH     R0,[R1, #+0]
+   \   000000A0   060055E1           CMP      R5,R6
+   \   000000A4   E0FFFFAA           BGE      ??_DrawHLine_2
+   \   000000A8   F081BDE8           POP      {R4-R8,PC}
+    211            } else {
+    212              ColorIndex = LCD__GetColorIndex();
+    213              //
+    214              // Get context
+    215              //
+    216              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+   \                     ??_DrawHLine_0:
+   \   000000AC   081097E5           LDR      R1,[R7, #+8]
+    217              //
+    218              // Mirror x
+    219              //
+    220              temp = x0;
+   \   000000B0   0620A0E1           MOV      R2,R6
+   \   000000B4   0C3091E5           LDR      R3,[R1, #+12]
+   \   000000B8   ........           LDR      R0,??DataTable15_1
+   \   000000BC   013043E2           SUB      R3,R3,#+1
+   \   000000C0   056043E0           SUB      R6,R3,R5
+    221              x0 = (pContext->vxSize - 1 - x1);
+    222              x1 = (pContext->vxSize - 1 - temp);
+   \   000000C4   025043E0           SUB      R5,R3,R2
+    223              //
+    224              // Mirror y
+    225              //
+    226              y = (pContext->vySize - 1 - y);
+    227              //
+    228              // Draw...
+    229              //
+    230              Off = XY2OFF32(pContext->vxSizePhys, x0, y);
+    231              pDest = OFF2PTR32(pContext->VRAMAddr, Off);
+   \   000000C8   102091E5           LDR      R2,[R1, #+16]
+   \   000000CC   143091E5           LDR      R3,[R1, #+20]
+   \   000000D0   012042E2           SUB      R2,R2,#+1
+   \   000000D4   042042E0           SUB      R2,R2,R4
+   \   000000D8   C330A0E1           ASR      R3,R3,#+1
+   \   000000DC   930202E0           MUL      R2,R3,R2
+   \   000000E0   001091E5           LDR      R1,[R1, #+0]
+   \   000000E4   A62082E0           ADD      R2,R2,R6, LSR #+1
+   \   000000E8   000090E5           LDR      R0,[R0, #+0]
+   \   000000EC   021181E0           ADD      R1,R1,R2, LSL #+2
+    232              RemPixels = x1 - x0 + 1;
+   \   000000F0   062045E0           SUB      R2,R5,R6
+   \   000000F4   000090E5           LDR      R0,[R0, #+0]
+   \   000000F8   012082E2           ADD      R2,R2,#+1
+    233              //
+    234              // First DWORD
+    235              //
+    236              if (x0 & 1) {
+   \   000000FC   010016E3           TST      R6,#0x1
+   \   00000100   0500000A           BEQ      ??_DrawHLine_3
+    237                Data = READ_MEM32P(pDest);
+    238                #if (LCD_ENDIAN_BIG == 0)
+    239                  Data &= 0xFFFF;
+    240                  Data |= (((U32)ColorIndex) << 16);
+    241                #else
+    242                  Data &= 0xFFFF0000;
+    243                  Data |= ColorIndex;
+    244                #endif
+    245                WRITE_MEM32P(pDest, Data);
+   \   00000104   B030D1E1           LDRH     R3,[R1, #+0]
+   \   00000108   00C8A0E1           LSL      R12,R0,#+16
+    246                pDest++;
+    247                RemPixels--;
+   \   0000010C   012042E2           SUB      R2,R2,#+1
+   \   00000110   0338A0E1           LSL      R3,R3,#+16
+   \   00000114   23388CE1           ORR      R3,R12,R3, LSR #+16
+   \   00000118   043081E4           STR      R3,[R1], #+4
+    248              }
+    249              //
+    250              // Complete DWORDS
+    251              //
+    252              ColorMask = ColorIndex * 0x00010001;
+   \                     ??_DrawHLine_3:
+   \   0000011C   003880E0           ADD      R3,R0,R0, LSL #+16
+    253              if (RemPixels >= 16) {
+   \   00000120   100052E3           CMP      R2,#+16
+   \   00000124   0B0000BA           BLT      ??_DrawHLine_4
+    254                RemPixels -= 16;
+   \   00000128   102042E2           SUB      R2,R2,#+16
+    255                do {
+    256                  WRITE_MEM32P(pDest,     ColorMask);
+   \                     ??_DrawHLine_5:
+   \   0000012C   043081E4           STR      R3,[R1], #+4
+    257                  WRITE_MEM32P(pDest + 1, ColorMask);
+   \   00000130   043081E4           STR      R3,[R1], #+4
+    258                  WRITE_MEM32P(pDest + 2, ColorMask);
+   \   00000134   043081E4           STR      R3,[R1], #+4
+    259                  WRITE_MEM32P(pDest + 3, ColorMask);
+   \   00000138   043081E4           STR      R3,[R1], #+4
+    260                  WRITE_MEM32P(pDest + 4, ColorMask);
+   \   0000013C   043081E4           STR      R3,[R1], #+4
+    261                  WRITE_MEM32P(pDest + 5, ColorMask);
+   \   00000140   043081E4           STR      R3,[R1], #+4
+    262                  WRITE_MEM32P(pDest + 6, ColorMask);
+   \   00000144   043081E4           STR      R3,[R1], #+4
+    263                  WRITE_MEM32P(pDest + 7, ColorMask);
+   \   00000148   043081E4           STR      R3,[R1], #+4
+    264                  pDest += 8;
+    265                  RemPixels -= 16;
+   \   0000014C   102052E2           SUBS     R2,R2,#+16
+    266                } while (RemPixels >= 0);
+   \   00000150   F5FFFF5A           BPL      ??_DrawHLine_5
+    267                RemPixels += 16;
+   \   00000154   102082E2           ADD      R2,R2,#+16
+    268              }
+    269              if (RemPixels >= 2) {
+   \                     ??_DrawHLine_4:
+   \   00000158   020052E3           CMP      R2,#+2
+   \   0000015C   030000BA           BLT      ??_DrawHLine_6
+    270                do {
+    271                  WRITE_MEM32P(pDest, ColorMask);
+    272                  pDest++;
+    273                  RemPixels -= 2;
+   \                     ??_DrawHLine_7:
+   \   00000160   022042E2           SUB      R2,R2,#+2
+   \   00000164   043081E4           STR      R3,[R1], #+4
+    274                } while (RemPixels >= 2);
+   \   00000168   020052E3           CMP      R2,#+2
+   \   0000016C   FBFFFFAA           BGE      ??_DrawHLine_7
+    275              }
+    276              //
+    277              // Last DWORD
+    278              //
+    279              if (RemPixels > 0) {
+   \                     ??_DrawHLine_6:
+   \   00000170   010052E3           CMP      R2,#+1
+   \   00000174   050000BA           BLT      ??_DrawHLine_1
+    280                Data = READ_MEM32P(pDest);
+    281                #if (LCD_ENDIAN_BIG == 0)
+    282                  Data &= 0xFFFF0000;
+    283                  Data |= ColorIndex & 0xFFFF;
+    284                #else
+    285                  Data &= 0xFFFF;
+    286                  Data |= (((U32)ColorIndex) << 16);
+    287                #endif
+    288                WRITE_MEM32P(pDest, Data);
+   \   00000178   002091E5           LDR      R2,[R1, #+0]
+   \   0000017C   0008A0E1           LSL      R0,R0,#+16
+   \   00000180   2228A0E1           LSR      R2,R2,#+16
+   \   00000184   2008A0E1           LSR      R0,R0,#+16
+   \   00000188   020880E1           ORR      R0,R0,R2, LSL #+16
+   \   0000018C   000081E5           STR      R0,[R1, #+0]
+    289              }
+    290            }
+    291          }
+   \                     ??_DrawHLine_1:
+   \   00000190   F081BDE8           POP      {R4-R8,PC}       ;; return
+    292          
+    293          /*********************************************************************
+    294          *
+    295          *       _DrawVLine
+    296          */
+
+   \                                 In section .text, align 4, keep-with-next
+    297          static void _DrawVLine  (GUI_DEVICE * pDevice, int x, int y0,  int y1) {
+   \                     _DrawVLine:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    298            LCD_PIXELINDEX ColorIndex;
+    299          
+    300            if (GUI_Context.DrawMode & LCD_DRAWMODE_XOR) {
+   \   00000008   ........           LDR      R0,??DataTable15
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   1000D0E5           LDRB     R0,[R0, #+16]
+   \   00000014   0260A0E1           MOV      R6,R2
+   \   00000018   0370A0E1           MOV      R7,R3
+   \   0000001C   010010E3           TST      R0,#0x1
+   \   00000020   2100000A           BEQ      ??_DrawVLine_0
+   \   00000024   060057E1           CMP      R7,R6
+   \   00000028   330000BA           BLT      ??_DrawVLine_1
+    301              for (; y0 <= y1; y0++) {
+    302                _XorPixel(pDevice, x, y0);
+   \                     ??_DrawVLine_2:
+   \   0000002C   080094E5           LDR      R0,[R4, #+8]
+   \   00000030   102090E5           LDR      R2,[R0, #+16]
+   \   00000034   143090E5           LDR      R3,[R0, #+20]
+   \   00000038   012042E2           SUB      R2,R2,#+1
+   \   0000003C   0C1090E5           LDR      R1,[R0, #+12]
+   \   00000040   062042E0           SUB      R2,R2,R6
+   \   00000044   931221E0           MLA      R1,R3,R2,R1
+   \   00000048   000090E5           LDR      R0,[R0, #+0]
+   \   0000004C   011041E2           SUB      R1,R1,#+1
+   \   00000050   051041E0           SUB      R1,R1,R5
+   \   00000054   810080E0           ADD      R0,R0,R1, LSL #+1
+   \   00000058   B080D0E1           LDRH     R8,[R0, #+0]
+   \   0000005C   100094E5           LDR      R0,[R4, #+16]
+   \   00000060   080090E5           LDR      R0,[R0, #+8]
+   \   00000064   30FF2FE1           BLX      R0
+   \   00000068   081094E5           LDR      R1,[R4, #+8]
+   \   0000006C   080020E0           EOR      R0,R0,R8
+   \   00000070   103091E5           LDR      R3,[R1, #+16]
+   \   00000074   14C091E5           LDR      R12,[R1, #+20]
+   \   00000078   013043E2           SUB      R3,R3,#+1
+   \   0000007C   0C2091E5           LDR      R2,[R1, #+12]
+   \   00000080   063043E0           SUB      R3,R3,R6
+   \   00000084   9C2322E0           MLA      R2,R12,R3,R2
+   \   00000088   001091E5           LDR      R1,[R1, #+0]
+   \   0000008C   012042E2           SUB      R2,R2,#+1
+   \   00000090   052042E0           SUB      R2,R2,R5
+   \   00000094   821081E0           ADD      R1,R1,R2, LSL #+1
+    303              }
+   \   00000098   016086E2           ADD      R6,R6,#+1
+   \   0000009C   B000C1E1           STRH     R0,[R1, #+0]
+   \   000000A0   060057E1           CMP      R7,R6
+   \   000000A4   E0FFFFAA           BGE      ??_DrawVLine_2
+   \   000000A8   F081BDE8           POP      {R4-R8,PC}
+    304            } else {
+    305              ColorIndex = LCD__GetColorIndex();
+   \                     ??_DrawVLine_0:
+   \   000000AC   ........           LDR      R0,??DataTable15_1
+   \   000000B0   060057E1           CMP      R7,R6
+   \   000000B4   000090E5           LDR      R0,[R0, #+0]
+   \   000000B8   000090E5           LDR      R0,[R0, #+0]
+   \   000000BC   0E0000BA           BLT      ??_DrawVLine_1
+    306              for (; y0 <= y1; y0++) {
+    307                _SetPixelIndex(pDevice, x, y0, ColorIndex);
+   \                     ??_DrawVLine_3:
+   \   000000C0   081094E5           LDR      R1,[R4, #+8]
+   \   000000C4   103091E5           LDR      R3,[R1, #+16]
+   \   000000C8   14C091E5           LDR      R12,[R1, #+20]
+   \   000000CC   013043E2           SUB      R3,R3,#+1
+   \   000000D0   0C2091E5           LDR      R2,[R1, #+12]
+   \   000000D4   063043E0           SUB      R3,R3,R6
+   \   000000D8   9C2322E0           MLA      R2,R12,R3,R2
+   \   000000DC   001091E5           LDR      R1,[R1, #+0]
+   \   000000E0   012042E2           SUB      R2,R2,#+1
+   \   000000E4   052042E0           SUB      R2,R2,R5
+   \   000000E8   821081E0           ADD      R1,R1,R2, LSL #+1
+    308              }
+   \   000000EC   016086E2           ADD      R6,R6,#+1
+   \   000000F0   B000C1E1           STRH     R0,[R1, #+0]
+   \   000000F4   060057E1           CMP      R7,R6
+   \   000000F8   F0FFFFAA           BGE      ??_DrawVLine_3
+    309            }
+    310          }
+   \                     ??_DrawVLine_1:
+   \   000000FC   F081BDE8           POP      {R4-R8,PC}       ;; return
+    311          
+    312          /*********************************************************************
+    313          *
+    314          *       _FillRect
+    315          */
+
+   \                                 In section .text, align 4, keep-with-next
+    316          static void _FillRect(GUI_DEVICE * pDevice, int x0, int y0, int x1, int y1) {
+   \                     _FillRect:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   0090A0E1           MOV      R9,R0
+    317            DRIVER_CONTEXT * pContext;
+    318            U32 * pDest;
+    319            U32 Off;
+    320            int RemPixels, temp;
+    321            U32 Data, ColorMask;
+    322            LCD_PIXELINDEX ColorIndex;
+    323          
+    324            if (GUI_Context.DrawMode & LCD_DRAWMODE_XOR) {
+   \   00000008   ........           LDR      R0,??DataTable15
+   \   0000000C   04D04DE2           SUB      SP,SP,#+4
+   \   00000010   1000D0E5           LDRB     R0,[R0, #+16]
+   \   00000014   0140A0E1           MOV      R4,R1
+   \   00000018   0250A0E1           MOV      R5,R2
+   \   0000001C   0370A0E1           MOV      R7,R3
+   \   00000020   28609DE5           LDR      R6,[SP, #+40]
+   \   00000024   010010E3           TST      R0,#0x1
+   \   00000028   0A00000A           BEQ      ??_FillRect_0
+   \   0000002C   050056E1           CMP      R6,R5
+   \   00000030   480000BA           BLT      ??_FillRect_1
+    325              for (; y0 <= y1; y0++) {
+    326                _DrawHLine(pDevice, x0, y0, x1);
+   \                     ??_FillRect_2:
+   \   00000034   0730A0E1           MOV      R3,R7
+   \   00000038   0520A0E1           MOV      R2,R5
+   \   0000003C   0410A0E1           MOV      R1,R4
+   \   00000040   0900A0E1           MOV      R0,R9
+   \   00000044   ........           BL       _DrawHLine
+    327              }
+   \   00000048   015085E2           ADD      R5,R5,#+1
+   \   0000004C   050056E1           CMP      R6,R5
+   \   00000050   F7FFFFAA           BGE      ??_FillRect_2
+   \   00000054   3F0000EA           B        ??_FillRect_1
+    328            } else {
+    329              ColorIndex = LCD__GetColorIndex();
+   \                     ??_FillRect_0:
+   \   00000058   ........           LDR      R0,??DataTable15_1
+   \   0000005C   000090E5           LDR      R0,[R0, #+0]
+   \   00000060   008090E5           LDR      R8,[R0, #+0]
+    330              //
+    331              // Get context
+    332              //
+    333              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+   \   00000064   080099E5           LDR      R0,[R9, #+8]
+    334              //
+    335              // Mirror x
+    336              //
+    337              temp = x0;
+    338              x0 = (pContext->vxSize - 1 - x1);
+    339              x1 = (pContext->vxSize - 1 - temp);
+    340              //
+    341              // Mirror y
+    342              //
+    343              temp = y0;
+    344              y0 = (pContext->vySize - 1 - y1);
+    345              y1 = (pContext->vySize - 1 - temp);
+   \   00000068   08C888E0           ADD      R12,R8,R8, LSL #+16
+   \   0000006C   0C2090E5           LDR      R2,[R0, #+12]
+   \   00000070   012042E2           SUB      R2,R2,#+1
+   \   00000074   074042E0           SUB      R4,R2,R7
+   \   00000078   017042E0           SUB      R7,R2,R1
+   \   0000007C   102090E5           LDR      R2,[R0, #+16]
+   \   00000080   0510A0E1           MOV      R1,R5
+   \   00000084   012042E2           SUB      R2,R2,#+1
+   \   00000088   065042E0           SUB      R5,R2,R6
+   \   0000008C   016042E0           SUB      R6,R2,R1
+   \   00000090   FF20A0E3           MOV      R2,#+255
+   \   00000094   041047E0           SUB      R1,R7,R4
+   \   00000098   FF2C82E3           ORR      R2,R2,#0xFF00
+   \   0000009C   01E081E2           ADD      LR,R1,#+1
+   \   000000A0   083002E0           AND      R3,R2,R8
+   \   000000A4   0878A0E1           LSL      R7,R8,#+16
+   \   000000A8   A410A0E1           LSR      R1,R4,#+1
+   \   000000AC   0280E0E1           MVN      R8,R2
+    346              //
+    347              // Draw...
+    348              //
+    349              do {
+    350                Off = XY2OFF32(pContext->vxSizePhys, x0, y0);
+    351                pDest = OFF2PTR32(pContext->VRAMAddr, Off);
+   \                     ??_FillRect_3:
+   \   000000B0   149090E5           LDR      R9,[R0, #+20]
+    352                RemPixels = x1 - x0 + 1;
+   \   000000B4   0EB0A0E1           MOV      R11,LR
+   \   000000B8   C990A0E1           ASR      R9,R9,#+1
+   \   000000BC   99152AE0           MLA      R10,R9,R5,R1
+   \   000000C0   009090E5           LDR      R9,[R0, #+0]
+    353                //
+    354                // First DWORD
+    355                //
+    356                if (x0 & 1) {
+   \   000000C4   010014E3           TST      R4,#0x1
+   \   000000C8   0A9189E0           ADD      R9,R9,R10, LSL #+2
+   \   000000CC   0400000A           BEQ      ??_FillRect_4
+    357                  Data = READ_MEM32P(pDest);
+    358                  #if (LCD_ENDIAN_BIG == 0)
+    359                    Data &= 0xFFFF;
+    360                    Data |= (((U32)ColorIndex) << 16);
+    361                  #else
+    362                    Data &= 0xFFFF0000;
+    363                    Data |= ColorIndex;
+    364                  #endif
+    365                  WRITE_MEM32P(pDest, Data);
+   \   000000D0   00A099E5           LDR      R10,[R9, #+0]
+    366                  pDest++;
+    367                  RemPixels--;
+   \   000000D4   01B04BE2           SUB      R11,R11,#+1
+   \   000000D8   0AA002E0           AND      R10,R2,R10
+   \   000000DC   0AA087E1           ORR      R10,R7,R10
+   \   000000E0   04A089E4           STR      R10,[R9], #+4
+    368                }
+    369                //
+    370                // Complete DWORDS
+    371                //
+    372                ColorMask = ColorIndex * 0x00010001;
+    373                if (RemPixels >= 16) {
+   \                     ??_FillRect_4:
+   \   000000E4   10005BE3           CMP      R11,#+16
+   \   000000E8   0B0000BA           BLT      ??_FillRect_5
+    374                  RemPixels -= 16;
+   \   000000EC   10B04BE2           SUB      R11,R11,#+16
+    375                  do {
+    376                    WRITE_MEM32P(pDest,     ColorMask);
+   \                     ??_FillRect_6:
+   \   000000F0   04C089E4           STR      R12,[R9], #+4
+    377                    WRITE_MEM32P(pDest + 1, ColorMask);
+   \   000000F4   04C089E4           STR      R12,[R9], #+4
+    378                    WRITE_MEM32P(pDest + 2, ColorMask);
+   \   000000F8   04C089E4           STR      R12,[R9], #+4
+    379                    WRITE_MEM32P(pDest + 3, ColorMask);
+   \   000000FC   04C089E4           STR      R12,[R9], #+4
+    380                    WRITE_MEM32P(pDest + 4, ColorMask);
+   \   00000100   04C089E4           STR      R12,[R9], #+4
+    381                    WRITE_MEM32P(pDest + 5, ColorMask);
+   \   00000104   04C089E4           STR      R12,[R9], #+4
+    382                    WRITE_MEM32P(pDest + 6, ColorMask);
+   \   00000108   04C089E4           STR      R12,[R9], #+4
+    383                    WRITE_MEM32P(pDest + 7, ColorMask);
+   \   0000010C   04C089E4           STR      R12,[R9], #+4
+    384                    pDest += 8;
+    385                    RemPixels -= 16;
+   \   00000110   10B05BE2           SUBS     R11,R11,#+16
+    386                  } while (RemPixels >= 0);
+   \   00000114   F5FFFF5A           BPL      ??_FillRect_6
+    387                  RemPixels += 16;
+   \   00000118   10B08BE2           ADD      R11,R11,#+16
+    388                }
+    389                if (RemPixels >= 2) {
+   \                     ??_FillRect_5:
+   \   0000011C   02005BE3           CMP      R11,#+2
+   \   00000120   030000BA           BLT      ??_FillRect_7
+    390                  do {
+    391                    WRITE_MEM32P(pDest, ColorMask);
+    392                    pDest++;
+    393                    RemPixels -= 2;
+   \                     ??_FillRect_8:
+   \   00000124   02B04BE2           SUB      R11,R11,#+2
+   \   00000128   04C089E4           STR      R12,[R9], #+4
+    394                  } while (RemPixels >= 2);
+   \   0000012C   02005BE3           CMP      R11,#+2
+   \   00000130   FBFFFFAA           BGE      ??_FillRect_8
+    395                }
+    396                //
+    397                // Last DWORD
+    398                //
+    399                if (RemPixels > 0) {
+   \                     ??_FillRect_7:
+   \   00000134   01005BE3           CMP      R11,#+1
+   \   00000138   030000BA           BLT      ??_FillRect_9
+    400                  Data = READ_MEM32P(pDest);
+    401                  #if (LCD_ENDIAN_BIG == 0)
+    402                    Data &= 0xFFFF0000;
+    403                    Data |= ColorIndex & 0xFFFF;
+    404                  #else
+    405                    Data &= 0xFFFF;
+    406                    Data |= (((U32)ColorIndex) << 16);
+    407                  #endif
+    408                  WRITE_MEM32P(pDest, Data);
+   \   0000013C   00A099E5           LDR      R10,[R9, #+0]
+   \   00000140   0AA008E0           AND      R10,R8,R10
+   \   00000144   0AA083E1           ORR      R10,R3,R10
+   \   00000148   00A089E5           STR      R10,[R9, #+0]
+    409                }
+    410              } while (++y0 <= y1);
+   \                     ??_FillRect_9:
+   \   0000014C   015085E2           ADD      R5,R5,#+1
+   \   00000150   050056E1           CMP      R6,R5
+   \   00000154   D5FFFFAA           BGE      ??_FillRect_3
+    411            }
+    412          }
+   \                     ??_FillRect_1:
+   \   00000158   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   0000015C   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    413          
+    414          /*********************************************************************
+    415          *
+    416          *       Draw Bitmap 1 BPP
+    417          */
+
+   \                                 In section .text, align 4, keep-with-next
+    418          static void _DrawBitLine1BPP(GUI_DEVICE * pDevice, unsigned x, unsigned y, U8 const GUI_UNI_PTR * p, int Diff, int xsize, const LCD_PIXELINDEX * pTrans) {
+   \                     _DrawBitLine1BPP:
+   \   00000000   F0472DE9           PUSH     {R4-R10,LR}
+    419            DRIVER_CONTEXT * pContext;
+    420            unsigned Pixels, PixelCnt;
+    421            LCD_PIXELINDEX Index, Index0, Index1, IndexMask;
+    422            U32 Off;
+    423          
+    424            Index0   = *(pTrans + 0);
+    425            Index1   = *(pTrans + 1);
+    426            //
+    427            // Get context
+    428            //
+    429            pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+   \   00000004   086090E5           LDR      R6,[R0, #+8]
+   \   00000008   20C09DE5           LDR      R12,[SP, #+32]
+    430            x       += Diff;
+    431            //
+    432            // Mirror x
+    433            //
+    434            x = (pContext->vxSize - 1 - (x));
+    435            //
+    436            // Mirror y
+    437            //
+    438            y = (pContext->vySize - 1 - y);
+    439            Off      = XY2OFF16(pContext->vxSizePhys, x, y);
+   \   0000000C   107096E5           LDR      R7,[R6, #+16]
+   \   00000010   0C8096E5           LDR      R8,[R6, #+12]
+   \   00000014   017047E2           SUB      R7,R7,#+1
+   \   00000018   022047E0           SUB      R2,R7,R2
+   \   0000001C   147096E5           LDR      R7,[R6, #+20]
+   \   00000020   018048E2           SUB      R8,R8,#+1
+   \   00000024   978222E0           MLA      R2,R7,R2,R8
+   \   00000028   0340A0E1           MOV      R4,R3
+   \   0000002C   011042E0           SUB      R1,R2,R1
+   \   00000030   0C7041E0           SUB      R7,R1,R12
+    440            PixelCnt = 8 - Diff;
+    441            Pixels   = LCD_aMirror[*p] >> Diff;
+   \   00000034   0010D4E5           LDRB     R1,[R4, #+0]
+   \   00000038   ........           LDR      R9,??DataTable16
+   \   0000003C   28E09DE5           LDR      LR,[SP, #+40]
+   \   00000040   0910D1E7           LDRB     R1,[R1, +R9]
+   \   00000044   00309EE5           LDR      R3,[LR, #+0]
+   \   00000048   24509DE5           LDR      R5,[SP, #+36]
+   \   0000004C   51ACA0E1           ASR      R10,R1,R12
+    442            switch (GUI_Context.DrawMode & (LCD_DRAWMODE_TRANS | LCD_DRAWMODE_XOR)) {
+   \   00000050   ........           LDR      R1,??DataTable15
+   \   00000054   04E09EE5           LDR      LR,[LR, #+4]
+   \   00000058   1010D1E5           LDRB     R1,[R1, #+16]
+   \   0000005C   08806CE2           RSB      R8,R12,#+8
+   \   00000060   031001E2           AND      R1,R1,#0x3
+   \   00000064   030051E3           CMP      R1,#+3
+   \   00000068   01F18F90           ADDLS    PC,PC,R1, LSL #+2
+   \                     ??_DrawBitLine1BPP_0:
+   \   0000006C   3400008A           BHI      ??_DrawBitLine1BPP_1
+   \   00000070   020000EA           B        ??_DrawBitLine1BPP_2
+   \   00000074   1F0000EA           B        ??_DrawBitLine1BPP_3
+   \   00000078   100000EA           B        ??_DrawBitLine1BPP_4
+   \   0000007C   1D0000EA           B        ??_DrawBitLine1BPP_3
+    443            case 0:
+    444              do {
+    445                Index = (Pixels & 1) ? Index1 : Index0;
+    446                WRITE_MEM16(pContext->VRAMAddr, Off, Index);
+   \                     ??_DrawBitLine1BPP_2:
+   \   00000080   001096E5           LDR      R1,[R6, #+0]
+   \   00000084   01001AE3           TST      R10,#0x1
+   \   00000088   0E00A011           MOVNE    R0,LR
+   \   0000008C   0300A001           MOVEQ    R0,R3
+   \   00000090   871081E0           ADD      R1,R1,R7, LSL #+1
+    447                Off--;
+    448                PixelCnt--;
+   \   00000094   018048E2           SUB      R8,R8,#+1
+   \   00000098   B000C1E1           STRH     R0,[R1, #+0]
+    449                Pixels >>= 1;
+    450                if (PixelCnt == 0) {
+   \   0000009C   000058E3           CMP      R8,#+0
+    451                  Pixels   = LCD_aMirror[*(++p)];
+   \   000000A0   0100F405           LDRBEQ   R0,[R4, #+1]!
+   \   000000A4   AAA0A0E1           LSR      R10,R10,#+1
+    452                  PixelCnt = 8;
+   \   000000A8   0880A003           MOVEQ    R8,#+8
+   \   000000AC   09A0D007           LDRBEQ   R10,[R0, +R9]
+   \   000000B0   017047E2           SUB      R7,R7,#+1
+    453                }
+    454              } while (--xsize);
+   \   000000B4   015055E2           SUBS     R5,R5,#+1
+   \   000000B8   F0FFFF1A           BNE      ??_DrawBitLine1BPP_2
+   \   000000BC   F087BDE8           POP      {R4-R10,PC}
+    455              break;
+    456            case LCD_DRAWMODE_TRANS:
+    457              do {
+    458                if (Pixels & 1) {
+   \                     ??_DrawBitLine1BPP_4:
+   \   000000C0   01001AE3           TST      R10,#0x1
+    459                  WRITE_MEM16(pContext->VRAMAddr, Off, Index1);
+   \   000000C4   00009615           LDRNE    R0,[R6, #+0]
+    460                }
+    461                Off--;
+    462                PixelCnt--;
+   \   000000C8   018048E2           SUB      R8,R8,#+1
+   \   000000CC   87008010           ADDNE    R0,R0,R7, LSL #+1
+   \   000000D0   B0E0C011           STRHNE   LR,[R0, #+0]
+    463                Pixels >>= 1;
+    464                if (PixelCnt == 0) {
+   \   000000D4   000058E3           CMP      R8,#+0
+    465                  Pixels   = LCD_aMirror[*(++p)];
+   \   000000D8   0100F405           LDRBEQ   R0,[R4, #+1]!
+   \   000000DC   AAA0A0E1           LSR      R10,R10,#+1
+    466                  PixelCnt = 8;
+   \   000000E0   0880A003           MOVEQ    R8,#+8
+   \   000000E4   09A0D007           LDRBEQ   R10,[R0, +R9]
+   \   000000E8   017047E2           SUB      R7,R7,#+1
+    467                }
+    468              } while (--xsize);
+   \   000000EC   015055E2           SUBS     R5,R5,#+1
+   \   000000F0   F2FFFF1A           BNE      ??_DrawBitLine1BPP_4
+   \   000000F4   F087BDE8           POP      {R4-R10,PC}
+    469              break;
+    470            case LCD_DRAWMODE_XOR | LCD_DRAWMODE_TRANS:
+    471            case LCD_DRAWMODE_XOR:
+    472              IndexMask = pDevice->pColorConvAPI->pfGetIndexMask();
+   \                     ??_DrawBitLine1BPP_3:
+   \   000000F8   100090E5           LDR      R0,[R0, #+16]
+   \   000000FC   080090E5           LDR      R0,[R0, #+8]
+   \   00000100   30FF2FE1           BLX      R0
+   \   00000104   001096E5           LDR      R1,[R6, #+0]
+   \   00000108   871081E0           ADD      R1,R1,R7, LSL #+1
+    473              do {
+    474                if (Pixels & 1) {
+   \                     ??_DrawBitLine1BPP_5:
+   \   0000010C   01001AE3           TST      R10,#0x1
+    475                  Index = READ_MEM16(pContext->VRAMAddr, Off);
+    476                  Index ^= IndexMask;
+    477                  WRITE_MEM16(pContext->VRAMAddr, Off, Index);
+   \   00000110   B020D111           LDRHNE   R2,[R1, #+0]
+    478                }
+    479                Off--;
+    480                PixelCnt--;
+   \   00000114   018048E2           SUB      R8,R8,#+1
+    481                Pixels >>= 1;
+   \   00000118   AAA0A0E1           LSR      R10,R10,#+1
+   \   0000011C   02202010           EORNE    R2,R0,R2
+   \   00000120   B020C111           STRHNE   R2,[R1, #+0]
+    482                if (PixelCnt == 0) {
+   \   00000124   000058E3           CMP      R8,#+0
+    483                  Pixels   = LCD_aMirror[*(++p)];
+   \   00000128   0120F405           LDRBEQ   R2,[R4, #+1]!
+    484                  PixelCnt = 8;
+   \   0000012C   0880A003           MOVEQ    R8,#+8
+    485                }
+    486              } while (--xsize);
+   \   00000130   015045E2           SUB      R5,R5,#+1
+   \   00000134   09A0D207           LDRBEQ   R10,[R2, +R9]
+   \   00000138   021041E2           SUB      R1,R1,#+2
+   \   0000013C   000055E3           CMP      R5,#+0
+   \   00000140   F1FFFF1A           BNE      ??_DrawBitLine1BPP_5
+    487              break;
+    488            }
+    489          }
+   \                     ??_DrawBitLine1BPP_1:
+   \   00000144   F087BDE8           POP      {R4-R10,PC}      ;; return
+    490          
+    491          /*********************************************************************
+    492          *
+    493          *       Draw Bitmap 2 BPP, not optimized
+    494          */
+
+   \                                 In section .text, align 4, keep-with-next
+    495          static void  _DrawBitLine2BPP(GUI_DEVICE * pDevice, int x, int y, U8 const GUI_UNI_PTR * p, int Diff, int xsize, const LCD_PIXELINDEX * pTrans) {
+   \                     _DrawBitLine2BPP:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+    496            LCD_PIXELINDEX Pixels, PixelIndex;
+    497            int CurrentPixel, Shift, Index;
+    498            Pixels       = *p;
+    499            CurrentPixel = Diff;
+    500            x           += Diff;
+    501            switch (GUI_Context.DrawMode & (LCD_DRAWMODE_TRANS | LCD_DRAWMODE_XOR)) {
+   \   00000004   ........           LDR      R6,??DataTable15
+   \   00000008   24C09DE5           LDR      R12,[SP, #+36]
+   \   0000000C   1060D6E5           LDRB     R6,[R6, #+16]
+   \   00000010   28E09DE5           LDR      LR,[SP, #+40]
+   \   00000014   2C409DE5           LDR      R4,[SP, #+44]
+   \   00000018   0050D3E5           LDRB     R5,[R3, #+0]
+   \   0000001C   01108CE0           ADD      R1,R12,R1
+   \   00000020   036016E2           ANDS     R6,R6,#0x3
+   \   00000024   0200000A           BEQ      ??_DrawBitLine2BPP_0
+   \   00000028   026056E2           SUBS     R6,R6,#+2
+   \   0000002C   3800000A           BEQ      ??_DrawBitLine2BPP_1
+   \   00000030   F08FBDE8           POP      {R4-R11,PC}
+    502            case 0:
+    503              if (pTrans) {
+   \                     ??_DrawBitLine2BPP_0:
+   \   00000034   C060A0E3           MOV      R6,#+192
+   \   00000038   000054E3           CMP      R4,#+0
+   \   0000003C   1A00000A           BEQ      ??_DrawBitLine2BPP_2
+    504                do {
+    505                  Shift = (3 - CurrentPixel) << 1;
+    506                  Index = (Pixels & (0xC0 >> (6 - Shift))) >> Shift;
+    507                  PixelIndex = *(pTrans + Index);
+    508                  _SetPixelIndex(pDevice, x++, y, PixelIndex);
+   \                     ??_DrawBitLine2BPP_3:
+   \   00000040   088090E5           LDR      R8,[R0, #+8]
+   \   00000044   03706CE2           RSB      R7,R12,#+3
+   \   00000048   10A098E5           LDR      R10,[R8, #+16]
+   \   0000004C   0C9098E5           LDR      R9,[R8, #+12]
+   \   00000050   01A04AE2           SUB      R10,R10,#+1
+   \   00000054   02B04AE0           SUB      R11,R10,R2
+   \   00000058   14A098E5           LDR      R10,[R8, #+20]
+   \   0000005C   008098E5           LDR      R8,[R8, #+0]
+   \   00000060   9A9B29E0           MLA      R9,R10,R11,R9
+   \   00000064   8770A0E1           LSL      R7,R7,#+1
+   \   00000068   019049E2           SUB      R9,R9,#+1
+   \   0000006C   019049E0           SUB      R9,R9,R1
+   \   00000070   898088E0           ADD      R8,R8,R9, LSL #+1
+   \   00000074   0790A0E1           MOV      R9,R7
+   \   00000078   069069E2           RSB      R9,R9,#+6
+   \   0000007C   569905E0           AND      R9,R5,R6, ASR R9
+   \   00000080   3977A0E1           LSR      R7,R9,R7
+   \   00000084   077194E7           LDR      R7,[R4, +R7, LSL #+2]
+    509                  if (++CurrentPixel == 4) {
+   \   00000088   01C08CE2           ADD      R12,R12,#+1
+   \   0000008C   B070C8E1           STRH     R7,[R8, #+0]
+   \   00000090   04005CE3           CMP      R12,#+4
+    510                    CurrentPixel = 0;
+   \   00000094   00C0A003           MOVEQ    R12,#+0
+    511                    Pixels = *(++p);
+   \   00000098   0150F305           LDRBEQ   R5,[R3, #+1]!
+   \   0000009C   011081E2           ADD      R1,R1,#+1
+    512                  }
+    513          		  } while (--xsize);
+   \   000000A0   01E05EE2           SUBS     LR,LR,#+1
+   \   000000A4   E5FFFF1A           BNE      ??_DrawBitLine2BPP_3
+   \   000000A8   F08FBDE8           POP      {R4-R11,PC}
+    514              } else {
+    515                do {
+    516                  Shift = (3 - CurrentPixel) << 1;
+   \                     ??_DrawBitLine2BPP_2:
+   \   000000AC   03406CE2           RSB      R4,R12,#+3
+   \   000000B0   8470A0E1           LSL      R7,R4,#+1
+    517                  Index = (Pixels & (0xC0 >> (6 - Shift))) >> Shift;
+    518                  _SetPixelIndex(pDevice, x++, y, Index);
+   \   000000B4   084090E5           LDR      R4,[R0, #+8]
+    519                  if (++CurrentPixel == 4) {
+   \   000000B8   01C08CE2           ADD      R12,R12,#+1
+   \   000000BC   109094E5           LDR      R9,[R4, #+16]
+   \   000000C0   14A094E5           LDR      R10,[R4, #+20]
+   \   000000C4   019049E2           SUB      R9,R9,#+1
+   \   000000C8   0C8094E5           LDR      R8,[R4, #+12]
+   \   000000CC   029049E0           SUB      R9,R9,R2
+   \   000000D0   9A8928E0           MLA      R8,R10,R9,R8
+   \   000000D4   004094E5           LDR      R4,[R4, #+0]
+   \   000000D8   018048E2           SUB      R8,R8,#+1
+   \   000000DC   018048E0           SUB      R8,R8,R1
+   \   000000E0   884084E0           ADD      R4,R4,R8, LSL #+1
+   \   000000E4   0780A0E1           MOV      R8,R7
+   \   000000E8   068068E2           RSB      R8,R8,#+6
+   \   000000EC   568805E0           AND      R8,R5,R6, ASR R8
+   \   000000F0   3877A0E1           LSR      R7,R8,R7
+   \   000000F4   B070C4E1           STRH     R7,[R4, #+0]
+   \   000000F8   04005CE3           CMP      R12,#+4
+    520                    CurrentPixel = 0;
+   \   000000FC   00C0A003           MOVEQ    R12,#+0
+    521                    Pixels = *(++p);
+   \   00000100   0150F305           LDRBEQ   R5,[R3, #+1]!
+   \   00000104   011081E2           ADD      R1,R1,#+1
+    522                  }
+    523          		  } while (--xsize);
+   \   00000108   01E05EE2           SUBS     LR,LR,#+1
+   \   0000010C   E6FFFF1A           BNE      ??_DrawBitLine2BPP_2
+   \   00000110   F08FBDE8           POP      {R4-R11,PC}
+    524              }
+    525              break;
+    526            case LCD_DRAWMODE_TRANS:
+    527              if (pTrans) {
+   \                     ??_DrawBitLine2BPP_1:
+   \   00000114   C060A0E3           MOV      R6,#+192
+   \   00000118   000054E3           CMP      R4,#+0
+   \   0000011C   1B00000A           BEQ      ??_DrawBitLine2BPP_4
+    528                do {
+    529                  Shift = (3 - CurrentPixel) << 1;
+   \                     ??_DrawBitLine2BPP_5:
+   \   00000120   03706CE2           RSB      R7,R12,#+3
+   \   00000124   8770A0E1           LSL      R7,R7,#+1
+    530                  Index = (Pixels & (0xC0 >> (6 - Shift))) >> Shift;
+   \   00000128   0780A0E1           MOV      R8,R7
+   \   0000012C   068068E2           RSB      R8,R8,#+6
+   \   00000130   568805E0           AND      R8,R5,R6, ASR R8
+   \   00000134   3877B0E1           LSRS     R7,R8,R7
+    531                  if (Index) {
+   \   00000138   0C00000A           BEQ      ??_DrawBitLine2BPP_6
+    532                    PixelIndex = *(pTrans + Index);
+    533                    _SetPixelIndex(pDevice, x, y, PixelIndex);
+   \   0000013C   088090E5           LDR      R8,[R0, #+8]
+   \   00000140   077194E7           LDR      R7,[R4, +R7, LSL #+2]
+   \   00000144   10A098E5           LDR      R10,[R8, #+16]
+   \   00000148   0C9098E5           LDR      R9,[R8, #+12]
+   \   0000014C   01A04AE2           SUB      R10,R10,#+1
+   \   00000150   02B04AE0           SUB      R11,R10,R2
+   \   00000154   14A098E5           LDR      R10,[R8, #+20]
+   \   00000158   008098E5           LDR      R8,[R8, #+0]
+   \   0000015C   9A9B29E0           MLA      R9,R10,R11,R9
+   \   00000160   019049E2           SUB      R9,R9,#+1
+   \   00000164   019049E0           SUB      R9,R9,R1
+   \   00000168   898088E0           ADD      R8,R8,R9, LSL #+1
+   \   0000016C   B070C8E1           STRH     R7,[R8, #+0]
+    534                  }
+    535                  x++;
+    536                  if (++CurrentPixel == 4) {
+   \                     ??_DrawBitLine2BPP_6:
+   \   00000170   01C08CE2           ADD      R12,R12,#+1
+   \   00000174   04005CE3           CMP      R12,#+4
+    537                    CurrentPixel = 0;
+   \   00000178   00C0A003           MOVEQ    R12,#+0
+    538                    Pixels = *(++p);
+   \   0000017C   0150F305           LDRBEQ   R5,[R3, #+1]!
+   \   00000180   011081E2           ADD      R1,R1,#+1
+    539                  }
+    540          		  } while (--xsize);
+   \   00000184   01E05EE2           SUBS     LR,LR,#+1
+   \   00000188   E4FFFF1A           BNE      ??_DrawBitLine2BPP_5
+   \   0000018C   F08FBDE8           POP      {R4-R11,PC}
+    541              } else {
+    542                do {
+    543                  Shift = (3 - CurrentPixel) << 1;
+   \                     ??_DrawBitLine2BPP_4:
+   \   00000190   03406CE2           RSB      R4,R12,#+3
+   \   00000194   8470A0E1           LSL      R7,R4,#+1
+    544                  Index = (Pixels & (0xC0 >> (6 - Shift))) >> Shift;
+   \   00000198   0740A0E1           MOV      R4,R7
+   \   0000019C   064064E2           RSB      R4,R4,#+6
+   \   000001A0   564405E0           AND      R4,R5,R6, ASR R4
+   \   000001A4   3477B0E1           LSRS     R7,R4,R7
+    545                  if (Index) {
+   \   000001A8   0B00000A           BEQ      ??_DrawBitLine2BPP_7
+    546                    _SetPixelIndex(pDevice, x, y, Index);
+   \   000001AC   084090E5           LDR      R4,[R0, #+8]
+   \   000001B0   109094E5           LDR      R9,[R4, #+16]
+   \   000001B4   14A094E5           LDR      R10,[R4, #+20]
+   \   000001B8   019049E2           SUB      R9,R9,#+1
+   \   000001BC   0C8094E5           LDR      R8,[R4, #+12]
+   \   000001C0   029049E0           SUB      R9,R9,R2
+   \   000001C4   9A8928E0           MLA      R8,R10,R9,R8
+   \   000001C8   004094E5           LDR      R4,[R4, #+0]
+   \   000001CC   018048E2           SUB      R8,R8,#+1
+   \   000001D0   018048E0           SUB      R8,R8,R1
+   \   000001D4   884084E0           ADD      R4,R4,R8, LSL #+1
+   \   000001D8   B070C4E1           STRH     R7,[R4, #+0]
+    547                  }
+    548                  x++;
+    549                  if (++CurrentPixel == 4) {
+   \                     ??_DrawBitLine2BPP_7:
+   \   000001DC   01C08CE2           ADD      R12,R12,#+1
+   \   000001E0   04005CE3           CMP      R12,#+4
+    550                    CurrentPixel = 0;
+   \   000001E4   00C0A003           MOVEQ    R12,#+0
+    551                    Pixels = *(++p);
+   \   000001E8   0150F305           LDRBEQ   R5,[R3, #+1]!
+   \   000001EC   011081E2           ADD      R1,R1,#+1
+    552                  }
+    553          		  } while (--xsize);
+   \   000001F0   01E05EE2           SUBS     LR,LR,#+1
+   \   000001F4   E5FFFF1A           BNE      ??_DrawBitLine2BPP_4
+    554              }
+    555              break;
+    556            }
+    557          }
+   \   000001F8   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    558          
+    559          /*********************************************************************
+    560          *
+    561          *       Draw Bitmap 4 BPP, not optimized
+    562          */
+
+   \                                 In section .text, align 4, keep-with-next
+    563          static void  _DrawBitLine4BPP(GUI_DEVICE * pDevice, int x, int y, U8 const GUI_UNI_PTR * p, int Diff, int xsize, const LCD_PIXELINDEX * pTrans) {
+   \                     _DrawBitLine4BPP:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+    564            LCD_PIXELINDEX Pixels, PixelIndex;
+    565            int CurrentPixel, Shift, Index;
+    566            Pixels       = *p;
+    567            CurrentPixel = Diff;
+    568            x           += Diff;
+    569            switch (GUI_Context.DrawMode & (LCD_DRAWMODE_TRANS | LCD_DRAWMODE_XOR)) {
+   \   00000004   ........           LDR      R6,??DataTable15
+   \   00000008   24C09DE5           LDR      R12,[SP, #+36]
+   \   0000000C   1060D6E5           LDRB     R6,[R6, #+16]
+   \   00000010   28E09DE5           LDR      LR,[SP, #+40]
+   \   00000014   2C409DE5           LDR      R4,[SP, #+44]
+   \   00000018   0050D3E5           LDRB     R5,[R3, #+0]
+   \   0000001C   01108CE0           ADD      R1,R12,R1
+   \   00000020   036016E2           ANDS     R6,R6,#0x3
+   \   00000024   0200000A           BEQ      ??_DrawBitLine4BPP_0
+   \   00000028   026056E2           SUBS     R6,R6,#+2
+   \   0000002C   3800000A           BEQ      ??_DrawBitLine4BPP_1
+   \   00000030   F08FBDE8           POP      {R4-R11,PC}
+    570            case 0:
+    571              if (pTrans) {
+   \                     ??_DrawBitLine4BPP_0:
+   \   00000034   F060A0E3           MOV      R6,#+240
+   \   00000038   000054E3           CMP      R4,#+0
+   \   0000003C   1A00000A           BEQ      ??_DrawBitLine4BPP_2
+    572                do {
+    573                  Shift = (1 - CurrentPixel) << 2;
+    574                  Index = (Pixels & (0xF0 >> (4 - Shift))) >> Shift;
+    575                  PixelIndex = *(pTrans + Index);
+    576                  _SetPixelIndex(pDevice, x++, y, PixelIndex);
+   \                     ??_DrawBitLine4BPP_3:
+   \   00000040   088090E5           LDR      R8,[R0, #+8]
+   \   00000044   01706CE2           RSB      R7,R12,#+1
+   \   00000048   10A098E5           LDR      R10,[R8, #+16]
+   \   0000004C   0C9098E5           LDR      R9,[R8, #+12]
+   \   00000050   01A04AE2           SUB      R10,R10,#+1
+   \   00000054   02B04AE0           SUB      R11,R10,R2
+   \   00000058   14A098E5           LDR      R10,[R8, #+20]
+   \   0000005C   008098E5           LDR      R8,[R8, #+0]
+   \   00000060   9A9B29E0           MLA      R9,R10,R11,R9
+   \   00000064   0771A0E1           LSL      R7,R7,#+2
+   \   00000068   019049E2           SUB      R9,R9,#+1
+   \   0000006C   019049E0           SUB      R9,R9,R1
+   \   00000070   898088E0           ADD      R8,R8,R9, LSL #+1
+   \   00000074   0790A0E1           MOV      R9,R7
+   \   00000078   049069E2           RSB      R9,R9,#+4
+   \   0000007C   569905E0           AND      R9,R5,R6, ASR R9
+   \   00000080   3977A0E1           LSR      R7,R9,R7
+   \   00000084   077194E7           LDR      R7,[R4, +R7, LSL #+2]
+    577                  if (++CurrentPixel == 2) {
+   \   00000088   01C08CE2           ADD      R12,R12,#+1
+   \   0000008C   B070C8E1           STRH     R7,[R8, #+0]
+   \   00000090   02005CE3           CMP      R12,#+2
+    578                    CurrentPixel = 0;
+   \   00000094   00C0A003           MOVEQ    R12,#+0
+    579                    Pixels = *(++p);
+   \   00000098   0150F305           LDRBEQ   R5,[R3, #+1]!
+   \   0000009C   011081E2           ADD      R1,R1,#+1
+    580                  }
+    581          		  } while (--xsize);
+   \   000000A0   01E05EE2           SUBS     LR,LR,#+1
+   \   000000A4   E5FFFF1A           BNE      ??_DrawBitLine4BPP_3
+   \   000000A8   F08FBDE8           POP      {R4-R11,PC}
+    582              } else {
+    583                do {
+    584                  Shift = (1 - CurrentPixel) << 2;
+   \                     ??_DrawBitLine4BPP_2:
+   \   000000AC   01406CE2           RSB      R4,R12,#+1
+   \   000000B0   0471A0E1           LSL      R7,R4,#+2
+    585                  Index = (Pixels & (0xF0 >> (4 - Shift))) >> Shift;
+    586                  _SetPixelIndex(pDevice, x++, y, Index);
+   \   000000B4   084090E5           LDR      R4,[R0, #+8]
+    587                  if (++CurrentPixel == 2) {
+   \   000000B8   01C08CE2           ADD      R12,R12,#+1
+   \   000000BC   109094E5           LDR      R9,[R4, #+16]
+   \   000000C0   14A094E5           LDR      R10,[R4, #+20]
+   \   000000C4   019049E2           SUB      R9,R9,#+1
+   \   000000C8   0C8094E5           LDR      R8,[R4, #+12]
+   \   000000CC   029049E0           SUB      R9,R9,R2
+   \   000000D0   9A8928E0           MLA      R8,R10,R9,R8
+   \   000000D4   004094E5           LDR      R4,[R4, #+0]
+   \   000000D8   018048E2           SUB      R8,R8,#+1
+   \   000000DC   018048E0           SUB      R8,R8,R1
+   \   000000E0   884084E0           ADD      R4,R4,R8, LSL #+1
+   \   000000E4   0780A0E1           MOV      R8,R7
+   \   000000E8   048068E2           RSB      R8,R8,#+4
+   \   000000EC   568805E0           AND      R8,R5,R6, ASR R8
+   \   000000F0   3877A0E1           LSR      R7,R8,R7
+   \   000000F4   B070C4E1           STRH     R7,[R4, #+0]
+   \   000000F8   02005CE3           CMP      R12,#+2
+    588                    CurrentPixel = 0;
+   \   000000FC   00C0A003           MOVEQ    R12,#+0
+    589                    Pixels = *(++p);
+   \   00000100   0150F305           LDRBEQ   R5,[R3, #+1]!
+   \   00000104   011081E2           ADD      R1,R1,#+1
+    590                  }
+    591          		  } while (--xsize);
+   \   00000108   01E05EE2           SUBS     LR,LR,#+1
+   \   0000010C   E6FFFF1A           BNE      ??_DrawBitLine4BPP_2
+   \   00000110   F08FBDE8           POP      {R4-R11,PC}
+    592              }
+    593              break;
+    594            case LCD_DRAWMODE_TRANS:
+    595              if (pTrans) {
+   \                     ??_DrawBitLine4BPP_1:
+   \   00000114   F060A0E3           MOV      R6,#+240
+   \   00000118   000054E3           CMP      R4,#+0
+   \   0000011C   1B00000A           BEQ      ??_DrawBitLine4BPP_4
+    596                do {
+    597                  Shift = (1 - CurrentPixel) << 2;
+   \                     ??_DrawBitLine4BPP_5:
+   \   00000120   01706CE2           RSB      R7,R12,#+1
+   \   00000124   0771A0E1           LSL      R7,R7,#+2
+    598                  Index = (Pixels & (0xF0 >> (4 - Shift))) >> Shift;
+   \   00000128   0780A0E1           MOV      R8,R7
+   \   0000012C   048068E2           RSB      R8,R8,#+4
+   \   00000130   568805E0           AND      R8,R5,R6, ASR R8
+   \   00000134   3877B0E1           LSRS     R7,R8,R7
+    599                  if (Index) {
+   \   00000138   0C00000A           BEQ      ??_DrawBitLine4BPP_6
+    600                    PixelIndex = *(pTrans + Index);
+    601                    _SetPixelIndex(pDevice, x, y, PixelIndex);
+   \   0000013C   088090E5           LDR      R8,[R0, #+8]
+   \   00000140   077194E7           LDR      R7,[R4, +R7, LSL #+2]
+   \   00000144   10A098E5           LDR      R10,[R8, #+16]
+   \   00000148   0C9098E5           LDR      R9,[R8, #+12]
+   \   0000014C   01A04AE2           SUB      R10,R10,#+1
+   \   00000150   02B04AE0           SUB      R11,R10,R2
+   \   00000154   14A098E5           LDR      R10,[R8, #+20]
+   \   00000158   008098E5           LDR      R8,[R8, #+0]
+   \   0000015C   9A9B29E0           MLA      R9,R10,R11,R9
+   \   00000160   019049E2           SUB      R9,R9,#+1
+   \   00000164   019049E0           SUB      R9,R9,R1
+   \   00000168   898088E0           ADD      R8,R8,R9, LSL #+1
+   \   0000016C   B070C8E1           STRH     R7,[R8, #+0]
+    602                  }
+    603                  x++;
+    604                  if (++CurrentPixel == 2) {
+   \                     ??_DrawBitLine4BPP_6:
+   \   00000170   01C08CE2           ADD      R12,R12,#+1
+   \   00000174   02005CE3           CMP      R12,#+2
+    605                    CurrentPixel = 0;
+   \   00000178   00C0A003           MOVEQ    R12,#+0
+    606                    Pixels = *(++p);
+   \   0000017C   0150F305           LDRBEQ   R5,[R3, #+1]!
+   \   00000180   011081E2           ADD      R1,R1,#+1
+    607                  }
+    608          		  } while (--xsize);
+   \   00000184   01E05EE2           SUBS     LR,LR,#+1
+   \   00000188   E4FFFF1A           BNE      ??_DrawBitLine4BPP_5
+   \   0000018C   F08FBDE8           POP      {R4-R11,PC}
+    609              } else {
+    610                do {
+    611                  Shift = (1 - CurrentPixel) << 2;
+   \                     ??_DrawBitLine4BPP_4:
+   \   00000190   01406CE2           RSB      R4,R12,#+1
+   \   00000194   0471A0E1           LSL      R7,R4,#+2
+    612                  Index = (Pixels & (0xF0 >> (4 - Shift))) >> Shift;
+   \   00000198   0740A0E1           MOV      R4,R7
+   \   0000019C   044064E2           RSB      R4,R4,#+4
+   \   000001A0   564405E0           AND      R4,R5,R6, ASR R4
+   \   000001A4   3477B0E1           LSRS     R7,R4,R7
+    613                  if (Index) {
+   \   000001A8   0B00000A           BEQ      ??_DrawBitLine4BPP_7
+    614                    _SetPixelIndex(pDevice, x, y, Index);
+   \   000001AC   084090E5           LDR      R4,[R0, #+8]
+   \   000001B0   109094E5           LDR      R9,[R4, #+16]
+   \   000001B4   14A094E5           LDR      R10,[R4, #+20]
+   \   000001B8   019049E2           SUB      R9,R9,#+1
+   \   000001BC   0C8094E5           LDR      R8,[R4, #+12]
+   \   000001C0   029049E0           SUB      R9,R9,R2
+   \   000001C4   9A8928E0           MLA      R8,R10,R9,R8
+   \   000001C8   004094E5           LDR      R4,[R4, #+0]
+   \   000001CC   018048E2           SUB      R8,R8,#+1
+   \   000001D0   018048E0           SUB      R8,R8,R1
+   \   000001D4   884084E0           ADD      R4,R4,R8, LSL #+1
+   \   000001D8   B070C4E1           STRH     R7,[R4, #+0]
+    615                  }
+    616                  x++;
+    617                  if (++CurrentPixel == 2) {
+   \                     ??_DrawBitLine4BPP_7:
+   \   000001DC   01C08CE2           ADD      R12,R12,#+1
+   \   000001E0   02005CE3           CMP      R12,#+2
+    618                    CurrentPixel = 0;
+   \   000001E4   00C0A003           MOVEQ    R12,#+0
+    619                    Pixels = *(++p);
+   \   000001E8   0150F305           LDRBEQ   R5,[R3, #+1]!
+   \   000001EC   011081E2           ADD      R1,R1,#+1
+    620                  }
+    621          		  } while (--xsize);
+   \   000001F0   01E05EE2           SUBS     LR,LR,#+1
+   \   000001F4   E5FFFF1A           BNE      ??_DrawBitLine4BPP_4
+    622              }
+    623              break;
+    624            }
+    625          }
+   \   000001F8   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    626          
+    627          /*********************************************************************
+    628          *
+    629          *       Draw Bitmap 8 BPP
+    630          */
+
+   \                                 In section .text, align 4, keep-with-next
+    631          static void  _DrawBitLine8BPP(GUI_DEVICE * pDevice, int x, int y, U8 const GUI_UNI_PTR * p, int xsize, const LCD_PIXELINDEX * pTrans) {
+   \                     _DrawBitLine8BPP:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   10E09DE5           LDR      LR,[SP, #+16]
+   \   00000008   0CC09DE5           LDR      R12,[SP, #+12]
+    632            DRIVER_CONTEXT * pContext;
+    633            LCD_PIXELINDEX Pixel;
+    634            register U32 Off;
+    635            U16 * pDest;
+    636          
+    637            if (!pTrans) {
+   \   0000000C   00005EE3           CMP      LR,#+0
+   \   00000010   5300000A           BEQ      ??_DrawBitLine8BPP_0
+    638              return; // No translation from 8bpp BMP to 16bpp device makes no sense
+    639            }
+    640            //
+    641            // Get context
+    642            //
+    643            pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+   \   00000014   080090E5           LDR      R0,[R0, #+8]
+    644            //
+    645            // Mirror x
+    646            //
+    647            x = (pContext->vxSize - 1 - (x));
+    648            //
+    649            // Mirror y
+    650            //
+    651            y = (pContext->vySize - 1 - (y));
+    652            Off   = XY2OFF16(pContext->vxSizePhys, x,y);
+    653            pDest = OFF2PTR16(pContext->VRAMAddr, Off);
+   \   00000018   104090E5           LDR      R4,[R0, #+16]
+   \   0000001C   0C5090E5           LDR      R5,[R0, #+12]
+   \   00000020   014044E2           SUB      R4,R4,#+1
+   \   00000024   022044E0           SUB      R2,R4,R2
+   \   00000028   144090E5           LDR      R4,[R0, #+20]
+   \   0000002C   015045E2           SUB      R5,R5,#+1
+   \   00000030   011045E0           SUB      R1,R5,R1
+   \   00000034   941221E0           MLA      R1,R4,R2,R1
+   \   00000038   000090E5           LDR      R0,[R0, #+0]
+   \   0000003C   810080E0           ADD      R0,R0,R1, LSL #+1
+    654            switch (GUI_Context.DrawMode & (LCD_DRAWMODE_TRANS | LCD_DRAWMODE_XOR)) {
+   \   00000040   ........           LDR      R1,??DataTable15
+   \   00000044   1010D1E5           LDRB     R1,[R1, #+16]
+   \   00000048   031011E2           ANDS     R1,R1,#0x3
+   \   0000004C   0200000A           BEQ      ??_DrawBitLine8BPP_1
+   \   00000050   021051E2           SUBS     R1,R1,#+2
+   \   00000054   3700000A           BEQ      ??_DrawBitLine8BPP_2
+   \   00000058   3080BDE8           POP      {R4,R5,PC}
+    655            case 0:
+    656              while (xsize >= 8) {
+   \                     ??_DrawBitLine8BPP_1:
+   \   0000005C   08005CE3           CMP      R12,#+8
+   \   00000060   180000AA           BGE      ??_DrawBitLine8BPP_3
+   \                     ??_DrawBitLine8BPP_4:
+   \   00000064   04005CE3           CMP      R12,#+4
+   \   00000068   0E0000BA           BLT      ??_DrawBitLine8BPP_5
+    657                WRITE_MEM16P(pDest - 0, *(pTrans + *(p + 0)));
+    658                WRITE_MEM16P(pDest - 1, *(pTrans + *(p + 1)));
+    659                WRITE_MEM16P(pDest - 2, *(pTrans + *(p + 2)));
+    660                WRITE_MEM16P(pDest - 3, *(pTrans + *(p + 3)));
+    661                WRITE_MEM16P(pDest - 4, *(pTrans + *(p + 4)));
+    662                WRITE_MEM16P(pDest - 5, *(pTrans + *(p + 5)));
+    663                WRITE_MEM16P(pDest - 6, *(pTrans + *(p + 6)));
+    664                WRITE_MEM16P(pDest - 7, *(pTrans + *(p + 7)));
+    665                xsize -= 8;
+    666                p     += 8;
+    667                pDest -= 8;
+    668              }
+    669              while (xsize >= 4) {
+    670                WRITE_MEM16P(pDest - 0, *(pTrans + *(p + 0)));
+   \                     ??_DrawBitLine8BPP_6:
+   \   0000006C   0110D3E4           LDRB     R1,[R3], #+1
+    671                WRITE_MEM16P(pDest - 1, *(pTrans + *(p + 1)));
+    672                WRITE_MEM16P(pDest - 2, *(pTrans + *(p + 2)));
+    673                WRITE_MEM16P(pDest - 3, *(pTrans + *(p + 3)));
+    674                xsize -= 4;
+   \   00000070   04C04CE2           SUB      R12,R12,#+4
+    675                p     += 4;
+    676                pDest -= 4;
+   \   00000074   04005CE3           CMP      R12,#+4
+   \   00000078   01119EE7           LDR      R1,[LR, +R1, LSL #+2]
+   \   0000007C   B21040E0           STRH     R1,[R0], #-2
+   \   00000080   0110D3E4           LDRB     R1,[R3], #+1
+   \   00000084   01119EE7           LDR      R1,[LR, +R1, LSL #+2]
+   \   00000088   B21040E0           STRH     R1,[R0], #-2
+   \   0000008C   0110D3E4           LDRB     R1,[R3], #+1
+   \   00000090   01119EE7           LDR      R1,[LR, +R1, LSL #+2]
+   \   00000094   B21040E0           STRH     R1,[R0], #-2
+   \   00000098   0110D3E4           LDRB     R1,[R3], #+1
+   \   0000009C   01119EE7           LDR      R1,[LR, +R1, LSL #+2]
+   \   000000A0   B21040E0           STRH     R1,[R0], #-2
+   \   000000A4   F0FFFFAA           BGE      ??_DrawBitLine8BPP_6
+    677              }
+    678              while (xsize) {
+   \                     ??_DrawBitLine8BPP_5:
+   \   000000A8   00005CE3           CMP      R12,#+0
+   \   000000AC   2C00000A           BEQ      ??_DrawBitLine8BPP_0
+    679                WRITE_MEM16P(pDest - 0, *(pTrans + *(p + 0)));
+   \                     ??_DrawBitLine8BPP_7:
+   \   000000B0   0110D3E4           LDRB     R1,[R3], #+1
+    680                xsize--;
+   \   000000B4   01C05CE2           SUBS     R12,R12,#+1
+   \   000000B8   01119EE7           LDR      R1,[LR, +R1, LSL #+2]
+   \   000000BC   B21040E0           STRH     R1,[R0], #-2
+    681                p++;
+    682                pDest--;
+   \   000000C0   FAFFFF1A           BNE      ??_DrawBitLine8BPP_7
+   \   000000C4   3080BDE8           POP      {R4,R5,PC}
+    683              }
+   \                     ??_DrawBitLine8BPP_3:
+   \   000000C8   0110D3E4           LDRB     R1,[R3], #+1
+   \   000000CC   08C04CE2           SUB      R12,R12,#+8
+   \   000000D0   08005CE3           CMP      R12,#+8
+   \   000000D4   01119EE7           LDR      R1,[LR, +R1, LSL #+2]
+   \   000000D8   B21040E0           STRH     R1,[R0], #-2
+   \   000000DC   0110D3E4           LDRB     R1,[R3], #+1
+   \   000000E0   01119EE7           LDR      R1,[LR, +R1, LSL #+2]
+   \   000000E4   B21040E0           STRH     R1,[R0], #-2
+   \   000000E8   0110D3E4           LDRB     R1,[R3], #+1
+   \   000000EC   01119EE7           LDR      R1,[LR, +R1, LSL #+2]
+   \   000000F0   B21040E0           STRH     R1,[R0], #-2
+   \   000000F4   0110D3E4           LDRB     R1,[R3], #+1
+   \   000000F8   01119EE7           LDR      R1,[LR, +R1, LSL #+2]
+   \   000000FC   B21040E0           STRH     R1,[R0], #-2
+   \   00000100   0110D3E4           LDRB     R1,[R3], #+1
+   \   00000104   01119EE7           LDR      R1,[LR, +R1, LSL #+2]
+   \   00000108   B21040E0           STRH     R1,[R0], #-2
+   \   0000010C   0110D3E4           LDRB     R1,[R3], #+1
+   \   00000110   01119EE7           LDR      R1,[LR, +R1, LSL #+2]
+   \   00000114   B21040E0           STRH     R1,[R0], #-2
+   \   00000118   0110D3E4           LDRB     R1,[R3], #+1
+   \   0000011C   01119EE7           LDR      R1,[LR, +R1, LSL #+2]
+   \   00000120   B21040E0           STRH     R1,[R0], #-2
+   \   00000124   0110D3E4           LDRB     R1,[R3], #+1
+   \   00000128   01119EE7           LDR      R1,[LR, +R1, LSL #+2]
+   \   0000012C   B21040E0           STRH     R1,[R0], #-2
+   \   00000130   E4FFFFAA           BGE      ??_DrawBitLine8BPP_3
+   \   00000134   CAFFFFEA           B        ??_DrawBitLine8BPP_4
+    684              break;
+    685            case LCD_DRAWMODE_TRANS:
+    686              for (; xsize > 0; xsize--, p++, pDest--) {
+   \                     ??_DrawBitLine8BPP_2:
+   \   00000138   01005CE3           CMP      R12,#+1
+   \   0000013C   080000BA           BLT      ??_DrawBitLine8BPP_0
+    687                Pixel = *p;
+    688                if (Pixel) {
+   \                     ??_DrawBitLine8BPP_8:
+   \   00000140   0010D3E5           LDRB     R1,[R3, #+0]
+    689                  WRITE_MEM16P(pDest, *(pTrans + *p));
+    690                }
+    691              }
+   \   00000144   01C04CE2           SUB      R12,R12,#+1
+   \   00000148   013083E2           ADD      R3,R3,#+1
+   \   0000014C   000051E3           CMP      R1,#+0
+   \   00000150   01119E17           LDRNE    R1,[LR, +R1, LSL #+2]
+   \   00000154   B010C011           STRHNE   R1,[R0, #+0]
+   \   00000158   020040E2           SUB      R0,R0,#+2
+   \   0000015C   01005CE3           CMP      R12,#+1
+   \   00000160   F6FFFFAA           BGE      ??_DrawBitLine8BPP_8
+   \                     ??_DrawBitLine8BPP_0:
+   \   00000164   3080BDE8           POP      {R4,R5,PC}       ;; return
+    692              break;
+    693            }
+    694          }
+    695          
+    696          /*********************************************************************
+    697          *
+    698          *       Draw Bitmap 16 BPP
+    699          */
+
+   \                                 In section .text, align 4, keep-with-next
+    700          static void _DrawBitLine16BPP(GUI_DEVICE * pDevice, int x, int y, U16 const GUI_UNI_PTR * p, int xsize) {
+   \                     _DrawBitLine16BPP:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+    701            DRIVER_CONTEXT * pContext;
+    702            U32 Off;
+    703            U16 * pDest;
+    704          
+    705            //
+    706            // Get context
+    707            //
+    708            pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+   \   00000004   080090E5           LDR      R0,[R0, #+8]
+   \   00000008   0CC09DE5           LDR      R12,[SP, #+12]
+    709            //
+    710            // Mirror x
+    711            //
+    712            x = (pContext->vxSize - 1 - (x));
+    713            //
+    714            // Mirror y
+    715            //
+    716            y = (pContext->vySize - 1 - (y));
+    717            Off = XY2OFF16(pContext->vxSizePhys, x,y);
+    718            pDest = OFF2PTR16(pContext->VRAMAddr, Off);
+   \   0000000C   10E090E5           LDR      LR,[R0, #+16]
+   \   00000010   0C4090E5           LDR      R4,[R0, #+12]
+   \   00000014   01E04EE2           SUB      LR,LR,#+1
+   \   00000018   02204EE0           SUB      R2,LR,R2
+   \   0000001C   14E090E5           LDR      LR,[R0, #+20]
+   \   00000020   014044E2           SUB      R4,R4,#+1
+   \   00000024   011044E0           SUB      R1,R4,R1
+   \   00000028   9E1221E0           MLA      R1,LR,R2,R1
+   \   0000002C   000090E5           LDR      R0,[R0, #+0]
+   \   00000030   08005CE3           CMP      R12,#+8
+   \   00000034   810080E0           ADD      R0,R0,R1, LSL #+1
+   \   00000038   4D0000BA           BLT      ??_DrawBitLine16BPP_0
+   \   0000003C   4C11A0E1           ASR      R1,R12,#+2
+   \   00000040   A11E8CE0           ADD      R1,R12,R1, LSR #+29
+   \   00000044   00E0E0E3           MVN      LR,#+0
+   \   00000048   C1118EE0           ADD      R1,LR,R1, ASR #+3
+   \   0000004C   B040D3E1           LDRH     R4,[R3, #+0]
+   \   00000050   B220D3E1           LDRH     R2,[R3, #+2]
+   \   00000054   010011E3           TST      R1,#0x1
+   \   00000058   1000000A           BEQ      ??_DrawBitLine16BPP_1
+    719            while (xsize >= 8) {
+    720              WRITE_MEM16P(pDest - 0, *(p + 0));
+   \   0000005C   B24040E0           STRH     R4,[R0], #-2
+    721              WRITE_MEM16P(pDest - 1, *(p + 1));
+   \   00000060   B22040E0           STRH     R2,[R0], #-2
+    722              WRITE_MEM16P(pDest - 2, *(p + 2));
+   \   00000064   B420D3E1           LDRH     R2,[R3, #+4]
+    723              WRITE_MEM16P(pDest - 3, *(p + 3));
+    724              WRITE_MEM16P(pDest - 4, *(p + 4));
+    725              WRITE_MEM16P(pDest - 5, *(p + 5));
+    726              WRITE_MEM16P(pDest - 6, *(p + 6));
+    727              WRITE_MEM16P(pDest - 7, *(p + 7));
+    728              xsize -= 8;
+   \   00000068   08C04CE2           SUB      R12,R12,#+8
+   \   0000006C   B22040E0           STRH     R2,[R0], #-2
+   \   00000070   B620D3E1           LDRH     R2,[R3, #+6]
+   \   00000074   B22040E0           STRH     R2,[R0], #-2
+   \   00000078   B820D3E1           LDRH     R2,[R3, #+8]
+   \   0000007C   B22040E0           STRH     R2,[R0], #-2
+   \   00000080   BA20D3E1           LDRH     R2,[R3, #+10]
+   \   00000084   B22040E0           STRH     R2,[R0], #-2
+   \   00000088   BC20D3E1           LDRH     R2,[R3, #+12]
+   \   0000008C   B22040E0           STRH     R2,[R0], #-2
+   \   00000090   BE20D3E1           LDRH     R2,[R3, #+14]
+   \   00000094   B22040E0           STRH     R2,[R0], #-2
+    729              p     += 8;
+    730              pDest -= 8;
+   \   00000098   B041F3E1           LDRH     R4,[R3, #+16]!
+   \   0000009C   B220D3E1           LDRH     R2,[R3, #+2]
+   \                     ??_DrawBitLine16BPP_1:
+   \   000000A0   A110B0E1           LSRS     R1,R1,#+1
+   \   000000A4   2200000A           BEQ      ??_DrawBitLine16BPP_2
+   \                     ??_DrawBitLine16BPP_3:
+   \   000000A8   B24040E0           STRH     R4,[R0], #-2
+   \   000000AC   B22040E0           STRH     R2,[R0], #-2
+   \   000000B0   B420D3E1           LDRH     R2,[R3, #+4]
+   \   000000B4   10C04CE2           SUB      R12,R12,#+16
+   \   000000B8   011051E2           SUBS     R1,R1,#+1
+   \   000000BC   B22040E0           STRH     R2,[R0], #-2
+   \   000000C0   B620D3E1           LDRH     R2,[R3, #+6]
+   \   000000C4   B22040E0           STRH     R2,[R0], #-2
+   \   000000C8   B820D3E1           LDRH     R2,[R3, #+8]
+   \   000000CC   B22040E0           STRH     R2,[R0], #-2
+   \   000000D0   BA20D3E1           LDRH     R2,[R3, #+10]
+   \   000000D4   B22040E0           STRH     R2,[R0], #-2
+   \   000000D8   BC20D3E1           LDRH     R2,[R3, #+12]
+   \   000000DC   B22040E0           STRH     R2,[R0], #-2
+   \   000000E0   BE20D3E1           LDRH     R2,[R3, #+14]
+   \   000000E4   B22040E0           STRH     R2,[R0], #-2
+   \   000000E8   B0E1F3E1           LDRH     LR,[R3, #+16]!
+   \   000000EC   B250D3E1           LDRH     R5,[R3, #+2]
+   \   000000F0   B2E040E0           STRH     LR,[R0], #-2
+   \   000000F4   B25040E0           STRH     R5,[R0], #-2
+   \   000000F8   B420D3E1           LDRH     R2,[R3, #+4]
+   \   000000FC   B22040E0           STRH     R2,[R0], #-2
+   \   00000100   B620D3E1           LDRH     R2,[R3, #+6]
+   \   00000104   B22040E0           STRH     R2,[R0], #-2
+   \   00000108   B820D3E1           LDRH     R2,[R3, #+8]
+   \   0000010C   B22040E0           STRH     R2,[R0], #-2
+   \   00000110   BA20D3E1           LDRH     R2,[R3, #+10]
+   \   00000114   B22040E0           STRH     R2,[R0], #-2
+   \   00000118   BC20D3E1           LDRH     R2,[R3, #+12]
+   \   0000011C   B22040E0           STRH     R2,[R0], #-2
+   \   00000120   BE20D3E1           LDRH     R2,[R3, #+14]
+   \   00000124   B22040E0           STRH     R2,[R0], #-2
+   \   00000128   B041F3E1           LDRH     R4,[R3, #+16]!
+   \   0000012C   B220D3E1           LDRH     R2,[R3, #+2]
+   \   00000130   DCFFFF1A           BNE      ??_DrawBitLine16BPP_3
+   \                     ??_DrawBitLine16BPP_2:
+   \   00000134   B24040E0           STRH     R4,[R0], #-2
+   \   00000138   B22040E0           STRH     R2,[R0], #-2
+   \   0000013C   B410D3E1           LDRH     R1,[R3, #+4]
+   \   00000140   08C04CE2           SUB      R12,R12,#+8
+   \   00000144   B21040E0           STRH     R1,[R0], #-2
+   \   00000148   B610D3E1           LDRH     R1,[R3, #+6]
+   \   0000014C   B21040E0           STRH     R1,[R0], #-2
+   \   00000150   B810D3E1           LDRH     R1,[R3, #+8]
+   \   00000154   B21040E0           STRH     R1,[R0], #-2
+   \   00000158   BA10D3E1           LDRH     R1,[R3, #+10]
+   \   0000015C   B21040E0           STRH     R1,[R0], #-2
+   \   00000160   BC10D3E1           LDRH     R1,[R3, #+12]
+   \   00000164   B21040E0           STRH     R1,[R0], #-2
+   \   00000168   BE10D3E1           LDRH     R1,[R3, #+14]
+   \   0000016C   103083E2           ADD      R3,R3,#+16
+   \   00000170   B21040E0           STRH     R1,[R0], #-2
+    731            }
+    732            while (xsize >= 4) {
+   \                     ??_DrawBitLine16BPP_0:
+   \   00000174   04005CE3           CMP      R12,#+4
+   \   00000178   100000AA           BGE      ??_DrawBitLine16BPP_4
+   \                     ??_DrawBitLine16BPP_5:
+   \   0000017C   00005CE3           CMP      R12,#+0
+   \   00000180   0D00000A           BEQ      ??_DrawBitLine16BPP_6
+   \   00000184   B020D3E1           LDRH     R2,[R3, #+0]
+   \   00000188   01104CE2           SUB      R1,R12,#+1
+   \   0000018C   010011E3           TST      R1,#0x1
+    733              WRITE_MEM16P(pDest - 0, *(p + 0));
+    734              WRITE_MEM16P(pDest - 1, *(p + 1));
+    735              WRITE_MEM16P(pDest - 2, *(p + 2));
+    736              WRITE_MEM16P(pDest - 3, *(p + 3));
+    737              xsize -= 4;
+    738              p     += 4;
+    739              pDest -= 4;
+    740            }
+    741            while (xsize) {
+    742              WRITE_MEM16P(pDest - 0, *(p + 0));
+   \   00000190   B2204010           STRHNE   R2,[R0], #-2
+    743              xsize--;
+    744              p++;
+    745              pDest--;
+   \   00000194   B220F311           LDRHNE   R2,[R3, #+2]!
+   \   00000198   A110B0E1           LSRS     R1,R1,#+1
+   \   0000019C   0500000A           BEQ      ??_DrawBitLine16BPP_7
+   \                     ??_DrawBitLine16BPP_8:
+   \   000001A0   B22040E0           STRH     R2,[R0], #-2
+   \   000001A4   B2C0F3E1           LDRH     R12,[R3, #+2]!
+   \   000001A8   011051E2           SUBS     R1,R1,#+1
+   \   000001AC   B2C040E0           STRH     R12,[R0], #-2
+   \   000001B0   B220F3E1           LDRH     R2,[R3, #+2]!
+   \   000001B4   F9FFFF1A           BNE      ??_DrawBitLine16BPP_8
+   \                     ??_DrawBitLine16BPP_7:
+   \   000001B8   B020C0E1           STRH     R2,[R0, #+0]
+    746            }
+    747          }
+   \                     ??_DrawBitLine16BPP_6:
+   \   000001BC   3080BDE8           POP      {R4,R5,PC}       ;; return
+   \                     ??_DrawBitLine16BPP_4:
+   \   000001C0   B210D3E0           LDRH     R1,[R3], #+2
+   \   000001C4   04C04CE2           SUB      R12,R12,#+4
+   \   000001C8   04005CE3           CMP      R12,#+4
+   \   000001CC   B21040E0           STRH     R1,[R0], #-2
+   \   000001D0   B210D3E0           LDRH     R1,[R3], #+2
+   \   000001D4   B21040E0           STRH     R1,[R0], #-2
+   \   000001D8   B210D3E0           LDRH     R1,[R3], #+2
+   \   000001DC   B21040E0           STRH     R1,[R0], #-2
+   \   000001E0   B210D3E0           LDRH     R1,[R3], #+2
+   \   000001E4   B21040E0           STRH     R1,[R0], #-2
+   \   000001E8   F4FFFFAA           BGE      ??_DrawBitLine16BPP_4
+   \   000001EC   E2FFFFEA           B        ??_DrawBitLine16BPP_5
+    748          
+    749          /*********************************************************************
+    750          *
+    751          *       _DrawBitmap
+    752          */
+
+   \                                 In section .text, align 4, keep-with-next
+    753          static void _DrawBitmap(GUI_DEVICE * pDevice, int x0, int y0,
+    754                                 int xSize, int ySize,
+    755                                 int BitsPerPixel, 
+    756                                 int BytesPerLine,
+    757                                 const U8 GUI_UNI_PTR * pData, int Diff,
+    758                                 const LCD_PIXELINDEX* pTrans) {
+   \                     _DrawBitmap:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   14D04DE2           SUB      SP,SP,#+20
+   \   00000008   0150A0E1           MOV      R5,R1
+   \   0000000C   3C109DE5           LDR      R1,[SP, #+60]
+   \   00000010   0040A0E1           MOV      R4,R0
+    759            int i;
+    760          
+    761            switch (BitsPerPixel) {
+   \   00000014   011041E2           SUB      R1,R1,#+1
+   \   00000018   0360A0E1           MOV      R6,R3
+   \   0000001C   38009DE5           LDR      R0,[SP, #+56]
+   \   00000020   40709DE5           LDR      R7,[SP, #+64]
+   \   00000024   44809DE5           LDR      R8,[SP, #+68]
+   \   00000028   48909DE5           LDR      R9,[SP, #+72]
+   \   0000002C   4CA09DE5           LDR      R10,[SP, #+76]
+   \   00000030   0F0051E3           CMP      R1,#+15
+   \   00000034   01F18F90           ADDLS    PC,PC,R1, LSL #+2
+   \                     ??_DrawBitmap_0:
+   \   00000038   DC00008A           BHI      ??_DrawBitmap_1
+   \   0000003C   0E0000EA           B        ??_DrawBitmap_2
+   \   00000040   3A0000EA           B        ??_DrawBitmap_3
+   \   00000044   D90000EA           B        ??_DrawBitmap_1
+   \   00000048   650000EA           B        ??_DrawBitmap_4
+   \   0000004C   D70000EA           B        ??_DrawBitmap_1
+   \   00000050   D60000EA           B        ??_DrawBitmap_1
+   \   00000054   D50000EA           B        ??_DrawBitmap_1
+   \   00000058   8E0000EA           B        ??_DrawBitmap_5
+   \   0000005C   D30000EA           B        ??_DrawBitmap_1
+   \   00000060   D20000EA           B        ??_DrawBitmap_1
+   \   00000064   D10000EA           B        ??_DrawBitmap_1
+   \   00000068   D00000EA           B        ??_DrawBitmap_1
+   \   0000006C   CF0000EA           B        ??_DrawBitmap_1
+   \   00000070   CE0000EA           B        ??_DrawBitmap_1
+   \   00000074   CD0000EA           B        ??_DrawBitmap_1
+   \   00000078   AB0000EA           B        ??_DrawBitmap_6
+    762            case 1:
+    763              for (i = 0; i < ySize; i++) {
+   \                     ??_DrawBitmap_2:
+   \   0000007C   010050E3           CMP      R0,#+1
+   \   00000080   CA0000BA           BLT      ??_DrawBitmap_1
+   \   00000084   02B0A0E1           MOV      R11,R2
+   \   00000088   10008DE5           STR      R0,[SP, #+16]
+   \   0000008C   010010E3           TST      R0,#0x1
+   \   00000090   0800000A           BEQ      ??_DrawBitmap_7
+    764                _DrawBitLine1BPP(pDevice, x0, i + y0, pData, Diff, xSize, pTrans);
+   \   00000094   08A08DE5           STR      R10,[SP, #+8]
+   \   00000098   04608DE5           STR      R6,[SP, #+4]
+   \   0000009C   00908DE5           STR      R9,[SP, #+0]
+   \   000000A0   0830A0E1           MOV      R3,R8
+   \   000000A4   0510A0E1           MOV      R1,R5
+   \   000000A8   0400A0E1           MOV      R0,R4
+   \   000000AC   ........           BL       _DrawBitLine1BPP
+    765                pData += BytesPerLine;
+   \   000000B0   088087E0           ADD      R8,R7,R8
+   \   000000B4   01B08BE2           ADD      R11,R11,#+1
+   \                     ??_DrawBitmap_7:
+   \   000000B8   10109DE5           LDR      R1,[SP, #+16]
+   \   000000BC   A110A0E1           LSR      R1,R1,#+1
+   \   000000C0   0C108DE5           STR      R1,[SP, #+12]
+   \   000000C4   000051E3           CMP      R1,#+0
+   \   000000C8   B800000A           BEQ      ??_DrawBitmap_1
+   \                     ??_DrawBitmap_8:
+   \   000000CC   08A08DE5           STR      R10,[SP, #+8]
+   \   000000D0   04608DE5           STR      R6,[SP, #+4]
+   \   000000D4   00908DE5           STR      R9,[SP, #+0]
+   \   000000D8   0830A0E1           MOV      R3,R8
+   \   000000DC   0B20A0E1           MOV      R2,R11
+   \   000000E0   0510A0E1           MOV      R1,R5
+   \   000000E4   0400A0E1           MOV      R0,R4
+   \   000000E8   ........           BL       _DrawBitLine1BPP
+   \   000000EC   088087E0           ADD      R8,R7,R8
+   \   000000F0   08A08DE5           STR      R10,[SP, #+8]
+   \   000000F4   04608DE5           STR      R6,[SP, #+4]
+   \   000000F8   00908DE5           STR      R9,[SP, #+0]
+   \   000000FC   0830A0E1           MOV      R3,R8
+   \   00000100   01208BE2           ADD      R2,R11,#+1
+   \   00000104   0510A0E1           MOV      R1,R5
+   \   00000108   0400A0E1           MOV      R0,R4
+   \   0000010C   ........           BL       _DrawBitLine1BPP
+    766              }
+   \   00000110   0C109DE5           LDR      R1,[SP, #+12]
+   \   00000114   088087E0           ADD      R8,R7,R8
+   \   00000118   011041E2           SUB      R1,R1,#+1
+   \   0000011C   0C108DE5           STR      R1,[SP, #+12]
+   \   00000120   02B08BE2           ADD      R11,R11,#+2
+   \   00000124   000051E3           CMP      R1,#+0
+   \   00000128   E7FFFF1A           BNE      ??_DrawBitmap_8
+   \   0000012C   9F0000EA           B        ??_DrawBitmap_1
+    767              break;
+    768            case 2:
+    769              for (i = 0; i < ySize; i++) {
+   \                     ??_DrawBitmap_3:
+   \   00000130   010050E3           CMP      R0,#+1
+   \   00000134   9D0000BA           BLT      ??_DrawBitmap_1
+   \   00000138   02B0A0E1           MOV      R11,R2
+   \   0000013C   10008DE5           STR      R0,[SP, #+16]
+   \   00000140   010010E3           TST      R0,#0x1
+   \   00000144   0800000A           BEQ      ??_DrawBitmap_9
+    770                _DrawBitLine2BPP(pDevice, x0, i + y0, pData, Diff, xSize, pTrans);
+   \   00000148   08A08DE5           STR      R10,[SP, #+8]
+   \   0000014C   04608DE5           STR      R6,[SP, #+4]
+   \   00000150   00908DE5           STR      R9,[SP, #+0]
+   \   00000154   0830A0E1           MOV      R3,R8
+   \   00000158   0510A0E1           MOV      R1,R5
+   \   0000015C   0400A0E1           MOV      R0,R4
+   \   00000160   ........           BL       _DrawBitLine2BPP
+    771                pData += BytesPerLine;
+   \   00000164   088087E0           ADD      R8,R7,R8
+   \   00000168   01B08BE2           ADD      R11,R11,#+1
+   \                     ??_DrawBitmap_9:
+   \   0000016C   10109DE5           LDR      R1,[SP, #+16]
+   \   00000170   A110A0E1           LSR      R1,R1,#+1
+   \   00000174   0C108DE5           STR      R1,[SP, #+12]
+   \   00000178   000051E3           CMP      R1,#+0
+   \   0000017C   8B00000A           BEQ      ??_DrawBitmap_1
+   \                     ??_DrawBitmap_10:
+   \   00000180   08A08DE5           STR      R10,[SP, #+8]
+   \   00000184   04608DE5           STR      R6,[SP, #+4]
+   \   00000188   00908DE5           STR      R9,[SP, #+0]
+   \   0000018C   0830A0E1           MOV      R3,R8
+   \   00000190   0B20A0E1           MOV      R2,R11
+   \   00000194   0510A0E1           MOV      R1,R5
+   \   00000198   0400A0E1           MOV      R0,R4
+   \   0000019C   ........           BL       _DrawBitLine2BPP
+   \   000001A0   088087E0           ADD      R8,R7,R8
+   \   000001A4   08A08DE5           STR      R10,[SP, #+8]
+   \   000001A8   04608DE5           STR      R6,[SP, #+4]
+   \   000001AC   00908DE5           STR      R9,[SP, #+0]
+   \   000001B0   0830A0E1           MOV      R3,R8
+   \   000001B4   01208BE2           ADD      R2,R11,#+1
+   \   000001B8   0510A0E1           MOV      R1,R5
+   \   000001BC   0400A0E1           MOV      R0,R4
+   \   000001C0   ........           BL       _DrawBitLine2BPP
+    772              }
+   \   000001C4   0C109DE5           LDR      R1,[SP, #+12]
+   \   000001C8   088087E0           ADD      R8,R7,R8
+   \   000001CC   011041E2           SUB      R1,R1,#+1
+   \   000001D0   0C108DE5           STR      R1,[SP, #+12]
+   \   000001D4   02B08BE2           ADD      R11,R11,#+2
+   \   000001D8   000051E3           CMP      R1,#+0
+   \   000001DC   E7FFFF1A           BNE      ??_DrawBitmap_10
+   \   000001E0   720000EA           B        ??_DrawBitmap_1
+    773              break;
+    774            case 4:
+    775              for (i = 0; i < ySize; i++) {
+   \                     ??_DrawBitmap_4:
+   \   000001E4   010050E3           CMP      R0,#+1
+   \   000001E8   700000BA           BLT      ??_DrawBitmap_1
+   \   000001EC   02B0A0E1           MOV      R11,R2
+   \   000001F0   10008DE5           STR      R0,[SP, #+16]
+   \   000001F4   010010E3           TST      R0,#0x1
+   \   000001F8   0800000A           BEQ      ??_DrawBitmap_11
+    776                _DrawBitLine4BPP(pDevice, x0, i + y0, pData, Diff, xSize, pTrans);
+   \   000001FC   08A08DE5           STR      R10,[SP, #+8]
+   \   00000200   04608DE5           STR      R6,[SP, #+4]
+   \   00000204   00908DE5           STR      R9,[SP, #+0]
+   \   00000208   0830A0E1           MOV      R3,R8
+   \   0000020C   0510A0E1           MOV      R1,R5
+   \   00000210   0400A0E1           MOV      R0,R4
+   \   00000214   ........           BL       _DrawBitLine4BPP
+    777                pData += BytesPerLine;
+   \   00000218   088087E0           ADD      R8,R7,R8
+   \   0000021C   01B08BE2           ADD      R11,R11,#+1
+   \                     ??_DrawBitmap_11:
+   \   00000220   10109DE5           LDR      R1,[SP, #+16]
+   \   00000224   A110A0E1           LSR      R1,R1,#+1
+   \   00000228   0C108DE5           STR      R1,[SP, #+12]
+   \   0000022C   000051E3           CMP      R1,#+0
+   \   00000230   5E00000A           BEQ      ??_DrawBitmap_1
+   \                     ??_DrawBitmap_12:
+   \   00000234   08A08DE5           STR      R10,[SP, #+8]
+   \   00000238   04608DE5           STR      R6,[SP, #+4]
+   \   0000023C   00908DE5           STR      R9,[SP, #+0]
+   \   00000240   0830A0E1           MOV      R3,R8
+   \   00000244   0B20A0E1           MOV      R2,R11
+   \   00000248   0510A0E1           MOV      R1,R5
+   \   0000024C   0400A0E1           MOV      R0,R4
+   \   00000250   ........           BL       _DrawBitLine4BPP
+   \   00000254   088087E0           ADD      R8,R7,R8
+   \   00000258   08A08DE5           STR      R10,[SP, #+8]
+   \   0000025C   04608DE5           STR      R6,[SP, #+4]
+   \   00000260   00908DE5           STR      R9,[SP, #+0]
+   \   00000264   0830A0E1           MOV      R3,R8
+   \   00000268   01208BE2           ADD      R2,R11,#+1
+   \   0000026C   0510A0E1           MOV      R1,R5
+   \   00000270   0400A0E1           MOV      R0,R4
+   \   00000274   ........           BL       _DrawBitLine4BPP
+    778              }
+   \   00000278   0C109DE5           LDR      R1,[SP, #+12]
+   \   0000027C   088087E0           ADD      R8,R7,R8
+   \   00000280   011041E2           SUB      R1,R1,#+1
+   \   00000284   0C108DE5           STR      R1,[SP, #+12]
+   \   00000288   02B08BE2           ADD      R11,R11,#+2
+   \   0000028C   000051E3           CMP      R1,#+0
+   \   00000290   E7FFFF1A           BNE      ??_DrawBitmap_12
+   \   00000294   450000EA           B        ??_DrawBitmap_1
+    779              break;
+    780            case 8:
+    781              for (i = 0; i < ySize; i++) {
+   \                     ??_DrawBitmap_5:
+   \   00000298   010050E3           CMP      R0,#+1
+   \   0000029C   430000BA           BLT      ??_DrawBitmap_1
+   \   000002A0   00B0A0E1           MOV      R11,R0
+   \   000002A4   0290A0E1           MOV      R9,R2
+   \   000002A8   01001BE3           TST      R11,#0x1
+   \   000002AC   0700000A           BEQ      ??_DrawBitmap_13
+    782                _DrawBitLine8BPP(pDevice, x0, i + y0, pData, xSize, pTrans);
+   \   000002B0   04A08DE5           STR      R10,[SP, #+4]
+   \   000002B4   00608DE5           STR      R6,[SP, #+0]
+   \   000002B8   0830A0E1           MOV      R3,R8
+   \   000002BC   0510A0E1           MOV      R1,R5
+   \   000002C0   0400A0E1           MOV      R0,R4
+   \   000002C4   ........           BL       _DrawBitLine8BPP
+    783                pData += BytesPerLine;
+   \   000002C8   088087E0           ADD      R8,R7,R8
+   \   000002CC   019089E2           ADD      R9,R9,#+1
+   \                     ??_DrawBitmap_13:
+   \   000002D0   ABB0B0E1           LSRS     R11,R11,#+1
+   \   000002D4   3500000A           BEQ      ??_DrawBitmap_1
+   \                     ??_DrawBitmap_14:
+   \   000002D8   04A08DE5           STR      R10,[SP, #+4]
+   \   000002DC   00608DE5           STR      R6,[SP, #+0]
+   \   000002E0   0830A0E1           MOV      R3,R8
+   \   000002E4   0920A0E1           MOV      R2,R9
+   \   000002E8   0510A0E1           MOV      R1,R5
+   \   000002EC   0400A0E1           MOV      R0,R4
+   \   000002F0   ........           BL       _DrawBitLine8BPP
+   \   000002F4   088087E0           ADD      R8,R7,R8
+   \   000002F8   04A08DE5           STR      R10,[SP, #+4]
+   \   000002FC   00608DE5           STR      R6,[SP, #+0]
+   \   00000300   0830A0E1           MOV      R3,R8
+   \   00000304   012089E2           ADD      R2,R9,#+1
+   \   00000308   0510A0E1           MOV      R1,R5
+   \   0000030C   0400A0E1           MOV      R0,R4
+   \   00000310   ........           BL       _DrawBitLine8BPP
+    784              }
+   \   00000314   01B04BE2           SUB      R11,R11,#+1
+   \   00000318   088087E0           ADD      R8,R7,R8
+   \   0000031C   029089E2           ADD      R9,R9,#+2
+   \   00000320   00005BE3           CMP      R11,#+0
+   \   00000324   EBFFFF1A           BNE      ??_DrawBitmap_14
+   \   00000328   200000EA           B        ??_DrawBitmap_1
+    785              break;
+    786            case 16:
+    787              for (i = 0; i < ySize; i++) {
+   \                     ??_DrawBitmap_6:
+   \   0000032C   010050E3           CMP      R0,#+1
+   \   00000330   1E0000BA           BLT      ??_DrawBitmap_1
+   \   00000334   00A0A0E1           MOV      R10,R0
+   \   00000338   0290A0E1           MOV      R9,R2
+   \   0000033C   01001AE3           TST      R10,#0x1
+   \   00000340   0600000A           BEQ      ??_DrawBitmap_15
+    788                _DrawBitLine16BPP(pDevice, x0, i + y0, (const U16 *)pData, xSize);
+   \   00000344   00608DE5           STR      R6,[SP, #+0]
+   \   00000348   0830A0E1           MOV      R3,R8
+   \   0000034C   0510A0E1           MOV      R1,R5
+   \   00000350   0400A0E1           MOV      R0,R4
+   \   00000354   ........           BL       _DrawBitLine16BPP
+    789                pData += BytesPerLine;
+   \   00000358   088087E0           ADD      R8,R7,R8
+   \   0000035C   019089E2           ADD      R9,R9,#+1
+   \                     ??_DrawBitmap_15:
+   \   00000360   AAA0B0E1           LSRS     R10,R10,#+1
+   \   00000364   1100000A           BEQ      ??_DrawBitmap_1
+   \                     ??_DrawBitmap_16:
+   \   00000368   00608DE5           STR      R6,[SP, #+0]
+   \   0000036C   0830A0E1           MOV      R3,R8
+   \   00000370   0920A0E1           MOV      R2,R9
+   \   00000374   0510A0E1           MOV      R1,R5
+   \   00000378   0400A0E1           MOV      R0,R4
+   \   0000037C   ........           BL       _DrawBitLine16BPP
+   \   00000380   088087E0           ADD      R8,R7,R8
+   \   00000384   00608DE5           STR      R6,[SP, #+0]
+   \   00000388   0830A0E1           MOV      R3,R8
+   \   0000038C   012089E2           ADD      R2,R9,#+1
+   \   00000390   0510A0E1           MOV      R1,R5
+   \   00000394   0400A0E1           MOV      R0,R4
+   \   00000398   ........           BL       _DrawBitLine16BPP
+    790              }
+   \   0000039C   01A04AE2           SUB      R10,R10,#+1
+   \   000003A0   088087E0           ADD      R8,R7,R8
+   \   000003A4   029089E2           ADD      R9,R9,#+2
+   \   000003A8   00005AE3           CMP      R10,#+0
+   \   000003AC   EDFFFF1A           BNE      ??_DrawBitmap_16
+    791              break;
+    792            }
+    793          }
+   \                     ??_DrawBitmap_1:
+   \   000003B0   14D08DE2           ADD      SP,SP,#+20       ;; stack cleaning
+   \   000003B4   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    794          
+    795          /*********************************************************************
+    796          *
+    797          *       _SetOrg
+    798          */
+
+   \                                 In section .text, align 4, keep-with-next
+    799          static void _SetOrg(GUI_DEVICE * pDevice, int x, int y) {
+   \                     _SetOrg:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+    800            #ifndef WIN32
+    801              DRIVER_CONTEXT * pContext;
+    802            #endif
+    803            LCD_X_SETORG_INFO Data = {0};
+   \   00000004   ............       ADRL     R12,`?<Constant {0}>`
+   \              ....        
+   \   0000000C   0CD04DE2           SUB      SP,SP,#+12
+   \   00000010   00409CE5           LDR      R4,[R12, #+0]
+   \   00000014   04509CE5           LDR      R5,[R12, #+4]
+   \   00000018   0D30A0E1           MOV      R3,SP
+   \   0000001C   300083E8           STM      R3,{R4,R5}
+    804          
+    805            #ifdef WIN32
+    806              LCDSIM_SetOrg(x, y, pDevice->LayerIndex);
+    807            #else
+    808              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+   \   00000020   083090E5           LDR      R3,[R0, #+8]
+    809              Data.xPos = pContext->vxSize - pContext->xSize - x;
+   \   00000024   0CC093E5           LDR      R12,[R3, #+12]
+   \   00000028   04E093E5           LDR      LR,[R3, #+4]
+   \   0000002C   0EC04CE0           SUB      R12,R12,LR
+   \   00000030   01104CE0           SUB      R1,R12,R1
+   \   00000034   00108DE5           STR      R1,[SP, #+0]
+    810              Data.yPos = pContext->vySize - pContext->ySize - y;
+   \   00000038   101093E5           LDR      R1,[R3, #+16]
+   \   0000003C   083093E5           LDR      R3,[R3, #+8]
+   \   00000040   031041E0           SUB      R1,R1,R3
+   \   00000044   021041E0           SUB      R1,R1,R2
+   \   00000048   04108DE5           STR      R1,[SP, #+4]
+    811              LCD_X_DisplayDriver(pDevice->LayerIndex, LCD_X_SETORG, (void *)&Data);
+   \   0000004C   0D20A0E1           MOV      R2,SP
+   \   00000050   0310A0E3           MOV      R1,#+3
+   \   00000054   180090E5           LDR      R0,[R0, #+24]
+   \   00000058   ........           BL       LCD_X_DisplayDriver
+    812            #endif
+    813          }
+   \   0000005C   0CD08DE2           ADD      SP,SP,#+12       ;; stack cleaning
+   \   00000060   3080BDE8           POP      {R4,R5,PC}       ;; return
+    814          
+    815          /*********************************************************************
+    816          *
+    817          *       _InitOnce
+    818          *
+    819          * Purpose:
+    820          *   Allocates a fixed block for the context of the driver
+    821          *
+    822          * Return value:
+    823          *   0 on success, 1 on error
+    824          */
+    825          static int _InitOnce(GUI_DEVICE * pDevice) {
+    826            if (pDevice->u.pContext == NULL) {
+    827              pDevice->u.pContext = GUI_ALLOC_GetFixedBlock(sizeof(DRIVER_CONTEXT));
+    828              GUI__memset((U8 *)pDevice->u.pContext, 0, sizeof(DRIVER_CONTEXT));
+    829            }
+    830            return pDevice->u.pContext ? 0 : 1;
+    831          }
+    832          
+    833          /*********************************************************************
+    834          *
+    835          *       _GetRect
+    836          */
+
+   \                                 In section .text, align 4, keep-with-next
+    837          static void _GetRect(GUI_DEVICE * pDevice, LCD_RECT * pRect) {
+    838            DRIVER_CONTEXT * pContext;
+    839          
+    840            pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+   \                     _GetRect:
+   \   00000000   080090E5           LDR      R0,[R0, #+8]
+    841            pRect->x0 = 0;
+   \   00000004   0020A0E3           MOV      R2,#+0
+   \   00000008   B020C1E1           STRH     R2,[R1, #+0]
+    842            pRect->y0 = 0;
+   \   0000000C   B220C1E1           STRH     R2,[R1, #+2]
+    843            pRect->x1 = pContext->vxSize - 1;
+   \   00000010   0C2090E5           LDR      R2,[R0, #+12]
+   \   00000014   012042E2           SUB      R2,R2,#+1
+   \   00000018   B420C1E1           STRH     R2,[R1, #+4]
+    844            pRect->y1 = pContext->vySize - 1;
+   \   0000001C   100090E5           LDR      R0,[R0, #+16]
+   \   00000020   010040E2           SUB      R0,R0,#+1
+   \   00000024   B600C1E1           STRH     R0,[R1, #+6]
+    845          }
+   \   00000028   1EFF2FE1           BX       LR               ;; return
+    846          
+    847          /*********************************************************************
+    848          *
+    849          *       _GetDevProp
+    850          */
+
+   \                                 In section .text, align 4, keep-with-next
+    851          static I32 _GetDevProp(GUI_DEVICE * pDevice, int Index) {
+    852            DRIVER_CONTEXT * pContext;
+    853          
+    854            pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+    855            switch (Index) {
+   \                     _GetDevProp:
+   \   00000000   011041E2           SUB      R1,R1,#+1
+   \   00000004   080090E5           LDR      R0,[R0, #+8]
+   \   00000008   0D0051E3           CMP      R1,#+13
+   \   0000000C   01F18F90           ADDLS    PC,PC,R1, LSL #+2
+   \                     ??_GetDevProp_0:
+   \   00000010   1B00008A           BHI      ??_GetDevProp_1
+   \   00000014   0C0000EA           B        ??_GetDevProp_2
+   \   00000018   0D0000EA           B        ??_GetDevProp_3
+   \   0000001C   0E0000EA           B        ??_GetDevProp_4
+   \   00000020   0F0000EA           B        ??_GetDevProp_5
+   \   00000024   160000EA           B        ??_GetDevProp_1
+   \   00000028   150000EA           B        ??_GetDevProp_1
+   \   0000002C   140000EA           B        ??_GetDevProp_1
+   \   00000030   0D0000EA           B        ??_GetDevProp_6
+   \   00000034   0E0000EA           B        ??_GetDevProp_7
+   \   00000038   0F0000EA           B        ??_GetDevProp_8
+   \   0000003C   0E0000EA           B        ??_GetDevProp_8
+   \   00000040   0D0000EA           B        ??_GetDevProp_8
+   \   00000044   0C0000EA           B        ??_GetDevProp_8
+   \   00000048   090000EA           B        ??_GetDevProp_7
+    856            case LCD_DEVCAP_XSIZE:
+    857              return pContext->xSize;
+   \                     ??_GetDevProp_2:
+   \   0000004C   040090E5           LDR      R0,[R0, #+4]
+   \   00000050   1EFF2FE1           BX       LR
+    858            case LCD_DEVCAP_YSIZE:
+    859              return pContext->ySize;
+   \                     ??_GetDevProp_3:
+   \   00000054   080090E5           LDR      R0,[R0, #+8]
+   \   00000058   1EFF2FE1           BX       LR
+    860            case LCD_DEVCAP_VXSIZE:
+    861              return pContext->vxSize;
+   \                     ??_GetDevProp_4:
+   \   0000005C   0C0090E5           LDR      R0,[R0, #+12]
+   \   00000060   1EFF2FE1           BX       LR
+    862            case LCD_DEVCAP_VYSIZE:
+    863              return pContext->vySize;
+   \                     ??_GetDevProp_5:
+   \   00000064   100090E5           LDR      R0,[R0, #+16]
+   \   00000068   1EFF2FE1           BX       LR
+    864          
+    865            case LCD_DEVCAP_BITSPERPIXEL:
+    866              return 16;
+   \                     ??_GetDevProp_6:
+   \   0000006C   1000A0E3           MOV      R0,#+16
+   \   00000070   1EFF2FE1           BX       LR
+    867            case LCD_DEVCAP_NUMCOLORS:
+    868              return 0;
+   \                     ??_GetDevProp_7:
+   \   00000074   0000A0E3           MOV      R0,#+0
+   \   00000078   1EFF2FE1           BX       LR
+    869            case LCD_DEVCAP_XMAG:
+    870              return 1;
+   \                     ??_GetDevProp_8:
+   \   0000007C   0100A0E3           MOV      R0,#+1
+   \   00000080   1EFF2FE1           BX       LR
+    871            case LCD_DEVCAP_YMAG:
+    872              return 1;
+    873            case LCD_DEVCAP_MIRROR_X:
+    874              return 1;
+    875            case LCD_DEVCAP_MIRROR_Y:
+    876              return 1;
+    877            case LCD_DEVCAP_SWAP_XY:
+    878              return 0;
+    879            }
+    880            return -1;
+   \                     ??_GetDevProp_1:
+   \   00000084   0000E0E3           MVN      R0,#+0
+   \   00000088   1EFF2FE1           BX       LR               ;; return
+    881          }
+    882          
+    883          /*********************************************************************
+    884          *
+    885          *       _GetDevData
+    886          */
+
+   \                                 In section .text, align 4, keep-with-next
+    887          static void * _GetDevData(GUI_DEVICE * pDevice, int Index) {
+    888            GUI_USE_PARA(pDevice);
+    889            switch (Index) {
+   \                     _GetDevData:
+   \   00000000   010051E3           CMP      R1,#+1
+   \   00000004   0100001A           BNE      ??_GetDevData_0
+    890            #if GUI_SUPPORT_MEMDEV
+    891              case LCD_DEVDATA_MEMDEV:
+    892                return (void *)&GUI_MEMDEV_DEVICE_16;
+   \   00000008   ........           LDR      R0,??DataTable17
+   \   0000000C   1EFF2FE1           BX       LR
+    893            #endif
+    894            }
+    895            return NULL;
+   \                     ??_GetDevData_0:
+   \   00000010   0000A0E3           MOV      R0,#+0
+   \   00000014   1EFF2FE1           BX       LR               ;; return
+    896          }
+    897          
+    898          /*********************************************************************
+    899          *
+    900          *       Static code: Functions available by _GetDevFunc()
+    901          *
+    902          **********************************************************************
+    903          */
+    904          /*********************************************************************
+    905          *
+    906          *       _ReadRect
+    907          */
+
+   \                                 In section .text, align 4, keep-with-next
+    908          static void _ReadRect(GUI_DEVICE * pDevice, int x0, int y0, int x1, int y1, LCD_PIXELINDEX * pBuffer) {
+   \                     _ReadRect:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+    909            DRIVER_CONTEXT * pContext;
+    910            U32 Off;
+    911            int x, NumPixelsPerLine;
+    912            U16 * p;
+    913          
+    914            pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+   \   00000004   080090E5           LDR      R0,[R0, #+8]
+   \   00000008   10E09DE5           LDR      LR,[SP, #+16]
+   \   0000000C   0C4090E5           LDR      R4,[R0, #+12]
+   \   00000010   14C09DE5           LDR      R12,[SP, #+20]
+   \   00000014   014044E2           SUB      R4,R4,#+1
+   \   00000018   011044E0           SUB      R1,R4,R1
+    915            x0 = (pContext->vxSize - 1 - (x0));
+    916            x1 = (pContext->vxSize - 1 - (x1));
+   \   0000001C   033044E0           SUB      R3,R4,R3
+   \   00000020   104090E5           LDR      R4,[R0, #+16]
+   \   00000024   014044E2           SUB      R4,R4,#+1
+   \   00000028   022044E0           SUB      R2,R4,R2
+    917            y0 = (pContext->vySize - 1 - (y0));
+    918            y1 = (pContext->vySize - 1 - (y1));
+   \   0000002C   0EE044E0           SUB      LR,R4,LR
+    919            p = (U16 *)pBuffer;
+    920            x = x0;
+   \   00000030   0140A0E1           MOV      R4,R1
+    921            do {
+    922              Off = XY2OFF16(pContext->vxSizePhys, x0, y0);
+    923              NumPixelsPerLine = x0 - x1 + 1;
+   \                     ??_ReadRect_0:
+   \   00000034   146090E5           LDR      R6,[R0, #+20]
+   \   00000038   035041E0           SUB      R5,R1,R3
+   \   0000003C   961221E0           MLA      R1,R6,R2,R1
+   \   00000040   015085E2           ADD      R5,R5,#+1
+   \   00000044   8110A0E1           LSL      R1,R1,#+1
+    924              do {
+    925                *p++ = READ_MEM16(pContext->VRAMAddr, Off);
+   \                     ??_ReadRect_1:
+   \   00000048   006090E5           LDR      R6,[R0, #+0]
+    926                Off--;
+    927              } while (--NumPixelsPerLine);
+   \   0000004C   015045E2           SUB      R5,R5,#+1
+   \   00000050   B66091E1           LDRH     R6,[R1, +R6]
+   \   00000054   021041E2           SUB      R1,R1,#+2
+   \   00000058   000055E3           CMP      R5,#+0
+   \   0000005C   B260CCE0           STRH     R6,[R12], #+2
+   \   00000060   F8FFFF1A           BNE      ??_ReadRect_1
+    928              x0 = x;
+    929            } while (y0-- > y1);
+   \   00000064   0250A0E1           MOV      R5,R2
+   \   00000068   0410A0E1           MOV      R1,R4
+   \   0000006C   012045E2           SUB      R2,R5,#+1
+   \   00000070   05005EE1           CMP      LR,R5
+   \   00000074   EEFFFFBA           BLT      ??_ReadRect_0
+    930          }
+   \   00000078   7080BDE8           POP      {R4-R6,PC}       ;; return
+    931          
+    932          /*********************************************************************
+    933          *
+    934          *       _SetVRAMAddr
+    935          */
+
+   \                                 In section .text, align 4, keep-with-next
+    936          static void _SetVRAMAddr(GUI_DEVICE * pDevice, void * pVRAM) {
+   \                     _SetVRAMAddr:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0150A0E1           MOV      R5,R1
+    937            DRIVER_CONTEXT * pContext;
+    938            LCD_X_SETVRAMADDR_INFO Data = {0};
+   \   00000008   ............       ADRL     R1,`?<Constant {(void *)0}>`
+   \              ....        
+   \   00000010   04D04DE2           SUB      SP,SP,#+4
+   \   00000014   001091E5           LDR      R1,[R1, #+0]
+   \   00000018   0040A0E1           MOV      R4,R0
+   \   0000001C   00108DE5           STR      R1,[SP, #+0]
+    939          
+    940            _InitOnce(pDevice);
+   \   00000020   080094E5           LDR      R0,[R4, #+8]
+   \   00000024   000050E3           CMP      R0,#+0
+   \   00000028   0500001A           BNE      ??_SetVRAMAddr_0
+   \   0000002C   2C00A0E3           MOV      R0,#+44
+   \   00000030   ........           BL       GUI_ALLOC_GetFixedBlock
+   \   00000034   080084E5           STR      R0,[R4, #+8]
+   \   00000038   2C20A0E3           MOV      R2,#+44
+   \   0000003C   0010A0E3           MOV      R1,#+0
+   \   00000040   ........           BL       GUI__memset
+    941            if (pDevice->u.pContext) {
+   \                     ??_SetVRAMAddr_0:
+   \   00000044   080094E5           LDR      R0,[R4, #+8]
+   \   00000048   000050E3           CMP      R0,#+0
+   \   0000004C   0500000A           BEQ      ??_SetVRAMAddr_1
+    942              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+    943              pContext->VRAMAddr = (U32)pVRAM;
+   \   00000050   005080E5           STR      R5,[R0, #+0]
+    944              Data.pVRAM = pVRAM;
+   \   00000054   00508DE5           STR      R5,[SP, #+0]
+    945              LCD_X_DisplayDriver(pDevice->LayerIndex, LCD_X_SETVRAMADDR, (void *)&Data);
+   \   00000058   0D20A0E1           MOV      R2,SP
+   \   0000005C   0210A0E3           MOV      R1,#+2
+   \   00000060   180094E5           LDR      R0,[R4, #+24]
+   \   00000064   ........           BL       LCD_X_DisplayDriver
+    946            }
+    947            #ifdef WIN32
+    948              SIM_Lin_SetVRAMAddr(pDevice->LayerIndex, pVRAM);
+    949            #endif
+    950          }
+   \                     ??_SetVRAMAddr_1:
+   \   00000068   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   0000006C   3080BDE8           POP      {R4,R5,PC}       ;; return
+    951          
+    952          /*********************************************************************
+    953          *
+    954          *       _SetVSize
+    955          */
+
+   \                                 In section .text, align 4, keep-with-next
+    956          static void _SetVSize(GUI_DEVICE * pDevice, int xSize, int ySize) {
+   \                     _SetVSize:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    957            DRIVER_CONTEXT * pContext;
+    958          
+    959            _InitOnce(pDevice);
+   \   00000008   080094E5           LDR      R0,[R4, #+8]
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0260A0E1           MOV      R6,R2
+   \   00000014   000050E3           CMP      R0,#+0
+   \   00000018   0500001A           BNE      ??_SetVSize_0
+   \   0000001C   2C00A0E3           MOV      R0,#+44
+   \   00000020   ........           BL       GUI_ALLOC_GetFixedBlock
+   \   00000024   080084E5           STR      R0,[R4, #+8]
+   \   00000028   2C20A0E3           MOV      R2,#+44
+   \   0000002C   0010A0E3           MOV      R1,#+0
+   \   00000030   ........           BL       GUI__memset
+    960            if (pDevice->u.pContext) {
+   \                     ??_SetVSize_0:
+   \   00000034   080094E5           LDR      R0,[R4, #+8]
+   \   00000038   000050E3           CMP      R0,#+0
+    961              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+    962              pContext->vxSize = xSize;
+   \   0000003C   0C508015           STRNE    R5,[R0, #+12]
+    963              pContext->vySize = ySize;
+   \   00000040   10608015           STRNE    R6,[R0, #+16]
+    964              pContext->vxSizePhys = xSize;
+   \   00000044   14508015           STRNE    R5,[R0, #+20]
+    965            }
+    966            #ifdef WIN32
+    967              SIM_Lin_SetVRAMSize(pDevice->LayerIndex, xSize, ySize);
+    968            #endif
+    969          }
+   \   00000048   7080BDE8           POP      {R4-R6,PC}       ;; return
+    970          
+    971          /*********************************************************************
+    972          *
+    973          *       _SetSize
+    974          */
+
+   \                                 In section .text, align 4, keep-with-next
+    975          static void _SetSize(GUI_DEVICE * pDevice, int xSize, int ySize) {
+   \                     _SetSize:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0150A0E1           MOV      R5,R1
+    976            DRIVER_CONTEXT * pContext;
+    977            LCD_X_SETSIZE_INFO Data = {0};
+   \   00000008   ............       ADRL     R1,`?<Constant {0}>_1`
+   \              ....        
+   \   00000010   0260A0E1           MOV      R6,R2
+   \   00000014   08D04DE2           SUB      SP,SP,#+8
+   \   00000018   0040A0E1           MOV      R4,R0
+   \   0000001C   002091E5           LDR      R2,[R1, #+0]
+   \   00000020   043091E5           LDR      R3,[R1, #+4]
+   \   00000024   0D00A0E1           MOV      R0,SP
+   \   00000028   0C0080E8           STM      R0,{R2,R3}
+    978          
+    979            _InitOnce(pDevice);
+   \   0000002C   080094E5           LDR      R0,[R4, #+8]
+   \   00000030   000050E3           CMP      R0,#+0
+   \   00000034   0500001A           BNE      ??_SetSize_0
+   \   00000038   2C00A0E3           MOV      R0,#+44
+   \   0000003C   ........           BL       GUI_ALLOC_GetFixedBlock
+   \   00000040   080084E5           STR      R0,[R4, #+8]
+   \   00000044   2C20A0E3           MOV      R2,#+44
+   \   00000048   0010A0E3           MOV      R1,#+0
+   \   0000004C   ........           BL       GUI__memset
+    980            if (pDevice->u.pContext) {
+   \                     ??_SetSize_0:
+   \   00000050   080094E5           LDR      R0,[R4, #+8]
+   \   00000054   000050E3           CMP      R0,#+0
+   \   00000058   0A00000A           BEQ      ??_SetSize_1
+    981              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+    982              if (pContext->vxSizePhys == 0) {
+   \   0000005C   141090E5           LDR      R1,[R0, #+20]
+    983                pContext->vxSizePhys = xSize;
+    984              }
+    985              pContext->xSize = xSize;
+    986              pContext->ySize = ySize;
+    987              Data.xSize = xSize;
+    988              Data.ySize = ySize;
+    989              LCD_X_DisplayDriver(pDevice->LayerIndex, LCD_X_SETSIZE, (void *)&Data);
+   \   00000060   0D20A0E1           MOV      R2,SP
+   \   00000064   000051E3           CMP      R1,#+0
+   \   00000068   14508005           STREQ    R5,[R0, #+20]
+   \   0000006C   045080E5           STR      R5,[R0, #+4]
+   \   00000070   086080E5           STR      R6,[R0, #+8]
+   \   00000074   00508DE5           STR      R5,[SP, #+0]
+   \   00000078   04608DE5           STR      R6,[SP, #+4]
+   \   0000007C   0710A0E3           MOV      R1,#+7
+   \   00000080   180094E5           LDR      R0,[R4, #+24]
+   \   00000084   ........           BL       LCD_X_DisplayDriver
+    990            }
+    991          }
+   \                     ??_SetSize_1:
+   \   00000088   08D08DE2           ADD      SP,SP,#+8        ;; stack cleaning
+   \   0000008C   7080BDE8           POP      {R4-R6,PC}       ;; return
+    992          
+    993          /*********************************************************************
+    994          *
+    995          *       _SetPos
+    996          */
+
+   \                                 In section .text, align 4, keep-with-next
+    997          static void _SetPos(GUI_DEVICE * pDevice, int xPos, int yPos) {
+   \                     _SetPos:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0150A0E1           MOV      R5,R1
+    998            DRIVER_CONTEXT * pContext;
+    999            LCD_X_SETPOS_INFO Data = {0};
+   \   00000008   ............       ADRL     R1,`?<Constant {0}>_2`
+   \              ....        
+   \   00000010   0260A0E1           MOV      R6,R2
+   \   00000014   08D04DE2           SUB      SP,SP,#+8
+   \   00000018   0040A0E1           MOV      R4,R0
+   \   0000001C   002091E5           LDR      R2,[R1, #+0]
+   \   00000020   043091E5           LDR      R3,[R1, #+4]
+   \   00000024   0D00A0E1           MOV      R0,SP
+   \   00000028   0C0080E8           STM      R0,{R2,R3}
+   1000          
+   1001            _InitOnce(pDevice);
+   \   0000002C   080094E5           LDR      R0,[R4, #+8]
+   \   00000030   000050E3           CMP      R0,#+0
+   \   00000034   0500001A           BNE      ??_SetPos_0
+   \   00000038   2C00A0E3           MOV      R0,#+44
+   \   0000003C   ........           BL       GUI_ALLOC_GetFixedBlock
+   \   00000040   080084E5           STR      R0,[R4, #+8]
+   \   00000044   2C20A0E3           MOV      R2,#+44
+   \   00000048   0010A0E3           MOV      R1,#+0
+   \   0000004C   ........           BL       GUI__memset
+   1002            if (pDevice->u.pContext) {
+   \                     ??_SetPos_0:
+   \   00000050   080094E5           LDR      R0,[R4, #+8]
+   \   00000054   000050E3           CMP      R0,#+0
+   \   00000058   0700000A           BEQ      ??_SetPos_1
+   1003              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+   1004              pContext->xPos = xPos;
+   \   0000005C   185080E5           STR      R5,[R0, #+24]
+   1005              pContext->yPos = yPos;
+   \   00000060   1C6080E5           STR      R6,[R0, #+28]
+   1006              Data.xPos = xPos;
+   \   00000064   00508DE5           STR      R5,[SP, #+0]
+   1007              Data.yPos = yPos;
+   \   00000068   04608DE5           STR      R6,[SP, #+4]
+   1008              LCD_X_DisplayDriver(pDevice->LayerIndex, LCD_X_SETPOS, (void *)&Data);
+   \   0000006C   0D20A0E1           MOV      R2,SP
+   \   00000070   0810A0E3           MOV      R1,#+8
+   \   00000074   180094E5           LDR      R0,[R4, #+24]
+   \   00000078   ........           BL       LCD_X_DisplayDriver
+   1009            }
+   1010          }
+   \                     ??_SetPos_1:
+   \   0000007C   08D08DE2           ADD      SP,SP,#+8        ;; stack cleaning
+   \   00000080   7080BDE8           POP      {R4-R6,PC}       ;; return
+   1011          
+   1012          /*********************************************************************
+   1013          *
+   1014          *       _GetPos
+   1015          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1016          static void _GetPos(GUI_DEVICE * pDevice, int * pxPos, int * pyPos) {
+   \                     _GetPos:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   1017            DRIVER_CONTEXT * pContext;
+   1018          
+   1019            _InitOnce(pDevice);
+   \   00000008   080094E5           LDR      R0,[R4, #+8]
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0260A0E1           MOV      R6,R2
+   \   00000014   000050E3           CMP      R0,#+0
+   \   00000018   0500001A           BNE      ??_GetPos_0
+   \   0000001C   2C00A0E3           MOV      R0,#+44
+   \   00000020   ........           BL       GUI_ALLOC_GetFixedBlock
+   \   00000024   080084E5           STR      R0,[R4, #+8]
+   \   00000028   2C20A0E3           MOV      R2,#+44
+   \   0000002C   0010A0E3           MOV      R1,#+0
+   \   00000030   ........           BL       GUI__memset
+   1020            if (pDevice->u.pContext) {
+   \                     ??_GetPos_0:
+   \   00000034   080094E5           LDR      R0,[R4, #+8]
+   \   00000038   000050E3           CMP      R0,#+0
+   \   0000003C   0300000A           BEQ      ??_GetPos_1
+   1021              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+   1022              *pxPos = pContext->xPos;
+   \   00000040   181090E5           LDR      R1,[R0, #+24]
+   \   00000044   001085E5           STR      R1,[R5, #+0]
+   1023              *pyPos = pContext->yPos;
+   \   00000048   1C0090E5           LDR      R0,[R0, #+28]
+   \   0000004C   000086E5           STR      R0,[R6, #+0]
+   1024            }
+   1025          }
+   \                     ??_GetPos_1:
+   \   00000050   7080BDE8           POP      {R4-R6,PC}       ;; return
+   1026          
+   1027          /*********************************************************************
+   1028          *
+   1029          *       _SetAlpha
+   1030          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1031          static void _SetAlpha(GUI_DEVICE * pDevice, int Alpha) {
+   \                     _SetAlpha:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0150A0E1           MOV      R5,R1
+   1032            DRIVER_CONTEXT * pContext;
+   1033            LCD_X_SETALPHA_INFO Data = {0};
+   \   00000008   ........           ADR      R1,`?<Constant {0}>_3`
+   \   0000000C   04D04DE2           SUB      SP,SP,#+4
+   \   00000010   001091E5           LDR      R1,[R1, #+0]
+   \   00000014   0040A0E1           MOV      R4,R0
+   \   00000018   00108DE5           STR      R1,[SP, #+0]
+   1034          
+   1035            _InitOnce(pDevice);
+   \   0000001C   080094E5           LDR      R0,[R4, #+8]
+   \   00000020   000050E3           CMP      R0,#+0
+   \   00000024   0500001A           BNE      ??_SetAlpha_0
+   \   00000028   2C00A0E3           MOV      R0,#+44
+   \   0000002C   ........           BL       GUI_ALLOC_GetFixedBlock
+   \   00000030   080084E5           STR      R0,[R4, #+8]
+   \   00000034   2C20A0E3           MOV      R2,#+44
+   \   00000038   0010A0E3           MOV      R1,#+0
+   \   0000003C   ........           BL       GUI__memset
+   1036            if (pDevice->u.pContext) {
+   \                     ??_SetAlpha_0:
+   \   00000040   080094E5           LDR      R0,[R4, #+8]
+   \   00000044   000050E3           CMP      R0,#+0
+   \   00000048   0500000A           BEQ      ??_SetAlpha_1
+   1037              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+   1038              pContext->Alpha = Alpha;
+   \   0000004C   205080E5           STR      R5,[R0, #+32]
+   1039              Data.Alpha = Alpha;
+   \   00000050   00508DE5           STR      R5,[SP, #+0]
+   1040              LCD_X_DisplayDriver(pDevice->LayerIndex, LCD_X_SETALPHA, (void *)&Data);
+   \   00000054   0D20A0E1           MOV      R2,SP
+   \   00000058   0A10A0E3           MOV      R1,#+10
+   \   0000005C   180094E5           LDR      R0,[R4, #+24]
+   \   00000060   ........           BL       LCD_X_DisplayDriver
+   1041            }
+   1042          }
+   \                     ??_SetAlpha_1:
+   \   00000064   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000068   3080BDE8           POP      {R4,R5,PC}       ;; return
+   1043          
+   1044          /*********************************************************************
+   1045          *
+   1046          *       _SetVis
+   1047          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1048          static void _SetVis(GUI_DEVICE * pDevice, int OnOff) {
+   \                     _SetVis:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0150A0E1           MOV      R5,R1
+   1049            DRIVER_CONTEXT * pContext;
+   1050            LCD_X_SETVIS_INFO Data = {0};
+   \   00000008   ........           ADR      R1,`?<Constant {0}>_4`
+   \   0000000C   04D04DE2           SUB      SP,SP,#+4
+   \   00000010   001091E5           LDR      R1,[R1, #+0]
+   \   00000014   0040A0E1           MOV      R4,R0
+   \   00000018   00108DE5           STR      R1,[SP, #+0]
+   1051          
+   1052            _InitOnce(pDevice);
+   \   0000001C   080094E5           LDR      R0,[R4, #+8]
+   \   00000020   000050E3           CMP      R0,#+0
+   \   00000024   0500001A           BNE      ??_SetVis_0
+   \   00000028   2C00A0E3           MOV      R0,#+44
+   \   0000002C   ........           BL       GUI_ALLOC_GetFixedBlock
+   \   00000030   080084E5           STR      R0,[R4, #+8]
+   \   00000034   2C20A0E3           MOV      R2,#+44
+   \   00000038   0010A0E3           MOV      R1,#+0
+   \   0000003C   ........           BL       GUI__memset
+   1053            if (pDevice->u.pContext) {
+   \                     ??_SetVis_0:
+   \   00000040   080094E5           LDR      R0,[R4, #+8]
+   \   00000044   000050E3           CMP      R0,#+0
+   \   00000048   0500000A           BEQ      ??_SetVis_1
+   1054              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+   1055              pContext->IsVisible = OnOff;
+   \   0000004C   245080E5           STR      R5,[R0, #+36]
+   1056              Data.OnOff = OnOff;
+   \   00000050   00508DE5           STR      R5,[SP, #+0]
+   1057              LCD_X_DisplayDriver(pDevice->LayerIndex, LCD_X_SETVIS, (void *)&Data);
+   \   00000054   0D20A0E1           MOV      R2,SP
+   \   00000058   0910A0E3           MOV      R1,#+9
+   \   0000005C   180094E5           LDR      R0,[R4, #+24]
+   \   00000060   ........           BL       LCD_X_DisplayDriver
+   1058            }
+   1059          }
+   \                     ??_SetVis_1:
+   \   00000064   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000068   3080BDE8           POP      {R4,R5,PC}       ;; return
+   1060          
+   1061          /*********************************************************************
+   1062          *
+   1063          *       _Init
+   1064          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1065          static int  _Init(GUI_DEVICE * pDevice) {
+   \                     _Init:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   1066            int r;
+   1067          
+   1068            r = _InitOnce(pDevice);
+   \   00000008   080094E5           LDR      R0,[R4, #+8]
+   \   0000000C   04D04DE2           SUB      SP,SP,#+4
+   \   00000010   000050E3           CMP      R0,#+0
+   \   00000014   0500001A           BNE      ??_Init_0
+   \   00000018   2C00A0E3           MOV      R0,#+44
+   \   0000001C   ........           BL       GUI_ALLOC_GetFixedBlock
+   \   00000020   080084E5           STR      R0,[R4, #+8]
+   \   00000024   2C20A0E3           MOV      R2,#+44
+   \   00000028   0010A0E3           MOV      R1,#+0
+   \   0000002C   ........           BL       GUI__memset
+   \                     ??_Init_0:
+   \   00000030   080094E5           LDR      R0,[R4, #+8]
+   1069            r |= LCD_X_DisplayDriver(pDevice->LayerIndex, LCD_X_INITCONTROLLER, NULL);
+   1070            return r;
+   \   00000034   0020A0E3           MOV      R2,#+0
+   \   00000038   000050E3           CMP      R0,#+0
+   \   0000003C   0150A003           MOVEQ    R5,#+1
+   \   00000040   0050A013           MOVNE    R5,#+0
+   \   00000044   0110A0E3           MOV      R1,#+1
+   \   00000048   180094E5           LDR      R0,[R4, #+24]
+   \   0000004C   ........           BL       LCD_X_DisplayDriver
+   \   00000050   050080E1           ORR      R0,R0,R5
+   \   00000054   04D08DE2           ADD      SP,SP,#+4
+   \   00000058   3080BDE8           POP      {R4,R5,PC}       ;; return
+   1071          }
+   1072          
+   1073          /*********************************************************************
+   1074          *
+   1075          *       _On
+   1076          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1077          static void _On (GUI_DEVICE * pDevice) {
+   1078            LCD_X_DisplayDriver(pDevice->LayerIndex, LCD_X_ON, NULL);
+   \                     _On:
+   \   00000000   0020A0E3           MOV      R2,#+0
+   \   00000004   0510A0E3           MOV      R1,#+5
+   \   00000008   180090E5           LDR      R0,[R0, #+24]
+   \   0000000C   ........           B        LCD_X_DisplayDriver  ;; tailcall
+   1079          }
+   1080          
+   1081          /*********************************************************************
+   1082          *
+   1083          *       _Off
+   1084          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1085          static void _Off (GUI_DEVICE * pDevice) {
+   1086            LCD_X_DisplayDriver(pDevice->LayerIndex, LCD_X_OFF, NULL);
+   \                     _Off:
+   \   00000000   0020A0E3           MOV      R2,#+0
+   \   00000004   0610A0E3           MOV      R1,#+6
+   \   00000008   180090E5           LDR      R0,[R0, #+24]
+   \   0000000C   ........           B        LCD_X_DisplayDriver  ;; tailcall
+   1087          }
+   1088          
+   1089          /*********************************************************************
+   1090          *
+   1091          *       _SetLUTEntry
+   1092          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1093          static void _SetLUTEntry(GUI_DEVICE * pDevice, U8 Pos, LCD_COLOR Color) {
+   \                     _SetLUTEntry:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   1094            LCD_X_SETLUTENTRY_INFO Data = {0};
+   \   00000004   ........           ADR      R12,`?<Constant {0L}>`
+   \   00000008   0CD04DE2           SUB      SP,SP,#+12
+   \   0000000C   00409CE5           LDR      R4,[R12, #+0]
+   \   00000010   04509CE5           LDR      R5,[R12, #+4]
+   \   00000014   0D30A0E1           MOV      R3,SP
+   \   00000018   300083E8           STM      R3,{R4,R5}
+   1095          
+   1096            Data.Pos   = Pos;
+   \   0000001C   0410CDE5           STRB     R1,[SP, #+4]
+   1097            Data.Color = Color;
+   \   00000020   00208DE5           STR      R2,[SP, #+0]
+   1098            LCD_X_DisplayDriver(pDevice->LayerIndex, LCD_X_SETLUTENTRY, (void *)&Data);
+   \   00000024   0D20A0E1           MOV      R2,SP
+   \   00000028   0410A0E3           MOV      R1,#+4
+   \   0000002C   180090E5           LDR      R0,[R0, #+24]
+   \   00000030   ........           BL       LCD_X_DisplayDriver
+   1099          }
+   \   00000034   0CD08DE2           ADD      SP,SP,#+12       ;; stack cleaning
+   \   00000038   3080BDE8           POP      {R4,R5,PC}       ;; return
+   1100          
+   1101          /*********************************************************************
+   1102          *
+   1103          *       _SetAlphaMode
+   1104          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1105          static void _SetAlphaMode(GUI_DEVICE * pDevice, int AlphaMode) {
+   \                     _SetAlphaMode:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   1106            LCD_X_SETALPHAMODE_INFO Data = {0};
+   1107          
+   1108            Data.AlphaMode = AlphaMode;
+   \   00000008   00108DE5           STR      R1,[SP, #+0]
+   1109            LCD_X_DisplayDriver(pDevice->LayerIndex, LCD_X_SETALPHAMODE, (void *)&Data);
+   \   0000000C   0D20A0E1           MOV      R2,SP
+   \   00000010   0B10A0E3           MOV      R1,#+11
+   \   00000014   180090E5           LDR      R0,[R0, #+24]
+   \   00000018   ........           BL       LCD_X_DisplayDriver
+   1110          }
+   \   0000001C   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000020   0080BDE8           POP      {PC}             ;; return
+   1111          
+   1112          /*********************************************************************
+   1113          *
+   1114          *       _SetChromaMode
+   1115          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1116          static void _SetChromaMode(GUI_DEVICE * pDevice, int ChromaMode) {
+   \                     _SetChromaMode:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   1117            LCD_X_SETCHROMAMODE_INFO Data = {0};
+   1118          
+   1119            Data.ChromaMode = ChromaMode;
+   \   00000008   00108DE5           STR      R1,[SP, #+0]
+   1120            LCD_X_DisplayDriver(pDevice->LayerIndex, LCD_X_SETCHROMAMODE, (void *)&Data);
+   \   0000000C   0D20A0E1           MOV      R2,SP
+   \   00000010   0C10A0E3           MOV      R1,#+12
+   \   00000014   180090E5           LDR      R0,[R0, #+24]
+   \   00000018   ........           BL       LCD_X_DisplayDriver
+   1121          }
+   \   0000001C   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000020   0080BDE8           POP      {PC}             ;; return
+   1122          
+   1123          /*********************************************************************
+   1124          *
+   1125          *       _SetChroma
+   1126          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1127          static void _SetChroma(GUI_DEVICE * pDevice, LCD_COLOR ChromaMin, LCD_COLOR ChromaMax) {
+   \                     _SetChroma:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   1128            LCD_X_SETCHROMA_INFO Data = {0};
+   \   00000004   ........           ADR      R12,`?<Constant {0L}>_1`
+   \   00000008   0CD04DE2           SUB      SP,SP,#+12
+   \   0000000C   00409CE5           LDR      R4,[R12, #+0]
+   \   00000010   04509CE5           LDR      R5,[R12, #+4]
+   \   00000014   0D30A0E1           MOV      R3,SP
+   \   00000018   300083E8           STM      R3,{R4,R5}
+   1129          
+   1130            Data.ChromaMin = ChromaMin;
+   \   0000001C   00108DE5           STR      R1,[SP, #+0]
+   1131            Data.ChromaMax = ChromaMax;
+   \   00000020   04208DE5           STR      R2,[SP, #+4]
+   1132            LCD_X_DisplayDriver(pDevice->LayerIndex, LCD_X_SETCHROMA, (void *)&Data);
+   \   00000024   0D20A0E1           MOV      R2,SP
+   \   00000028   0D10A0E3           MOV      R1,#+13
+   \   0000002C   180090E5           LDR      R0,[R0, #+24]
+   \   00000030   ........           BL       LCD_X_DisplayDriver
+   1133          }
+   \   00000034   0CD08DE2           ADD      SP,SP,#+12       ;; stack cleaning
+   \   00000038   3080BDE8           POP      {R4,R5,PC}       ;; return
+   1134          
+   1135          /*********************************************************************
+   1136          *
+   1137          *       _SetFunc
+   1138          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1139          static void _SetFunc(GUI_DEVICE * pDevice, int Index, void (* pFunc)(void)) {
+   \                     _SetFunc:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   1140            DRIVER_CONTEXT * pContext;
+   1141          
+   1142            _InitOnce(pDevice);
+   \   00000008   080094E5           LDR      R0,[R4, #+8]
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0260A0E1           MOV      R6,R2
+   \   00000014   000050E3           CMP      R0,#+0
+   \   00000018   0500001A           BNE      ??_SetFunc_0
+   \   0000001C   2C00A0E3           MOV      R0,#+44
+   \   00000020   ........           BL       GUI_ALLOC_GetFixedBlock
+   \   00000024   080084E5           STR      R0,[R4, #+8]
+   \   00000028   2C20A0E3           MOV      R2,#+44
+   \   0000002C   0010A0E3           MOV      R1,#+0
+   \   00000030   ........           BL       GUI__memset
+   1143            if (pDevice->u.pContext) {
+   \                     ??_SetFunc_0:
+   \   00000034   080094E5           LDR      R0,[R4, #+8]
+   \   00000038   000050E3           CMP      R0,#+0
+   \   0000003C   0100000A           BEQ      ??_SetFunc_1
+   1144              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+   1145              switch (Index) {
+   \   00000040   170055E3           CMP      R5,#+23
+   1146              case LCD_DEVFUNC_FILLRECT:
+   1147                pContext->pfFillRect = (void (*)(int LayerIndex, int x0, int y0, int x1, int y1, U32 PixelIndex))pFunc;
+   \   00000044   28608005           STREQ    R6,[R0, #+40]
+   1148                break;
+   1149              }
+   1150            }
+   1151          }
+   \                     ??_SetFunc_1:
+   \   00000048   7080BDE8           POP      {R4-R6,PC}       ;; return
+   1152          
+   1153          /*********************************************************************
+   1154          *
+   1155          *       _GetDevFunc
+   1156          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1157          static void (* _GetDevFunc(GUI_DEVICE ** ppDevice, int Index))(void) {
+   1158            GUI_USE_PARA(ppDevice);
+   1159            switch (Index) {
+   \                     _GetDevFunc:
+   \   00000000   011041E2           SUB      R1,R1,#+1
+   \   00000004   150051E3           CMP      R1,#+21
+   \   00000008   01F18F90           ADDLS    PC,PC,R1, LSL #+2
+   \                     ??_GetDevFunc_0:
+   \   0000000C   3500008A           BHI      ??_GetDevFunc_1
+   \   00000010   140000EA           B        ??_GetDevFunc_2
+   \   00000014   1F0000EA           B        ??_GetDevFunc_3
+   \   00000018   1A0000EA           B        ??_GetDevFunc_4
+   \   0000001C   1B0000EA           B        ??_GetDevFunc_5
+   \   00000020   300000EA           B        ??_GetDevFunc_1
+   \   00000024   1D0000EA           B        ??_GetDevFunc_6
+   \   00000028   2E0000EA           B        ??_GetDevFunc_1
+   \   0000002C   2D0000EA           B        ??_GetDevFunc_1
+   \   00000030   0E0000EA           B        ??_GetDevFunc_7
+   \   00000034   0F0000EA           B        ??_GetDevFunc_8
+   \   00000038   100000EA           B        ??_GetDevFunc_9
+   \   0000003C   190000EA           B        ??_GetDevFunc_10
+   \   00000040   280000EA           B        ??_GetDevFunc_1
+   \   00000044   190000EA           B        ??_GetDevFunc_11
+   \   00000048   1A0000EA           B        ??_GetDevFunc_12
+   \   0000004C   1B0000EA           B        ??_GetDevFunc_13
+   \   00000050   240000EA           B        ??_GetDevFunc_1
+   \   00000054   230000EA           B        ??_GetDevFunc_1
+   \   00000058   1A0000EA           B        ??_GetDevFunc_14
+   \   0000005C   1B0000EA           B        ??_GetDevFunc_15
+   \   00000060   1C0000EA           B        ??_GetDevFunc_16
+   \   00000064   1D0000EA           B        ??_GetDevFunc_17
+   1160            #if 1
+   1161            case LCD_DEVFUNC_READRECT:
+   1162              return (void (*)(void))_ReadRect;
+   \                     ??_GetDevFunc_2:
+   \   00000068   ........           LDR      R0,??DataTable17_1
+   \   0000006C   1EFF2FE1           BX       LR
+   1163            #endif
+   1164            case LCD_DEVFUNC_SET_VRAM_ADDR:
+   1165              return (void (*)(void))_SetVRAMAddr;
+   \                     ??_GetDevFunc_7:
+   \   00000070   ........           LDR      R0,??DataTable17_2
+   \   00000074   1EFF2FE1           BX       LR
+   1166            case LCD_DEVFUNC_SET_VSIZE:
+   1167              return (void (*)(void))_SetVSize;
+   \                     ??_GetDevFunc_8:
+   \   00000078   ........           LDR      R0,??DataTable17_3
+   \   0000007C   1EFF2FE1           BX       LR
+   1168            case LCD_DEVFUNC_SET_SIZE:
+   1169              return (void (*)(void))_SetSize;
+   \                     ??_GetDevFunc_9:
+   \   00000080   ........           LDR      R0,??DataTable17_4
+   \   00000084   1EFF2FE1           BX       LR
+   1170            case LCD_DEVFUNC_SETPOS:
+   1171              return (void (*)(void))_SetPos;
+   \                     ??_GetDevFunc_4:
+   \   00000088   ........           LDR      R0,??DataTable17_5
+   \   0000008C   1EFF2FE1           BX       LR
+   1172            case LCD_DEVFUNC_GETPOS:
+   1173              return (void (*)(void))_GetPos;
+   \                     ??_GetDevFunc_5:
+   \   00000090   ........           LDR      R0,??DataTable17_6
+   \   00000094   1EFF2FE1           BX       LR
+   1174            case LCD_DEVFUNC_SETALPHA:
+   1175              return (void (*)(void))_SetAlpha;
+   \                     ??_GetDevFunc_3:
+   \   00000098   ........           LDR      R0,??DataTable17_7
+   \   0000009C   1EFF2FE1           BX       LR
+   1176            case LCD_DEVFUNC_SETVIS:
+   1177              return (void (*)(void))_SetVis;
+   \                     ??_GetDevFunc_6:
+   \   000000A0   ........           LDR      R0,??DataTable17_8
+   \   000000A4   1EFF2FE1           BX       LR
+   1178            case LCD_DEVFUNC_INIT:
+   1179              return (void (*)(void))_Init;
+   \                     ??_GetDevFunc_10:
+   \   000000A8   ........           LDR      R0,??DataTable17_9
+   \   000000AC   1EFF2FE1           BX       LR
+   1180            case LCD_DEVFUNC_ON:
+   1181              return (void (*)(void))_On;
+   \                     ??_GetDevFunc_11:
+   \   000000B0   ........           LDR      R0,??DataTable17_10
+   \   000000B4   1EFF2FE1           BX       LR
+   1182            case LCD_DEVFUNC_OFF:
+   1183              return (void (*)(void))_Off;
+   \                     ??_GetDevFunc_12:
+   \   000000B8   ........           LDR      R0,??DataTable17_11
+   \   000000BC   1EFF2FE1           BX       LR
+   1184            case LCD_DEVFUNC_SETLUTENTRY:
+   1185              return (void (*)(void))_SetLUTEntry;
+   \                     ??_GetDevFunc_13:
+   \   000000C0   ........           LDR      R0,??DataTable17_12
+   \   000000C4   1EFF2FE1           BX       LR
+   1186          
+   1187            case LCD_DEVFUNC_ALPHAMODE:
+   1188              return (void (*)(void))_SetAlphaMode;
+   \                     ??_GetDevFunc_14:
+   \   000000C8   ........           LDR      R0,??DataTable17_13
+   \   000000CC   1EFF2FE1           BX       LR
+   1189            case LCD_DEVFUNC_CHROMAMODE:
+   1190              return (void (*)(void))_SetChromaMode;
+   \                     ??_GetDevFunc_15:
+   \   000000D0   ........           LDR      R0,??DataTable17_14
+   \   000000D4   1EFF2FE1           BX       LR
+   1191            case LCD_DEVFUNC_CHROMA:
+   1192              return (void (*)(void))_SetChroma;
+   \                     ??_GetDevFunc_16:
+   \   000000D8   ........           LDR      R0,??DataTable17_15
+   \   000000DC   1EFF2FE1           BX       LR
+   1193            
+   1194            case LCD_DEVFUNC_SETFUNC:
+   1195              return (void (*)(void))_SetFunc;
+   \                     ??_GetDevFunc_17:
+   \   000000E0   ........           LDR      R0,??DataTable17_16
+   \   000000E4   1EFF2FE1           BX       LR
+   1196            }
+   1197            return NULL;
+   \                     ??_GetDevFunc_1:
+   \   000000E8   0000A0E3           MOV      R0,#+0
+   \   000000EC   1EFF2FE1           BX       LR               ;; return
+   1198          }
+   1199          
+   1200          /*********************************************************************
+   1201          *
+   1202          *       Public data
+   1203          *
+   1204          **********************************************************************
+   1205          */
+   1206          /*********************************************************************
+   1207          *
+   1208          *       GUI_DEVICE_API structure
+   1209          */
+
+   \                                 In section .rodata, align 4, keep-with-next
+   1210          const GUI_DEVICE_API GUIDRV_Lin_OXY_16_API = {
+   \                     GUIDRV_Lin_OXY_16_API:
+   \   00000000                      ; Initializer data, 52 bytes
+   \   00000000   00000000....       DC32 0, _DrawBitmap, _DrawHLine, _DrawVLine, _FillRect, _GetPixelIndex, _SetPixelIndex, _XorPixel, _SetOrg, _GetDevFunc
+   \              ............
+   \              ............
+   \              ............
+   \              ............
+   \              ............
+   \              ........    
+   \   00000028   ............       DC32 _GetDevProp, _GetDevData, _GetRect
+   \              ............
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable15:
+   \   00000000   ........           DC32     GUI_Context
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable15_1:
+   \   00000000   ........           DC32     LCD_pColorIndex
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable16:
+   \   00000000   ........           DC32     LCD_aMirror
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17:
+   \   00000000   ........           DC32     GUI_MEMDEV_DEVICE_16
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_1:
+   \   00000000   ........           DC32     _ReadRect
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_2:
+   \   00000000   ........           DC32     _SetVRAMAddr
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_3:
+   \   00000000   ........           DC32     _SetVSize
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_4:
+   \   00000000   ........           DC32     _SetSize
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_5:
+   \   00000000   ........           DC32     _SetPos
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_6:
+   \   00000000   ........           DC32     _GetPos
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_7:
+   \   00000000   ........           DC32     _SetAlpha
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_8:
+   \   00000000   ........           DC32     _SetVis
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_9:
+   \   00000000   ........           DC32     _Init
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_10:
+   \   00000000   ........           DC32     _On
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_11:
+   \   00000000   ........           DC32     _Off
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_12:
+   \   00000000   ........           DC32     _SetLUTEntry
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_13:
+   \   00000000   ........           DC32     _SetAlphaMode
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_14:
+   \   00000000   ........           DC32     _SetChromaMode
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_15:
+   \   00000000   ........           DC32     _SetChroma
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_16:
+   \   00000000   ........           DC32     _SetFunc
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant {0}>`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   00000000           DC32 0
+   \   00000004   00000000           DC8 0, 0, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant {(void *)0}>`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   00000000           DC32 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant {0}>_1`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   00000000           DC32 0
+   \   00000004   00000000           DC8 0, 0, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant {0}>_2`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   00000000           DC32 0
+   \   00000004   00000000           DC8 0, 0, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant {0}>_3`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   00000000           DC32 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant {0}>_4`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   00000000           DC32 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant {0L}>`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   00000000           DC32 0
+   \   00000004   00000000           DC8 0, 0, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant {0L}>_1`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   00000000           DC32 0
+   \   00000004   00000000           DC8 0, 0, 0, 0
+   1211            //
+   1212            // Data
+   1213            //
+   1214            DEVICE_CLASS_DRIVER,
+   1215            //
+   1216            // Drawing functions
+   1217            //
+   1218            _DrawBitmap,
+   1219            _DrawHLine,
+   1220            _DrawVLine,
+   1221            _FillRect,
+   1222            _GetPixelIndex,
+   1223            _SetPixelIndex,
+   1224            _XorPixel,
+   1225            //
+   1226            // Set origin
+   1227            //
+   1228            _SetOrg,
+   1229            //
+   1230            // Request information
+   1231            //
+   1232            _GetDevFunc,
+   1233            _GetDevProp,
+   1234            _GetDevData,
+   1235            _GetRect,
+   1236          };
+   1237          
+   1238          #else
+   1239          
+   1240          void GUIDRV_Lin_OXY_16_C(void);   // Avoid empty object files
+   1241          void GUIDRV_Lin_OXY_16_C(void) {}
+   1242          
+   1243          #endif
+   1244          
+   1245          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function          .cstack
+     --------          -------
+     _DrawBitLine16BPP     12
+     _DrawBitLine1BPP      32
+     _DrawBitLine2BPP      36
+     _DrawBitLine4BPP      36
+     _DrawBitLine8BPP      12
+     _DrawBitmap           56
+     _DrawHLine            24
+     _DrawVLine            24
+     _FillRect             40
+     _GetDevData            0
+     _GetDevFunc            0
+     _GetDevProp            0
+     _GetPixelIndex         0
+     _GetPos               16
+     _GetRect               0
+     _Init                 16
+     _Off                   8
+     _On                    8
+     _ReadRect             16
+     _SetAlpha             16
+     _SetAlphaMode          8
+     _SetChroma            24
+     _SetChromaMode         8
+     _SetFunc              16
+     _SetLUTEntry          24
+     _SetOrg               24
+     _SetPixelIndex         4
+     _SetPos               24
+     _SetSize              24
+     _SetVRAMAddr          16
+     _SetVSize             16
+     _SetVis               16
+     _XorPixel             24
+
+
+   Section sizes:
+
+     Function/Label          Bytes
+     --------------          -----
+     _SetPixelIndex            56
+     _GetPixelIndex            52
+     _XorPixel                140
+     _DrawHLine               404
+     _DrawVLine               256
+     _FillRect                352
+     _DrawBitLine1BPP         328
+     _DrawBitLine2BPP         508
+     _DrawBitLine4BPP         508
+     _DrawBitLine8BPP         360
+     _DrawBitLine16BPP        496
+     _DrawBitmap              952
+     _SetOrg                  100
+     _GetRect                  44
+     _GetDevProp              140
+     _GetDevData               24
+     _ReadRect                124
+     _SetVRAMAddr             112
+     _SetVSize                 76
+     _SetSize                 144
+     _SetPos                  132
+     _GetPos                   84
+     _SetAlpha                108
+     _SetVis                  108
+     _Init                     92
+     _On                       16
+     _Off                      16
+     _SetLUTEntry              60
+     _SetAlphaMode             36
+     _SetChromaMode            36
+     _SetChroma                60
+     _SetFunc                  76
+     _GetDevFunc              240
+     GUIDRV_Lin_OXY_16_API     52
+     ??DataTable15              4
+     ??DataTable15_1            4
+     ??DataTable16              4
+     ??DataTable17              4
+     ??DataTable17_1            4
+     ??DataTable17_2            4
+     ??DataTable17_3            4
+     ??DataTable17_4            4
+     ??DataTable17_5            4
+     ??DataTable17_6            4
+     ??DataTable17_7            4
+     ??DataTable17_8            4
+     ??DataTable17_9            4
+     ??DataTable17_10           4
+     ??DataTable17_11           4
+     ??DataTable17_12           4
+     ??DataTable17_13           4
+     ??DataTable17_14           4
+     ??DataTable17_15           4
+     ??DataTable17_16           4
+     ?<Constant {0}>            8
+     ?<Constant {(void *)0}>    4
+     ?<Constant {0}>_1          8
+     ?<Constant {0}>_2          8
+     ?<Constant {0}>_3          4
+     ?<Constant {0}>_4          4
+     ?<Constant {0L}>           8
+     ?<Constant {0L}>_1         8
+
+ 
+    52 bytes in section .rodata
+ 6 372 bytes in section .text
+ 
+ 6 372 bytes of CODE  memory
+    52 bytes of CONST memory
+
+Errors: none
+Warnings: none

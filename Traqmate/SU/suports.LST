@@ -1,0 +1,301 @@
+C51 COMPILER V9.51   SUPORTS                                                               01/05/2016 18:47:25 PAGE 1   
+
+
+C51 COMPILER V9.51, COMPILATION OF MODULE SUPORTS
+OBJECT MODULE PLACED IN suports.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE suports.c OPTIMIZE(SIZE) BROWSE MDU_F120 INCDIR(..\..\C51\INC\;..\CommonFil
+                    -es\;..\SU\) DB OE DEFINE(SENSOR,EXTCLK6,NODEBUG,UBLOX,DISPLAYATTACHED) DEBUG OBJECTEXTEND
+
+line level    source
+
+   1          // Part of sensorunit.c
+   2          // 11/10/2003
+   3          // 12/21/2004 converted to x132 microprocessor
+   4          // 11/24/2005 added data i/o stuff
+   5          // Author: GAStephens
+   6          //
+   7          // This file contains all the functions to setup the Cygnal 8051 for use in the 
+   8          // traqmate program including the system clock, SPI port, UARTs, timers, and
+   9          // crossbar switch.
+  10          
+  11          #include <sensor.h>
+  12          
+  13          //-----------------------------------------------------------------------------
+  14          // Initialization Subroutines
+  15          //-----------------------------------------------------------------------------
+  16          
+  17          //-----------------------------------------------------------------------------
+  18          // PORT_Init
+  19          //-----------------------------------------------------------------------------
+  20          //
+  21          // Configure the Crossbar and GPIO ports
+  22          //
+  23          // this function does the following:
+  24          //              enables uarts 0,1 and sets their tx lines as push-pull
+  25          //              enables the SPI ports and sets SO and SCK as push-pull
+  26          //              configures digital inputs as inputs
+  27          //              enables the SMB bus
+  28          //              enables the crossbar itself and sets weak pullups
+  29          //              sets GPS_PPS signal ports to high impedance
+  30          //              sets ACC_ST, 3.3V_GPS_ENABLE, 3.3V_IF_ENABLE signal ports to push-pull
+  31          //              sets 
+  32          
+  33          //
+  34          void PORT_Init_SU (void) {
+  35   1      //      u16 i;
+  36   1              
+  37   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+  38   1      
+  39   1              SFRPAGE = CONFIG_PAGE;                          // set SFR page
+  40   1      
+  41   1              XBR0    = 0xEF;                                         // 11101111 Enable all but CEX5
+  42   1              XBR1    = 0x07;                                         // 00000111 Turn on INT0, T0, CP1
+  43   1              XBR2    = 0x44;                     // 01000100 Enable crossbar, weak pull-ups, UART1
+  44   1      
+  45   1              P0MDOUT = 0x15;                                         // 00010101 enable TX0, SI, SCK, as push-pulls
+  46   1              P0 = 0xEA;                                                      // 11101010 set all open drain pins to 1
+  47   1      
+  48   1              P1MDIN  = 0xFF;                                         // set all digital i/o points (no analog)
+  49   1              P1MDOUT = 0x3D;                                         // 00111101 enable cex2, cex3, tx1, pwmx,y as push-pull
+  50   1              P1 = 0x01;                                                      // set rx1 to high impedance
+  51   1      
+  52   1              P2MDOUT = 0x00;                                         // all pins open drain
+  53   1              P2 = 0xFF;                                                      // high impedance
+  54   1      
+C51 COMPILER V9.51   SUPORTS                                                               01/05/2016 18:47:25 PAGE 2   
+
+  55   1              P6MDOUT = 0x00;                                         // all pins open drain
+  56   1              P6 = 0xFF;                                                      // high impedance
+  57   1              // test for SU2.0
+  58   1              su2 = (SU2MASK == (P6 & 0xE0));         // test for SU2.0
+  59   1      
+  60   1              if (su2) {
+  61   2                      P3 = 0x79;                                              // 01111001 P3.6 - P3.3 LEDs on, P3.2 - P3.1 off, P3.0 = 1      
+  62   2                      P3MDOUT = 0xFE;                                 // 11111110 upper 5 bits push-pull, P3.2 - P3.1 AutoOn Pushpull, P3.0 Open Drain
+  63   2              } // if 
+  64   1              else {
+  65   2                      P3 = 0x7E;                                              // lower 3 bits high impedance, LEDs on, P3.0 = 1
+  66   2                      P3MDOUT = 0xF8;                                 // 11111000 upper 5 bits push-pull
+  67   2              } // else
+  68   1      
+  69   1              // Digital Outs - write port first so no glitch on ports
+  70   1              P4 = 0x00;                                                      // set to low
+  71   1              P4MDOUT = 0xFF;                                         // all pins push-pull
+  72   1      
+  73   1              // Digital Ins
+  74   1              P5MDOUT = 0x00;                                         // all pins open drain
+  75   1              P5 = 0xFF;                                                      // 11111111
+  76   1      
+  77   1              if (su2) {                                                      // set port first to eliminate glitches on 3VEn
+  78   2                      P7 = 0x97;                                              // 10011111 5VEn=1, n/c, gselect=0, 3VGPS=1, /I2Cpu=0, dataflash=111
+  79   2                      P7MDOUT = 0xF7;                                 // all pins push-pull except P7.3 = /I2Cpu
+  80   2              } // if
+  81   1              else {
+  82   2                      P7MDOUT = 0xFF;                                 // all pins push-pull
+  83   2                      P7 = 0xF7;                                              // 11110111 5VEn=1, n/c, 3VIFEN=1, 3VGPS=1, GPSRESET=0, dataflash=111
+  84   2              } // else
+  85   1      
+  86   1              // SU2 version 2
+  87   1              if (su2) {
+  88   2                      EN3VGPS = 0;
+  89   2                      ENSMBPU = 1;                                    // disable I2C pullup
+  90   2              } // if
+  91   1              else
+  92   1                      EN3VGPS = 1;
+  93   1      
+  94   1              SFRPAGE = SFRPAGE_SAVE;                         // Restore SFR page
+  95   1      } // Port_Init_SU
+  96          
+  97          // Initializes the counters for use with Frequency 0 input (RPM)
+  98          //
+  99          void Freq0_Init (void) {
+ 100   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 101   1      
+ 102   1              // configure the PCA to generate timing signal for RPM measurement
+ 103   1              SFRPAGE = PCA0_PAGE;
+ 104   1              PCA0CN =        0x00;                                   // 01000000 PCA0 disabled
+ 105   1              PCA0MD =        0x80;                                   // 1000000 suspend with microp, SYSCLK / 12
+ 106   1              PCA0L = 0x00;                                           // clear the counter
+ 107   1              PCA0H = 0x00;
+ 108   1              PCA0CPL2 = 0;                                           // clear lower byte of register
+ 109   1              PCA0CPH2 = (SYSCLK/12/FREQ_SAMPLE_RATE/2);      // magic number to get widest RPM range = 256000 freq0ticks/se
+             -c = 12 for 75Mhz
+ 110   1              PCA0CPM2 = 0x46;                                        // 01000110 Frequency Output Mode
+ 111   1              PCA0CN = 0x40;                                          // 01000000 PCA0 enabled
+ 112   1      
+ 113   1              // clear global period counterss
+ 114   1              period0 = negperiod0 = 0;
+ 115   1      
+C51 COMPILER V9.51   SUPORTS                                                               01/05/2016 18:47:25 PAGE 3   
+
+ 116   1              // configure T0 to count pulses from PCA, generate interrupt on overflow
+ 117   1              SFRPAGE = TIMER01_PAGE;
+ 118   1              TR0 = 0;                                                        // disable Timer 0
+ 119   1              TMOD = (TMOD & 0xFF00) | 0x05;          // xxxx0101, not gated, counter, 16 bit
+ 120   1              CKCON = CKCON | 0x08;                           // xxxx1xxx, use system clock   
+ 121   1              TL0 = 0x00;                                                     // clear the counter/timer
+ 122   1              TH0 = 0x00;
+ 123   1              TF0 = 0;                                                        // clear T0 overflow flag
+ 124   1              TR0 = 1;                                                        // enable Timer 0
+ 125   1      
+ 126   1              // configure Comparator 0
+ 127   1              SFRPAGE = CPT0_PAGE;
+ 128   1              CPT0CN = 0x80;                                          // 10000000, CPT0 enabled, no hysteresis
+ 129   1      //      CPT0CN = 0x8F;                                          // 11001111, CPT0 enabled, compare CPT0+ > CPT0-, +,- hysteresis
+ 130   1      //      CPT0MD = 0x23;                                          // 00100011 rising edge, slow response time
+ 131   1              CPT0MD = (RISING_EDGE | FALLING_EDGE);          // 00110000 rising and falling edge, fast response time
+ 132   1      
+ 133   1              // enable interrupts
+ 134   1      //      EIP1 &= ~0x20;                                          // set comparator input low priority
+ 135   1              ET0 = 1;                                                        // enable T0 interrupt
+ 136   1              EIE1 |= (RISING_EDGE | FALLING_EDGE);   // xx11xxxx enable CPT0 rising and falling edge interrupts
+ 137   1      
+ 138   1              SFRPAGE = SFRPAGE_SAVE;                         // Restore SFR page
+ 139   1      
+ 140   1      } // Freq0_Init
+ 141          
+ 142          //
+ 143          // PPS_Init
+ 144          //
+ 145          // Setup external interrupt for GPS Pulse Per Second
+ 146          //
+ 147          void PPS_Init (void) {
+ 148   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 149   1      
+ 150   1              SFRPAGE = LEGACY_PAGE;                          // set SFR page
+ 151   1      
+ 152   1              IE0 = 0;                                                        // clear pending flag
+ 153   1              IT0 = 1;                                                        // INT0 edge triggered
+ 154   1              EX0 = 1;                                                        // enable INT0
+ 155   1      
+ 156   1              SFRPAGE = SFRPAGE_SAVE;                         // Restore SFR page
+ 157   1      }
+ 158          
+ 159          // interrupt for Frequency 0 Input (RPM), rising edge on Comparator 0
+ 160          void Freq0_Rising_ISR (void) interrupt 11 {
+ 161   1              u16 temp;
+ 162   1              static u08 freqbufferindex = 0xFF;
+ 163   1              static u32 freqtotal;
+ 164   1      
+ 165   1              EIE1 &= ~(RISING_EDGE | FALLING_EDGE);          // disable CPT0 rising and falling edge interrupts
+ 166   1      
+ 167   1              SFRPAGE = TIMER01_PAGE;
+ 168   1              temp = (((u16) TH0) << 8) + TL0;        // save the timer count in freq0ticks
+ 169   1      
+ 170   1              // ignore if not enough time has passed since negative-going pulse
+ 171   1              if ((temp - negperiod0) > PULSE_KEEPOUT) {
+ 172   2      
+ 173   2                      TR0 = 0;                                                        // stop Timer0
+ 174   2                      TL0 = 0x00;                                                     // clear the counter/timer
+ 175   2                      TH0 = 0x00;
+ 176   2                      TF0 = 0;                                                        // clear T0 overflow flag
+ 177   2                      TR0 = 1;                                                        // enable Timer 0
+C51 COMPILER V9.51   SUPORTS                                                               01/05/2016 18:47:25 PAGE 4   
+
+ 178   2                      if (0xFF == freqbufferindex) {          // first time through
+ 179   3                              u08 i;
+ 180   3                              freqbufferindex = 0;                    // initialize index
+ 181   3                              for     (i=0; i<RPM_AVERAGING; i++)     // prime the buffer
+ 182   3                                      freqtotal += (periodbuff[i] = temp);
+ 183   3                              period0 = temp;                                 // publish the value
+ 184   3                      } // if
+ 185   2                      else {
+ 186   3                              if (++freqbufferindex >= RPM_AVERAGING) freqbufferindex = 0; // roll index back around
+ 187   3                              freqtotal -= periodbuff[freqbufferindex];                       // subtract off oldest value
+ 188   3                              freqtotal += (periodbuff[freqbufferindex] = temp);      // add in new value
+ 189   3                              temp = freqtotal / RPM_AVERAGING;                                       // get the average
+ 190   3                              if (ABS(period0 - temp) >= (period0 >> 9))                      // suppress small changes
+ 191   3                                      period0 = temp;                 
+ 192   3                      } // else                
+ 193   2      
+ 194   2                      negperiod0 = 0;                                         // reset negative-going pulse
+ 195   2              } // if 
+ 196   1      
+ 197   1              SFRPAGE = CPT0_PAGE;
+ 198   1              CPT0CN &= 0xCF;                                         // 11001111 clear rising & falling edge flags
+ 199   1                                                                                      // 11001111, CPT0 enabled, compare CPT0+ > CPT0-, +,- hysteresis
+ 200   1              EIE1 |= (RISING_EDGE | FALLING_EDGE);           // enable CPT0 rising and falling edge interrupts
+ 201   1      }
+ 202          
+ 203          // interrupt for Frequency 0 Input (RPM) falling edge on Comparator 0
+ 204          void Freq0_Falling_ISR (void) interrupt 10 {
+ 205   1      
+ 206   1              EIE1 &= ~(RISING_EDGE | FALLING_EDGE);          // disable CPT0 rising and falling edge interrupts
+ 207   1      
+ 208   1              SFRPAGE = TIMER01_PAGE;
+ 209   1              negperiod0 = (((u16) TH0) << 8) + TL0;          // save the position of the negative-going pulse
+ 210   1      
+ 211   1              SFRPAGE = CPT0_PAGE;
+ 212   1              CPT0CN &= 0xCF;                                         // 11001111 clear rising & falling edge flags
+ 213   1                                                                                      // 11001111, CPT0 enabled, compare CPT0+ > CPT0-, +,- hysteresis
+ 214   1              EIE1 |= (RISING_EDGE | FALLING_EDGE);           // enable CPT0 rising and falling edge interrupts
+ 215   1      }
+ 216          
+ 217          // interrupt for Timer 0 Overflow = Frequency 0 Input (RPM) is not working
+ 218          void T0_ISR (void) interrupt 1 {
+ 219   1      
+ 220   1              EIE1 &= ~(RISING_EDGE | FALLING_EDGE);          // disable CPT0 rising edge interrupt
+ 221   1      
+ 222   1              SFRPAGE = TIMER01_PAGE;
+ 223   1              TR0 = 0;                                                        // stop Timer0
+ 224   1              TL0 = 0x00;                                                     // clear the counter/timer
+ 225   1              TH0 = 0x00;
+ 226   1              TR0 = 1;                                                        // enable Timer 0
+ 227   1      
+ 228   1      //  may want to eliminate this to cover up falsing
+ 229   1              period0 = negperiod0 = 0;                       // didn't get ignition pulse so RPM = 0
+ 230   1      
+ 231   1              SFRPAGE = CPT0_PAGE;
+ 232   1              CPT0CN &= 0xCF;                                         // clear rising edge flag
+ 233   1                                                                                      // 11001111, CPT0 enabled, compare CPT0+ > CPT0-, +,- hysteresis
+ 234   1      
+ 235   1              EIE1 |= (RISING_EDGE | FALLING_EDGE);                                           // enable CPT0 rising edge interrupt
+ 236   1      }
+ 237          
+ 238          // interrupt for pulse per second sync signal from GPS
+ 239          void GPSPPS_ISR (void) interrupt 0 {
+C51 COMPILER V9.51   SUPORTS                                                               01/05/2016 18:47:25 PAGE 5   
+
+ 240   1              extern u16 int_dec;
+ 241   1              extern xdata u16 accumulator[NUM_CHAN];
+ 242   1              extern u08 channel;                                     // which ADC channel are we sampling
+ 243   1              u08 i;
+ 244   1              u08 EASAVE = EA;
+ 245   1      
+ 246   1              gpspulse = TRUE;                                        // set semaphore
+ 247   1              int_dec = SAMPLE_RATE * NUM_CHAN / samps_per_sec;
+ 248   1      
+ 249   1              channel = 0;
+ 250   1              for (i=0; i<NUM_CHAN; i++)
+ 251   1                      accumulator[i] = 0;                             // reset adc accumulator
+ 252   1      
+ 253   1              EA = 0;                                                         // pause interrupts
+ 254   1              EIE2 &= ~0x01;                                          // stop Timer3 interrupts
+ 255   1      
+ 256   1              SFRPAGE = ADC0_PAGE;
+ 257   1              AD0BUSY = 0;                                            // turn off adc interrupts
+ 258   1              AD0INT = 0;                                                     // clear ADC conversion complete indicator
+ 259   1              AMX0SL = 0x00;                                          // set mux back to first sample
+ 260   1      
+ 261   1              SFRPAGE = TMR3_PAGE;
+ 262   1              TMR3CN = 0x00;                                          // Stop Timer3; Clear TF3;
+ 263   1              TMR3 = 0xFFFF;                                          // set to reload real soon
+ 264   1              EIE2 |= 0x01;                                           // enable Timer3 interrupts
+ 265   1              TMR3CN |= 0x04;                                         // start Timer3
+ 266   1              
+ 267   1              EA = EASAVE;
+ 268   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    836    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =      5       3
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

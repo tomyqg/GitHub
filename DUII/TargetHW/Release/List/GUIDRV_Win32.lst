@@ -1,0 +1,872 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:15:36 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\GUI\GUIDRV_Win32.c                      #
+#    Command line =  C:\DUII\TargetHW\GUI\GUIDRV_Win32.c -D DEBUG=1 -D        #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\GUIDRV_Win32.lst           #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\GUIDRV_Win32.o              #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\GUI\GUIDRV_Win32.c
+      1          /*********************************************************************
+      2          *                SEGGER Microcontroller GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 1996 - 2010  SEGGER Microcontroller GmbH & Co. KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          ** emWin V5.06 - Graphical user interface for embedded applications **
+     13          emWin is protected by international copyright laws.   Knowledge of the
+     14          source code may not be used to write a similar product.  This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : GUIDRV_Win32.c
+     19          Purpose     : Driver for simulaton under Windows
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          #if defined(WIN32)
+     24          
+     25          #include <windows.h>
+     26          #include <memory.h>
+     27          
+     28          #include "LCD_Private.h"              /* include LCDConf.h */
+     29          #include "LCD_SIM.h"
+     30          #include "GUI_Private.h"
+     31          #include "LCD_ConfDefaults.h"
+     32          
+     33          /*********************************************************************
+     34          *
+     35          *       Types
+     36          *
+     37          **********************************************************************
+     38          */
+     39          typedef struct {
+     40            U32 VRAMAddr;
+     41            int xSize, ySize;
+     42            int vxSize, vySize;
+     43            int vxSizePhys;
+     44            int xPos, yPos;
+     45            int Alpha;
+     46            int IsVisible;
+     47            unsigned NumColors;
+     48            LCD_COLOR aColor[256];
+     49          } DRIVER_CONTEXT;
+     50          
+     51          /*********************************************************************
+     52          *
+     53          *       Defines
+     54          *
+     55          **********************************************************************
+     56          */
+     57          
+     58          #ifdef WIN32
+     59            #ifndef ASSERT
+     60              #define ASSERT(Val) \
+     61              if (!(Val)) \
+     62                MessageBox(NULL,"...in file "__FILE__,"Assertion failed...",MB_OK);
+     63            #endif
+     64          #endif
+     65          
+     66          #ifdef LCD_ASSERT
+     67            #undef LCD_ASSERT
+     68          #endif
+     69          #define LCD_ASSERT(v) ASSERT(v)
+     70          
+     71          /*********************************************************************
+     72          *
+     73          *       Macros for internal use
+     74          */
+     75          #ifdef _DEBUG
+     76          static int _CheckBound(GUI_DEVICE * pDevice, unsigned int c) {
+     77            DRIVER_CONTEXT * pContext;
+     78            U32 NumColors;
+     79          
+     80            pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+     81            NumColors = pContext->NumColors ? pContext->NumColors : 0xFFFFFFFF;
+     82            if (c > NumColors) {
+     83              GUI_DEBUG_ERROROUT("LCDWin::SETPIXEL: parameters out of bounds");
+     84              return 1;
+     85            }
+     86            return 0;
+     87          }
+     88          
+     89            #define SETPIXEL(pDevice, x, y, c) \
+     90              if (!_CheckBound(pDevice, c)) { \
+     91                LCDSIM_SetPixelIndex(x, y, c, pDevice->LayerIndex); \
+     92              }
+     93          #else
+     94            #define SETPIXEL(pDevice, x, y, c) LCDSIM_SetPixelIndex(x, y, c, pDevice->LayerIndex)
+     95          #endif
+     96          #define XORPIXEL(pDevice, x, y)    _XOR_Pixel(pDevice, x, y)
+     97          
+     98          /*********************************************************************
+     99          *
+    100          *       Static code
+    101          *
+    102          **********************************************************************
+    103          */
+    104          /*********************************************************************
+    105          *
+    106          *       _GetPixelIndex
+    107          */
+    108          static unsigned _GetPixelIndex(GUI_DEVICE * pDevice, int x, int y)  {
+    109            return LCDSIM_GetPixelIndex(x,y, pDevice->LayerIndex);
+    110          }
+    111          
+    112          /*********************************************************************
+    113          *
+    114          *       _XOR_Pixel
+    115          */
+    116          static void _XOR_Pixel(GUI_DEVICE * pDevice, int x, int y) {
+    117            LCD_PIXELINDEX PixelIndex;
+    118            LCD_PIXELINDEX IndexMask;
+    119            
+    120            PixelIndex = _GetPixelIndex(pDevice, x, y);
+    121            IndexMask  = pDevice->pColorConvAPI->pfGetIndexMask();
+    122            LCDSIM_SetPixelIndex(x, y, PixelIndex ^ IndexMask, pDevice->LayerIndex);
+    123          }
+    124          
+    125          /*********************************************************************
+    126          *
+    127          *       _XorPixel
+    128          *
+    129          *  Purpose:
+    130          *    Inverts 1 pixel of the display.
+    131          */
+    132          static void _XorPixel(GUI_DEVICE * pDevice, int x, int y) {
+    133            XORPIXEL(pDevice, x, y);
+    134          }
+    135          
+    136          /*********************************************************************
+    137          *
+    138          *       _SetPixelIndex
+    139          *
+    140          *  Purpose:
+    141          *    Writes 1 pixel into the display.
+    142          */
+    143          static void _SetPixelIndex(GUI_DEVICE * pDevice, int x, int y, int ColorIndex) {
+    144            SETPIXEL(pDevice, x, y, ColorIndex);
+    145          }
+    146          
+    147          /*********************************************************************
+    148          *
+    149          *       _DrawBitLine1BPP
+    150          */
+    151          static void _DrawBitLine1BPP(GUI_DEVICE * pDevice, int x, int y, U8 const*p, int Diff, int xSize, const LCD_PIXELINDEX*pTrans) {
+    152            LCD_PIXELINDEX Index0, Index1, IndexMask;
+    153            int Pixel;
+    154            const LCD_PIXELINDEX aTrans[2] = {0, 1};
+    155          
+    156            if (!pTrans) {
+    157              pTrans = aTrans;
+    158            }
+    159            Index0 = *(pTrans + 0);
+    160            Index1 = *(pTrans + 1);
+    161            x+=Diff;
+    162            switch (GUI_Context.DrawMode & (LCD_DRAWMODE_TRANS|LCD_DRAWMODE_XOR)) {
+    163            case 0:    /* Write mode */
+    164              do {
+    165                LCDSIM_SetPixelIndex(x++,y, (*p & (0x80>>Diff)) ? Index1 : Index0, pDevice->LayerIndex);
+    166          			if (++Diff==8) {
+    167                  Diff=0;
+    168          				p++;
+    169          			}
+    170          		} while (--xSize);
+    171              break;
+    172            case LCD_DRAWMODE_TRANS:
+    173              do {
+    174            		if (*p & (0x80>>Diff))
+    175                  LCDSIM_SetPixelIndex(x,y, Index1, pDevice->LayerIndex);
+    176                x++;
+    177          			if (++Diff==8) {
+    178                  Diff=0;
+    179          				p++;
+    180          			}
+    181          		} while (--xSize);
+    182              break;
+    183            case LCD_DRAWMODE_XOR | LCD_DRAWMODE_TRANS:
+    184            case LCD_DRAWMODE_XOR:
+    185              IndexMask  = pDevice->pColorConvAPI->pfGetIndexMask();
+    186              do {
+    187            		if (*p & (0x80>>Diff)) {
+    188                  Pixel = LCDSIM_GetPixelIndex(x,y, pDevice->LayerIndex);
+    189                  LCDSIM_SetPixelIndex(x,y, Pixel ^ IndexMask, pDevice->LayerIndex);
+    190                }
+    191                x++;
+    192          			if (++Diff==8) {
+    193                  Diff=0;
+    194          				p++;
+    195          			}
+    196          		} while (--xSize);
+    197              break;
+    198          	}
+    199          }
+    200          
+    201          /*********************************************************************
+    202          *
+    203          *       _DrawBitLine2BPP
+    204          */
+    205          static void _DrawBitLine2BPP(GUI_DEVICE * pDevice, int x, int y, U8 const * p, int Diff, int xSize, const LCD_PIXELINDEX * pTrans) {
+    206            LCD_PIXELINDEX Pixels = *p;
+    207            int CurrentPixel = Diff;
+    208            x += Diff;
+    209            switch (GUI_Context.DrawMode & (LCD_DRAWMODE_TRANS | LCD_DRAWMODE_XOR)) {
+    210              case 0:
+    211                if (pTrans) {
+    212                  do {
+    213                    int Shift = (3 - CurrentPixel) << 1;
+    214                    int Index = (Pixels & (0xC0 >> (6 - Shift))) >> Shift;
+    215                    LCD_PIXELINDEX PixelIndex = *(pTrans + Index);
+    216                    SETPIXEL(pDevice, x++, y, PixelIndex);
+    217                    if (++CurrentPixel == 4) {
+    218                      CurrentPixel = 0;
+    219                      Pixels = *(++p);
+    220                    }
+    221          		    } while (--xSize);
+    222                } else {
+    223                  do {
+    224                    int Shift = (3 - CurrentPixel) << 1;
+    225                    int Index = (Pixels & (0xC0 >> (6 - Shift))) >> Shift;
+    226                    SETPIXEL(pDevice, x++, y, Index);
+    227                    if (++CurrentPixel == 4) {
+    228                      CurrentPixel = 0;
+    229                      Pixels = *(++p);
+    230                    }
+    231          		    } while (--xSize);
+    232                }
+    233                break;
+    234              case LCD_DRAWMODE_TRANS:
+    235                if (pTrans) {
+    236                  do {
+    237                    int Shift = (3 - CurrentPixel) << 1;
+    238                    int Index = (Pixels & (0xC0 >> (6 - Shift))) >> Shift;
+    239                    if (Index) {
+    240                      LCD_PIXELINDEX PixelIndex = *(pTrans + Index);
+    241                      SETPIXEL(pDevice, x, y, PixelIndex);
+    242                    }
+    243                    x++;
+    244                    if (++CurrentPixel == 4) {
+    245                      CurrentPixel = 0;
+    246                      Pixels = *(++p);
+    247                    }
+    248          		    } while (--xSize);
+    249                } else {
+    250                  do {
+    251                    int Shift = (3 - CurrentPixel) << 1;
+    252                    int Index = (Pixels & (0xC0 >> (6 - Shift))) >> Shift;
+    253                    if (Index) {
+    254                      SETPIXEL(pDevice, x, y, Index);
+    255                    }
+    256                    x++;
+    257                    if (++CurrentPixel == 4) {
+    258                      CurrentPixel = 0;
+    259                      Pixels = *(++p);
+    260                    }
+    261          		    } while (--xSize);
+    262                }
+    263                break;
+    264            }
+    265          }
+    266          
+    267          /*********************************************************************
+    268          *
+    269          *       _DrawBitLine4BPP
+    270          */
+    271          static void _DrawBitLine4BPP(GUI_DEVICE * pDevice, int x, int y, U8 const * p, int Diff, int xSize, const LCD_PIXELINDEX * pTrans) {
+    272            LCD_PIXELINDEX Pixels = *p;
+    273            int CurrentPixel = Diff;
+    274            x += Diff;
+    275            switch (GUI_Context.DrawMode & (LCD_DRAWMODE_TRANS | LCD_DRAWMODE_XOR)) {
+    276              case 0:
+    277                if (pTrans) {
+    278                  do {
+    279                    int Shift = (1 - CurrentPixel) << 2;
+    280                    int Index = (Pixels & (0xF0 >> (4 - Shift))) >> Shift;
+    281                    LCD_PIXELINDEX PixelIndex = *(pTrans + Index);
+    282                    SETPIXEL(pDevice, x++, y, PixelIndex);
+    283                    if (++CurrentPixel == 2) {
+    284                      CurrentPixel = 0;
+    285                      Pixels = *(++p);
+    286                    }
+    287          		    } while (--xSize);
+    288                } else {
+    289                  do {
+    290                    int Shift = (1 - CurrentPixel) << 2;
+    291                    int Index = (Pixels & (0xF0 >> (4 - Shift))) >> Shift;
+    292                    SETPIXEL(pDevice, x++, y, Index);
+    293                    if (++CurrentPixel == 2) {
+    294                      CurrentPixel = 0;
+    295                      Pixels = *(++p);
+    296                    }
+    297          		    } while (--xSize);
+    298                }
+    299                break;
+    300              case LCD_DRAWMODE_TRANS:
+    301                if (pTrans) {
+    302                  do {
+    303                    int Shift = (1 - CurrentPixel) << 2;
+    304                    int Index = (Pixels & (0xF0 >> (4 - Shift))) >> Shift;
+    305                    if (Index) {
+    306                      LCD_PIXELINDEX PixelIndex = *(pTrans + Index);
+    307                      SETPIXEL(pDevice, x, y, PixelIndex);
+    308                    }
+    309                    x++;
+    310                    if (++CurrentPixel == 2) {
+    311                      CurrentPixel = 0;
+    312                      Pixels = *(++p);
+    313                    }
+    314          		    } while (--xSize);
+    315                } else {
+    316                  do {
+    317                    int Shift = (1 - CurrentPixel) << 2;
+    318                    int Index = (Pixels & (0xF0 >> (4 - Shift))) >> Shift;
+    319                    if (Index) {
+    320                      SETPIXEL(pDevice, x, y, Index);
+    321                    }
+    322                    x++;
+    323                    if (++CurrentPixel == 2) {
+    324                      CurrentPixel = 0;
+    325                      Pixels = *(++p);
+    326                    }
+    327          		    } while (--xSize);
+    328                }
+    329                break;
+    330            }
+    331          }
+    332          
+    333          /*********************************************************************
+    334          *
+    335          *       _DrawBitLine8BPP
+    336          */
+    337          static void _DrawBitLine8BPP(GUI_DEVICE * pDevice, int x, int y, U8 const*p, int xSize, const LCD_PIXELINDEX*pTrans) {
+    338            LCD_PIXELINDEX pixel;
+    339            if ((GUI_Context.DrawMode & LCD_DRAWMODE_TRANS)==0) {
+    340              if (pTrans) {
+    341                for (;xSize > 0; xSize--,x++,p++) {
+    342                  pixel = *p;
+    343                  SETPIXEL(pDevice, x, y, *(pTrans+pixel));
+    344                }
+    345              } else {
+    346                for (;xSize > 0; xSize--,x++,p++) {
+    347                  SETPIXEL(pDevice, x, y, *p);
+    348                }
+    349              }
+    350            } else {   /* Handle transparent bitmap */
+    351              if (pTrans) {
+    352                for (; xSize > 0; xSize--, x++, p++) {
+    353                  pixel = *p;
+    354                  if (pixel) {
+    355                    SETPIXEL(pDevice, x+0, y, *(pTrans+pixel));
+    356                  }
+    357                }
+    358              } else {
+    359                for (; xSize > 0; xSize--, x++, p++) {
+    360                  pixel = *p;
+    361                  if (pixel) {
+    362                    SETPIXEL(pDevice, x+0, y, pixel);
+    363                  }
+    364                }
+    365              }
+    366            }
+    367          }
+    368          
+    369          /*********************************************************************
+    370          *
+    371          *       _DrawBitLine16BPP
+    372          */
+    373          static void _DrawBitLine16BPP(GUI_DEVICE * pDevice, int x, int y, U16 const * p, int xSize) {
+    374            LCD_PIXELINDEX pixel;
+    375            if ((GUI_Context.DrawMode & LCD_DRAWMODE_TRANS) == 0) {
+    376              for (;xSize > 0; xSize--,x++,p++) {
+    377                SETPIXEL(pDevice, x, y, *p);
+    378              }
+    379            } else {   /* Handle transparent bitmap */
+    380              for (; xSize > 0; xSize--, x++, p++) {
+    381                pixel = *p;
+    382                if (pixel) {
+    383                  SETPIXEL(pDevice, x + 0, y, pixel);
+    384                }
+    385              }
+    386            }
+    387          }
+    388          
+    389          /*********************************************************************
+    390          *
+    391          *       _DrawBitLine32BPP
+    392          */
+    393          static void _DrawBitLine32BPP(GUI_DEVICE * pDevice, int x, int y, U32 const * p, int xSize) {
+    394            for (;xSize > 0; xSize--, x++, p++) {
+    395              SETPIXEL(pDevice, x, y, *p);
+    396            }
+    397          }
+    398          
+    399          /*********************************************************************
+    400          *
+    401          *       _InitOnce
+    402          *
+    403          * Purpose:
+    404          *   Allocates a fixed block for the context of the driver
+    405          *
+    406          * Return value:
+    407          *   0 on success, 1 on error
+    408          */
+    409          static int _InitOnce(GUI_DEVICE * pDevice) {
+    410            DRIVER_CONTEXT * pContext;
+    411            U32 IndexMask;
+    412            int BitsPerPixel;
+    413          
+    414            if (pDevice->u.pContext == NULL) {
+    415              pContext = GUI_ALLOC_GetFixedBlock(sizeof(DRIVER_CONTEXT));
+    416              pDevice->u.pContext = pContext;
+    417              memset(pContext, 0, sizeof(DRIVER_CONTEXT));
+    418              IndexMask = pDevice->pColorConvAPI->pfGetIndexMask();
+    419              BitsPerPixel = LCD__GetBPP(IndexMask);
+    420              if (BitsPerPixel < 24) {
+    421                pContext->NumColors = (1 << BitsPerPixel);
+    422              } else {
+    423                pContext->NumColors = 0;
+    424              }
+    425            }
+    426            return pDevice->u.pContext ? 0 : 1;
+    427          }
+    428          
+    429          /*********************************************************************
+    430          *
+    431          *       _SetPos
+    432          *
+    433          *  Purpose:
+    434          *    Sets the layer position
+    435          */
+    436          static void _SetPos(GUI_DEVICE * pDevice, int xPos, int yPos) {
+    437            DRIVER_CONTEXT * pContext;
+    438          
+    439            _InitOnce(pDevice);
+    440            if (pDevice->u.pContext) {
+    441              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+    442              pContext->xPos = xPos;
+    443              pContext->yPos = yPos;
+    444            }
+    445            LCDSIM_SetLayerPos(xPos, yPos, pDevice->LayerIndex);
+    446          }
+    447          
+    448          /*********************************************************************
+    449          *
+    450          *       _GetPos
+    451          */
+    452          static void _GetPos(GUI_DEVICE * pDevice, int * pxPos, int * pyPos) {
+    453            DRIVER_CONTEXT * pContext;
+    454          
+    455            _InitOnce(pDevice);
+    456            if (pDevice->u.pContext) {
+    457              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+    458              *pxPos = pContext->xPos;
+    459              *pyPos = pContext->yPos;
+    460            }
+    461          }
+    462          
+    463          /*********************************************************************
+    464          *
+    465          *       _SetVis
+    466          *
+    467          *  Purpose:
+    468          *    Sets the layer visibility
+    469          */
+    470          static void _SetVis(GUI_DEVICE * pDevice, int OnOff) {
+    471            DRIVER_CONTEXT * pContext;
+    472          
+    473            _InitOnce(pDevice);
+    474            if (pDevice->u.pContext) {
+    475              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+    476              pContext->IsVisible = OnOff;
+    477            }
+    478            LCDSIM_SetLayerVis(OnOff, pDevice->LayerIndex);
+    479          }
+    480          
+    481          /*********************************************************************
+    482          *
+    483          *       _SetAlpha
+    484          *
+    485          *  Purpose:
+    486          *    Sets the alpha blending factor
+    487          */
+    488          static void _SetAlpha(GUI_DEVICE * pDevice, int Alpha) {
+    489            DRIVER_CONTEXT * pContext;
+    490          
+    491            _InitOnce(pDevice);
+    492            if (pDevice->u.pContext) {
+    493              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+    494              pContext->Alpha = Alpha;
+    495            }
+    496            LCDSIM_SetAlpha(Alpha, pDevice->LayerIndex);
+    497          }
+    498          
+    499          /*********************************************************************
+    500          *
+    501          *       _SetVSize
+    502          */
+    503          static void _SetVSize(GUI_DEVICE * pDevice, int xSize, int ySize) {
+    504            DRIVER_CONTEXT * pContext;
+    505          
+    506            _InitOnce(pDevice);
+    507            if (pDevice->u.pContext) {
+    508              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+    509              pContext->vxSize = xSize;
+    510              pContext->vySize = ySize;
+    511              pContext->vxSizePhys = ySize;
+    512            }
+    513          }
+    514          
+    515          /*********************************************************************
+    516          *
+    517          *       _SetSize
+    518          */
+    519          static void _SetSize(GUI_DEVICE * pDevice, int xSize, int ySize) {
+    520            DRIVER_CONTEXT * pContext;
+    521          
+    522            _InitOnce(pDevice);
+    523            if (pDevice->u.pContext) {
+    524              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+    525              if (pContext->vxSizePhys == 0) {
+    526                pContext->vxSizePhys = ySize;
+    527              }
+    528              pContext->xSize = xSize;
+    529              pContext->ySize = ySize;
+    530            }
+    531          }
+    532          
+    533          /*********************************************************************
+    534          *
+    535          *       _DrawHLine
+    536          */
+    537          static void _DrawHLine(GUI_DEVICE * pDevice, int x0, int y,  int x1) {
+    538            if (GUI_Context.DrawMode & LCD_DRAWMODE_XOR) {
+    539              for (;x0 <= x1; x0++) {
+    540                XORPIXEL(pDevice, x0, y);
+    541              }
+    542            } else {
+    543              for (;x0 <= x1; x0++) {
+    544                SETPIXEL(pDevice, x0, y, LCD__GetColorIndex());
+    545              }
+    546            }
+    547          }
+    548          
+    549          /*********************************************************************
+    550          *
+    551          *       _DrawVLine
+    552          */
+    553          static void _DrawVLine(GUI_DEVICE * pDevice, int x, int y0,  int y1) {
+    554            if (GUI_Context.DrawMode & LCD_DRAWMODE_XOR) {
+    555              while (y0 <= y1) {
+    556                XORPIXEL(pDevice, x, y0);
+    557                y0++;
+    558              }
+    559            } else {
+    560              while (y0 <= y1) {
+    561                SETPIXEL(pDevice, x, y0, LCD__GetColorIndex());
+    562                y0++;
+    563              }
+    564            }
+    565          }
+    566          
+    567          /*********************************************************************
+    568          *
+    569          *       _FillRect
+    570          */
+    571          static void _FillRect(GUI_DEVICE * pDevice, int x0, int y0, int x1, int y1) {
+    572            for (; y0 <= y1; y0++) {
+    573              _DrawHLine(pDevice, x0, y0, x1);
+    574            }
+    575          }
+    576          
+    577          /*********************************************************************
+    578          *
+    579          *       _DrawBitmap
+    580          */
+    581          static void _DrawBitmap(GUI_DEVICE * pDevice, int x0, int y0,
+    582                                 int xSize, int ySize,
+    583                                 int BitsPerPixel, 
+    584                                 int BytesPerLine,
+    585                                 const U8* pData, int Diff,
+    586                                 const LCD_PIXELINDEX* pTrans)
+    587          {
+    588            int i;
+    589            /*
+    590               Use DrawBitLineXBPP
+    591            */
+    592            for (i = 0; i < ySize; i++) {
+    593              switch (BitsPerPixel) {
+    594              case 1:
+    595                _DrawBitLine1BPP(pDevice, x0, i + y0, pData, Diff, xSize, pTrans);
+    596                break;
+    597              case 2:
+    598                _DrawBitLine2BPP(pDevice, x0, i + y0, pData, Diff, xSize, pTrans);
+    599                break;
+    600              case 4:
+    601                _DrawBitLine4BPP(pDevice, x0, i + y0, pData, Diff, xSize, pTrans);
+    602                break;
+    603              case 8:
+    604                _DrawBitLine8BPP(pDevice, x0, i + y0, pData, xSize, pTrans);
+    605                break;
+    606              case 16:
+    607                _DrawBitLine16BPP(pDevice, x0, i + y0, (const U16 *)pData, xSize);
+    608                break;
+    609              case 24:
+    610              case 32:
+    611                _DrawBitLine32BPP(pDevice, x0, i + y0, (const U32 *)pData, xSize);
+    612                break;
+    613              }
+    614              pData += BytesPerLine;
+    615            }
+    616          }
+    617          
+    618          /*********************************************************************
+    619          *
+    620          *       _SetOrg
+    621          *
+    622          *  Purpose:
+    623          *    Sets the original position of the virtual display.
+    624          *    Has no function at this point with the PC-driver.
+    625          */
+    626          static void _SetOrg(GUI_DEVICE * pDevice, int x, int y) {
+    627            LCDSIM_SetOrg(x, y, pDevice->LayerIndex);
+    628          }
+    629          
+    630          /*********************************************************************
+    631          *
+    632          *       _On
+    633          *       _Off
+    634          *
+    635          *  (Not supported in Simulation)
+    636          */
+    637          static void _Off          (GUI_DEVICE * pDevice) {}
+    638          static void _On           (GUI_DEVICE * pDevice) {}
+    639          
+    640          /*********************************************************************
+    641          *
+    642          *       _SetLUTEntry
+    643          */
+    644          static void _SetLUTEntry(GUI_DEVICE * pDevice, U8 Pos, LCD_COLOR Color) {
+    645            DRIVER_CONTEXT * pContext;
+    646          
+    647            _InitOnce(pDevice);
+    648            if (pDevice->u.pContext) {
+    649              pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+    650              if (pContext->NumColors <= Pos) {
+    651                pContext->NumColors = Pos + 1;
+    652              }
+    653              if (Pos < GUI_COUNTOF(pContext->aColor)) {
+    654                pContext->aColor[Pos] = Color;
+    655              }
+    656            }
+    657            LCDSIM_SetLUTEntry(Pos, Color, pDevice->LayerIndex);
+    658          }
+    659          
+    660          /*********************************************************************
+    661          *
+    662          *       _Init
+    663          */
+    664          static int  _Init(GUI_DEVICE * pDevice) {
+    665            int r;
+    666          
+    667            r = _InitOnce(pDevice);
+    668          	return r;
+    669          }
+    670          
+    671          /*********************************************************************
+    672          *
+    673          *       _GetRect
+    674          */
+    675          static void _GetRect(GUI_DEVICE * pDevice, LCD_RECT * pRect) {
+    676            DRIVER_CONTEXT * pContext;
+    677          
+    678            pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+    679            pRect->x0 = 0;
+    680            pRect->y0 = 0;
+    681            pRect->x1 = pContext->vxSize - 1;
+    682            pRect->y1 = pContext->vySize - 1;
+    683          }
+    684          
+    685          /*********************************************************************
+    686          *
+    687          *       _GetDevFunc
+    688          */
+    689          static void (* _GetDevFunc(GUI_DEVICE ** ppDevice, int Index))(void) {
+    690            GUI_USE_PARA(ppDevice);
+    691            switch (Index) {
+    692            case LCD_DEVFUNC_SETPOS:
+    693              return (void (*)(void))_SetPos;
+    694            case LCD_DEVFUNC_GETPOS:
+    695              return (void (*)(void))_GetPos;
+    696            case LCD_DEVFUNC_SETVIS:
+    697              return (void (*)(void))_SetVis;
+    698            case LCD_DEVFUNC_SETALPHA:
+    699              return (void (*)(void))_SetAlpha;
+    700            case LCD_DEVFUNC_SET_VSIZE:
+    701              return (void (*)(void))_SetVSize;
+    702            case LCD_DEVFUNC_SET_SIZE:
+    703              return (void (*)(void))_SetSize;
+    704            case LCD_DEVFUNC_SETLUTENTRY:
+    705              return (void (*)(void))_SetLUTEntry;
+    706            }
+    707            return NULL;
+    708          }
+    709          
+    710          /*********************************************************************
+    711          *
+    712          *       _GetDevProp
+    713          */
+    714          static I32 _GetDevProp(GUI_DEVICE * pDevice, int Index) {
+    715            DRIVER_CONTEXT * pContext;
+    716          
+    717            pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+    718            switch (Index) {
+    719            case LCD_DEVCAP_XSIZE:
+    720              return pContext->xSize;
+    721            case LCD_DEVCAP_YSIZE:
+    722              return pContext->ySize;
+    723            case LCD_DEVCAP_VXSIZE:
+    724              return pContext->vxSize;
+    725            case LCD_DEVCAP_VYSIZE:
+    726              return pContext->vySize;
+    727            case LCD_DEVCAP_BITSPERPIXEL:
+    728              return LCD__GetBPP(pDevice->pColorConvAPI->pfGetIndexMask());
+    729            case LCD_DEVCAP_NUMCOLORS:
+    730              return pContext->NumColors;
+    731            case LCD_DEVCAP_XMAG:
+    732              return 1;
+    733            case LCD_DEVCAP_YMAG:
+    734              return 1;
+    735            case LCD_DEVCAP_MIRROR_X:
+    736              return 0;
+    737            case LCD_DEVCAP_MIRROR_Y:
+    738              return 0;
+    739            case LCD_DEVCAP_SWAP_XY:
+    740              return 0;
+    741            }
+    742            return -1;
+    743          }
+    744          
+    745          /*********************************************************************
+    746          *
+    747          *       _GetDevData
+    748          */
+    749          static void * _GetDevData(GUI_DEVICE * pDevice, int Index) {
+    750            DRIVER_CONTEXT * pContext;
+    751          
+    752            pContext = (DRIVER_CONTEXT *)pDevice->u.pContext;
+    753            switch (Index) {
+    754            #if GUI_SUPPORT_MEMDEV
+    755              case LCD_DEVDATA_MEMDEV:
+    756                pDevice = GUI_DEVICE__GetpDriver(GUI_Context.SelLayer);
+    757                switch (LCD__GetBPPDevice(pDevice->pColorConvAPI->pfGetIndexMask())) {
+    758                case 1:
+    759                  return (void *)&GUI_MEMDEV_DEVICE_1;
+    760                case 8:
+    761                  return (void *)&GUI_MEMDEV_DEVICE_8;
+    762                case 16:
+    763                  return (void *)&GUI_MEMDEV_DEVICE_16;
+    764                case 32:
+    765                  return (void *)&GUI_MEMDEV_DEVICE_32;
+    766                }
+    767                return (void *)NULL;
+    768            #endif
+    769            case LCD_DEVDATA_PHYSPAL:
+    770              return  (void *)pContext->aColor;
+    771            }
+    772            return NULL;
+    773          }
+    774          
+    775          /*********************************************************************
+    776          *
+    777          *       GUI_DEVICE_API structure
+    778          */
+    779          const GUI_DEVICE_API GUIDRV_Win_API = {
+    780            //
+    781            // Data
+    782            //
+    783            DEVICE_CLASS_DRIVER,
+    784            //
+    785            // Drawing functions
+    786            //
+    787            _DrawBitmap   ,
+    788            _DrawHLine    ,
+    789            _DrawVLine    ,
+    790            _FillRect     ,
+    791            _GetPixelIndex,
+    792            _SetPixelIndex,
+    793            _XorPixel     ,
+    794            //
+    795            // Set origin
+    796            //
+    797            _SetOrg       ,
+    798            //
+    799            // Initialization
+    800            //
+    801            //
+    802            // Request information
+    803            //
+    804            _GetDevFunc   ,
+    805            _GetDevProp   ,
+    806            _GetDevData,
+    807            _GetRect      ,
+    808          };
+    809          
+    810          #else
+    811          
+    812          void LCDWin_c(void);
+
+   \                                 In section .text, align 4, keep-with-next
+    813          void LCDWin_c(void) { } /* avoid empty object files */
+   \                     LCDWin_c:
+   \   00000000   1EFF2FE1           BX       LR               ;; return
+    814          
+    815          #endif /* defined(WIN32) && defined(LCD_USE_WINSIM) */
+    816          
+    817          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function .cstack
+     -------- -------
+     LCDWin_c      0
+
+
+   Section sizes:
+
+     Function/Label Bytes
+     -------------- -----
+     LCDWin_c          4
+
+ 
+ 4 bytes in section .text
+ 
+ 4 bytes of CODE memory
+
+Errors: none
+Warnings: none

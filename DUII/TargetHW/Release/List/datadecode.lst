@@ -1,0 +1,877 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     02/Feb/2016  18:29:40 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\Setup\datadecode.c                      #
+#    Command line =  C:\DUII\TargetHW\Setup\datadecode.c -D DEBUG=1 -D        #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\datadecode.lst             #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\datadecode.o                #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\Setup\datadecode.c
+      1          // Part of displayunit.c
+      2          // 8/3/2004
+      3          // Author: GAStephens
+      4          //
+      5          // formats and uploads the contents of the dataflash
+      6          // part of traqmate.c
+      7          
+      8          #include <math.h>
+      9          
+     10          #include "DUII.h"
+     11          #include "commondefs.h"
+     12          #include "WM.h"
+     13          #include "DataHandler.h"
+     14          #include "tmtypes.h"
+     15          #include "datadecode.h"
+     16          #include "CommTask.h"
+     17          
+     18          extern OS_RSEMA SEMA_GlobalData;			// resource semaphore around global data
+     19          
+
+   \                                 In section .text, align 4, keep-with-next
+     20          void unpack_velocities( u08 *velptr, s16 *eastvel, s16 *northvel, s16 *vertvel) {
+   \                     unpack_velocities:
+   \   00000000   00402DE9           PUSH     {LR}
+     21          	
+     22          	*eastvel = (s16) ((((u16) (velptr[0] & 0xE0)) << 3) + (u16) velptr[1]);
+   \   00000004   00C0D0E5           LDRB     R12,[R0, #+0]
+   \   00000008   01E0D0E5           LDRB     LR,[R0, #+1]
+   \   0000000C   E0C00CE2           AND      R12,R12,#0xE0
+   \   00000010   8CC18EE0           ADD      R12,LR,R12, LSL #+3
+     23          	// sign extend
+     24          	if (*eastvel & 0x0400) *eastvel |= 0xF800;
+   \   00000014   400E1CE3           TST      R12,#0x400
+   \   00000018   FFE0E013           MVNNE    LR,#+255
+   \   0000001C   70EECE13           BICNE    LR,LR,#0x700
+   \   00000020   0CC08E11           ORRNE    R12,LR,R12
+   \   00000024   B0C0C1E1           STRH     R12,[R1, #+0]
+     25          
+     26          	*northvel = (s16) ((((u16) (velptr[0] & 0x1C)) << 6) + (u16) velptr[2]);
+   \   00000028   0010D0E5           LDRB     R1,[R0, #+0]
+   \   0000002C   02C0D0E5           LDRB     R12,[R0, #+2]
+   \   00000030   1C1001E2           AND      R1,R1,#0x1C
+   \   00000034   01138CE0           ADD      R1,R12,R1, LSL #+6
+     27          	// sign extend
+     28          	if (*northvel & 0x0400) *northvel |= 0xF800;
+   \   00000038   400E11E3           TST      R1,#0x400
+   \   0000003C   FFC0E013           MVNNE    R12,#+255
+   \   00000040   70CECC13           BICNE    R12,R12,#0x700
+   \   00000044   01108C11           ORRNE    R1,R12,R1
+   \   00000048   B010C2E1           STRH     R1,[R2, #+0]
+     29          
+     30          	*vertvel = (s16) ((((u16) (velptr[0] & 0x03)) << 8) + (u16) velptr[3]);
+   \   0000004C   0010D0E5           LDRB     R1,[R0, #+0]
+   \   00000050   0300D0E5           LDRB     R0,[R0, #+3]
+   \   00000054   031001E2           AND      R1,R1,#0x3
+   \   00000058   010480E0           ADD      R0,R0,R1, LSL #+8
+     31          	// sign extend
+     32          	if (*vertvel & 0x0200) *vertvel |= 0xFC00;
+   \   0000005C   800F10E3           TST      R0,#0x200
+   \   00000060   FF10E013           MVNNE    R1,#+255
+   \   00000064   C01FC113           BICNE    R1,R1,#0x300
+   \   00000068   00008111           ORRNE    R0,R1,R0
+   \   0000006C   B000C3E1           STRH     R0,[R3, #+0]
+     33          } // unpack_velocities
+   \   00000070   0080BDE8           POP      {PC}             ;; return
+     34          
+
+   \                                 In section .text, align 4, keep-with-next
+     35          float compute_heading (s16 eastvel, s16 northvel) {
+   \                     compute_heading:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0160A0E1           MOV      R6,R1
+     36          	float tempfloat;
+     37          	s16 tempint;
+     38          
+     39          	// compute heading = vector sum of east/west vel and inverse of north/south vel (due east is 0)
+     40          	tempfloat = atan2((float) northvel, (float) eastvel);
+     41          
+     42          	tempfloat = (tempfloat * (180.0 / PI));
+   \   00000008   ........           BL       __aeabi_i2f
+   \   0000000C   ........           BL       __aeabi_f2d
+   \   00000010   0040A0E1           MOV      R4,R0
+   \   00000014   0150A0E1           MOV      R5,R1
+   \   00000018   0600A0E1           MOV      R0,R6
+   \   0000001C   ........           BL       __aeabi_i2f
+   \   00000020   ........           BL       __aeabi_f2d
+   \   00000024   0420A0E1           MOV      R2,R4
+   \   00000028   0530A0E1           MOV      R3,R5
+   \   0000002C   ........           BL       atan2
+   \   00000030   ........           BL       __aeabi_d2f
+   \   00000034   ........           BL       __aeabi_f2d
+   \   00000038   0020A0E1           MOV      R2,R0
+   \   0000003C   0130A0E1           MOV      R3,R1
+   \   00000040   ........           ADR      R0,??DataTable10
+   \   00000044   030090E8           LDM      R0,{R0,R1}
+   \   00000048   ........           BL       __aeabi_dmul
+   \   0000004C   ........           BL       __aeabi_d2f
+   \   00000050   0040A0E1           MOV      R4,R0
+     43          	tempint = (s16) tempfloat;
+   \   00000054   ........           BL       __aeabi_f2iz
+   \   00000058   0008A0E1           LSL      R0,R0,#+16
+     44          	
+     45          	// save the fraction
+     46          	tempfloat = tempfloat - (float) tempint;
+     47          	
+     48          	// convert from trig coordinate to compass heading and make sure it is 0-360
+     49          	tempint = 360 - ((tempint + 270) % 360);
+   \   0000005C   0E10A0E3           MOV      R1,#+14
+   \   00000060   4008A0E1           ASR      R0,R0,#+16
+   \   00000064   401F81E3           ORR      R1,R1,#0x100
+   \   00000068   005081E0           ADD      R5,R1,R0
+     50          
+     51          	// add the fraction to the integer
+     52          	tempfloat += (float) tempint;
+     53          								
+     54          	return (tempfloat);
+   \   0000006C   ........           BL       __aeabi_i2f
+   \   00000070   0010A0E1           MOV      R1,R0
+   \   00000074   0400A0E1           MOV      R0,R4
+   \   00000078   ........           BL       __aeabi_fsub
+   \   0000007C   ........           LDR      R1,??DataTable12_2  ;; 0xb60b60b7
+   \   00000080   0040A0E1           MOV      R4,R0
+   \   00000084   9521C1E0           SMULL    R2,R1,R5,R1
+   \   00000088   0500A0E1           MOV      R0,R5
+   \   0000008C   051081E0           ADD      R1,R1,R5
+   \   00000090   4114B0E1           ASRS     R1,R1,#+8
+   \   00000094   5A0F60E2           RSB      R0,R0,#+360
+   \   00000098   01108142           ADDMI    R1,R1,#+1
+   \   0000009C   5A2FA0E3           MOV      R2,#+360
+   \   000000A0   810200E1           SMLABB   R0,R1,R2,R0
+   \   000000A4   0008A0E1           LSL      R0,R0,#+16
+   \   000000A8   4008A0E1           ASR      R0,R0,#+16
+   \   000000AC   ........           BL       __aeabi_i2f
+   \   000000B0   0410A0E1           MOV      R1,R4
+   \   000000B4   7040BDE8           POP      {R4-R6,LR}
+   \   000000B8   ........           B        __aeabi_fadd     ;; tailcall
+     55          
+     56          } // compute_heading
+     57          
+     58          // returns C or F calculated degrees from recorded value
+
+   \                                 In section .text, align 4, keep-with-next
+     59          float dotemp(s08 scaledtemp, char corf) {
+   \                     dotemp:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   \   00000004   0140A0E1           MOV      R4,R1
+     60          	float temperature;
+     61          
+     62          	temperature = (float) scaledtemp;
+   \   00000008   ........           BL       __aeabi_i2f
+     63          	if (corf == 'F' || corf == 'f')
+   \   0000000C   460054E3           CMP      R4,#+70
+   \   00000010   66005413           CMPNE    R4,#+102
+   \   00000014   1800001A           BNE      ??dotemp_0
+     64          		temperature = temperature / 2.0 * 9.0 / 5.0 + 32.0;	// in fahrenheit
+   \   00000018   ........           BL       __aeabi_f2d
+   \   0000001C   0130A0E1           MOV      R3,R1
+   \   00000020   0020A0E1           MOV      R2,R0
+   \   00000024   C015A0E3           MOV      R1,#+805306368
+   \   00000028   0000A0E3           MOV      R0,#+0
+   \   0000002C   FE1681E3           ORR      R1,R1,#0xFE00000
+   \   00000030   ........           BL       __aeabi_dmul
+   \   00000034   0130A0E1           MOV      R3,R1
+   \   00000038   0020A0E1           MOV      R2,R0
+   \   0000003C   4014A0E3           MOV      R1,#+1073741824
+   \   00000040   0000A0E3           MOV      R0,#+0
+   \   00000044   881981E3           ORR      R1,R1,#0x220000
+   \   00000048   ........           BL       __aeabi_dmul
+   \   0000004C   4034A0E3           MOV      R3,#+1073741824
+   \   00000050   0020A0E3           MOV      R2,#+0
+   \   00000054   503983E3           ORR      R3,R3,#0x140000
+   \   00000058   ........           BL       __aeabi_ddiv
+   \   0000005C   0130A0E1           MOV      R3,R1
+   \   00000060   0020A0E1           MOV      R2,R0
+   \   00000064   4014A0E3           MOV      R1,#+1073741824
+   \   00000068   0000A0E3           MOV      R0,#+0
+   \   0000006C   401881E3           ORR      R1,R1,#0x400000
+   \   00000070   ........           BL       __aeabi_dadd
+   \   00000074   1040BDE8           POP      {R4,LR}
+   \   00000078   ........           B        __aeabi_d2f      ;; tailcall
+     65          	else
+     66          		temperature = temperature / 2.0;	// in celsius
+   \                     ??dotemp_0:
+   \   0000007C   1040BDE8           POP      {R4,LR}
+   \   00000080   FC15A0E3           MOV      R1,#+1056964608
+   \   00000084   ........           B        __aeabi_fmul     ;; tailcall
+     67          	
+     68          	return (temperature);
+     69          }
+     70          
+     71          // gets GPS time from global memory and breaks it out into individual numbers in FS_FILETIME structure
+     72          // returns 0 if GPS time is not valid
+     73          //
+     74          #define MAXTIME		(7*24*60*60*1000)		// 604,800,000 maximum time value
+     75          
+
+   \                                 In section .text, align 4, keep-with-next
+     76          unsigned char breakOutTime ( FS_FILETIME *FileTime ) {
+   \                     breakOutTime:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+     77          	U32 time;
+     78          	U16 weeks;
+     79          	U32 secs;
+     80          
+     81          	// request use of global data
+     82          	OS_Use(&SEMA_GlobalData);
+   \   00000004   ........           LDR      R6,??DataTable12_3
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   20D04DE2           SUB      SP,SP,#+32
+   \   00000010   0600A0E1           MOV      R0,R6
+   \   00000014   ........           BL       OS_Use
+     83          
+     84          	// update global data
+     85          	time = (u32) GetValue(GPS_TIME).uVal;
+   \   00000018   1210A0E3           MOV      R1,#+18
+   \   0000001C   08008DE2           ADD      R0,SP,#+8
+   \   00000020   ........           BL       GetValue
+     86          	weeks = (u16) GetValue(GPS_WEEKS).uVal;
+   \   00000024   1110A0E3           MOV      R1,#+17
+   \   00000028   0D00A0E1           MOV      R0,SP
+   \   0000002C   ........           BL       GetValue
+   \   00000030   00509DE5           LDR      R5,[SP, #+0]
+     87          
+     88          	// relinquish global data
+     89          	OS_Unuse(&SEMA_GlobalData);	
+   \   00000034   0600A0E1           MOV      R0,R6
+   \   00000038   ........           BL       OS_Unuse
+     90          
+     91          	if (0 == weeks)		// bad GPS time
+   \   0000003C   0558A0E1           LSL      R5,R5,#+16
+   \   00000040   2558B0E1           LSRS     R5,R5,#+16
+     92          		return 0;
+   \   00000044   0000A003           MOVEQ    R0,#+0
+   \   00000048   5E00000A           BEQ      ??breakOutTime_0
+     93          	else {
+     94          		s32 newtime;
+     95          		int days, dow;
+     96          
+     97          		// add on offset in milliseconds
+     98          		newtime = (s32) time + ((s32) sysData.timeZone * (60 * 60 * 1000));
+   \   0000004C   ........           LDR      R1,??DataTable12_4
+   \   00000050   DB29A0E3           MOV      R2,#+3588096
+   \   00000054   DA17D1E1           LDRSB    R1,[R1, #+122]
+   \   00000058   08009DE5           LDR      R0,[SP, #+8]
+   \   0000005C   BA2D82E3           ORR      R2,R2,#0x2E80
+   \   00000060   920120E0           MLA      R0,R2,R1,R0
+     99          
+    100          		// handle week boundaries
+    101          		if (newtime < 0) {		// moved into last week
+   \   00000064   000050E3           CMP      R0,#+0
+    102          			weeks--;
+   \   00000068   01504542           SUBMI    R5,R5,#+1
+    103          			newtime += MAXTIME;
+   \   0000006C   ........           LDRMI    R1,??DataTable12_5  ;; 0x240c8400
+   \   00000070   0400004A           BMI      ??breakOutTime_1
+    104          		}
+    105          		else if (newtime > MAXTIME) { // moved into next week
+   \   00000074   ........           LDR      R1,??DataTable12_6  ;; 0x240c8401
+   \   00000078   010050E1           CMP      R0,R1
+   \   0000007C   020000BA           BLT      ??breakOutTime_2
+    106          			weeks++;
+   \   00000080   015085E2           ADD      R5,R5,#+1
+    107          			newtime -= MAXTIME;
+   \   00000084   ........           LDR      R1,??DataTable12_7  ;; 0xdbf37c00
+   \                     ??breakOutTime_1:
+   \   00000088   000081E0           ADD      R0,R1,R0
+    108          		}
+    109          		time = (u32) newtime;
+    110          
+    111          		// get seconds since Sunday midnight
+    112          		secs = time / 1000;
+   \                     ??breakOutTime_2:
+   \   0000008C   ........           LDR      R2,??DataTable12_8  ;; 0x83126e98
+    113          		dow = (secs / 60 / 60 / 24);
+    114          		FileTime->Hour = (secs / 3600) % 24;
+   \   00000090   ........           LDR      R3,??DataTable12_9  ;; 0xaaaaaaab
+   \   00000094   902281E0           UMULL    R2,R1,R0,R2
+   \   00000098   ........           LDR      R2,??DataTable12_10  ;; 0x91a2b3c5
+   \   0000009C   A104A0E1           LSR      R0,R1,#+9
+   \   000000A0   902281E0           UMULL    R2,R1,R0,R2
+   \   000000A4   A115A0E1           LSR      R1,R1,#+11
+   \   000000A8   913382E0           UMULL    R3,R2,R1,R3
+   \   000000AC   1830A0E3           MOV      R3,#+24
+   \   000000B0   2222A0E1           LSR      R2,R2,#+4
+   \   000000B4   830262E1           SMULBB   R2,R3,R2
+    115          		FileTime->Minute = (secs / 60) % 60;
+   \   000000B8   ........           LDR      R3,??DataTable12_11  ;; 0x88888889
+   \   000000BC   021041E0           SUB      R1,R1,R2
+   \   000000C0   ........           LDR      R2,??DataTable12_11  ;; 0x88888889
+   \   000000C4   B610C4E1           STRH     R1,[R4, #+6]
+   \   000000C8   902281E0           UMULL    R2,R1,R0,R2
+   \   000000CC   A112A0E1           LSR      R1,R1,#+5
+   \   000000D0   913382E0           UMULL    R3,R2,R1,R3
+   \   000000D4   3C30A0E3           MOV      R3,#+60
+   \   000000D8   A222A0E1           LSR      R2,R2,#+5
+   \   000000DC   83026CE1           SMULBB   R12,R3,R2
+   \   000000E0   0CC041E0           SUB      R12,R1,R12
+    116          		FileTime->Second = secs % 60;
+   \   000000E4   930101E0           MUL      R1,R3,R1
+   \   000000E8   B8C0C4E1           STRH     R12,[R4, #+8]
+   \   000000EC   010040E0           SUB      R0,R0,R1
+   \   000000F0   BA00C4E1           STRH     R0,[R4, #+10]
+    117          
+    118          		// 8030 = number days from GPS start Jan 6, 1980 to Jan 1, 2002
+    119          		days = (weeks * 7) + dow - 8030; // days since Jan 1, 2002
+    120          
+    121          		dodate (&(FileTime->Day), &((*FileTime).Month), &((*FileTime).Year), days);
+   \   000000F4   ............       ADRL     R12,`?<Constant {31, 28, 31, 30, 31, 30, 31, 31, 30`
+   \              ....        
+   \   000000FC   850165E0           RSB      R0,R5,R5, LSL #+3
+   \   00000100   ........           LDR      R3,??DataTable12_9  ;; 0xaaaaaaab
+   \   00000104   6040BCE8           LDM      R12!,{R5,R6,LR}
+   \   00000108   923381E0           UMULL    R3,R1,R2,R3
+   \   0000010C   10308DE2           ADD      R3,SP,#+16
+   \   00000110   6040A3E8           STM      R3!,{R5,R6,LR}
+   \   00000114   210280E0           ADD      R0,R0,R1, LSR #+4
+   \   00000118   5E10A0E3           MOV      R1,#+94
+   \   0000011C   7C1D81E3           ORR      R1,R1,#0x1F00
+   \   00000120   6EC0A0E3           MOV      R12,#+110
+   \   00000124   010040E0           SUB      R0,R0,R1
+   \   00000128   D230A0E3           MOV      R3,#+210
+   \   0000012C   40CF8CE3           ORR      R12,R12,#0x100
+   \   00000130   021084E2           ADD      R1,R4,#+2
+   \   00000134   042084E2           ADD      R2,R4,#+4
+   \   00000138   703E83E3           ORR      R3,R3,#0x700
+   \   0000013C   01E04CE2           SUB      LR,R12,#+1
+   \   00000140   010000EA           B        ??breakOutTime_3
+   \                     ??breakOutTime_4:
+   \   00000144   050040E0           SUB      R0,R0,R5
+   \   00000148   013083E2           ADD      R3,R3,#+1
+   \                     ??breakOutTime_3:
+   \   0000014C   0008A0E1           LSL      R0,R0,#+16
+   \   00000150   0C50A0E1           MOV      R5,R12
+   \   00000154   2008A0E1           LSR      R0,R0,#+16
+   \   00000158   050050E1           CMP      R0,R5
+   \   0000015C   0300003A           BCC      ??breakOutTime_5
+   \   00000160   030013E3           TST      R3,#0x3
+   \   00000164   0900001A           BNE      ??breakOutTime_6
+   \   00000168   050050E1           CMP      R0,R5
+   \   0000016C   F4FFFF1A           BNE      ??breakOutTime_4
+   \                     ??breakOutTime_5:
+   \   00000170   B030C4E1           STRH     R3,[R4, #+0]
+   \   00000174   0030D4E5           LDRB     R3,[R4, #+0]
+   \   00000178   030013E3           TST      R3,#0x3
+   \   0000017C   1DC0A003           MOVEQ    R12,#+29
+   \   00000180   11C0CD05           STRBEQ   R12,[SP, #+17]
+   \   00000184   0030A0E3           MOV      R3,#+0
+   \   00000188   10C08DE2           ADD      R12,SP,#+16
+   \   0000018C   030000EA           B        ??breakOutTime_7
+   \                     ??breakOutTime_6:
+   \   00000190   0E50A0E1           MOV      R5,LR
+   \   00000194   EAFFFFEA           B        ??breakOutTime_4
+   \                     ??breakOutTime_8:
+   \   00000198   01E0DCE4           LDRB     LR,[R12], #+1
+   \   0000019C   0E0040E0           SUB      R0,R0,LR
+   \                     ??breakOutTime_7:
+   \   000001A0   B030C1E1           STRH     R3,[R1, #+0]
+   \   000001A4   00E0DCE5           LDRB     LR,[R12, #+0]
+   \   000001A8   0008A0E1           LSL      R0,R0,#+16
+   \   000001AC   2008A0E1           LSR      R0,R0,#+16
+   \   000001B0   013083E2           ADD      R3,R3,#+1
+   \   000001B4   00005EE1           CMP      LR,R0
+   \   000001B8   F6FFFF3A           BCC      ??breakOutTime_8
+   \   000001BC   B030C1E1           STRH     R3,[R1, #+0]
+   \   000001C0   B000C2E1           STRH     R0,[R2, #+0]
+    122          	} // else
+    123          
+    124          	return 1;
+   \   000001C4   0100A0E3           MOV      R0,#+1
+   \                     ??breakOutTime_0:
+   \   000001C8   20D08DE2           ADD      SP,SP,#+32       ;; stack cleaning
+   \   000001CC   7080BDE8           POP      {R4-R6,PC}       ;; return
+    125          } // breakOutTime
+    126          	
+    127          // time and weeks are gps format
+    128          // textline is a buffer large enough to hold the expected formatted string
+    129          //
+
+   \                                 In section .text, align 4, keep-with-next
+    130          char *formattime (timeforms whattodo, char *textline) {
+   \                     formattime:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   14D04DE2           SUB      SP,SP,#+20
+   \   00000008   0050A0E1           MOV      R5,R0
+   \   0000000C   0140A0E1           MOV      R4,R1
+    131          	FS_FILETIME FileTime;
+    132          
+    133          	if (0 == breakOutTime(&FileTime)) {
+   \   00000010   04008DE2           ADD      R0,SP,#+4
+   \   00000014   ........           BL       breakOutTime
+   \   00000018   000050E3           CMP      R0,#+0
+   \   0000001C   0400001A           BNE      ??formattime_1
+    134          		strcpy (textline, "--:--");
+   \   00000020   0620A0E3           MOV      R2,#+6
+   \   00000024   ........           ADR      R1,`?<Constant "--:--">`
+   \   00000028   0400A0E1           MOV      R0,R4
+   \   0000002C   ........           BL       __aeabi_memcpy
+   \   00000030   3E0000EA           B        ??formattime_2
+    135          	} // if
+    136          	else {
+    137          		switch (whattodo) {
+   \                     ??formattime_1:
+   \   00000034   040055E3           CMP      R5,#+4
+   \   00000038   05F18F90           ADDLS    PC,PC,R5, LSL #+2
+   \                     ??formattime_0:
+   \   0000003C   3B00008A           BHI      ??formattime_2
+   \   00000040   030000EA           B        ??formattime_3
+   \   00000044   100000EA           B        ??formattime_4
+   \   00000048   190000EA           B        ??formattime_5
+   \   0000004C   1E0000EA           B        ??formattime_6
+   \   00000050   0D0000EA           B        ??formattime_4
+    138          			case SHORTDANDT:
+    139          				// date
+    140          				sprintf(textline, "%02d/%02d", FileTime.Month, FileTime.Day);
+   \                     ??formattime_3:
+   \   00000054   B830DDE1           LDRH     R3,[SP, #+8]
+   \   00000058   B620DDE1           LDRH     R2,[SP, #+6]
+   \   0000005C   ........           ADR      R1,`?<Constant "%02d/%02d">`
+   \   00000060   0400A0E1           MOV      R0,R4
+   \   00000064   ........           BL       sprintf
+    141          				// time
+    142          				sprintf(textline + strlen(textline), " %02d:%02d:%02d", FileTime.Hour, FileTime.Minute, FileTime.Second);
+   \                     ??formattime_7:
+   \   00000068   0400A0E1           MOV      R0,R4
+   \   0000006C   ........           BL       strlen
+   \   00000070   BE10DDE1           LDRH     R1,[SP, #+14]
+   \   00000074   BC30DDE1           LDRH     R3,[SP, #+12]
+   \   00000078   BA20DDE1           LDRH     R2,[SP, #+10]
+   \   0000007C   00108DE5           STR      R1,[SP, #+0]
+   \   00000080   ........           ADR      R1,`?<Constant " %02d:%02d:%02d">`
+   \   00000084   040080E0           ADD      R0,R0,R4
+   \   00000088   270000EA           B        ??formattime_8
+    143          				break;
+    144          			case LONGDANDT:
+    145          			case SHORTDATE:
+    146          				// date
+    147          				sprintf(textline, "%04d-%02d-%02d", FileTime.Year, FileTime.Month, FileTime.Day);
+   \                     ??formattime_4:
+   \   0000008C   B800DDE1           LDRH     R0,[SP, #+8]
+   \   00000090   B630DDE1           LDRH     R3,[SP, #+6]
+   \   00000094   B420DDE1           LDRH     R2,[SP, #+4]
+   \   00000098   00008DE5           STR      R0,[SP, #+0]
+   \   0000009C   ........           ADR      R1,`?<Constant "%04d-%02d-%02d">`
+   \   000000A0   0400A0E1           MOV      R0,R4
+   \   000000A4   ........           BL       sprintf
+    148          				if (SHORTDATE == whattodo) break;		// leave early
+   \   000000A8   040055E3           CMP      R5,#+4
+   \   000000AC   1F00000A           BEQ      ??formattime_2
+    149          				// time
+    150          				sprintf(textline + strlen(textline), " %02d:%02d:%02d", FileTime.Hour, FileTime.Minute, FileTime.Second);
+   \   000000B0   ECFFFFEA           B        ??formattime_7
+    151          				break;
+    152          			case SHORTTIME:
+    153          				// time
+    154          				sprintf(textline, "%02d:%02d", FileTime.Hour, FileTime.Minute);
+   \                     ??formattime_5:
+   \   000000B4   BC30DDE1           LDRH     R3,[SP, #+12]
+   \   000000B8   BA20DDE1           LDRH     R2,[SP, #+10]
+   \   000000BC   ........           ADR      R1,`?<Constant "%02d:%02d">`
+   \   000000C0   0400A0E1           MOV      R0,R4
+   \   000000C4   ........           BL       sprintf
+    155          				break;
+   \   000000C8   180000EA           B        ??formattime_2
+    156          			case SHORT12: {
+    157          				int pm = (FileTime.Hour >= 12);
+   \                     ??formattime_6:
+   \   000000CC   BA00DDE1           LDRH     R0,[SP, #+10]
+   \   000000D0   0C0050E3           CMP      R0,#+12
+   \   000000D4   0B00003A           BCC      ??formattime_9
+    158          				// time
+    159          				if (FileTime.Hour == 0)
+    160          					FileTime.Hour = 12;
+    161          				if (FileTime.Hour > 12)
+   \   000000D8   0D0050E3           CMP      R0,#+13
+   \   000000DC   0700003A           BCC      ??formattime_10
+    162          					FileTime.Hour = FileTime.Hour % 12;
+   \   000000E0   ........           LDR      R1,??DataTable12_12  ;; 0x2aaaaaab
+   \   000000E4   9021C1E0           SMULL    R2,R1,R0,R1
+   \   000000E8   0C20A0E3           MOV      R2,#+12
+   \   000000EC   C110B0E1           ASRS     R1,R1,#+1
+   \   000000F0   01108142           ADDMI    R1,R1,#+1
+   \   000000F4   920101E0           MUL      R1,R2,R1
+   \   000000F8   010040E0           SUB      R0,R0,R1
+   \   000000FC   BA00CDE1           STRH     R0,[SP, #+10]
+   \                     ??formattime_10:
+   \   00000100   ........           ADR      R0,??DataTable12  ;; 0x70, 0x6D, 0x00, 0x00
+   \   00000104   030000EA           B        ??formattime_11
+   \                     ??formattime_9:
+   \   00000108   000050E3           CMP      R0,#+0
+   \   0000010C   0C10A003           MOVEQ    R1,#+12
+   \   00000110   BA10CD01           STRHEQ   R1,[SP, #+10]
+   \   00000114   ........           ADR      R0,??DataTable12_1  ;; 0x61, 0x6D, 0x00, 0x00
+   \                     ??formattime_11:
+   \   00000118   00008DE5           STR      R0,[SP, #+0]
+   \   0000011C   BC30DDE1           LDRH     R3,[SP, #+12]
+   \   00000120   BA20DDE1           LDRH     R2,[SP, #+10]
+   \   00000124   ........           ADR      R1,`?<Constant "%2d:%02d%s">`
+   \   00000128   0400A0E1           MOV      R0,R4
+   \                     ??formattime_8:
+   \   0000012C   ........           BL       sprintf
+    163          				sprintf(textline, "%2d:%02d%s", FileTime.Hour, FileTime.Minute, (pm? "pm": "am"));
+    164          				break;
+    165          			} // case
+    166          		} // switch
+    167          	} // else
+    168          	
+    169          	return textline;
+   \                     ??formattime_2:
+   \   00000130   0400A0E1           MOV      R0,R4
+   \   00000134   14D08DE2           ADD      SP,SP,#+20
+   \   00000138   3080BDE8           POP      {R4,R5,PC}       ;; return
+    170          } // formattime
+    171          
+    172          // returns a file timestamp that can be used to set file time
+    173          // returns 0 if GPS time has not yet been set
+    174          //
+
+   \                                 In section .text, align 4, keep-with-next
+    175          U32 getTimeStamp ( void ) {
+   \                     getTimeStamp:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   14D04DE2           SUB      SP,SP,#+20
+    176          	FS_FILETIME FileTime;
+    177          	U32 TimeStamp;
+    178          
+    179          	if (0 == breakOutTime(&FileTime))
+   \   00000008   04008DE2           ADD      R0,SP,#+4
+   \   0000000C   ........           BL       breakOutTime
+   \   00000010   000050E3           CMP      R0,#+0
+   \   00000014   0300000A           BEQ      ??getTimeStamp_0
+    180          		return 0;
+    181          	FS_FileTimeToTimeStamp (&FileTime, &TimeStamp);
+   \   00000018   0D10A0E1           MOV      R1,SP
+   \   0000001C   04008DE2           ADD      R0,SP,#+4
+   \   00000020   ........           BL       FS_FileTimeToTimeStamp
+    182          	return TimeStamp;
+   \   00000024   00009DE5           LDR      R0,[SP, #+0]
+   \                     ??getTimeStamp_0:
+   \   00000028   14D08DE2           ADD      SP,SP,#+20       ;; stack cleaning
+   \   0000002C   0080BDE8           POP      {PC}             ;; return
+    183          
+    184          } // getTimeStamp
+    185          
+    186          // day 1 = Jan 1, 2002
+    187          // returns day of month, month (jan = 1), and year
+    188          
+
+   \                                 In section .text, align 4, keep-with-next
+    189          void dodate(U16 *day, U16 *mon, U16 *year, U16 days) {
+   \                     dodate:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+    190          
+    191          	u08 calendar[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+   \   00000004   ........           ADR      LR,`?<Constant {31, 28, 31, 30, 31, 30, 31, 31, 30`
+   \   00000008   0CD04DE2           SUB      SP,SP,#+12
+   \   0000000C   7000BEE8           LDM      LR!,{R4-R6}
+   \   00000010   0DC0A0E1           MOV      R12,SP
+   \   00000014   7000ACE8           STM      R12!,{R4-R6}
+    192          
+    193          	*year = 2002;	
+   \   00000018   D2C0A0E3           MOV      R12,#+210
+   \   0000001C   70CE8CE3           ORR      R12,R12,#0x700
+   \   00000020   B0C0C2E1           STRH     R12,[R2, #+0]
+   \   00000024   6EC0A0E3           MOV      R12,#+110
+   \   00000028   40CF8CE3           ORR      R12,R12,#0x100
+   \   0000002C   01E04CE2           SUB      LR,R12,#+1
+   \   00000030   040000EA           B        ??dodate_0
+    194          	while (days > 365 ) {
+    195          		// fix leap year
+    196          		if (!(*year%4) && days == 366) break;
+   \                     ??dodate_1:
+   \   00000034   040053E1           CMP      R3,R4
+   \   00000038   0E00000A           BEQ      ??dodate_2
+   \                     ??dodate_3:
+   \   0000003C   043043E0           SUB      R3,R3,R4
+    197          		days -= ((*year % 4)? 365 : 366);
+    198          		++*year;
+   \   00000040   014085E2           ADD      R4,R5,#+1
+   \   00000044   B040C2E1           STRH     R4,[R2, #+0]
+   \                     ??dodate_0:
+   \   00000048   0338A0E1           LSL      R3,R3,#+16
+   \   0000004C   0C40A0E1           MOV      R4,R12
+   \   00000050   2338A0E1           LSR      R3,R3,#+16
+   \   00000054   B050D2E1           LDRH     R5,[R2, #+0]
+   \   00000058   040053E1           CMP      R3,R4
+   \   0000005C   0300003A           BCC      ??dodate_4
+   \   00000060   030015E3           TST      R5,#0x3
+   \   00000064   F2FFFF0A           BEQ      ??dodate_1
+   \   00000068   0E40A0E1           MOV      R4,LR
+   \   0000006C   F2FFFFEA           B        ??dodate_3
+    199          	}
+    200          
+    201          	if (!(*year%4)) calendar[1] = 29; 		// fix leap year
+   \                     ??dodate_4:
+   \   00000070   030015E3           TST      R5,#0x3
+   \   00000074   0100001A           BNE      ??dodate_5
+   \                     ??dodate_2:
+   \   00000078   1DC0A0E3           MOV      R12,#+29
+   \   0000007C   01C0CDE5           STRB     R12,[SP, #+1]
+    202          
+    203          	*mon = 0;
+   \                     ??dodate_5:
+   \   00000080   0020A0E3           MOV      R2,#+0
+   \   00000084   0DC0A0E1           MOV      R12,SP
+   \   00000088   010000EA           B        ??dodate_6
+    204          	while (days > calendar[*mon]) {
+    205          		days -= calendar[*mon];
+   \                     ??dodate_7:
+   \   0000008C   01E0DCE4           LDRB     LR,[R12], #+1
+   \   00000090   0E3043E0           SUB      R3,R3,LR
+    206          		++*mon;
+    207          	}
+   \                     ??dodate_6:
+   \   00000094   00E0DCE5           LDRB     LR,[R12, #+0]
+   \   00000098   0338A0E1           LSL      R3,R3,#+16
+   \   0000009C   2338A0E1           LSR      R3,R3,#+16
+   \   000000A0   012082E2           ADD      R2,R2,#+1
+   \   000000A4   03005EE1           CMP      LR,R3
+   \   000000A8   F7FFFF3A           BCC      ??dodate_7
+    208          	++*mon;
+   \   000000AC   B020C1E1           STRH     R2,[R1, #+0]
+    209          
+    210          	*day = days;
+   \   000000B0   B030C0E1           STRH     R3,[R0, #+0]
+    211          }
+   \   000000B4   0CD08DE2           ADD      SP,SP,#+12
+   \   000000B8   7080BDE8           POP      {R4-R6,PC}       ;; return
+    212          
+    213          // converts a timestamp into seconds since midnight jan 1, 1980
+    214          // NOTE: This routine is approximate for comparing dates. It is not exact to the day.
+    215          //
+
+   \                                 In section .text, align 4, keep-with-next
+    216          U32 FileTimeToSeconds(FS_FILETIME *pFileTime) {
+    217          	U32 seconds = 0;
+    218          
+    219          	seconds += pFileTime->Second;
+    220          	seconds += pFileTime->Minute * 60;
+    221          	seconds += pFileTime->Hour * 60 * 60;
+    222          	seconds += pFileTime->Day * 24 * 60 * 60;
+    223          	seconds += pFileTime->Month * 30 * 24 * 60 * 60;		// not accurate (months vary)
+    224          	seconds += pFileTime->Year * 365 * 24 * 60 * 60;		// not accurate (leap years)
+    225          	
+    226          	return (seconds);
+   \                     FileTimeToSeconds:
+   \   00000000   B820D0E1           LDRH     R2,[R0, #+8]
+   \   00000004   BA10D0E1           LDRH     R1,[R0, #+10]
+   \   00000008   3C30A0E3           MOV      R3,#+60
+   \   0000000C   931221E0           MLA      R1,R3,R2,R1
+   \   00000010   B620D0E1           LDRH     R2,[R0, #+6]
+   \   00000014   E13EA0E3           MOV      R3,#+3600
+   \   00000018   931221E0           MLA      R1,R3,R2,R1
+   \   0000001C   B420D0E1           LDRH     R2,[R0, #+4]
+   \   00000020   503BA0E3           MOV      R3,#+81920
+   \   00000024   463D83E3           ORR      R3,R3,#0x1180
+   \   00000028   931221E0           MLA      R1,R3,R2,R1
+   \   0000002C   B220D0E1           LDRH     R2,[R0, #+2]
+   \   00000030   9C39A0E3           MOV      R3,#+2555904
+   \   00000034   8D3C83E3           ORR      R3,R3,#0x8D00
+   \   00000038   931221E0           MLA      R1,R3,R2,R1
+   \   0000003C   B000D0E1           LDRH     R0,[R0, #+0]
+   \   00000040   ........           LDR      R2,??DataTable12_13  ;; 0x1e13380
+   \   00000044   921020E0           MLA      R0,R2,R0,R1
+   \   00000048   1EFF2FE1           BX       LR               ;; return
+    227          	
+    228          } // TimeToSeconds
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10:
+   \   00000000   ECC9631ADCA5       DC32     0x1A63C9EC,0x404CA5DC
+   \              4C40        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12:
+   \   00000000   706D0000           DC8      0x70, 0x6D, 0x00, 0x00
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_1:
+   \   00000000   616D0000           DC8      0x61, 0x6D, 0x00, 0x00
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_2:
+   \   00000000   B7600BB6           DC32     0xb60b60b7
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_3:
+   \   00000000   ........           DC32     SEMA_GlobalData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_4:
+   \   00000000   ........           DC32     sysData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_5:
+   \   00000000   00840C24           DC32     0x240c8400
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_6:
+   \   00000000   01840C24           DC32     0x240c8401
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_7:
+   \   00000000   007CF3DB           DC32     0xdbf37c00
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_8:
+   \   00000000   986E1283           DC32     0x83126e98
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_9:
+   \   00000000   ABAAAAAA           DC32     0xaaaaaaab
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_10:
+   \   00000000   C5B3A291           DC32     0x91a2b3c5
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_11:
+   \   00000000   89888888           DC32     0x88888889
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_12:
+   \   00000000   ABAAAA2A           DC32     0x2aaaaaab
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_13:
+   \   00000000   8033E101           DC32     0x1e13380
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "--:--">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   2D2D3A2D2D00       DC8 45, 45, 58, 45, 45, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "%02d/%02d">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   253032642F25       DC8 37, 48, 50, 100, 47, 37, 48, 50, 100, 0
+   \              30326400    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant " %02d:%02d:%02d">`:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   20253032643A       DC8 32, 37, 48, 50, 100, 58, 37, 48, 50, 100
+   \              25303264    
+   \   0000000A   3A2530326400       DC8 58, 37, 48, 50, 100, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "%04d-%02d-%02d">`:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   253034642D25       DC8 37, 48, 52, 100, 45, 37, 48, 50, 100, 45
+   \              3032642D    
+   \   0000000A   253032640000       DC8 37, 48, 50, 100, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "%02d:%02d">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   253032643A25       DC8 37, 48, 50, 100, 58, 37, 48, 50, 100, 0
+   \              30326400    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "%2d:%02d%s">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   2532643A2530       DC8 37, 50, 100, 58, 37, 48, 50, 100, 37, 115
+   \              32642573    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "pm">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   706D0000           DC8 112, 109, 0, 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "am">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   616D0000           DC8 97, 109, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant {31, 28, 31, 30, 31, 30, 31, 31, 30`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   1F1C1F1E1F1E       DC8 31, 28, 31, 30, 31, 30, 31, 31, 30, 31
+   \              1F1F1E1F    
+   \   0000000A   1E1F               DC8 30, 31
+    229          
+
+   Maximum stack usage in bytes:
+
+     Function          .cstack
+     --------          -------
+     FileTimeToSeconds      0
+     breakOutTime          48
+     compute_heading       16
+     dodate                28
+     dotemp                 8
+     formattime            32
+     getTimeStamp          24
+     unpack_velocities      4
+
+
+   Section sizes:
+
+     Function/Label                                 Bytes
+     --------------                                 -----
+     unpack_velocities                               116
+     compute_heading                                 188
+     dotemp                                          136
+     breakOutTime                                    464
+     formattime                                      316
+     getTimeStamp                                     48
+     dodate                                          188
+     FileTimeToSeconds                                76
+     ??DataTable10                                     8
+     ??DataTable12                                     4
+     ??DataTable12_1                                   4
+     ??DataTable12_2                                   4
+     ??DataTable12_3                                   4
+     ??DataTable12_4                                   4
+     ??DataTable12_5                                   4
+     ??DataTable12_6                                   4
+     ??DataTable12_7                                   4
+     ??DataTable12_8                                   4
+     ??DataTable12_9                                   4
+     ??DataTable12_10                                  4
+     ??DataTable12_11                                  4
+     ??DataTable12_12                                  4
+     ??DataTable12_13                                  4
+     ?<Constant "--:--">                               8
+     ?<Constant "%02d/%02d">                          12
+     ?<Constant " %02d:%02d:%02d">                    16
+     ?<Constant "%04d-%02d-%02d">                     16
+     ?<Constant "%02d:%02d">                          12
+     ?<Constant "%2d:%02d%s">                         12
+     ?<Constant "pm">                                  4
+     ?<Constant "am">                                  4
+     ?<Constant {31, 28, 31, 30, 31, 30, 31, 31, 30   12
+
+ 
+     8 bytes in section .rodata
+ 1 684 bytes in section .text
+ 
+ 1 684 bytes of CODE  memory
+     8 bytes of CONST memory
+
+Errors: none
+Warnings: none

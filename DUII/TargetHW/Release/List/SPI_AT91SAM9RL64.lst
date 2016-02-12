@@ -1,0 +1,2131 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     20/Nov/2015  12:00:51 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\Setup\SPI_AT91SAM9RL64.c                #
+#    Command line =  C:\DUII\TargetHW\Setup\SPI_AT91SAM9RL64.c -D DEBUG=1 -D  #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\SPI_AT91SAM9RL64.lst       #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\SPI_AT91SAM9RL64.o          #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\Setup\SPI_AT91SAM9RL64.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2009     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          ----------------------------------------------------------------------
+     19          File        : MMC_HW_SPI.c
+     20          Purpose     : Sample MMC hardware layer for Atmel AT91SAM9261
+     21          ---------------------------END-OF-HEADER------------------------------
+     22          */
+     23          
+     24          /*********************************************************************
+     25          *
+     26          *             #include Section
+     27          *
+     28          **********************************************************************
+     29          */
+     30          
+     31          #include "SPI_API.h"
+     32          #include "FS_OS.h"
+     33          #include "RTOS.h"
+     34          #include "MMC_MCI_HW.h"
+     35          
+     36          //
+     37          // Public Prototypes
+     38          //
+     39          
+     40          //
+     41          // Local Prototypes
+     42          //
+     43          void uSDelay(int);
+     44          void mSDelay(int);
+     45          void DummyWrite(void);
+     46          void _SPI_Common_X_Write(const U8 * pData, int NumBytes);
+     47          void LED_SPI_X_EnableCS(void);
+     48          void DF0_SPI_X_EnableCS(void);
+     49          void DF1_SPI_X_EnableCS(void);
+     50          void LED_SPI_X_DisableCS(void);
+     51          void DF0_SPI_X_DisableCS(void);
+     52          void DF1_SPI_X_DisableCS(void);
+     53          
+     54          /*********************************************************************
+     55          *
+     56          *       Defines, Configurable
+     57          *
+     58          **********************************************************************
+     59          */
+     60          #define USE_OS    0     // 0: Polled mode, 1 means the task is suspended during DMA transfer, reducing CPU load and allowing the CPU to execute an other task
+     61          
+     62          #ifndef USE_PDC
+     63            #define USE_PDC 1    // 0: PDC shall not be used. When PDC is used to transfer data from/to internal memory, wrong data are received. 1 : PDC shall be used.
+     64          #endif
+     65          
+     66          /*********************************************************************
+     67          *
+     68          *       Defines, sfr
+     69          *
+     70          **********************************************************************
+     71          */
+     72          
+     73          /*********************************************************************
+     74          *
+     75          *       #define Macros
+     76          *
+     77          **********************************************************************
+     78          */
+     79          /*********************************************************************
+     80          *
+     81          *       Static data
+     82          *
+     83          **********************************************************************
+     84          */
+     85          
+
+   \                                 In section .data, align 1
+   \   00000000   19                 DC8 25
+     86          static U8           _sbcr = MCLK_SPICLOCK / 4000000UL;
+
+   \                                 In section .bss, align 4
+     87          static U32          _aBuffer[(BUFFER_SIZE + CACHE_LINE_SIZE) / 4];   // Used to transfer data from or to DMA
+   \                     _aBuffer:
+   \   00000000                      DS8 544
+
+   \                                 In section .text, align 4, keep-with-next
+     88          static const U8     _aFF[512] = {
+   \                     _aFF:
+   \   00000000                      ; Initializer data, 512 bytes
+   \   00000000   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   0000000A   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000014   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   0000001E   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000028   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000032   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   0000003C   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000046   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000050   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   0000005A   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000064   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   0000006E   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000078   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000082   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   0000008C   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000096   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000000A0   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000000AA   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000000B4   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000000BE   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000000C8   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000000D2   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000000DC   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000000E6   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000000F0   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000000FA   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000104   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   0000010E   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000118   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000122   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   0000012C   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000136   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000140   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   0000014A   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000154   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   0000015E   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000168   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000172   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   0000017C   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000186   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   00000190   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   0000019A   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000001A4   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000001AE   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000001B8   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000001C2   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000001CC   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000001D6   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000001E0   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000001EA   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000001F4   FFFFFFFFFFFF       DC8 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+   \              FFFFFFFF    
+   \   000001FE   FFFF               DC8 255, 255
+     89            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     90            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     91            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     92            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     93            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     94            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     95            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     96            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     97            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     98            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     99            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    100            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    101            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    102            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    103            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    104            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    105            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    106            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    107            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    108            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    109            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    110            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    111            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    112            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    113            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    114            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    115            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    116            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    117            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    118            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    119            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    120            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
+    121          };
+    122          
+    123          /*********************************************************************
+    124          *
+    125          *       Static code
+    126          *
+    127          **********************************************************************
+    128          */
+    129          
+    130          /*********************************************************************
+    131          *
+    132          *       _PDC_SetTx
+    133          */
+    134          static void _PDC_SetTx(const U8 * pAddress, unsigned NumBytes) {
+    135            SPI_PDC_TPR = (unsigned int)pAddress;
+    136            SPI_PDC_TCR = NumBytes;
+    137          }
+    138          
+    139          /*********************************************************************
+    140          *
+    141          *       _PDC_SetRx
+    142          */
+    143          static void _PDC_SetRx(U8 * pAddress, unsigned Bytes) {
+    144            SPI_PDC_RPR = (unsigned int)pAddress;
+    145            SPI_PDC_RCR = Bytes;
+    146          }
+    147          
+    148          /*********************************************************************
+    149          *
+    150          *       _PDC_EnableTx
+    151          */
+    152          static void _PDC_EnableTx(void) {
+    153            SPI_PDC_PTCR = PDC_TXTEN;
+    154          }
+    155          
+    156          /*********************************************************************
+    157          *
+    158          *       _PDC_EnableRx
+    159          */
+    160          static void _PDC_EnableRx(void) {
+    161            SPI_PDC_PTCR = PDC_RXTEN;
+    162          }
+    163          
+    164          #if USE_OS
+    165          /**********************************************************
+    166          *
+    167          *       _IrqHandler
+    168          */
+    169          static void _IrqHandler(void) {
+    170            U32 v;
+    171          
+    172            //
+    173            // Disable further interrupts
+    174            //
+    175            v  = SPI_IMR;
+    176            SPI_IDR =  v;
+    177            //
+    178            // Signal (wake) the task waiting
+    179            //
+    180            FS_OS_SIGNAL();
+    181          }
+    182          #endif
+    183          /**********************************************************
+    184          *
+    185          *       _GetBufferAddr
+    186          */
+    187          static U8 * _GetBufferAddr(void) {
+    188            U8 * p;
+    189          
+    190            p = (U8 *)(((U32)&_aBuffer[0] + 0x1f) & ~0x1f);
+    191            return p;
+    192          }
+    193          
+    194          /*********************************************************************
+    195          *
+    196          *       _Init
+    197          */
+
+   \                                 In section .text, align 4, keep-with-next
+    198          static void _Init(void) {
+   \                     _Init:
+   \   00000000   00402DE9           PUSH     {LR}
+    199            //
+    200            // Enable "Power" (clock) for PIOA, B, D, PWM and SPI block
+    201            //
+    202            PMC_PCER = (1 << SPI_ID)
+    203                     | (1 << PIOA_ID)
+    204                     | (1 << PIOB_ID)
+    205                     | (1 << PIOD_ID)
+    206                     | (1 << PWM_ID)
+    207          			;
+   \   00000004   2C10A0E3           MOV      R1,#+44
+   \   00000008   810EA0E3           MOV      R0,#+2064
+   \   0000000C   821A81E3           ORR      R1,R1,#0x82000
+   \   00000010   001C00E5           STR      R1,[R0, #-3072]
+    208            //
+    209            // Setup Pins
+    210            //
+    211            PIOA_SODR = 0								// set output data register
+    212                      | (1 << SD0_CS_PIN)
+    213                      | (1 << SD_MOSI_PIN)
+    214                      | (1 << SD_CLK_PIN)
+    215          			| (1 << SENSE_12V)
+    216          			| (1 << SDCARD_DETECT)
+    217          			| (1 << SDCARD_WP)
+    218                      | (1 << SD0_CS_PIN)
+    219                      ;
+   \   00000014   ........           LDR      R1,??DataTable23  ;; 0x1c028200
+   \   00000018   3000A0E3           MOV      R0,#+48
+   \   0000001C   001C00E5           STR      R1,[R0, #-3072]
+    220            PIOA_PER =  0								// pio enable register
+    221          			| (1 << USB_OC_PIN)
+    222          			| (1 << USB_ENABLE_PIN)
+    223          			| (1 << SENSE_12V)
+    224          			| (1 << SDCARD_DETECT)
+    225          			| (1 << SDCARD_WP)
+    226                      | (1 << SD0_CS_PIN)
+    227          			;
+   \   00000020   FF00E0E3           MVN      R0,#+255
+   \   00000024   ........           LDR      R1,??DataTable23_1  ;; 0x101a8200
+   \   00000028   B00EC0E3           BIC      R0,R0,#0xB00
+   \   0000002C   001080E5           STR      R1,[R0, #+0]
+    228            PIOA_OER  = 0								// output enable register
+    229          	 		| (1 << DTXD_PIN)				// Serial Debug Unit data Tx Pin
+    230                      | (1 << SD0_CS_PIN)
+    231          			| (1 << USB_ENABLE_PIN)
+    232                      | (1 << SD_MOSI_PIN)
+    233                      | (1 << SD_CLK_PIN)
+    234                      | (1 << SD0_CS_PIN)
+    235                      ;
+   \   00000030   4015A0E3           MOV      R1,#+268435456
+   \   00000034   1000A0E3           MOV      R0,#+16
+   \   00000038   C51681E3           ORR      R1,R1,#0xC500000
+   \   0000003C   001C00E5           STR      R1,[R0, #-3072]
+    236            PIOA_ODR  = 0								// output disable register
+    237          	 		| (1 << DRXD_PIN)				// Serial Debug Unit data Rx Pin
+    238                      | (1 << SD_MOSI_PIN)
+    239                      ;
+   \   00000040   1400A0E3           MOV      R0,#+20
+   \   00000044   4216A0E3           MOV      R1,#+69206016
+   \   00000048   001C00E5           STR      R1,[R0, #-3072]
+    240            PIOA_PDR =  0								// port disable register
+    241          	 		| (1 << DRXD_PIN)				// Serial Debug Unit data Rx Pin
+    242          	 		| (1 << DTXD_PIN)				// Serial Debug Unit data Tx Pin
+    243                      | (1 << SD_MISO_PIN)       // SPI-MISO
+    244                      | (1 << SD_MOSI_PIN)       // SPI-MOSI
+    245                      | (1 << SD_CLK_PIN)        // SPI-Clock
+    246          			;
+   \   0000004C   E606A0E3           MOV      R0,#+241172480
+   \   00000050   0410A0E3           MOV      R1,#+4
+   \   00000054   000C01E5           STR      R0,[R1, #-3072]
+    247            PIOA_ASR  = 0								// A select register
+    248          	 		| (1 << DRXD_PIN)				// Serial Debug Unit data Rx Pin
+    249          	 		| (1 << DTXD_PIN)				// Serial Debug Unit data Tx Pin
+    250                      | (1 << SD_MISO_PIN)       // SPI-MISO
+    251                      | (1 << SD_MOSI_PIN)       // SPI-MOSI
+    252                      | (1 << SD_CLK_PIN)        // SPI-Clock
+    253          			;
+   \   00000058   7010A0E3           MOV      R1,#+112
+   \   0000005C   000C01E5           STR      R0,[R1, #-3072]
+    254          
+    255            PIOA_MDER =	0							// enable open collector
+    256          			| (1 << SENSE_12V)				// power loss comparator
+    257          			| (1 << SDCARD_DETECT)			// card detect
+    258          			| (1 << SDCARD_WP)				// write protect
+    259          			| (1 << USB_OC_PIN)				// read overcurrent
+    260          			;
+   \   00000060   A01AA0E3           MOV      R1,#+655360
+   \   00000064   5000A0E3           MOV      R0,#+80
+   \   00000068   821C81E3           ORR      R1,R1,#0x8200
+   \   0000006C   001C00E5           STR      R1,[R0, #-3072]
+    261            PIOA_PUDR =	0								// pull-up disable
+    262          			| (1 << SENSE_12V)
+    263          			| (1 << USB_ENABLE_PIN)			// turn off usb
+    264          			| (1 << USB_OC_PIN)				// turn off pullup so we can read overcurrent
+    265          			;
+   \   00000070   6809A0E3           MOV      R0,#+1703936
+   \   00000074   6010A0E3           MOV      R1,#+96
+   \   00000078   000C01E5           STR      R0,[R1, #-3072]
+    266            PIOA_CODR = 0								// clear output data register
+    267          			| (1 << SENSE_12V)				// set to low
+    268          			| (1 << USB_ENABLE_PIN)			// turn off usb
+    269          			| (1 << USB_OC_PIN)				// turn off pullup so we can read overcurrent
+    270                      ;
+   \   0000007C   3410A0E3           MOV      R1,#+52
+   \   00000080   000C01E5           STR      R0,[R1, #-3072]
+    271          
+    272          #if 0
+    273            // reference code only
+    274            //
+    275            // Initialize LCD
+    276            //
+    277          ;  PIOC_IDR        = 0xE8;
+    278          ;  PIOC_PPUDR      = 0xE8;
+    279            PIOC_ASR        = 0xE8;
+    280            PIOC_PDR        = 0xE8;
+    281          ;  PIOC_IDR        = 0x03FFBE12;
+    282          ;  PIOC_PPUDR      = 0x03FFBE12;
+    283          ;  PIOC_BSR        = 0x03FFBE12;
+    284            PIOC_PDR        = 0x03FFBE12;
+    285          #endif
+    286          
+    287            PIOB_PER =	0
+    288          				| (1 << TS_CS_PIN)
+    289          				| (1 << PWR_LOSS_12V_PIN)
+    290          				;
+   \   00000084   800FA0E3           MOV      R0,#+512
+   \   00000088   481EA0E3           MOV      R1,#+1152
+   \   0000008C   001C00E5           STR      R1,[R0, #-3072]
+    291          
+    292            PIOB_SODR =	0
+    293          				| (1 << TS_CS_PIN)
+    294          				;
+   \   00000090   8000A0E3           MOV      R0,#+128
+   \   00000094   8C1FA0E3           MOV      R1,#+560
+   \   00000098   000C01E5           STR      R0,[R1, #-3072]
+    295          
+    296            PIOB_OER  =	0								// enable outputs
+    297          				| (1 << TS_CS_PIN)
+    298          				;
+   \   0000009C   841FA0E3           MOV      R1,#+528
+   \   000000A0   000C01E5           STR      R0,[R1, #-3072]
+    299          
+    300            PIOB_ODR  =	0								// disable outputs
+    301          				| (1 << PWR_LOSS_12V_PIN)
+    302          				;
+   \   000000A4   401EA0E3           MOV      R1,#+1024
+   \   000000A8   852FA0E3           MOV      R2,#+532
+   \   000000AC   001C02E5           STR      R1,[R2, #-3072]
+    303          
+    304            PIOB_PUDR  =	0								// disable pullups
+    305          				| (1 << PWR_LOSS_12V_PIN)
+    306          				;
+   \   000000B0   982FA0E3           MOV      R2,#+608
+   \   000000B4   001C02E5           STR      R1,[R2, #-3072]
+    307          
+    308            PIOB_IFER  =	0								// enable input glitch filtering
+    309          				| (1 << PWR_LOSS_12V_PIN)
+    310          				;
+   \   000000B8   882FA0E3           MOV      R2,#+544
+   \   000000BC   001C02E5           STR      R1,[R2, #-3072]
+    311          
+    312          // Do this before configuring GPIO to prevent flicker of LEDs when PWM pin is enabled
+    313          
+    314          //
+    315          // Configure PWM for LED brightness control
+    316          // PIO Controller D, Peripheral A, PWM3
+    317          // pin PD18 to eval board connector J26 pin 20
+    318          //
+    319          // PWM0 - PD14 - Backlight control
+    320          // PWM1 - PD15 - Main board, upper, side warning LED
+    321          // PWM2 - PD16 - Main board, lower, side warning LED
+    322          // PWM3 - PD18 - LED board (tach LEDs)
+    323          //
+    324          	// ROB'S RECOMMENDATION
+    325          	PWMC_MR	= 0x00000A02;   // which is MCLK/ (1024*2) = 97KHz on clkA
+   \   000000C0   ........           LDR      R1,??DataTable23_2  ;; 0xfffc8000
+   \   000000C4   0220A0E3           MOV      R2,#+2
+   \   000000C8   A02E82E3           ORR      R2,R2,#0xA00
+   \   000000CC   002081E5           STR      R2,[R1, #+0]
+    326          	PWMC_ENA	= 0x0000000F;   // to enable PWM 0, 1, 2 and 3
+   \   000000D0   0F20A0E3           MOV      R2,#+15
+   \   000000D4   042081E5           STR      R2,[R1, #+4]
+    327          	
+    328          // Tach LEDs
+    329          	PWMC_MR3	= 0x0000000B;  // to use clkA
+   \   000000D8   0B20A0E3           MOV      R2,#+11
+   \   000000DC   602281E5           STR      R2,[R1, #+608]
+    330          	PWMC_PRD3= 0x00000064;  // set period to about 488Hz
+   \   000000E0   6430A0E3           MOV      R3,#+100
+   \   000000E4   683281E5           STR      R3,[R1, #+616]
+    331          	PWMC_DTY3 = TACH_LED_OFF;	// Set duty cycle to off
+   \   000000E8   00C0A0E3           MOV      R12,#+0
+   \   000000EC   64C281E5           STR      R12,[R1, #+612]
+    332          	
+    333          // Configure PWN for Warning LED brightness control
+    334          // PIO Controller D, Peripheral B, PWM3
+    335          // pins PD15, PD16 to eval board connector J26 pins 15, 18
+    336          // Set side warning LEDs initially with the same data
+    337          // Note PWM 1,2 are inverted from PWM3
+    338          	// Backlight
+    339          	PWMC_MR0  = 0x0000000B;   	// to use clkA
+   \   000000F0   002281E5           STR      R2,[R1, #+512]
+    340          	PWMC_PRD0 = 0x00000190;   	// 400 decimal, set period to about 120Hz
+   \   000000F4   64EFA0E3           MOV      LR,#+400
+   \   000000F8   08E281E5           STR      LR,[R1, #+520]
+    341          	PWMC_DTY0 = BACKLIGHT_LED_OFF;  	// Set duty cycle to off
+   \   000000FC   04C281E5           STR      R12,[R1, #+516]
+    342          
+    343          //	Warning LED 1
+    344          	PWMC_MR1  = 0x0000000B;   		// to use clkA
+   \   00000100   202281E5           STR      R2,[R1, #+544]
+    345          	PWMC_PRD1 = 0x00000064;   		// set period to about 488Hz
+   \   00000104   283281E5           STR      R3,[R1, #+552]
+    346          	PWMC_DTY1 = WARNING_LED_OFF;  // Set duty cycle to off
+   \   00000108   243281E5           STR      R3,[R1, #+548]
+    347          
+    348          //	Warning LED 2
+    349          	PWMC_MR2  = 0x0000000B;   		// to use clkA
+   \   0000010C   402281E5           STR      R2,[R1, #+576]
+    350          	PWMC_PRD2 = 0x00000064;   		// set period to about 488Hz
+   \   00000110   483281E5           STR      R3,[R1, #+584]
+    351          	PWMC_DTY2 = WARNING_LED_OFF;  // Set duty cycle to off
+   \   00000114   443281E5           STR      R3,[R1, #+580]
+    352          
+    353          // KMC - make GPIO
+    354            PIOD_PER =	0								// PIO enable
+    355          	 			| (1 << LCD_5V_ENABLE)
+    356          				| (1 << LED_CS_PIN)
+    357          				| (1 << TS_RESET_PIN)
+    358          				| (1 << HPSD)
+    359          	            | (1 << SD1_CS_PIN)
+    360          				| (1 << ONOFF_BUTTON)
+    361          				;
+   \   00000118   ........           LDR      R2,??DataTable23_3  ;; 0x120521
+   \   0000011C   601EA0E3           MOV      R1,#+1536
+   \   00000120   002C01E5           STR      R2,[R1, #-3072]
+    362          
+    363            PIOD_PDR =	0								// PIO disable
+    364          				| (1 << LIGHT_SENSOR)
+    365          				| (1 << LED_OE_PIN)
+    366          				| (1 << UPPER_WARNING_LED_PIN)
+    367          				| (1 << LOWER_WARNING_LED_PIN)
+    368          				| (1 << LCD_BACKLIGHT_PIN)
+    369          				;
+   \   00000124   4020A0E3           MOV      R2,#+64
+   \   00000128   041081E3           ORR      R1,R1,#0x4
+   \   0000012C   5C2A82E3           ORR      R2,R2,#0x5C000
+   \   00000130   002C01E5           STR      R2,[R1, #-3072]
+    370          				
+    371            PIOD_OER  = 0									// enable output
+    372          	 			| (1 << LCD_5V_ENABLE)
+    373          				| (1 << LED_CS_PIN)
+    374          				| (1 << TS_RESET_PIN)
+    375          				| (1 << HPSD)
+    376          				| (1 << UPPER_WARNING_LED_PIN)
+    377          				| (1 << LOWER_WARNING_LED_PIN)
+    378          				| (1 << LCD_BACKLIGHT_PIN)
+    379          	            | (1 << SD1_CS_PIN)
+    380          				;
+   \   00000134   4F29A0E3           MOV      R2,#+1294336
+   \   00000138   611EA0E3           MOV      R1,#+1552
+   \   0000013C   522E82E3           ORR      R2,R2,#0x520
+   \   00000140   002C01E5           STR      R2,[R1, #-3072]
+    381          
+    382            PIOD_ODR =	0								// output disable
+    383          				| (1 << ONOFF_BUTTON)
+    384          				| (1 << LIGHT_SENSOR)
+    385          				;
+   \   00000144   041081E3           ORR      R1,R1,#0x4
+   \   00000148   4120A0E3           MOV      R2,#+65
+   \   0000014C   002C01E5           STR      R2,[R1, #-3072]
+    386          
+    387            PIOD_IDR =	0								// interrupt disable
+    388          	 			| (1 << LCD_5V_ENABLE)
+    389          				| (1 << LED_CS_PIN)
+    390          				| (1 << TS_RESET_PIN)
+    391          				| (1 << HPSD)
+    392          				| (1 << ONOFF_BUTTON)
+    393          				;
+   \   00000150   ........           LDR      R2,??DataTable23_4  ;; 0x120421
+   \   00000154   301081E2           ADD      R1,R1,#+48
+   \   00000158   002C01E5           STR      R2,[R1, #-3072]
+    394          
+    395            PIOD_PUDR =	0								// pull-up disable
+    396          	 			| (1 << LCD_5V_ENABLE)
+    397          				| (1 << LED_CS_PIN)
+    398          				| (1 << LED_OE_PIN)
+    399          				| (1 << TS_RESET_PIN)
+    400          				| (1 << HPSD)
+    401          				| (1 << UPPER_WARNING_LED_PIN)
+    402          				| (1 << LOWER_WARNING_LED_PIN)
+    403          				| (1 << LCD_BACKLIGHT_PIN)
+    404          				| (1 << LIGHT_SENSOR)
+    405          				;
+   \   0000015C   5F29A0E3           MOV      R2,#+1556480
+   \   00000160   661EA0E3           MOV      R1,#+1632
+   \   00000164   462E82E3           ORR      R2,R2,#0x460
+   \   00000168   002C01E5           STR      R2,[R1, #-3072]
+    406          
+    407            PIOD_PUER =	0								// pullup enable
+    408          				| (1 << ONOFF_BUTTON)
+    409          				;
+   \   0000016C   0110A0E3           MOV      R1,#+1
+   \   00000170   602E83E3           ORR      R2,R3,#0x600
+   \   00000174   001C02E5           STR      R1,[R2, #-3072]
+    410          
+    411            PIOD_MDDR =	0								// disable open drain
+    412          	 			| (1 << LCD_5V_ENABLE)
+    413          				| (1 << LED_CS_PIN)
+    414          				| (1 << LED_OE_PIN)
+    415          				| (1 << TS_RESET_PIN)
+    416          				| (1 << HPSD)
+    417          				| (1 << UPPER_WARNING_LED_PIN)
+    418          				| (1 << LOWER_WARNING_LED_PIN)
+    419          				| (1 << LCD_BACKLIGHT_PIN)
+    420          				;
+   \   00000178   5F39A0E3           MOV      R3,#+1556480
+   \   0000017C   102042E2           SUB      R2,R2,#+16
+   \   00000180   423E83E3           ORR      R3,R3,#0x420
+   \   00000184   003C02E5           STR      R3,[R2, #-3072]
+    421          
+    422            PIOD_MDER =	0								// enable open drain
+    423          				| (1 << ONOFF_BUTTON)
+    424          				;
+   \   00000188   652EA0E3           MOV      R2,#+1616
+   \   0000018C   001C02E5           STR      R1,[R2, #-3072]
+    425          
+    426            PIOD_ASR =	0								// choose A peripheral
+    427          				| (1 << LED_OE_PIN)
+    428          				| (1 << LIGHT_SENSOR)
+    429          				;
+   \   00000190   4030A0E3           MOV      R3,#+64
+   \   00000194   672EA0E3           MOV      R2,#+1648
+   \   00000198   403A83E3           ORR      R3,R3,#0x40000
+   \   0000019C   003C02E5           STR      R3,[R2, #-3072]
+    430          
+    431            PIOD_BSR =	0								// choose B peripheral
+    432          				| (1 << UPPER_WARNING_LED_PIN)
+    433          				| (1 << LOWER_WARNING_LED_PIN)
+    434          				| (1 << LCD_BACKLIGHT_PIN)
+    435          				;
+   \   000001A0   042082E3           ORR      R2,R2,#0x4
+   \   000001A4   703BA0E3           MOV      R3,#+114688
+   \   000001A8   003C02E5           STR      R3,[R2, #-3072]
+    436          
+    437          // SET INITIAL STATE OF PIOD
+    438            PIOD_CODR =	0								// set output line low
+    439          				| (1 << LED_CS_PIN)
+    440          				| (1 << HPSD)
+    441          				| (1 << UPPER_WARNING_LED_PIN)
+    442          				| (1 << LOWER_WARNING_LED_PIN)
+    443          				| (1 << LCD_BACKLIGHT_PIN)
+    444          				| (1 << LED_OE_PIN)
+    445          				;
+   \   000001AC   2030A0E3           MOV      R3,#+32
+   \   000001B0   4020C2E3           BIC      R2,R2,#0x40
+   \   000001B4   7C3A83E3           ORR      R3,R3,#0x7C000
+   \   000001B8   003C02E5           STR      R3,[R2, #-3072]
+    446          
+    447            PIOD_SODR  =	0								// set output line high
+    448          	 			| (1 << LCD_5V_ENABLE)
+    449          				| (1 << TS_RESET_PIN)
+    450          				| (1 << SD1_CS_PIN)
+    451          				;
+   \   000001BC   4039A0E3           MOV      R3,#+1048576
+   \   000001C0   632EA0E3           MOV      R2,#+1584
+   \   000001C4   503E83E3           ORR      R3,R3,#0x500
+   \   000001C8   003C02E5           STR      R3,[R2, #-3072]
+    452            //
+    453            // SPI
+    454            //
+    455            SPI_CR    = (1 << 7);      // Software reset
+   \   000001CC   ........           LDR      R2,??DataTable23_5  ;; 0xfffcc000
+   \   000001D0   ........           LDR      R3,??DataTable23_6  ;; 0x10c802
+   \   000001D4   000082E5           STR      R0,[R2, #+0]
+    456            SPI_CR    = (1 << 7);      // KMC - Atmel code sends 2 consecutive resets!
+   \   000001D8   000082E5           STR      R0,[R2, #+0]
+    457            // see C:\Program Files\IAR Systems\Embedded Workbench 5.4\arm\examples\Atmel\at91lib\memories\spi-flash line 73
+    458            SPI_MR    = 0
+    459                      |(1 << 0)         // 1 : Master mode
+    460                      |(0 << 1)         // 0 : Fixed chip select
+    461                      |(0 << 2)         // Chip select
+    462                      |(0 << 3)         // 0: Use MCLK as clock
+    463                      |(1 << 4)         // 1: Fault detection disable
+    464                      |(0 << 7)         // 1: Loopback
+    465                      |(0xD << 16)      // Default to Touch Screen Controller as selected by default (must be something - cannot be none)
+    466                      ;
+   \   000001DC   1100A0E3           MOV      R0,#+17
+   \   000001E0   D00A80E3           ORR      R0,R0,#0xD0000
+   \   000001E4   040082E5           STR      R0,[R2, #+4]
+    467            SPI_CSR0  = 0				  // dataflash 0
+    468                      |(1 << 0)         // 1 : Clock polarity of idle is high
+    469                      |(0 << 1)         // Clock hase sel
+    470                      |(0 << 3)         // Chip select 0 becomes inactive after transfer (KMC - was: Leave CS0 stay low)
+    471                      |(0 << 4)         // 0000b: 8 bits per transfer
+    472                      |(_sbcr << 8)     // 8..15: SCBR: Baud rate divider  **** THIS WORKS ****
+    473          // SPI can run at 50MHz = MCLK / 2. Trying 4 = 25MHz -- GAS
+    474          //			| (4 << 8)			// 25MHz
+    475          				|(0x100000)
+    476                      ;
+   \   000001E8   ........           LDR      R0,??DataTable23_7  ;; 0x101901
+   \   000001EC   300082E5           STR      R0,[R2, #+48]
+    477            SPI_CSR1  = 0					// KMC TODO - initially assuming communication with touch screen controller chip
+    478          	 									// is the same as serial flash (whose setting are left over from the settings used
+    479          	 									// by the 9261 access to the SD card).
+    480                      |(0 << 0)         // CPOL = 0, Clock polarity of idle is low
+    481                      |(1 << 1)         // NCPHA = 1??????????????
+    482                      |(0 << 3)         // Chip select 1 becomes inactive after transfer
+    483                      |(0 << 4)         // 0000b: 8 bits per transfer
+    484                      |((_sbcr << 3) << 8)	   // 8..15: SCBR: Baud rate divider -- KMC TEST - slow it down
+    485                      |(0x100000)
+    486                      ;
+   \   000001F0   343082E5           STR      R3,[R2, #+52]
+    487            SPI_CSR2  = 0				  // dataflash 1
+    488                      |(1 << 0)         // 1 : Clock polarity of idle is high
+    489                      |(0 << 1)         // Clock hase sel
+    490                      |(0 << 3)         // Chip select 0 becomes inactive after transfer (KMC - was: Leave CS0 stay low)
+    491                      |(0 << 4)         // 0000b: 8 bits per transfer
+    492                      |(_sbcr << 8)     // 8..15: SCBR: Baud rate divider *** SEE ABOVE ***
+    493          //			| (4 << 8)			// 25 MHz
+    494                      |(0x100000)
+    495          			;
+   \   000001F4   380082E5           STR      R0,[R2, #+56]
+    496            SPI_CSR3  = 0					// LED controller
+    497                      |(1 << 0)         // 1 : Clock polarity of idle is high
+    498                      |(0 << 1)         // Clock hase sel
+    499                      |(0 << 3)         // Chip select 0 becomes inactive after transfer (KMC - was: Leave CS0 stay low)
+    500                      |(0 << 4)         // 0000b: 8 bits per transfer
+    501                      |(_sbcr << 8)     // 8..15: SCBR: Baud rate divider
+    502          //            |(0xFF << 8)	   // 8..15: SCBR: Baud rate divider -- KMC TEST - slow it WAY down (0xff = slowest, 0x00 = fastest)
+    503                      |(0x100000);
+   \   000001F8   3C0082E5           STR      R0,[R2, #+60]
+    504                      ;
+    505            SPI_CR    = (1 << 0);       // Enable SPI
+   \   000001FC   001082E5           STR      R1,[R2, #+0]
+    506          
+    507          	
+    508          #if USE_OS
+    509            //
+    510            // HW Init done
+    511            // Setup IRQ handler
+    512            //
+    513            SPI_IDR = 0xFFFFFFFF;                                     // Disable all interrupts
+    514            *(U32*)(0xFFFFF080 + 4 * SPI_ID)   = (U32)_IrqHandler;    // Set interrupt vector
+    515            *(U32*)(0xFFFFF128)                = (1 << SPI_ID);       // Clear pending interrupt
+    516            *(U32*)(0xFFFFF120)                = (1 << SPI_ID);       // Enable Interrupt
+    517          #endif
+    518          }
+   \   00000200   0080BDE8           POP      {PC}             ;; return
+    519          
+    520          
+    521          /*********************************************************************
+    522          *
+    523          *       Public code
+    524          *
+    525          **********************************************************************
+    526          */
+    527          /*********************************************************************
+    528          *
+    529          *             SPIInit
+    530          *
+    531          *  Description:
+    532          *    KMC TODO - combine this with other routine
+    533          *    Initialize the SPI subsystem.  Note, this routine might be combined
+    534          *    with another HW init routine to make sure registered are initialized
+    535          *    correctly the first time - and only once!
+    536          *
+    537          *  Parameters:
+    538          *    none
+    539          *
+    540          *  Return value:
+    541          *    void
+    542          */
+
+   \                                 In section .text, align 4, keep-with-next
+    543          void SPIInit(void)
+    544          {
+    545          	_Init();
+   \                     SPIInit:
+   \   00000000   ........           B        _Init            ;; tailcall
+    546          }
+    547          
+    548          //
+    549          // Initialize TI TSC2006 chip
+    550          //
+    551          // Config word == 0x8000
+    552          // 0b10001000 = control byte 1, scan X and Y continuously, do not reset, do not stop
+    553          //
+    554          #if 0
+    555          // My original code
+    556          unsigned const char SWRESET_COMMAND[] = { 0x82 };
+    557          unsigned const char INITIALIZE_TOUCHCONTROLLER_COMMAND[] = { 0x60, 0x80, 0x02 };
+    558          unsigned const char START_PROCESSING_TOUCH_COMMAND[] = { 0x88 };
+    559          
+    560          void TSInit(void)
+    561          {
+    562          	TS_SPI_X_Write(SWRESET_COMMAND, sizeof(SWRESET_COMMAND));		// Send software reset to reset registers
+    563          	uSDelay(10);																	// Delay just in case
+    564          	TS_SPI_X_Write(INITIALIZE_TOUCHCONTROLLER_COMMAND, sizeof(INITIALIZE_TOUCHCONTROLLER_COMMAND));		// Configure controller
+    565          	TS_SPI_X_Write(START_PROCESSING_TOUCH_COMMAND, sizeof(START_PROCESSING_TOUCH_COMMAND));				// Send command to start processing touch
+    566          }
+    567          
+    568          // New code from Robs measurements
+    569          // According to Rob's captures - this should be 86	unsigned const char SWRESET_COMMAND[] = { 0x82 };
+    570          unsigned const char SWRESET_COMMAND[] = { 0x86 };
+    571          unsigned const char SWRESET_COMMAND2[] = { 0x85 };
+    572          unsigned const char INITIALIZE_TOUCHCONTROLLER_COMMAND[] = { 0x62, 0xA9, 0x24 };
+    573          unsigned const char INITIALIZE_TOUCHCONTROLLER_COMMAND2[] = { 0x6A, 0x01, 0x00 };
+    574          unsigned const char INITIALIZE_TOUCHCONTROLLER_COMMAND3[] = { 0x72, 0x50, 0x1F };
+    575          unsigned const char START_PROCESSING_TOUCH_COMMAND[] = { 0x84 };
+    576          #else
+    577          // Ken's hybrid
+
+   \                                 In section .rodata, align 1, keep-with-next
+    578          unsigned const char SWRESET_COMMAND[] = { 0x82 };			// Software reset, change from xyz, 12 bits to xy, 10 bits
+   \                     SWRESET_COMMAND:
+   \   00000000                      ; Initializer data, 1 bytes
+   \   00000000   82                 DC8 130
+
+   \                                 In section .rodata, align 1, keep-with-next
+    579          unsigned const char SWRESET_COMMAND2[] = { 0x81 };			// Abort current conversion, change to 10 bits
+   \                     SWRESET_COMMAND2:
+   \   00000000                      ; Initializer data, 1 bytes
+   \   00000000   81                 DC8 129
+
+   \                                 In section .text, align 4, keep-with-next
+    580          unsigned const char INITIALIZE_TOUCHCONTROLLER_COMMAND[] = { 0x60, 0x80, 0x02 };	// Added enable of continuous scan
+   \                     INITIALIZE_TOUCHCONTROLLER_COMMAND:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   60800200           DC8 96, 128, 2, 0
+
+   \                                 In section .text, align 4, keep-with-next
+    581          unsigned const char INITIALIZE_TOUCHCONTROLLER_COMMAND1[] = { 0x62, 0xA9, 0x24 };
+   \                     INITIALIZE_TOUCHCONTROLLER_COMMAND1:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   62A92400           DC8 98, 169, 36, 0
+
+   \                                 In section .text, align 4, keep-with-next
+    582          unsigned const char INITIALIZE_TOUCHCONTROLLER_COMMAND2[] = { 0x6A, 0x01, 0x00 };
+   \                     INITIALIZE_TOUCHCONTROLLER_COMMAND2:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   6A010000           DC8 106, 1, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+    583          unsigned const char INITIALIZE_TOUCHCONTROLLER_COMMAND3[] = { 0x72, 0x50, 0x1F };
+   \                     INITIALIZE_TOUCHCONTROLLER_COMMAND3:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   72501F00           DC8 114, 80, 31, 0
+
+   \                                 In section .rodata, align 1, keep-with-next
+    584          unsigned const char START_PROCESSING_TOUCH_COMMAND[] = { 0x88 };		// change to 10 bit, xy only
+   \                     START_PROCESSING_TOUCH_COMMAND:
+   \   00000000                      ; Initializer data, 1 bytes
+   \   00000000   88                 DC8 136
+    585          
+
+   \                                 In section .text, align 4, keep-with-next
+    586          void TSInit(void)
+    587          {
+   \                     TSInit:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+    588             DummyWrite();			// Write a dummy byte to setup SPI bus
+   \   00000004   ........           LDR      R5,??DataTable23_8  ;; 0xfffcc004
+   \   00000008   0E40E0E3           MVN      R4,#+14
+   \   0000000C   000095E5           LDR      R0,[R5, #+0]
+   \   00000010   F04AC4E3           BIC      R4,R4,#0xF0000
+   \   00000014   000004E0           AND      R0,R4,R0
+   \   00000018   D00A80E3           ORR      R0,R0,#0xD0000
+   \   0000001C   000085E5           STR      R0,[R5, #+0]
+   \   00000020   04D04DE2           SUB      SP,SP,#+4
+   \   00000024   0100A0E3           MOV      R0,#+1
+   \   00000028   ........           BL       uSDelay
+   \   0000002C   0000A0E3           MOV      R0,#+0
+   \   00000030   080085E5           STR      R0,[R5, #+8]
+   \                     ??TSInit_0:
+   \   00000034   0C0095E5           LDR      R0,[R5, #+12]
+   \   00000038   020010E3           TST      R0,#0x2
+   \   0000003C   FCFFFF0A           BEQ      ??TSInit_0
+   \                     ??TSInit_1:
+   \   00000040   0C0095E5           LDR      R0,[R5, #+12]
+   \   00000044   800F10E3           TST      R0,#0x200
+   \   00000048   FCFFFF0A           BEQ      ??TSInit_1
+    589          
+    590          	TS_SPI_X_Write(SWRESET_COMMAND, sizeof(SWRESET_COMMAND));		// Send software reset to reset registers
+   \   0000004C   000095E5           LDR      R0,[R5, #+0]
+   \   00000050   8060A0E3           MOV      R6,#+128
+   \   00000054   000004E0           AND      R0,R4,R0
+   \   00000058   D00A80E3           ORR      R0,R0,#0xD0000
+   \   0000005C   000085E5           STR      R0,[R5, #+0]
+   \   00000060   0400A0E3           MOV      R0,#+4
+   \   00000064   D06900E5           STR      R6,[R0, #-2512]
+   \   00000068   0100A0E3           MOV      R0,#+1
+   \   0000006C   ........           BL       uSDelay
+   \   00000070   8200A0E3           MOV      R0,#+130
+   \   00000074   080085E5           STR      R0,[R5, #+8]
+   \                     ??TSInit_2:
+   \   00000078   0C0095E5           LDR      R0,[R5, #+12]
+   \   0000007C   020010E3           TST      R0,#0x2
+   \   00000080   FCFFFF0A           BEQ      ??TSInit_2
+   \                     ??TSInit_3:
+   \   00000084   0C0095E5           LDR      R0,[R5, #+12]
+   \   00000088   800F10E3           TST      R0,#0x200
+   \   0000008C   FCFFFF0A           BEQ      ??TSInit_3
+   \   00000090   CF70E0E3           MVN      R7,#+207
+   \   00000094   907EC7E3           BIC      R7,R7,#0x900
+   \   00000098   006087E5           STR      R6,[R7, #+0]
+    591          	TS_SPI_X_Write(SWRESET_COMMAND2, sizeof(SWRESET_COMMAND2));		// Send abort current conversion
+   \   0000009C   000095E5           LDR      R0,[R5, #+0]
+   \   000000A0   000004E0           AND      R0,R4,R0
+   \   000000A4   D00A80E3           ORR      R0,R0,#0xD0000
+   \   000000A8   000085E5           STR      R0,[R5, #+0]
+   \   000000AC   0400A0E3           MOV      R0,#+4
+   \   000000B0   D06900E5           STR      R6,[R0, #-2512]
+   \   000000B4   0100A0E3           MOV      R0,#+1
+   \   000000B8   ........           BL       uSDelay
+   \   000000BC   8100A0E3           MOV      R0,#+129
+   \   000000C0   080085E5           STR      R0,[R5, #+8]
+   \                     ??TSInit_4:
+   \   000000C4   0C0095E5           LDR      R0,[R5, #+12]
+   \   000000C8   020010E3           TST      R0,#0x2
+   \   000000CC   FCFFFF0A           BEQ      ??TSInit_4
+   \                     ??TSInit_5:
+   \   000000D0   0C0095E5           LDR      R0,[R5, #+12]
+   \   000000D4   800F10E3           TST      R0,#0x200
+   \   000000D8   FCFFFF0A           BEQ      ??TSInit_5
+   \   000000DC   006087E5           STR      R6,[R7, #+0]
+    592          	TS_SPI_X_Write(INITIALIZE_TOUCHCONTROLLER_COMMAND, sizeof(INITIALIZE_TOUCHCONTROLLER_COMMAND));		// Configure controller
+   \   000000E0   000095E5           LDR      R0,[R5, #+0]
+   \   000000E4   000004E0           AND      R0,R4,R0
+   \   000000E8   D00A80E3           ORR      R0,R0,#0xD0000
+   \   000000EC   000085E5           STR      R0,[R5, #+0]
+   \   000000F0   0400A0E3           MOV      R0,#+4
+   \   000000F4   D06900E5           STR      R6,[R0, #-2512]
+   \   000000F8   0100A0E3           MOV      R0,#+1
+   \   000000FC   ........           BL       uSDelay
+   \   00000100   ............       ADRL     R0,INITIALIZE_TOUCHCONTROLLER_COMMAND
+   \              ....        
+   \   00000108   0310A0E3           MOV      R1,#+3
+   \                     ??TSInit_6:
+   \   0000010C   0120D0E4           LDRB     R2,[R0], #+1
+   \   00000110   082085E5           STR      R2,[R5, #+8]
+   \                     ??TSInit_7:
+   \   00000114   0C2095E5           LDR      R2,[R5, #+12]
+   \   00000118   020012E3           TST      R2,#0x2
+   \   0000011C   FCFFFF0A           BEQ      ??TSInit_7
+   \   00000120   011051E2           SUBS     R1,R1,#+1
+   \   00000124   F8FFFF1A           BNE      ??TSInit_6
+   \                     ??TSInit_8:
+   \   00000128   0C0095E5           LDR      R0,[R5, #+12]
+   \   0000012C   800F10E3           TST      R0,#0x200
+   \   00000130   FCFFFF0A           BEQ      ??TSInit_8
+   \   00000134   006087E5           STR      R6,[R7, #+0]
+    593          	TS_SPI_X_Write(INITIALIZE_TOUCHCONTROLLER_COMMAND1, sizeof(INITIALIZE_TOUCHCONTROLLER_COMMAND1));		// Configure controller
+   \   00000138   000095E5           LDR      R0,[R5, #+0]
+   \   0000013C   000004E0           AND      R0,R4,R0
+   \   00000140   D00A80E3           ORR      R0,R0,#0xD0000
+   \   00000144   000085E5           STR      R0,[R5, #+0]
+   \   00000148   0400A0E3           MOV      R0,#+4
+   \   0000014C   D06900E5           STR      R6,[R0, #-2512]
+   \   00000150   0100A0E3           MOV      R0,#+1
+   \   00000154   ........           BL       uSDelay
+   \   00000158   ............       ADRL     R0,INITIALIZE_TOUCHCONTROLLER_COMMAND1
+   \              ....        
+   \   00000160   0310A0E3           MOV      R1,#+3
+   \                     ??TSInit_9:
+   \   00000164   0120D0E4           LDRB     R2,[R0], #+1
+   \   00000168   082085E5           STR      R2,[R5, #+8]
+   \                     ??TSInit_10:
+   \   0000016C   0C2095E5           LDR      R2,[R5, #+12]
+   \   00000170   020012E3           TST      R2,#0x2
+   \   00000174   FCFFFF0A           BEQ      ??TSInit_10
+   \   00000178   011051E2           SUBS     R1,R1,#+1
+   \   0000017C   F8FFFF1A           BNE      ??TSInit_9
+   \                     ??TSInit_11:
+   \   00000180   0C0095E5           LDR      R0,[R5, #+12]
+   \   00000184   800F10E3           TST      R0,#0x200
+   \   00000188   FCFFFF0A           BEQ      ??TSInit_11
+   \   0000018C   006087E5           STR      R6,[R7, #+0]
+    594          	TS_SPI_X_Write(INITIALIZE_TOUCHCONTROLLER_COMMAND2, sizeof(INITIALIZE_TOUCHCONTROLLER_COMMAND2));		// Configure controller
+   \   00000190   000095E5           LDR      R0,[R5, #+0]
+   \   00000194   000004E0           AND      R0,R4,R0
+   \   00000198   D00A80E3           ORR      R0,R0,#0xD0000
+   \   0000019C   000085E5           STR      R0,[R5, #+0]
+   \   000001A0   0400A0E3           MOV      R0,#+4
+   \   000001A4   D06900E5           STR      R6,[R0, #-2512]
+   \   000001A8   0100A0E3           MOV      R0,#+1
+   \   000001AC   ........           BL       uSDelay
+   \   000001B0   ............       ADRL     R0,INITIALIZE_TOUCHCONTROLLER_COMMAND2
+   \              ....        
+   \   000001B8   0310A0E3           MOV      R1,#+3
+   \                     ??TSInit_12:
+   \   000001BC   0120D0E4           LDRB     R2,[R0], #+1
+   \   000001C0   082085E5           STR      R2,[R5, #+8]
+   \                     ??TSInit_13:
+   \   000001C4   0C2095E5           LDR      R2,[R5, #+12]
+   \   000001C8   020012E3           TST      R2,#0x2
+   \   000001CC   FCFFFF0A           BEQ      ??TSInit_13
+   \   000001D0   011051E2           SUBS     R1,R1,#+1
+   \   000001D4   F8FFFF1A           BNE      ??TSInit_12
+   \                     ??TSInit_14:
+   \   000001D8   0C0095E5           LDR      R0,[R5, #+12]
+   \   000001DC   800F10E3           TST      R0,#0x200
+   \   000001E0   FCFFFF0A           BEQ      ??TSInit_14
+   \   000001E4   006087E5           STR      R6,[R7, #+0]
+    595          	TS_SPI_X_Write(INITIALIZE_TOUCHCONTROLLER_COMMAND3, sizeof(INITIALIZE_TOUCHCONTROLLER_COMMAND3));		// Configure controller
+   \   000001E8   000095E5           LDR      R0,[R5, #+0]
+   \   000001EC   000004E0           AND      R0,R4,R0
+   \   000001F0   D00A80E3           ORR      R0,R0,#0xD0000
+   \   000001F4   000085E5           STR      R0,[R5, #+0]
+   \   000001F8   0400A0E3           MOV      R0,#+4
+   \   000001FC   D06900E5           STR      R6,[R0, #-2512]
+   \   00000200   0100A0E3           MOV      R0,#+1
+   \   00000204   ........           BL       uSDelay
+   \   00000208   ............       ADRL     R0,INITIALIZE_TOUCHCONTROLLER_COMMAND3
+   \              ....        
+   \   00000210   0310A0E3           MOV      R1,#+3
+   \                     ??TSInit_15:
+   \   00000214   0120D0E4           LDRB     R2,[R0], #+1
+   \   00000218   082085E5           STR      R2,[R5, #+8]
+   \                     ??TSInit_16:
+   \   0000021C   0C2095E5           LDR      R2,[R5, #+12]
+   \   00000220   020012E3           TST      R2,#0x2
+   \   00000224   FCFFFF0A           BEQ      ??TSInit_16
+   \   00000228   011051E2           SUBS     R1,R1,#+1
+   \   0000022C   F8FFFF1A           BNE      ??TSInit_15
+   \                     ??TSInit_17:
+   \   00000230   0C0095E5           LDR      R0,[R5, #+12]
+   \   00000234   800F10E3           TST      R0,#0x200
+   \   00000238   FCFFFF0A           BEQ      ??TSInit_17
+   \   0000023C   006087E5           STR      R6,[R7, #+0]
+    596          	TS_SPI_X_Write(START_PROCESSING_TOUCH_COMMAND, sizeof(START_PROCESSING_TOUCH_COMMAND));				// Send command to start processing touch
+   \   00000240   000095E5           LDR      R0,[R5, #+0]
+   \   00000244   000004E0           AND      R0,R4,R0
+   \   00000248   D00A80E3           ORR      R0,R0,#0xD0000
+   \   0000024C   000085E5           STR      R0,[R5, #+0]
+   \   00000250   0400A0E3           MOV      R0,#+4
+   \   00000254   D06900E5           STR      R6,[R0, #-2512]
+   \   00000258   0100A0E3           MOV      R0,#+1
+   \   0000025C   ........           BL       uSDelay
+   \   00000260   8800A0E3           MOV      R0,#+136
+   \   00000264   080085E5           STR      R0,[R5, #+8]
+   \                     ??TSInit_18:
+   \   00000268   0C0095E5           LDR      R0,[R5, #+12]
+   \   0000026C   020010E3           TST      R0,#0x2
+   \   00000270   FCFFFF0A           BEQ      ??TSInit_18
+   \                     ??TSInit_19:
+   \   00000274   0C0095E5           LDR      R0,[R5, #+12]
+   \   00000278   800F10E3           TST      R0,#0x200
+   \   0000027C   FCFFFF0A           BEQ      ??TSInit_19
+   \   00000280   006087E5           STR      R6,[R7, #+0]
+    597          }
+   \   00000284   04D08DE2           ADD      SP,SP,#+4
+   \   00000288   F080BDE8           POP      {R4-R7,PC}       ;; return
+    598          #endif
+    599          
+    600          /*********************************************************************
+    601          *
+    602          *             TS_SPI_X_EnableCS
+    603          *
+    604          *  Description:
+    605          *    FS low level function. Sets the card slot active using the
+    606          *    chip select (CS) line.
+    607          *
+    608          *  Parameters:
+    609          *    none
+    610          *
+    611          *  Return value:
+    612          *    void
+    613          */
+    614          
+
+   \                                 In section .text, align 4, keep-with-next
+    615          void TS_SPI_X_EnableCS(void) {
+    616          	SELECT_TS;			// Ensure SPI_CSR1 is selected
+   \                     TS_SPI_X_EnableCS:
+   \   00000000   ........           LDR      R0,??DataTable23_8  ;; 0xfffcc004
+   \   00000004   0E20E0E3           MVN      R2,#+14
+   \   00000008   001090E5           LDR      R1,[R0, #+0]
+   \   0000000C   F02AC2E3           BIC      R2,R2,#0xF0000
+   \   00000010   011002E0           AND      R1,R2,R1
+   \   00000014   D01A81E3           ORR      R1,R1,#0xD0000
+   \   00000018   001080E5           STR      R1,[R0, #+0]
+    617          	PIOB_CODR  = (1 <<  TS_CS_PIN);       // CS1 on eval board
+   \   0000001C   CB00E0E3           MVN      R0,#+203
+   \   00000020   900EC0E3           BIC      R0,R0,#0x900
+   \   00000024   8010A0E3           MOV      R1,#+128
+   \   00000028   001080E5           STR      R1,[R0, #+0]
+    618          }
+   \   0000002C   1EFF2FE1           BX       LR               ;; return
+    619          
+
+   \                                 In section .text, align 4, keep-with-next
+    620          void LED_SPI_X_EnableCS(void) {
+    621          	SELECT_LED;			// Ensure SPI_CSR3 is selected
+   \                     LED_SPI_X_EnableCS:
+   \   00000000   ........           LDR      R0,??DataTable23_8  ;; 0xfffcc004
+   \   00000004   0E20E0E3           MVN      R2,#+14
+   \   00000008   001090E5           LDR      R1,[R0, #+0]
+   \   0000000C   F02AC2E3           BIC      R2,R2,#0xF0000
+   \   00000010   011002E0           AND      R1,R2,R1
+   \   00000014   701A81E3           ORR      R1,R1,#0x70000
+   \   00000018   001080E5           STR      R1,[R0, #+0]
+    622          	PIOD_SODR  = (1 <<  LED_CS_PIN);       // Set LED latch enable high before shifting out data
+   \   0000001C   CF00E0E3           MVN      R0,#+207
+   \   00000020   500EC0E3           BIC      R0,R0,#0x500
+   \   00000024   2010A0E3           MOV      R1,#+32
+   \   00000028   001080E5           STR      R1,[R0, #+0]
+    623          }
+   \   0000002C   1EFF2FE1           BX       LR               ;; return
+    624          
+
+   \                                 In section .text, align 4, keep-with-next
+    625          void DF_SPI_X_EnableCS(unsigned char chip) {
+    626          	if (0 == chip) {
+   \                     DF_SPI_X_EnableCS:
+   \   00000000   ........           LDR      R2,??DataTable23_8  ;; 0xfffcc004
+   \   00000004   000050E3           CMP      R0,#+0
+   \   00000008   0E10E0E3           MVN      R1,#+14
+   \   0000000C   000092E5           LDR      R0,[R2, #+0]
+   \   00000010   F01AC1E3           BIC      R1,R1,#0xF0000
+   \   00000014   000001E0           AND      R0,R1,R0
+   \   00000018   0600001A           BNE      ??DF_SPI_X_EnableCS_0
+    627          		SELECT_DF0;								// Ensure SPI_CSR0 is selected
+   \   0000001C   E00A80E3           ORR      R0,R0,#0xE0000
+   \   00000020   000082E5           STR      R0,[R2, #+0]
+    628          		PIOA_CODR  = (1 <<  SD0_CS_PIN);
+   \   00000024   CB00E0E3           MVN      R0,#+203
+   \   00000028   B00EC0E3           BIC      R0,R0,#0xB00
+   \   0000002C   4015A0E3           MOV      R1,#+268435456
+   \   00000030   001080E5           STR      R1,[R0, #+0]
+   \   00000034   1EFF2FE1           BX       LR
+    629          	} // if
+    630          	else {
+    631          		SELECT_DF1;								// Ensure SPI_CSR2 is selected
+   \                     ??DF_SPI_X_EnableCS_0:
+   \   00000038   B00A80E3           ORR      R0,R0,#0xB0000
+   \   0000003C   000082E5           STR      R0,[R2, #+0]
+    632          		PIOD_CODR  = (1 <<  SD1_CS_PIN);
+   \   00000040   600EA0E3           MOV      R0,#+1536
+   \   00000044   401FA0E3           MOV      R1,#+256
+   \   00000048   CC1B00E5           STR      R1,[R0, #-3020]
+    633          	} // else
+    634          }
+   \   0000004C   1EFF2FE1           BX       LR               ;; return
+    635          
+    636          /*********************************************************************
+    637          *
+    638          *             TS_SPI_X_DisableCS
+    639          *
+    640          *  Description:
+    641          *    FS low level function. Sets the card slot inactive using the
+    642          *    chip select (CS) line.
+    643          *
+    644          *  Parameters:
+    645          *    none
+    646          *
+    647          *  Return value:
+    648          *    void
+    649          */
+    650          
+
+   \                                 In section .text, align 4, keep-with-next
+    651          void TS_SPI_X_DisableCS(void) {
+    652          	PIOB_SODR  = (1 <<  TS_CS_PIN);       // CS1 on eval board
+   \                     TS_SPI_X_DisableCS:
+   \   00000000   CF00E0E3           MVN      R0,#+207
+   \   00000004   900EC0E3           BIC      R0,R0,#0x900
+   \   00000008   8010A0E3           MOV      R1,#+128
+   \   0000000C   001080E5           STR      R1,[R0, #+0]
+    653          }
+   \   00000010   1EFF2FE1           BX       LR               ;; return
+    654          
+
+   \                                 In section .text, align 4, keep-with-next
+    655          void LED_SPI_X_DisableCS(void) {
+    656          	PIOD_CODR  = (1 <<  LED_CS_PIN);       // Set LED latch enable line low after all data is sent
+   \                     LED_SPI_X_DisableCS:
+   \   00000000   CB00E0E3           MVN      R0,#+203
+   \   00000004   500EC0E3           BIC      R0,R0,#0x500
+   \   00000008   2010A0E3           MOV      R1,#+32
+   \   0000000C   001080E5           STR      R1,[R0, #+0]
+    657          	PIOD_CODR  = (1 <<  LED_OE_PIN);       // Set LED brightness full bright
+   \   00000010   401AA0E3           MOV      R1,#+262144
+   \   00000014   001080E5           STR      R1,[R0, #+0]
+    658          }
+   \   00000018   1EFF2FE1           BX       LR               ;; return
+    659          
+
+   \                                 In section .text, align 4, keep-with-next
+    660          void DF_SPI_X_DisableCS(unsigned char chip) {
+    661          	if (0 == chip)
+   \                     DF_SPI_X_DisableCS:
+   \   00000000   000050E3           CMP      R0,#+0
+   \   00000004   0400001A           BNE      ??DF_SPI_X_DisableCS_0
+    662          		PIOA_SODR  = (1 <<  SD0_CS_PIN);		// CS0
+   \   00000008   CF00E0E3           MVN      R0,#+207
+   \   0000000C   B00EC0E3           BIC      R0,R0,#0xB00
+   \   00000010   4015A0E3           MOV      R1,#+268435456
+   \   00000014   001080E5           STR      R1,[R0, #+0]
+   \   00000018   1EFF2FE1           BX       LR
+    663          	else
+    664          		PIOD_SODR  = (1 <<  SD1_CS_PIN);		// CS2
+   \                     ??DF_SPI_X_DisableCS_0:
+   \   0000001C   600EA0E3           MOV      R0,#+1536
+   \   00000020   401FA0E3           MOV      R1,#+256
+   \   00000024   D01B00E5           STR      R1,[R0, #-3024]
+    665          }
+   \   00000028   1EFF2FE1           BX       LR               ;; return
+    666          /*********************************************************************
+    667          *
+    668          *             SPI_DMA_X_Read
+    669          *
+    670          *  Description:
+    671          *    FS low level function. Reads a specified number of bytes from MMC
+    672          *    card to buffer.
+    673          *
+    674          *  Parameters:
+    675          *    Unit      - Device Index
+    676          *    pData            - Pointer to a data buffer
+    677          *    NumBytes         - Number of bytes
+    678          *
+    679          *  Return value:
+    680          *    void
+    681          */
+
+   \                                 In section .text, align 4, keep-with-next
+    682          void SPI_DMA_X_Read (U8 Unit, U8 * pData, int NumBytes) {
+   \                     SPI_DMA_X_Read:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+    683            U8 * p;
+    684            volatile int v;
+    685          
+    686            v = SPI_RDR;  // Do a dummy read to clear RDRF flag
+   \   00000004   ........           LDR      R0,??DataTable23_9  ;; 0xfffcc008
+   \   00000008   0140A0E1           MOV      R4,R1
+   \   0000000C   0250A0E1           MOV      R5,R2
+   \   00000010   002090E5           LDR      R2,[R0, #+0]
+    687            if (USE_PDC) {
+    688              p = _GetBufferAddr();
+   \   00000014   ........           LDR      R1,??DataTable23_10
+   \   00000018   08D04DE2           SUB      SP,SP,#+8
+   \   0000001C   00208DE5           STR      R2,[SP, #+0]
+   \   00000020   1F60C1E3           BIC      R6,R1,#0x1F
+    689              _PDC_SetRx(p, NumBytes);
+   \   00000024   F86080E5           STR      R6,[R0, #+248]
+   \   00000028   ............       ADRL     R1,_aFF
+   \              ....        
+   \   00000030   FC5080E5           STR      R5,[R0, #+252]
+    690              _PDC_SetTx(_aFF, NumBytes);
+   \   00000034   001180E5           STR      R1,[R0, #+256]
+   \   00000038   045180E5           STR      R5,[R0, #+260]
+    691              _PDC_EnableRx();
+   \   0000003C   0110A0E3           MOV      R1,#+1
+   \   00000040   181180E5           STR      R1,[R0, #+280]
+    692              _PDC_EnableTx();
+   \   00000044   401FA0E3           MOV      R1,#+256
+   \   00000048   181180E5           STR      R1,[R0, #+280]
+    693              //
+    694              // For larger blocks of data, block task to save CPU time (if an OS is present)
+    695              //
+    696              if (USE_OS && (NumBytes >= 512)) {
+    697                SPI_IER = SPI_RXBUFF;
+    698                FS_OS_WAIT(1000);
+    699              }
+    700              //
+    701              // Make sure we have received all bytes
+    702              //
+    703              while (SPI_PDC_RCR);
+   \                     ??SPI_DMA_X_Read_0:
+   \   0000004C   FC1090E5           LDR      R1,[R0, #+252]
+   \   00000050   000051E3           CMP      R1,#+0
+   \   00000054   FCFFFF1A           BNE      ??SPI_DMA_X_Read_0
+    704              OS_ARM_DCACHE_InvalidateRange(p, (((NumBytes + 0x1f) >> 5) << 5));
+   \   00000058   1F0085E2           ADD      R0,R5,#+31
+   \   0000005C   C002A0E1           ASR      R0,R0,#+5
+   \   00000060   8012A0E1           LSL      R1,R0,#+5
+   \   00000064   0600A0E1           MOV      R0,R6
+   \   00000068   ........           BL       OS_ARM_DCACHE_InvalidateRange
+    705              FS_MEMCPY(pData, p , NumBytes);
+   \   0000006C   0520A0E1           MOV      R2,R5
+   \   00000070   0610A0E1           MOV      R1,R6
+   \   00000074   0400A0E1           MOV      R0,R4
+   \   00000078   08D08DE2           ADD      SP,SP,#+8
+   \   0000007C   7040BDE8           POP      {R4-R6,LR}
+   \   00000080   ........           B        FS_memcpy        ;; tailcall
+    706            } else {
+    707              do {
+    708                SPI_TDR = 0xff;
+    709                while ((SPI_SR & (1 << 0)) == 0);
+    710                *pData++ = SPI_RDR;
+    711              } while (--NumBytes);
+    712            }
+    713          }
+    714          
+    715          /*********************************************************************
+    716          *
+    717          *             SPI_DMA_X_Write
+    718          *
+    719          *  Description:
+    720          *    FS low level function. Writes a specified number of bytes from
+    721          *    data buffer to the MMC/SD card.
+    722          *
+    723          *  Parameters:
+    724          *    Unit      - Device Index
+    725          *    pData            - Pointer to a data buffer
+    726          *    NumBytes         - Number of bytes
+    727          *
+    728          *  Return value:
+    729          *    void
+    730          */
+    731          
+
+   \                                 In section .text, align 4, keep-with-next
+    732          void SPI_DMA_X_Write(U8 Unit, const U8 * pData, int NumBytes) {
+   \                     SPI_DMA_X_Write:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+    733            U8 * p;
+    734          
+    735            if (USE_PDC) {
+    736              p = _GetBufferAddr();
+   \   00000004   ........           LDR      R0,??DataTable23_10
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   1F50C0E3           BIC      R5,R0,#0x1F
+   \   00000010   0240A0E1           MOV      R4,R2
+    737              FS_MEMCPY(p, pData, NumBytes);
+   \   00000014   0500A0E1           MOV      R0,R5
+   \   00000018   ........           BL       FS_memcpy
+    738              OS_ARM_DCACHE_CleanRange(p, (((NumBytes + 0x1f) >> 5) << 5));
+   \   0000001C   1F0084E2           ADD      R0,R4,#+31
+   \   00000020   C002A0E1           ASR      R0,R0,#+5
+   \   00000024   8012A0E1           LSL      R1,R0,#+5
+   \   00000028   0500A0E1           MOV      R0,R5
+   \   0000002C   ........           BL       OS_ARM_DCACHE_CleanRange
+    739              //
+    740              // Start transmission using the PDC
+    741              //
+    742              _PDC_SetTx(p, NumBytes);
+   \   00000030   ........           LDR      R0,??DataTable23_11  ;; 0xfffcc010
+   \   00000034   401FA0E3           MOV      R1,#+256
+   \   00000038   F85080E5           STR      R5,[R0, #+248]
+   \   0000003C   FC4080E5           STR      R4,[R0, #+252]
+    743              _PDC_EnableTx();
+   \   00000040   101180E5           STR      R1,[R0, #+272]
+    744              //
+    745              // For larger blocks of data, block task to save CPU time (if an OS is present)
+    746              //
+    747              if (USE_OS && (NumBytes >= 512)) {
+    748                SPI_IER = SPI_TXBUFE;
+    749                FS_OS_WAIT(1000);
+    750              }
+    751              //
+    752              // Check PDC counter to make sure all bytes are transferred
+    753              //
+    754              while (SPI_PDC_TCR);
+   \                     ??SPI_DMA_X_Write_0:
+   \   00000044   FC1090E5           LDR      R1,[R0, #+252]
+   \   00000048   000051E3           CMP      R1,#+0
+   \   0000004C   FCFFFF1A           BNE      ??SPI_DMA_X_Write_0
+    755            } else {
+    756              do {
+    757                SPI_TDR = *pData++;
+    758                while ((SPI_SR & (1 << 1)) == 0); // Check TDRE
+    759              } while (--NumBytes);
+    760          
+    761            }
+    762            //
+    763            // Check TXEMPTY-flag to make sure the last byte has left the serializer (has been sent)
+    764            //
+    765            while ((SPI_SR & (1 << 9)) == 0);   // Check TXEMPTY for sureness
+   \                     ??SPI_DMA_X_Write_1:
+   \   00000050   001090E5           LDR      R1,[R0, #+0]
+   \   00000054   800F11E3           TST      R1,#0x200
+   \   00000058   FCFFFF0A           BEQ      ??SPI_DMA_X_Write_1
+    766          }
+   \   0000005C   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000060   3080BDE8           POP      {R4,R5,PC}       ;; return
+    767          
+    768          /*********************************************************************
+    769          *
+    770          *             TS_SPI_X_Read
+    771          *
+    772          *  Description:
+    773          *    TS low level function. Reads a specified number of bytes from the
+    774          *    Touch Screen to the buffer.
+    775          *
+    776          *  Parameters:
+    777          *    pData            - Pointer to a data buffer
+    778          *    NumBytes         - Number of bytes
+    779          *
+    780          *  Return value:
+    781          *    void
+    782          */
+
+   \                                 In section .text, align 4, keep-with-next
+    783          void TS_SPI_X_Read(U8 * pData, int NumBytes)
+    784          {
+    785          volatile int v;
+    786          
+    787          	TS_SPI_X_EnableCS();
+   \                     TS_SPI_X_Read:
+   \   00000000   ........           LDR      R2,??DataTable23_8  ;; 0xfffcc004
+   \   00000004   0EC0E0E3           MVN      R12,#+14
+   \   00000008   003092E5           LDR      R3,[R2, #+0]
+   \   0000000C   F0CACCE3           BIC      R12,R12,#0xF0000
+   \   00000010   03300CE0           AND      R3,R12,R3
+   \   00000014   D03A83E3           ORR      R3,R3,#0xD0000
+   \   00000018   003082E5           STR      R3,[R2, #+0]
+   \   0000001C   8030A0E3           MOV      R3,#+128
+   \   00000020   04C0A0E3           MOV      R12,#+4
+   \   00000024   D0390CE5           STR      R3,[R12, #-2512]
+    788          	v = SPI_RDR;  // Do a dummy read to clear RDRF flag
+   \   00000028   04C092E5           LDR      R12,[R2, #+4]
+   \   0000002C   04D04DE2           SUB      SP,SP,#+4
+   \   00000030   00C08DE5           STR      R12,[SP, #+0]
+    789          	do
+    790          	{
+    791                SPI_TDR = 0x00;
+   \                     ??TS_SPI_X_Read_0:
+   \   00000034   00C0A0E3           MOV      R12,#+0
+   \   00000038   08C082E5           STR      R12,[R2, #+8]
+    792                while ((SPI_SR & RDRF) == 0)
+   \                     ??TS_SPI_X_Read_1:
+   \   0000003C   0CC092E5           LDR      R12,[R2, #+12]
+   \   00000040   01001CE3           TST      R12,#0x1
+   \   00000044   FCFFFF0A           BEQ      ??TS_SPI_X_Read_1
+    793          			;
+    794                *pData++ = SPI_RDR;
+   \   00000048   04C092E5           LDR      R12,[R2, #+4]
+    795             } while (--NumBytes);
+   \   0000004C   011051E2           SUBS     R1,R1,#+1
+   \   00000050   01C0C0E4           STRB     R12,[R0], #+1
+   \   00000054   F6FFFF1A           BNE      ??TS_SPI_X_Read_0
+    796          	TS_SPI_X_DisableCS();
+   \   00000058   CF00E0E3           MVN      R0,#+207
+   \   0000005C   900EC0E3           BIC      R0,R0,#0x900
+   \   00000060   003080E5           STR      R3,[R0, #+0]
+    797          }
+   \   00000064   04D08DE2           ADD      SP,SP,#+4
+   \   00000068   1EFF2FE1           BX       LR               ;; return
+    798          
+    799          
+    800          /*********************************************************************
+    801          *
+    802          *             LED_SPI_X_Write
+    803          *
+    804          *  Description:
+    805          *    LED low level function.  Writes a specified number of bytes from
+    806          *    data buffer to the LED controller chip.
+    807          *
+    808          *  Parameters:
+    809          *    pData            - Pointer to a data buffer
+    810          *    NumBytes         - Number of bytes
+    811          *
+    812          *  Return value:
+    813          *    void
+    814          */
+
+   \                                 In section .text, align 4, keep-with-next
+    815          void LED_SPI_X_Write(const U8 * pData, int NumBytes)
+    816          {
+   \                     LED_SPI_X_Write:
+   \   00000000   ........           LDR      R2,??DataTable23_8  ;; 0xfffcc004
+    817          	_SPI_Common_X_Write(pData, NumBytes);	// Common SPI Tx routine
+   \                     ??LED_SPI_X_Write_0:
+   \   00000004   0130D0E4           LDRB     R3,[R0], #+1
+   \   00000008   083082E5           STR      R3,[R2, #+8]
+   \                     ??LED_SPI_X_Write_1:
+   \   0000000C   0C3092E5           LDR      R3,[R2, #+12]
+   \   00000010   020013E3           TST      R3,#0x2
+   \   00000014   FCFFFF0A           BEQ      ??LED_SPI_X_Write_1
+   \   00000018   011051E2           SUBS     R1,R1,#+1
+   \   0000001C   F8FFFF1A           BNE      ??LED_SPI_X_Write_0
+   \                     ??LED_SPI_X_Write_2:
+   \   00000020   0C0092E5           LDR      R0,[R2, #+12]
+   \   00000024   800F10E3           TST      R0,#0x200
+   \   00000028   FCFFFF0A           BEQ      ??LED_SPI_X_Write_2
+    818          	LED_SPI_X_EnableCS();						// Latch data into register
+   \   0000002C   000092E5           LDR      R0,[R2, #+0]
+   \   00000030   0E10E0E3           MVN      R1,#+14
+   \   00000034   F01AC1E3           BIC      R1,R1,#0xF0000
+   \   00000038   000001E0           AND      R0,R1,R0
+   \   0000003C   700A80E3           ORR      R0,R0,#0x70000
+   \   00000040   000082E5           STR      R0,[R2, #+0]
+   \   00000044   CF10E0E3           MVN      R1,#+207
+   \   00000048   2000A0E3           MOV      R0,#+32
+   \   0000004C   501EC1E3           BIC      R1,R1,#0x500
+   \   00000050   000081E5           STR      R0,[R1, #+0]
+    819          	LED_SPI_X_DisableCS();
+   \   00000054   0410A0E3           MOV      R1,#+4
+   \   00000058   D00501E5           STR      R0,[R1, #-1488]
+   \   0000005C   0400A0E3           MOV      R0,#+4
+   \   00000060   401AA0E3           MOV      R1,#+262144
+   \   00000064   D01500E5           STR      R1,[R0, #-1488]
+    820          }
+   \   00000068   1EFF2FE1           BX       LR               ;; return
+    821          
+    822          /*********************************************************************
+    823          *
+    824          *             TS_SPI_X_Write
+    825          *
+    826          *  Description:
+    827          *    FS low level function. Writes a specified number of bytes from
+    828          *    data buffer to the touch screen controller chip.
+    829          *
+    830          *  Parameters:
+    831          *    pData            - Pointer to a data buffer
+    832          *    NumBytes         - Number of bytes
+    833          *
+    834          *  Return value:
+    835          *    void
+    836          */
+
+   \                                 In section .text, align 4, keep-with-next
+    837          void TS_SPI_X_Write(const U8 * pData, int NumBytes)
+    838          {
+   \                     TS_SPI_X_Write:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+    839          	TS_SPI_X_EnableCS();
+   \   00000004   ........           LDR      R6,??DataTable23_8  ;; 0xfffcc004
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   000096E5           LDR      R0,[R6, #+0]
+   \   00000014   0E10E0E3           MVN      R1,#+14
+   \   00000018   F01AC1E3           BIC      R1,R1,#0xF0000
+   \   0000001C   000001E0           AND      R0,R1,R0
+   \   00000020   D00A80E3           ORR      R0,R0,#0xD0000
+   \   00000024   000086E5           STR      R0,[R6, #+0]
+   \   00000028   8070A0E3           MOV      R7,#+128
+   \   0000002C   0400A0E3           MOV      R0,#+4
+   \   00000030   D07900E5           STR      R7,[R0, #-2512]
+   \   00000034   04D04DE2           SUB      SP,SP,#+4
+    840          	uSDelay(1);				// Added delay for Brian's observation that the clock is shifted before
+   \   00000038   0100A0E3           MOV      R0,#+1
+   \   0000003C   ........           BL       uSDelay
+    841          								// Chip select is active during initial mode selection command
+    842          	_SPI_Common_X_Write(pData, NumBytes);	// Common SPI Tx routine
+   \                     ??TS_SPI_X_Write_0:
+   \   00000040   0100D4E4           LDRB     R0,[R4], #+1
+   \   00000044   080086E5           STR      R0,[R6, #+8]
+   \                     ??TS_SPI_X_Write_1:
+   \   00000048   0C0096E5           LDR      R0,[R6, #+12]
+   \   0000004C   020010E3           TST      R0,#0x2
+   \   00000050   FCFFFF0A           BEQ      ??TS_SPI_X_Write_1
+   \   00000054   015055E2           SUBS     R5,R5,#+1
+   \   00000058   F8FFFF1A           BNE      ??TS_SPI_X_Write_0
+   \                     ??TS_SPI_X_Write_2:
+   \   0000005C   0C0096E5           LDR      R0,[R6, #+12]
+   \   00000060   800F10E3           TST      R0,#0x200
+   \   00000064   FCFFFF0A           BEQ      ??TS_SPI_X_Write_2
+    843          	TS_SPI_X_DisableCS();
+   \   00000068   CF00E0E3           MVN      R0,#+207
+   \   0000006C   900EC0E3           BIC      R0,R0,#0x900
+   \   00000070   007080E5           STR      R7,[R0, #+0]
+    844          }
+   \   00000074   04D08DE2           ADD      SP,SP,#+4
+   \   00000078   F080BDE8           POP      {R4-R7,PC}       ;; return
+    845          
+    846          /*********************************************************************
+    847          *
+    848          *             _SPI_Common_X_Write
+    849          *
+    850          *  Description:
+    851          *    Common SPI transmit routine.
+    852          *
+    853          *  Parameters:
+    854          *    pData            - Pointer to a data buffer
+    855          *    NumBytes         - Number of bytes
+    856          *
+    857          *  Return value:
+    858          *    void
+    859          */
+
+   \                                 In section .text, align 4, keep-with-next
+    860          void _SPI_Common_X_Write(const U8 * pData, int NumBytes)
+    861          {
+   \                     _SPI_Common_X_Write:
+   \   00000000   ........           LDR      R2,??DataTable23_12  ;; 0xfffcc00c
+    862             do
+    863          	{
+    864          		SPI_TDR = *pData++;
+   \                     ??_SPI_Common_X_Write_0:
+   \   00000004   0130D0E4           LDRB     R3,[R0], #+1
+   \   00000008   003082E5           STR      R3,[R2, #+0]
+    865          		while ((SPI_SR & TDRE) == 0)		// Check TDRE
+   \                     ??_SPI_Common_X_Write_1:
+   \   0000000C   043092E5           LDR      R3,[R2, #+4]
+   \   00000010   020013E3           TST      R3,#0x2
+   \   00000014   FCFFFF0A           BEQ      ??_SPI_Common_X_Write_1
+    866          			;
+    867          		// Once the byte is shifted out wait 50us before sending the next byte!
+    868          	} while (--NumBytes);
+   \   00000018   011051E2           SUBS     R1,R1,#+1
+   \   0000001C   F8FFFF1A           BNE      ??_SPI_Common_X_Write_0
+    869          
+    870          	//
+    871          	// Check TXEMPTY-flag to make sure the last byte has left the serializer (has been sent)
+    872          	//
+    873          	while ((SPI_SR & TXEMPTY) == 0)		// Check TXEMPTY for sureness
+   \                     ??_SPI_Common_X_Write_2:
+   \   00000020   040092E5           LDR      R0,[R2, #+4]
+   \   00000024   800F10E3           TST      R0,#0x200
+   \   00000028   FCFFFF0A           BEQ      ??_SPI_Common_X_Write_2
+    874          		;
+    875          }
+   \   0000002C   1EFF2FE1           BX       LR               ;; return
+    876          
+    877          
+
+   \                                 In section .text, align 4, keep-with-next
+    878          void DummyWrite(void)
+    879          {
+   \                     DummyWrite:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+    880          	SELECT_TS;			// Ensure SPI_CSR1 is selected
+   \   00000004   ........           LDR      R4,??DataTable23_8  ;; 0xfffcc004
+   \   00000008   0E10E0E3           MVN      R1,#+14
+   \   0000000C   000094E5           LDR      R0,[R4, #+0]
+   \   00000010   F01AC1E3           BIC      R1,R1,#0xF0000
+   \   00000014   000001E0           AND      R0,R1,R0
+   \   00000018   D00A80E3           ORR      R0,R0,#0xD0000
+   \   0000001C   000084E5           STR      R0,[R4, #+0]
+    881          	// with NO chip select
+    882          	uSDelay(1);				// Added delay for Brian's observation that the clock is shifted before
+   \   00000020   0100A0E3           MOV      R0,#+1
+   \   00000024   ........           BL       uSDelay
+    883          								// Chip select is active during initial mode selection command
+    884          	SPI_TDR = 0;
+   \   00000028   0000A0E3           MOV      R0,#+0
+   \   0000002C   080084E5           STR      R0,[R4, #+8]
+    885          	while ((SPI_SR & TDRE) == 0)		// Check TDRE
+   \                     ??DummyWrite_0:
+   \   00000030   0C0094E5           LDR      R0,[R4, #+12]
+   \   00000034   020010E3           TST      R0,#0x2
+   \   00000038   FCFFFF0A           BEQ      ??DummyWrite_0
+    886          		;
+    887          
+    888          	//
+    889          	// Check TXEMPTY-flag to make sure the last byte has left the serializer (has been sent)
+    890          	//
+    891          	while ((SPI_SR & TXEMPTY) == 0)		// Check TXEMPTY for sureness
+   \                     ??DummyWrite_1:
+   \   0000003C   0C0094E5           LDR      R0,[R4, #+12]
+   \   00000040   800F10E3           TST      R0,#0x200
+   \   00000044   FCFFFF0A           BEQ      ??DummyWrite_1
+    892          		;
+    893          }
+   \   00000048   1080BDE8           POP      {R4,PC}          ;; return
+    894          
+    895          /*********************************************************************
+    896          *
+    897          *             TS_SPI_X_Write_Read
+    898          *
+    899          *  Description:
+    900          *    TS low level function. Reads a specified number of bytes from the
+    901          *    Touch Screen to the buffer.  This function DOES NOT touch chip select!
+    902          *    Chip select must be manually controlled by the calling function.
+    903          *
+    904          *  Parameters:
+    905          *    pData            - Pointer to a data buffer
+    906          *    NumBytes         - Number of bytes
+    907          *
+    908          *  Return value:
+    909          *    void
+    910          */
+
+   \                                 In section .text, align 4, keep-with-next
+    911          void TS_SPI_X_Write_Read(const U8 * pWData, int NumWBytes, U8 * pRData, int NumRBytes)
+    912          {
+   \                     TS_SPI_X_Write_Read:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   ........           LDR      R12,??DataTable23_9  ;; 0xfffcc008
+    913          volatile int v;
+    914          
+    915          	do
+    916          	{
+    917          		SPI_TDR = *pWData++;
+   \                     ??TS_SPI_X_Write_Read_0:
+   \   0000000C   01E0D0E4           LDRB     LR,[R0], #+1
+   \   00000010   04E08CE5           STR      LR,[R12, #+4]
+    918          		while ((SPI_SR & TDRE) == 0)		// Check TDRE
+   \                     ??TS_SPI_X_Write_Read_1:
+   \   00000014   08E09CE5           LDR      LR,[R12, #+8]
+   \   00000018   02001EE3           TST      LR,#0x2
+   \   0000001C   FCFFFF0A           BEQ      ??TS_SPI_X_Write_Read_1
+    919          			;
+    920          	} while (--NumWBytes);
+   \   00000020   011051E2           SUBS     R1,R1,#+1
+   \   00000024   F8FFFF1A           BNE      ??TS_SPI_X_Write_Read_0
+    921          
+    922          	//
+    923          	// Check TXEMPTY-flag to make sure the last byte has left the serializer (has been sent)
+    924          	//
+    925          	while ((SPI_SR & TXEMPTY) == 0)		// Check TXEMPTY for sureness
+   \                     ??TS_SPI_X_Write_Read_2:
+   \   00000028   08009CE5           LDR      R0,[R12, #+8]
+   \   0000002C   800F10E3           TST      R0,#0x200
+   \   00000030   FCFFFF0A           BEQ      ??TS_SPI_X_Write_Read_2
+    926          		;
+    927          
+    928          //	uSDelay(10);
+    929          	
+    930          	v = SPI_RDR;  // Do a dummy read to clear RDRF flag
+   \   00000034   00109CE5           LDR      R1,[R12, #+0]
+   \   00000038   00108DE5           STR      R1,[SP, #+0]
+    931          	
+    932          #if 1
+    933          	do
+    934          	{
+    935                SPI_TDR = 0x00;
+   \                     ??TS_SPI_X_Write_Read_3:
+   \   0000003C   0000A0E3           MOV      R0,#+0
+   \   00000040   04008CE5           STR      R0,[R12, #+4]
+    936                while ((SPI_SR & RDRF) == 0)
+   \                     ??TS_SPI_X_Write_Read_4:
+   \   00000044   08009CE5           LDR      R0,[R12, #+8]
+   \   00000048   010010E3           TST      R0,#0x1
+   \   0000004C   FCFFFF0A           BEQ      ??TS_SPI_X_Write_Read_4
+    937          			;
+    938          	
+    939          //		uSDelay(10);			// test by adding inter-byte delay to make that 1/2 bit clearer
+    940          		
+    941                *pRData++ = SPI_RDR;
+   \   00000050   00009CE5           LDR      R0,[R12, #+0]
+    942             } while (--NumRBytes);
+   \   00000054   013053E2           SUBS     R3,R3,#+1
+   \   00000058   0100C2E4           STRB     R0,[R2], #+1
+   \   0000005C   F6FFFF1A           BNE      ??TS_SPI_X_Write_Read_3
+    943          #else	
+    944          	// Configure SPI for 16 bit transfers
+    945          	SPI_CSR1  = 0					// KMC TODO - initially assuming communication with touch screen controller chip
+    946          	 									// is the same as serial flash (whose setting are left over from the settings used
+    947          	 									// by the 9261 access to the SD card).
+    948                      |(0 << 0)         // CPOL = 0, Clock polarity of idle is low
+    949                      |(1 << 1)         // NCPHA = 1??????????????
+    950                      |(0 << 3)         // Chip select 1 becomes inactive after transfer
+    951                      |(8 << 4)         // 16 bits per transfer
+    952                      |((_sbcr << 3) << 8)	   // 8..15: SCBR: Baud rate divider -- KMC TEST - slow it down
+    953                      |(0x100000);
+    954          	
+    955                SPI_TDR = 0x0000;
+    956                while ((SPI_SR & RDRF) == 0)
+    957          			;
+    958          	
+    959                *((U16 *)pRData) = SPI_RDR;
+    960          
+    961          	// Put it back in mode for 8 bit transfers
+    962          	SPI_CSR1  = 0					// KMC TODO - initially assuming communication with touch screen controller chip
+    963          	 									// is the same as serial flash (whose setting are left over from the settings used
+    964          	 									// by the 9261 access to the SD card).
+    965                      |(0 << 0)         // CPOL = 0, Clock polarity of idle is low
+    966                      |(1 << 1)         // NCPHA = 1??????????????
+    967                      |(0 << 3)         // Chip select 1 becomes inactive after transfer
+    968                      |(0 << 4)         // 8 bits per transfer
+    969                      |((_sbcr << 3) << 8)	   // 8..15: SCBR: Baud rate divider -- KMC TEST - slow it down
+    970                      |(0x100000);
+    971          #endif
+    972          }
+   \   00000060   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000064   0080BDE8           POP      {PC}             ;; return
+    973          
+    974          
+
+   \                                 In section .bss, align 4
+    975          int gdelay;
+   \                     gdelay:
+   \   00000000                      DS8 4
+    976          
+    977          #pragma optimize=none
+
+   \                                 In section .text, align 4, keep-with-next
+    978          void uSDelay(int time)
+    979          {
+    980          	while (--time)
+   \                     uSDelay:
+   \                     ??uSDelay_0:
+   \   00000000   010050E2           SUBS     R0,R0,#+1
+   \   00000004   000050E3           CMP      R0,#+0
+   \   00000008   0C00000A           BEQ      ??uSDelay_1
+    981          	{
+    982          		for (gdelay = 0; gdelay < 50; gdelay++)
+   \   0000000C   ........           LDR      R1,??DataTable23_13
+   \   00000010   0020A0E3           MOV      R2,#+0
+   \   00000014   002081E5           STR      R2,[R1, #+0]
+   \                     ??uSDelay_2:
+   \   00000018   ........           LDR      R1,??DataTable23_13
+   \   0000001C   001091E5           LDR      R1,[R1, #+0]
+   \   00000020   320051E3           CMP      R1,#+50
+   \   00000024   F5FFFFAA           BGE      ??uSDelay_0
+   \   00000028   ........           LDR      R1,??DataTable23_13
+   \   0000002C   001091E5           LDR      R1,[R1, #+0]
+   \   00000030   011091E2           ADDS     R1,R1,#+1
+   \   00000034   ........           LDR      R2,??DataTable23_13
+   \   00000038   001082E5           STR      R1,[R2, #+0]
+   \   0000003C   F5FFFFEA           B        ??uSDelay_2
+    983          		  	;
+    984          	}
+    985          }
+   \                     ??uSDelay_1:
+   \   00000040   1EFF2FE1           BX       LR               ;; return
+    986          
+    987          void mSDelay(int);
+    988          
+    989          #pragma optimize=none
+
+   \                                 In section .text, align 4, keep-with-next
+    990          void mSDelay(int time)
+    991          {
+    992            	time *= 1000;
+   \                     mSDelay:
+   \   00000000   FA1FA0E3           MOV      R1,#+1000
+   \   00000004   910010E0           MULS     R0,R1,R0
+    993          	while (--time)
+   \                     ??mSDelay_0:
+   \   00000008   010050E2           SUBS     R0,R0,#+1
+   \   0000000C   000050E3           CMP      R0,#+0
+   \   00000010   0C00000A           BEQ      ??mSDelay_1
+    994          	{
+    995          		for (gdelay = 0; gdelay < 12; gdelay++)
+   \   00000014   ........           LDR      R1,??DataTable23_13
+   \   00000018   0020A0E3           MOV      R2,#+0
+   \   0000001C   002081E5           STR      R2,[R1, #+0]
+   \                     ??mSDelay_2:
+   \   00000020   ........           LDR      R1,??DataTable23_13
+   \   00000024   001091E5           LDR      R1,[R1, #+0]
+   \   00000028   0C0051E3           CMP      R1,#+12
+   \   0000002C   F5FFFFAA           BGE      ??mSDelay_0
+   \   00000030   ........           LDR      R1,??DataTable23_13
+   \   00000034   001091E5           LDR      R1,[R1, #+0]
+   \   00000038   011091E2           ADDS     R1,R1,#+1
+   \   0000003C   ........           LDR      R2,??DataTable23_13
+   \   00000040   001082E5           STR      R1,[R2, #+0]
+   \   00000044   F5FFFFEA           B        ??mSDelay_2
+    996          		  	;
+    997          	}
+    998          }
+   \                     ??mSDelay_1:
+   \   00000048   1EFF2FE1           BX       LR               ;; return
+    999          
+   1000          // simultaneously write	and read one unsigned char to SPI (mode 3). Blocking.
+
+   \                                 In section .text, align 4, keep-with-next
+   1001          unsigned char xferSPI (unsigned char ch) {
+   1002          	
+   1003          	SPI_TDR = ch;
+   \                     xferSPI:
+   \   00000000   ........           LDR      R1,??DataTable23_9  ;; 0xfffcc008
+   \   00000004   040081E5           STR      R0,[R1, #+4]
+   1004          
+   1005          	// wait for shifting
+   1006          	while ((0 == (SPI_SR & TDRE))) ;
+   \                     ??xferSPI_0:
+   \   00000008   080091E5           LDR      R0,[R1, #+8]
+   \   0000000C   020010E3           TST      R0,#0x2
+   \   00000010   FCFFFF0A           BEQ      ??xferSPI_0
+   1007          	
+   1008          	// wait for char
+   1009          	while ((0 == (SPI_SR & RDRF))) ;
+   \                     ??xferSPI_1:
+   \   00000014   080091E5           LDR      R0,[R1, #+8]
+   \   00000018   010010E3           TST      R0,#0x1
+   \   0000001C   FCFFFF0A           BEQ      ??xferSPI_1
+   1010          	
+   1011          	ch = SPI_RDR;
+   \   00000020   000091E5           LDR      R0,[R1, #+0]
+   1012          
+   1013          	return (ch);
+   \   00000024   FF0000E2           AND      R0,R0,#0xFF
+   \   00000028   1EFF2FE1           BX       LR               ;; return
+   1014          }
+   1015          
+   1016          //
+   1017          // Check to see if the SD card is inserted and not write-protected
+   1018          // Returns true (1) of the SD card is present and not write-protected
+   1019          // Returns false (0) if the SD card is not inserted or write-protected
+   1020          //
+
+   \                                 In section .text, align 4, keep-with-next
+   1021          char SDCardPresent(void)
+   1022          {
+   \                     SDCardPresent:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   1023          	if (1 == FS_MCI_HW_IsCardPresent(0))
+   \   00000008   0000A0E3           MOV      R0,#+0
+   \   0000000C   ........           BL       FS_MCI_HW_IsCardPresent
+   \   00000010   010050E3           CMP      R0,#+1
+   \   00000014   0000A0E3           MOV      R0,#+0
+   \   00000018   0300001A           BNE      ??SDCardPresent_0
+   1024          		return (!FS_MCI_HW_IsCardWriteProtected(0));
+   \   0000001C   ........           BL       FS_MCI_HW_IsCardWriteProtected
+   \   00000020   000050E3           CMP      R0,#+0
+   \   00000024   0100A003           MOVEQ    R0,#+1
+   \   00000028   0000A013           MOVNE    R0,#+0
+   1025          	else
+   1026          		return 0;
+   \                     ??SDCardPresent_0:
+   \   0000002C   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000030   0080BDE8           POP      {PC}             ;; return
+   1027          }
+   1028          
+   1029          //
+   1030          // Check to see if the SD card is write-protected
+   1031          // Returns true (1) of the SD card is write-protected
+   1032          // Returns false (0) if the SD card is not write-protected
+   1033          //
+
+   \                                 In section .text, align 4, keep-with-next
+   1034          char SDCardWriteProtected(void)
+   1035          {
+   1036          	return (FS_MCI_HW_IsCardWriteProtected(0));
+   \                     SDCardWriteProtected:
+   \   00000000   0000A0E3           MOV      R0,#+0
+   \   00000004   ........           B        FS_MCI_HW_IsCardWriteProtected  ;; tailcall
+   1037          }
+   1038          
+   1039          //
+   1040          // Check to see if there is much free space on the SD card
+   1041          // Returns true (1) if SD card is almost full
+   1042          // Otherwise returns false (0)
+   1043          //
+
+   \                                 In section .text, align 4, keep-with-next
+   1044          char SDCardAlmostFull(void)
+   1045          {
+   1046          	return 0;
+   \                     SDCardAlmostFull:
+   \   00000000   0000A0E3           MOV      R0,#+0
+   \   00000004   1EFF2FE1           BX       LR               ;; return
+   1047          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23:
+   \   00000000   0082021C           DC32     0x1c028200
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_1:
+   \   00000000   00821A10           DC32     0x101a8200
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_2:
+   \   00000000   0080FCFF           DC32     0xfffc8000
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_3:
+   \   00000000   21051200           DC32     0x120521
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_4:
+   \   00000000   21041200           DC32     0x120421
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_5:
+   \   00000000   00C0FCFF           DC32     0xfffcc000
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_6:
+   \   00000000   02C81000           DC32     0x10c802
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_7:
+   \   00000000   01191000           DC32     0x101901
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_8:
+   \   00000000   04C0FCFF           DC32     0xfffcc004
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_9:
+   \   00000000   08C0FCFF           DC32     0xfffcc008
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_10:
+   \   00000000   ........           DC32     _aBuffer+0x1F
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_11:
+   \   00000000   10C0FCFF           DC32     0xfffcc010
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_12:
+   \   00000000   0CC0FCFF           DC32     0xfffcc00c
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_13:
+   \   00000000   ........           DC32     gdelay
+   1048          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function             .cstack
+     --------             -------
+     DF_SPI_X_DisableCS        0
+     DF_SPI_X_EnableCS         0
+     DummyWrite                8
+     LED_SPI_X_DisableCS       0
+     LED_SPI_X_EnableCS        0
+     LED_SPI_X_Write           0
+     SDCardAlmostFull          0
+     SDCardPresent             8
+     SDCardWriteProtected      8
+     SPIInit                   8
+     SPI_DMA_X_Read           24
+     SPI_DMA_X_Write          16
+     TSInit                   24
+     TS_SPI_X_DisableCS        0
+     TS_SPI_X_EnableCS         0
+     TS_SPI_X_Read             8
+     TS_SPI_X_Write           24
+     TS_SPI_X_Write_Read       8
+     _Init                     4
+     _SPI_Common_X_Write       0
+     mSDelay                   0
+     uSDelay                   0
+     xferSPI                   0
+
+
+   Section sizes:
+
+     Function/Label                 Bytes
+     --------------                 -----
+     _sbcr                             1
+     _aBuffer                        544
+     _aFF                            512
+     _Init                           516
+     SPIInit                           4
+     SWRESET_COMMAND                   1
+     SWRESET_COMMAND2                  1
+     INITIALIZE_TOUCHCONTROLLER_COMMAND
+                                       4
+     INITIALIZE_TOUCHCONTROLLER_COMMAND1
+                                       4
+     INITIALIZE_TOUCHCONTROLLER_COMMAND2
+                                       4
+     INITIALIZE_TOUCHCONTROLLER_COMMAND3
+                                       4
+     START_PROCESSING_TOUCH_COMMAND    1
+     TSInit                          652
+     TS_SPI_X_EnableCS                48
+     LED_SPI_X_EnableCS               48
+     DF_SPI_X_EnableCS                80
+     TS_SPI_X_DisableCS               20
+     LED_SPI_X_DisableCS              28
+     DF_SPI_X_DisableCS               44
+     SPI_DMA_X_Read                  132
+     SPI_DMA_X_Write                 100
+     TS_SPI_X_Read                   108
+     LED_SPI_X_Write                 108
+     TS_SPI_X_Write                  124
+     _SPI_Common_X_Write              48
+     DummyWrite                       76
+     TS_SPI_X_Write_Read             104
+     gdelay                            4
+     uSDelay                          68
+     mSDelay                          76
+     xferSPI                          44
+     SDCardPresent                    52
+     SDCardWriteProtected              8
+     SDCardAlmostFull                  8
+     ??DataTable23                     4
+     ??DataTable23_1                   4
+     ??DataTable23_2                   4
+     ??DataTable23_3                   4
+     ??DataTable23_4                   4
+     ??DataTable23_5                   4
+     ??DataTable23_6                   4
+     ??DataTable23_7                   4
+     ??DataTable23_8                   4
+     ??DataTable23_9                   4
+     ??DataTable23_10                  4
+     ??DataTable23_11                  4
+     ??DataTable23_12                  4
+     ??DataTable23_13                  4
+
+ 
+   548 bytes in section .bss
+     1 byte  in section .data
+     3 bytes in section .rodata
+ 3 080 bytes in section .text
+ 
+ 3 080 bytes of CODE  memory
+     3 bytes of CONST memory
+   549 bytes of DATA  memory
+
+Errors: none
+Warnings: none

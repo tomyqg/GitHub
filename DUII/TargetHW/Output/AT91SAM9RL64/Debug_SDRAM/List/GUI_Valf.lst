@@ -1,0 +1,628 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     14/Jul/2015  19:01:06 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\GUI\GUI_Valf.c                          #
+#    Command line =  C:\DUII\TargetHW\GUI\GUI_Valf.c -D DEBUG=1 -D            #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\GU #
+#                    I_Valf.lst                                               #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\GUI #
+#                    _Valf.o                                                  #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\GUI\GUI_Valf.c
+      1          /*********************************************************************
+      2          *                SEGGER Microcontroller GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 1996 - 2010  SEGGER Microcontroller GmbH & Co. KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          ** emWin V5.06 - Graphical user interface for embedded applications **
+     13          emWin is protected by international copyright laws.   Knowledge of the
+     14          source code may not be used to write a similar product.  This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : GUIValf.c
+     19          Purpose     : Displaying floating point values
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          #include <math.h>
+     24          
+     25          #include "GUI_Private.h"
+     26          
+     27          /*********************************************************************
+     28          *
+     29          *       Static code
+     30          *
+     31          **********************************************************************
+     32          */
+     33          /*********************************************************************
+     34          *
+     35          *       _RoundHalfUp
+     36          *
+     37          * Purpose:
+     38          *   Rounds the given value with the 'Symmetric Arithmetic Rounding'
+     39          *   method, also known as 'Round-Half-Up':
+     40          *
+     41          *    3.044  rounded to hundredths is  3.04
+     42          *    3.045  rounded to hundredths is  3.05
+     43          *    3.0447 rounded to hundredths is  3.04
+     44          *   -2.1349 rounded to hundredths is -2.13
+     45          *   -2.1350 rounded to hundredths is -2.14
+     46          */
+     47          static float _RoundHalfUp(float f) {
+     48            if (f < 0) {
+     49              /*
+     50              * Manage negative values
+     51              */
+     52              f -= 0.5f;
+     53              f = (float)ceil(f);
+     54            } else {
+     55              /*
+     56              * Manage positive values
+     57              */
+     58              f += 0.5f;
+     59              f = (float)floor(f);
+     60            }
+     61            return f;
+     62          }
+     63          
+     64          /*********************************************************************
+     65          *
+     66          *       _DispFloatFix
+     67          *
+     68          * Purpose:
+     69          *   The function draws the given floating point value, which can be
+     70          *   positive or negative:
+     71          *
+     72          * Parameters:
+     73          *   f            - Value to be shown
+     74          *   Len          - Number of digits including the decimal point
+     75          *   Decs         - Number of decimal places
+     76          *   DrawPlusSign - If != 0 a plus sign is shown for a positive value
+     77          */
+     78          static void _DispFloatFix(float f, char Len, char Decs, int DrawPlusSign) {
+     79            f *= GUI_Pow10[(unsigned)Decs];
+     80            f = _RoundHalfUp(f);
+     81            if (DrawPlusSign) {
+     82              /*
+     83              * Draw with plus sign
+     84              */
+     85              GUI_DispSDecShift((long)f, Len, Decs);
+     86            } else {
+     87              /*
+     88              * Draw without plus sign
+     89              */
+     90              GUI_DispDecShift((long)f, Len, Decs);
+     91            }
+     92          }
+     93          
+     94          /*********************************************************************
+     95          *
+     96          *       _GetDecs
+     97          */
+     98          static int _GetDecs(float f) {
+     99            float fShift;
+    100            char Decs = 0;
+    101            fShift = f;
+    102            if (fShift < 0) {
+    103              fShift = -fShift;
+    104            }
+    105            fShift += 0.000000001f;
+    106            if (fShift != 0) {
+    107              do {
+    108                fShift *= 10;
+    109                Decs ++;
+    110              } while ((unsigned)fShift == 0);
+    111            }
+    112            return Decs;
+    113          }
+    114          
+    115          /*********************************************************************
+    116          *
+    117          *       _DispFloatMin
+    118          */
+
+   \                                 In section .text, align 4, keep-with-next
+    119          static void _DispFloatMin(float f, char Fract, int DrawPlusSign) {
+   \                     _DispFloatMin:
+   \   00000000   F0432DE9           PUSH     {R4-R9,LR}
+   \   00000004   0160A0E1           MOV      R6,R1
+    120            int Len;
+    121            float fRound; /* Value only used to calculate the length */
+    122            int Decs;
+    123            
+    124            fRound = f;
+    125            if (f == 0) {
+   \   00000008   0010A0E3           MOV      R1,#+0
+   \   0000000C   ........           BL       __aeabi_cfcmpeq
+   \   00000010   0050A0E1           MOV      R5,R0
+   \   00000014   04D04DE2           SUB      SP,SP,#+4
+   \   00000018   0270A0E1           MOV      R7,R2
+   \   0000001C   0540A0E1           MOV      R4,R5
+   \   00000020   5300000A           BEQ      ??_DispFloatMin_0
+    126              fRound = 1;
+    127            } else if ((f >= 0) && (f < 1)) { /* Values between 0 and 1 */
+   \   00000024   ........           BL       __aeabi_cfrcmple
+   \   00000028   2B00008A           BHI      ??_DispFloatMin_1
+   \   0000002C   FE15A0E3           MOV      R1,#+1065353216
+   \   00000030   ........           BL       __aeabi_cfcmple
+   \   00000034   4F00002A           BCS      ??_DispFloatMin_2
+    128              Decs = _GetDecs(f);
+   \   00000038   0080A0E3           MOV      R8,#+0
+   \   0000003C   ........           LDR      R0,??DataTable3  ;; 0x3089705f
+   \   00000040   0510A0E1           MOV      R1,R5
+   \   00000044   ........           BL       __aeabi_fadd
+   \   00000048   0010A0E3           MOV      R1,#+0
+   \   0000004C   ........           BL       __aeabi_cfcmpeq
+   \   00000050   0090A0E1           MOV      R9,R0
+   \   00000054   0800000A           BEQ      ??_DispFloatMin_3
+   \                     ??_DispFloatMin_4:
+   \   00000058   4004A0E3           MOV      R0,#+1073741824
+   \   0000005C   480780E3           ORR      R0,R0,#0x1200000
+   \   00000060   0910A0E1           MOV      R1,R9
+   \   00000064   ........           BL       __aeabi_fmul
+   \   00000068   0090A0E1           MOV      R9,R0
+   \   0000006C   018088E2           ADD      R8,R8,#+1
+   \   00000070   ........           BL       __aeabi_f2uiz
+   \   00000074   000050E3           CMP      R0,#+0
+   \   00000078   F6FFFF0A           BEQ      ??_DispFloatMin_4
+    129              if (Decs <= Fract) {
+   \                     ??_DispFloatMin_3:
+   \   0000007C   088CA0E1           MOV      R8,R8, LSL #+24
+   \   00000080   280C56E1           CMP      R6,R8, LSR #+24
+   \   00000084   0400003A           BCC      ??_DispFloatMin_5
+    130                fRound += 1;
+   \   00000088   FE05A0E3           MOV      R0,#+1065353216
+   \                     ??_DispFloatMin_6:
+   \   0000008C   0410A0E1           MOV      R1,R4
+   \   00000090   ........           BL       __aeabi_fadd
+   \   00000094   0040A0E1           MOV      R4,R0
+   \   00000098   360000EA           B        ??_DispFloatMin_2
+    131              } else {
+    132                if (f >= 0.5f) {
+   \                     ??_DispFloatMin_5:
+   \   0000009C   0500A0E1           MOV      R0,R5
+   \   000000A0   FC15A0E3           MOV      R1,#+1056964608
+   \   000000A4   ........           BL       __aeabi_cfrcmple
+   \   000000A8   0400008A           BHI      ??_DispFloatMin_7
+    133                  if (Fract) {
+   \   000000AC   000056E3           CMP      R6,#+0
+   \   000000B0   2F00001A           BNE      ??_DispFloatMin_0
+    134                    fRound = 1;
+    135                  } else {
+    136                    fRound = 0;
+   \   000000B4   0040A0E3           MOV      R4,#+0
+    137                    f      = 1;
+   \   000000B8   FE55A0E3           MOV      R5,#+1065353216
+   \   000000BC   2D0000EA           B        ??_DispFloatMin_2
+    138                  }
+    139                } else {
+    140                  if (Fract) {
+   \                     ??_DispFloatMin_7:
+   \   000000C0   000056E3           CMP      R6,#+0
+    141                    fRound = 1;
+   \   000000C4   FE45A013           MOVNE    R4,#+1065353216
+    142                    f      = 0;
+   \   000000C8   0050A013           MOVNE    R5,#+0
+   \   000000CC   2900001A           BNE      ??_DispFloatMin_2
+    143                  } else {
+    144                    fRound = 0;
+   \                     ??_DispFloatMin_8:
+   \   000000D0   0040A0E3           MOV      R4,#+0
+    145                    f      = 0;
+   \                     ??_DispFloatMin_9:
+   \   000000D4   0450A0E1           MOV      R5,R4
+   \   000000D8   260000EA           B        ??_DispFloatMin_2
+    146                  }
+    147                }
+    148              }
+    149            } else if ((f < 0) && (f > -1)) { /* Values between 0 and -1 */
+   \                     ??_DispFloatMin_1:
+   \   000000DC   5013E0E3           MVN      R1,#+1073741825
+   \   000000E0   8018C1E3           BIC      R1,R1,#0x800000
+   \   000000E4   ........           BL       __aeabi_cfrcmple
+   \   000000E8   2200008A           BHI      ??_DispFloatMin_2
+    150              Decs = _GetDecs(f);
+   \   000000EC   0080A0E3           MOV      R8,#+0
+   \   000000F0   ........           LDR      R0,??DataTable3  ;; 0x3089705f
+   \   000000F4   0510A0E1           MOV      R1,R5
+   \   000000F8   ........           BL       __aeabi_fsub
+   \   000000FC   0010A0E3           MOV      R1,#+0
+   \   00000100   ........           BL       __aeabi_cfcmpeq
+   \   00000104   0090A0E1           MOV      R9,R0
+   \   00000108   0800000A           BEQ      ??_DispFloatMin_10
+   \                     ??_DispFloatMin_11:
+   \   0000010C   4004A0E3           MOV      R0,#+1073741824
+   \   00000110   480780E3           ORR      R0,R0,#0x1200000
+   \   00000114   0910A0E1           MOV      R1,R9
+   \   00000118   ........           BL       __aeabi_fmul
+   \   0000011C   0090A0E1           MOV      R9,R0
+   \   00000120   018088E2           ADD      R8,R8,#+1
+   \   00000124   ........           BL       __aeabi_f2uiz
+   \   00000128   000050E3           CMP      R0,#+0
+   \   0000012C   F6FFFF0A           BEQ      ??_DispFloatMin_11
+    151              if (Decs <= Fract) {
+   \                     ??_DispFloatMin_10:
+   \   00000130   088CA0E1           MOV      R8,R8, LSL #+24
+   \   00000134   280C56E1           CMP      R6,R8, LSR #+24
+    152                fRound -= 1;
+   \   00000138   8004A023           MOVCS    R0,#-2147483648
+   \   0000013C   FE058023           ORRCS    R0,R0,#0x3F800000
+   \   00000140   D1FFFF2A           BCS      ??_DispFloatMin_6
+    153              } else {
+    154                if (f <= -0.5f) {
+   \   00000144   0110E0E3           MVN      R1,#+1
+   \   00000148   0500A0E1           MOV      R0,R5
+   \   0000014C   4114C1E3           BIC      R1,R1,#0x41000000
+   \   00000150   ........           BL       __aeabi_cfcmple
+   \   00000154   0400002A           BCS      ??_DispFloatMin_12
+    155                  if (Fract) {
+   \   00000158   000056E3           CMP      R6,#+0
+   \   0000015C   0400001A           BNE      ??_DispFloatMin_0
+    156                    fRound = 1;
+    157                  } else {
+    158                    f = fRound = -1;
+   \   00000160   8044A0E3           MOV      R4,#-2147483648
+   \   00000164   FE4584E3           ORR      R4,R4,#0x3F800000
+   \   00000168   D9FFFFEA           B        ??_DispFloatMin_9
+    159                  }
+    160                } else {
+    161                  if (Fract) {
+   \                     ??_DispFloatMin_12:
+   \   0000016C   000056E3           CMP      R6,#+0
+   \   00000170   D6FFFF0A           BEQ      ??_DispFloatMin_8
+    162                    fRound = 1;
+   \                     ??_DispFloatMin_0:
+   \   00000174   FE45A0E3           MOV      R4,#+1065353216
+    163                  } else {
+    164                    f = fRound = 0;
+    165                  }
+    166                }
+    167              }
+    168            }
+    169            fRound = fRound * GUI_Pow10[(unsigned)Fract];
+    170            fRound = _RoundHalfUp(fRound);
+   \                     ??_DispFloatMin_2:
+   \   00000178   ........           LDR      R0,??DataTable3_1
+   \   0000017C   0680A0E1           MOV      R8,R6
+   \   00000180   080190E7           LDR      R0,[R0, +R8, LSL #+2]
+   \   00000184   ........           BL       __aeabi_ui2f
+   \   00000188   0090A0E1           MOV      R9,R0
+   \   0000018C   0410A0E1           MOV      R1,R4
+   \   00000190   ........           BL       __aeabi_fmul
+   \   00000194   0010A0E3           MOV      R1,#+0
+   \   00000198   ........           BL       __aeabi_cfcmple
+   \   0000019C   0040A0E1           MOV      R4,R0
+   \   000001A0   0500003A           BCC      ??_DispFloatMin_13
+   \   000001A4   FC05A0E3           MOV      R0,#+1056964608
+   \   000001A8   0410A0E1           MOV      R1,R4
+   \   000001AC   ........           BL       __aeabi_fadd
+   \   000001B0   ........           BL       __aeabi_f2d
+   \   000001B4   ........           BL       floor
+   \   000001B8   040000EA           B        ??_DispFloatMin_14
+   \                     ??_DispFloatMin_13:
+   \   000001BC   BF04A0E3           MOV      R0,#-1090519040
+   \   000001C0   0410A0E1           MOV      R1,R4
+   \   000001C4   ........           BL       __aeabi_fadd
+   \   000001C8   ........           BL       __aeabi_f2d
+   \   000001CC   ........           BL       ceil
+   \                     ??_DispFloatMin_14:
+   \   000001D0   ........           BL       __aeabi_d2f
+    171            Len = GUI_Long2Len((long)fRound) - Fract;
+   \   000001D4   ........           BL       __aeabi_f2iz
+   \   000001D8   ........           BL       GUI_Long2Len
+   \   000001DC   082050E0           SUBS     R2,R0,R8
+    172            if (Len < 0) {
+    173              Len = 0;
+   \   000001E0   0020A043           MOVMI    R2,#+0
+    174            }
+    175            if ((DrawPlusSign == 1) && (f > 0)) { /* Add one character for the plus sign if required */
+   \   000001E4   010057E3           CMP      R7,#+1
+   \   000001E8   0300001A           BNE      ??_DispFloatMin_15
+   \   000001EC   0500A0E1           MOV      R0,R5
+   \   000001F0   0010A0E3           MOV      R1,#+0
+   \   000001F4   ........           BL       __aeabi_cfrcmple
+    176              Len++;
+   \   000001F8   01208232           ADDCC    R2,R2,#+1
+    177            }
+    178            _DispFloatFix(f, (char)(Len + Fract + (Fract ? 1 : 0)), (char)Fract, DrawPlusSign);
+   \                     ??_DispFloatMin_15:
+   \   000001FC   000056E3           CMP      R6,#+0
+   \   00000200   0100A013           MOVNE    R0,#+1
+   \   00000204   0000A003           MOVEQ    R0,#+0
+   \   00000208   021086E0           ADD      R1,R6,R2
+   \   0000020C   018080E0           ADD      R8,R0,R1
+   \   00000210   0900A0E1           MOV      R0,R9
+   \   00000214   0510A0E1           MOV      R1,R5
+   \   00000218   ........           BL       __aeabi_fmul
+   \   0000021C   0010A0E3           MOV      R1,#+0
+   \   00000220   ........           BL       __aeabi_cfcmple
+   \   00000224   0040A0E1           MOV      R4,R0
+   \   00000228   0500003A           BCC      ??_DispFloatMin_16
+   \   0000022C   FC05A0E3           MOV      R0,#+1056964608
+   \   00000230   0410A0E1           MOV      R1,R4
+   \   00000234   ........           BL       __aeabi_fadd
+   \   00000238   ........           BL       __aeabi_f2d
+   \   0000023C   ........           BL       floor
+   \   00000240   040000EA           B        ??_DispFloatMin_17
+   \                     ??_DispFloatMin_16:
+   \   00000244   BF04A0E3           MOV      R0,#-1090519040
+   \   00000248   0410A0E1           MOV      R1,R4
+   \   0000024C   ........           BL       __aeabi_fadd
+   \   00000250   ........           BL       __aeabi_f2d
+   \   00000254   ........           BL       ceil
+   \                     ??_DispFloatMin_17:
+   \   00000258   ........           BL       __aeabi_d2f
+   \   0000025C   ........           BL       __aeabi_f2iz
+   \   00000260   000057E3           CMP      R7,#+0
+   \   00000264   0620A0E1           MOV      R2,R6
+   \   00000268   FF1008E2           AND      R1,R8,#0xFF
+   \   0000026C   0100000A           BEQ      ??_DispFloatMin_18
+   \   00000270   ........           BL       GUI_DispSDecShift
+   \   00000274   000000EA           B        ??_DispFloatMin_19
+   \                     ??_DispFloatMin_18:
+   \   00000278   ........           BL       GUI_DispDecShift
+    179          }
+   \                     ??_DispFloatMin_19:
+   \   0000027C   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000280   F083BDE8           POP      {R4-R9,PC}       ;; return
+    180          
+    181          /*********************************************************************
+    182          *
+    183          *       Public code
+    184          *
+    185          **********************************************************************
+    186          */
+    187          /*********************************************************************
+    188          *
+    189          *       GUI_DispFloatFix
+    190          */
+
+   \                                 In section .text, align 4, keep-with-next
+    191          void GUI_DispFloatFix(float f, char Len, char Decs) {
+   \                     GUI_DispFloatFix:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0150A0E1           MOV      R5,R1
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0260A0E1           MOV      R6,R2
+    192            _DispFloatFix(f, Len, Decs, 0);
+   \   00000010   ........           LDR      R1,??DataTable3_1
+   \   00000014   0600A0E1           MOV      R0,R6
+   \   00000018   000191E7           LDR      R0,[R1, +R0, LSL #+2]
+   \   0000001C   ........           BL       __aeabi_ui2f
+   \   00000020   0410A0E1           MOV      R1,R4
+   \   00000024   ........           BL       __aeabi_fmul
+   \   00000028   0010A0E3           MOV      R1,#+0
+   \   0000002C   ........           BL       __aeabi_cfcmple
+   \   00000030   0040A0E1           MOV      R4,R0
+   \   00000034   0500003A           BCC      ??GUI_DispFloatFix_0
+   \   00000038   FC05A0E3           MOV      R0,#+1056964608
+   \   0000003C   0410A0E1           MOV      R1,R4
+   \   00000040   ........           BL       __aeabi_fadd
+   \   00000044   ........           BL       __aeabi_f2d
+   \   00000048   ........           BL       floor
+   \   0000004C   040000EA           B        ??GUI_DispFloatFix_1
+   \                     ??GUI_DispFloatFix_0:
+   \   00000050   BF04A0E3           MOV      R0,#-1090519040
+   \   00000054   0410A0E1           MOV      R1,R4
+   \   00000058   ........           BL       __aeabi_fadd
+   \   0000005C   ........           BL       __aeabi_f2d
+   \   00000060   ........           BL       ceil
+   \                     ??GUI_DispFloatFix_1:
+   \   00000064   ........           BL       __aeabi_d2f
+   \   00000068   ........           BL       __aeabi_f2iz
+   \   0000006C   0620A0E1           MOV      R2,R6
+   \   00000070   0510A0E1           MOV      R1,R5
+   \   00000074   7040BDE8           POP      {R4-R6,LR}
+   \   00000078   ........           B        GUI_DispDecShift  ;; tailcall
+    193          }
+    194          
+    195          /*********************************************************************
+    196          *
+    197          *       GUI_DispFloatMin
+    198          */
+
+   \                                 In section .text, align 4, keep-with-next
+    199          void GUI_DispFloatMin(float f, char Fract) {
+    200            _DispFloatMin(f, Fract, 0);
+   \                     GUI_DispFloatMin:
+   \   00000000   0020A0E3           MOV      R2,#+0
+   \   00000004   ........           B        _DispFloatMin    ;; tailcall
+    201          }
+    202          
+    203          /*********************************************************************
+    204          *
+    205          *       GUI_DispFloat
+    206          */
+
+   \                                 In section .text, align 4, keep-with-next
+    207          void GUI_DispFloat(float f, char Len) {
+   \                     GUI_DispFloat:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   0150A0E1           MOV      R5,R1
+    208            int Decs;
+    209            Decs =  Len - GUI_Long2Len((long)f) - 1;
+   \   0000000C   ........           BL       __aeabi_f2iz
+   \   00000010   ........           BL       GUI_Long2Len
+   \   00000014   000045E0           SUB      R0,R5,R0
+   \   00000018   016040E2           SUB      R6,R0,#+1
+    210            if ((f < 0) && (f > -1)) { /* If value < 0 and > -1 (e.g. -0.123) decrement Decs */
+   \   0000001C   0400A0E1           MOV      R0,R4
+   \   00000020   0010A0E3           MOV      R1,#+0
+   \   00000024   ........           BL       __aeabi_cfcmple
+   \   00000028   0300002A           BCS      ??GUI_DispFloat_0
+   \   0000002C   5013E0E3           MVN      R1,#+1073741825
+   \   00000030   8018C1E3           BIC      R1,R1,#0x800000
+   \   00000034   ........           BL       __aeabi_cfrcmple
+    211              Decs--;
+   \   00000038   01604692           SUBLS    R6,R6,#+1
+    212            }
+    213            if (Decs < 0) {
+   \                     ??GUI_DispFloat_0:
+   \   0000003C   000056E3           CMP      R6,#+0
+    214              Decs = 0;
+   \   00000040   0060A043           MOVMI    R6,#+0
+    215            }
+    216            _DispFloatFix(f, Len, (char)Decs, 0);
+   \   00000044   ........           LDR      R1,??DataTable3_1
+   \   00000048   FF0006E2           AND      R0,R6,#0xFF
+   \   0000004C   000191E7           LDR      R0,[R1, +R0, LSL #+2]
+   \   00000050   ........           BL       __aeabi_ui2f
+   \   00000054   0410A0E1           MOV      R1,R4
+   \   00000058   ........           BL       __aeabi_fmul
+   \   0000005C   0010A0E3           MOV      R1,#+0
+   \   00000060   ........           BL       __aeabi_cfcmple
+   \   00000064   0040A0E1           MOV      R4,R0
+   \   00000068   0500003A           BCC      ??GUI_DispFloat_1
+   \   0000006C   FC05A0E3           MOV      R0,#+1056964608
+   \   00000070   0410A0E1           MOV      R1,R4
+   \   00000074   ........           BL       __aeabi_fadd
+   \   00000078   ........           BL       __aeabi_f2d
+   \   0000007C   ........           BL       floor
+   \   00000080   040000EA           B        ??GUI_DispFloat_2
+   \                     ??GUI_DispFloat_1:
+   \   00000084   BF04A0E3           MOV      R0,#-1090519040
+   \   00000088   0410A0E1           MOV      R1,R4
+   \   0000008C   ........           BL       __aeabi_fadd
+   \   00000090   ........           BL       __aeabi_f2d
+   \   00000094   ........           BL       ceil
+   \                     ??GUI_DispFloat_2:
+   \   00000098   ........           BL       __aeabi_d2f
+   \   0000009C   FF2006E2           AND      R2,R6,#0xFF
+   \   000000A0   0540A0E1           MOV      R4,R5
+   \   000000A4   0250A0E1           MOV      R5,R2
+   \   000000A8   ........           BL       __aeabi_f2iz
+   \   000000AC   0520A0E1           MOV      R2,R5
+   \   000000B0   0410A0E1           MOV      R1,R4
+   \   000000B4   7040BDE8           POP      {R4-R6,LR}
+   \   000000B8   ........           B        GUI_DispDecShift  ;; tailcall
+    217          }
+    218          
+    219          /*********************************************************************
+    220          *
+    221          *       GUI_DispSFloatFix
+    222          */
+
+   \                                 In section .text, align 4, keep-with-next
+    223          void GUI_DispSFloatFix(float f, char Len, char Fract) {
+   \                     GUI_DispSFloatFix:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0150A0E1           MOV      R5,R1
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0260A0E1           MOV      R6,R2
+    224            _DispFloatFix (f, Len, Fract, 1);
+   \   00000010   ........           LDR      R1,??DataTable3_1
+   \   00000014   0600A0E1           MOV      R0,R6
+   \   00000018   000191E7           LDR      R0,[R1, +R0, LSL #+2]
+   \   0000001C   ........           BL       __aeabi_ui2f
+   \   00000020   0410A0E1           MOV      R1,R4
+   \   00000024   ........           BL       __aeabi_fmul
+   \   00000028   0010A0E3           MOV      R1,#+0
+   \   0000002C   ........           BL       __aeabi_cfcmple
+   \   00000030   0040A0E1           MOV      R4,R0
+   \   00000034   0500003A           BCC      ??GUI_DispSFloatFix_0
+   \   00000038   FC05A0E3           MOV      R0,#+1056964608
+   \   0000003C   0410A0E1           MOV      R1,R4
+   \   00000040   ........           BL       __aeabi_fadd
+   \   00000044   ........           BL       __aeabi_f2d
+   \   00000048   ........           BL       floor
+   \   0000004C   040000EA           B        ??GUI_DispSFloatFix_1
+   \                     ??GUI_DispSFloatFix_0:
+   \   00000050   BF04A0E3           MOV      R0,#-1090519040
+   \   00000054   0410A0E1           MOV      R1,R4
+   \   00000058   ........           BL       __aeabi_fadd
+   \   0000005C   ........           BL       __aeabi_f2d
+   \   00000060   ........           BL       ceil
+   \                     ??GUI_DispSFloatFix_1:
+   \   00000064   ........           BL       __aeabi_d2f
+   \   00000068   ........           BL       __aeabi_f2iz
+   \   0000006C   0620A0E1           MOV      R2,R6
+   \   00000070   0510A0E1           MOV      R1,R5
+   \   00000074   7040BDE8           POP      {R4-R6,LR}
+   \   00000078   ........           B        GUI_DispSDecShift  ;; tailcall
+    225          }
+    226          
+    227          /*********************************************************************
+    228          *
+    229          *       GUI_DispSFloatMin
+    230          */
+
+   \                                 In section .text, align 4, keep-with-next
+    231          void GUI_DispSFloatMin(float f, char Fract) {
+    232            _DispFloatMin(f, Fract, 1);
+   \                     GUI_DispSFloatMin:
+   \   00000000   0120A0E3           MOV      R2,#+1
+   \   00000004   ........           B        _DispFloatMin    ;; tailcall
+    233          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3:
+   \   00000000   5F708930           DC32     0x3089705f
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_1:
+   \   00000000   ........           DC32     GUI_Pow10
+    234          
+    235          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function          .cstack
+     --------          -------
+     GUI_DispFloat         16
+     GUI_DispFloatFix      16
+     GUI_DispFloatMin       8
+     GUI_DispSFloatFix     16
+     GUI_DispSFloatMin      8
+     _DispFloatMin         32
+
+
+   Section sizes:
+
+     Function/Label    Bytes
+     --------------    -----
+     _DispFloatMin      644
+     GUI_DispFloatFix   124
+     GUI_DispFloatMin     8
+     GUI_DispFloat      188
+     GUI_DispSFloatFix  124
+     GUI_DispSFloatMin    8
+     ??DataTable3         4
+     ??DataTable3_1       4
+
+ 
+ 1 104 bytes in section .text
+ 
+ 1 104 bytes of CODE memory
+
+Errors: none
+Warnings: none

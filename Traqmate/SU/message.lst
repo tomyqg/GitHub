@@ -1,0 +1,1204 @@
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 1   
+
+
+C51 COMPILER V9.51, COMPILATION OF MODULE MESSAGE
+OBJECT MODULE PLACED IN .\message.obj
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE ..\CommonFiles\message.c OPTIMIZE(SIZE) BROWSE MDU_F120 INCDIR(..\..\C51\IN
+                    -C\;..\CommonFiles\;..\SU\) DB OE DEFINE(SENSOR,EXTCLK6,NODEBUG,UBLOX,DISPLAYATTACHED) DEBUG OBJECTEXTEND PRINT(.\message
+                    -.lst) OBJECT(.\message.obj)
+
+line level    source
+
+   1          // Part of traqmate.c
+   2          // 3/10/2004
+   3          // Author: BLBoyer
+   4          // Modified for traqmate: GAStephens, 3/24/2004
+   5          // added opcode return to ParseMessage 7/29/04
+   6          // added sw download: JPaulos, GAStephens 4/28/05
+   7          //
+   8          // This file contains the routines to format and send coded messages
+   9          // between the Traqmate and Traqview software.
+  10          //
+  11          
+  12          #ifdef SENSOR
+  13          #include <sensor.h>
+  14          #endif
+  15          #ifdef DISPLAY
+              #include <display.h>
+              #endif
+  18          
+  19          void Calibrate( void );
+  20          void InputTest( void );
+  21          void OutputTest( void );
+  22          void DataflashTest( u08 );
+  23          void ADTest (void);
+  24          void DigIOTest (void);
+  25          void AutoOnTest (void);
+  26          void SMB_Master_Test (void);
+  27          void SMB_Slave_Test (void);
+  28          void JumpCopy( u16 );
+  29          void Init_Cameras ( void );
+  30          
+  31          #define SendACK_Data(DEST, LEN) SendMessage(msgrouting[0], (u08) DEST, (u08) ACK,(LEN))
+  32          #define SendACK(DEST) SendACK_Data(DEST, 0)
+  33          // #define Verify_CRC(DAT, COUNT) (((((u16)*(DAT))<<8) + *(DAT+1)) == crc16((DAT), (COUNT)))
+  34          #define MSG_SEG (pagesize + MSG_WRAPPER)
+  35          
+  36          // The following function gets passed all the input data
+  37          // necessary to build a complete message. For efficiency it does not
+  38          // get passed the data buffer itself.
+  39          // In addition to being passed the data, the function will also
+  40          // call supporting functions to calculate checksums for the header
+  41          // and if appropriate, crc's for the data portion of the message
+  42          
+  43          s16 SendMessage(        u08 source,             // unit id of source
+  44                                                  u08 dest,               // unit id of destination
+  45                                                  u08 opcode,             // message opcode
+  46                                                  u16 bytes)      {       // number of bytes to transmit
+  47   1              u08 chk = 0xFF;                                 // used to start the header checksum calculation
+  48   1              u16 i = 0;                                              // general index
+  49   1              u16 crc = 0;                                    // used to hold the calculated CRC
+  50   1              u08 port = msgrouting[dest];
+  51   1      
+  52   1              // grab the unit
+  53   1              CTS[dest-1] = CTS_COUNTDOWN;
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 2   
+
+  54   1      
+  55   1              // record this message as outstanding if from this device
+  56   1              if (source == msgrouting[0] && opcode != ACK && opcode != NAK)
+  57   1                      outstanding_msg[dest-1] = opcode;
+  58   1      
+  59   1              com[port].txbuff[START] = SOH ;  // start of header
+  60   1              com[port].txbuff[SOURCE] = source; // source of the message
+  61   1              com[port].txbuff[DESTINATION] = dest; // destination of the message (same as above)
+  62   1      
+  63   1              bytes += 2;                                     // add two bytes to the total for the CRC
+  64   1      
+  65   1              com[port].txbuff[UPPER_BYTE_COUNT] = (bytes & 0xff00)>>8 ;  // format byte count to
+  66   1              com[port].txbuff[LOWER_BYTE_COUNT] = bytes & 0xff;          // two byte field
+  67   1      
+  68   1              com[port].txbuff[OPCODE]=opcode ;       // store the message op code
+  69   1              
+  70   1              for (i=0; i<CHECKSUM;i++)       // calculate the message header checksum
+  71   1                      chk ^= com[port].txbuff[i] ;            // over all bytes from SOH through op code
+  72   1              
+  73   1              com[port].txbuff[CHECKSUM] = chk ;      // store the checksum in final header byte
+  74   1      
+  75   1              bytes -= 2;                                     // remove crc from total
+  76   1      
+  77   1              crc = crc16(&(com[port].txbuff[DATA_START]),bytes);     // calculate the crc
+  78   1      
+  79   1              com[port].txbuff[++bytes+CHECKSUM] = (crc & 0xff00)>>8 ;                // store the high crc byte
+  80   1              com[port].txbuff[++bytes+CHECKSUM] = (crc & 0xff) ;                     // store the low crc byte
+  81   1      
+  82   1              XmitUART(&(com[port]), DATA_START+bytes);                                               // send it
+  83   1              return(DATA_START+bytes) ;  // return total number of bytes processed in message
+  84   1      
+  85   1      } // SendMessage
+  86          
+  87          // the following routine will parse a message based on the op code
+  88          // it is up to the opcode to determine any additional processing, such as
+  89          // CRC calculations, or the meaning of the data
+  90          s16 Parse_Message(u08 port, u08 *msgptr) 
+  91          {
+  92   1              xdata int retval = 0 ;
+  93   1              xdata u16 msgdatalen;
+  94   1      
+  95   1              msgdatalen = (msgptr[UPPER_BYTE_COUNT] << 8) + msgptr[LOWER_BYTE_COUNT] - 2;
+  96   1      
+  97   1              retval = Verify_CRC(msgptr+DATA_START, msgdatalen);
+  98   1      
+  99   1              if (retval) {           // bad data
+ 100   2      
+ 101   2                      if (NAK != msgptr[OPCODE] && ACK != msgptr[OPCODE])     { // don't NAK an ACK or NAK
+ 102   3                              // grab the port
+ 103   3                              CTS[msgptr[SOURCE]-1] = CTS_COUNTDOWN;
+ 104   3      
+ 105   3                              retval = SendNAK(msgptr[SOURCE], (u08) BAD_CRC);                // no data is returned and no crc
+ 106   3                      } // if
+ 107   2      #if defined DISPLAY && defined DEBUG
+                                      Write_Line((u08) 3, "BAD CRC", TRUE, '-');
+              #endif
+ 110   2              } // if
+ 111   1              else {          // message is good so parse it
+ 112   2                      int i;
+ 113   2                      u08 *tmpfrom;
+ 114   2                      u08 *tmpto;
+ 115   2      
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 3   
+
+ 116   2                      // if message not for me, then route it
+ 117   2                      if (msgptr[DESTINATION] != msgrouting[0] && msgptr[DESTINATION] != ANY_UNIT) {
+ 118   3                              // copy message into appropriate outbound buffer
+ 119   3      
+ 120   3                      // copy into output buffer
+ 121   3                      tmpto = com[msgrouting[msgptr[DESTINATION]]].txbuff+DATA_START;
+ 122   3                      tmpfrom = msgptr+DATA_START;
+ 123   3                      for (i=0; i<msgdatalen; i++)
+ 124   3                              *tmpto++ = *tmpfrom++;
+ 125   3      
+ 126   3                              SendMessage(msgptr[SOURCE], msgptr[DESTINATION], msgptr[OPCODE], msgdatalen);
+ 127   3                      } // if
+ 128   2                      else {  // message for me so process it
+ 129   3      
+ 130   3      #if defined SENSOR && defined DISPLAYATTACHED
+ 131   3                              if (DISPLAY_UNIT == msgptr[SOURCE])
+ 132   3                                      // remember that we talked with a DU
+ 133   3                                      duconnected = TRUE;
+ 134   3      #endif
+ 135   3                              switch (msgptr[OPCODE]) {
+ 136   4                              case ACK:
+ 137   4      
+ 138   4                                      // if ACK with data then parse the results
+ 139   4                                      switch (outstanding_msg[msgptr[SOURCE]-1]) {
+ 140   5      #ifdef DISPLAY
+                                                      case READ_UNIT_INFO:
+                                                              // make sure this is the correct ACK
+                                                              if (SCRATCHLEN == msgdatalen)
+                                                                      // save the config data in RAM
+                                                                      scratch = *((scratchpadtype *) &(msgptr[DATA_START]));
+                                                              break;
+              #endif
+ 148   5                                              default:
+ 149   5                                                      break;
+ 150   5                                      } // switch
+ 151   4      
+ 152   4                                      // clear the message as outstanding from this device
+ 153   4                                      outstanding_msg[msgptr[SOURCE]-1] = 0;
+ 154   4      
+ 155   4                                      // free up unit for more communications
+ 156   4                                      CTS[msgptr[SOURCE]-1] = 0;
+ 157   4                                      break;
+ 158   4      
+ 159   4                              case NAK:
+ 160   4                                      // fall back and retry PUT CODE HERE
+ 161   4      
+ 162   4                                      // clear the message as outstanding from this device
+ 163   4                                      outstanding_msg[msgptr[SOURCE-1]] = 0;
+ 164   4      
+ 165   4                                      // free up unit for more communications
+ 166   4                                      CTS[msgptr[SOURCE]-1] = 0;
+ 167   4                                      break;
+ 168   4      
+ 169   4                      // the SendACK function should be called within each
+ 170   4                      // case to ensure the appropriate data is returned for
+ 171   4                      // the corresponding op code
+ 172   4                              case WHO_ARE_YOU:
+ 173   4                                      if (OCCUPIED(tm_state))
+ 174   4                                              retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+ 175   4                                      else
+ 176   4                                              retval = SendACK(msgptr[SOURCE]);
+ 177   4                                      // free up unit for more communications
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 4   
+
+ 178   4                                      CTS[msgptr[SOURCE]-1] = 0;
+ 179   4                                      break;
+ 180   4                              case READ_SEGMENT: {                    // get specified segment data
+ 181   5                                      int segnum;                             // segment number to get
+ 182   5      
+ 183   5                                      if (OCCUPIED(tm_state))
+ 184   5                                              retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+ 185   5                                      else {
+ 186   6                                              segnum = (msgptr[DATA_START]<<8) + msgptr[DATA_START+1];
+ 187   6      
+ 188   6                                              DataFlash_Page_Read(pagesize, com[port].txbuff+DATA_START, segnum);
+ 189   6                                              retval = SendACK_Data(msgptr[SOURCE], pagesize);  // send the segment data
+ 190   6                                      } // else
+ 191   5                                      // free up unit for more communications
+ 192   5                                      CTS[msgptr[SOURCE]-1] = 0;
+ 193   5                                      break;
+ 194   5                              } // READ_SEGMENT
+ 195   4                              case WRITE_SEGMENT: {                   // write data to specified segment
+ 196   5                                      int segnum;
+ 197   5      
+ 198   5                                      if (OCCUPIED(tm_state))
+ 199   5                                              retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+ 200   5                                      else {
+ 201   6                                              segnum = (msgptr[DATA_START]<<8) + msgptr[DATA_START+1];
+ 202   6      
+ 203   6                                              DataFlash_Page_Write_Erase(GENBUFFER, pagesize, msgptr+DATA_START+2, segnum);
+ 204   6      
+ 205   6                                              retval = SendACK(msgptr[SOURCE]);
+ 206   6      
+ 207   6      #if defined SENSOR && defined DISPLAYATTACHED           
+ 208   6                                              if (IODEFPAGE == segnum)                // likely that camera definition change so reload
+ 209   6                                                      Init_Cameras();
+ 210   6      #endif                                          
+ 211   6                                      } // else
+ 212   5                                      // free up unit for more communications
+ 213   5                                      CTS[msgptr[SOURCE]-1] = 0;
+ 214   5                                      break;
+ 215   5                              } // WRITE_SEGMENT
+ 216   4                              case READ_UNIT_INFO: {          // gets the factory calibration data
+ 217   5                                      if (OCCUPIED(tm_state))
+ 218   5                                              retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+ 219   5                                      else {
+ 220   6                                              ReadScratchpad(com[port].txbuff+DATA_START);
+ 221   6                                              retval = SendACK_Data(msgptr[SOURCE], SCRATCHLEN);  // send the segment data
+ 222   6                                      } // else
+ 223   5      
+ 224   5                                      // free up unit for more communications
+ 225   5                                      CTS[msgptr[SOURCE]-1] = 0;
+ 226   5                                      break;
+ 227   5                              } // READ_UNIT_INFO
+ 228   4                              case WRITE_UNIT_INFO: {         // writes the factory calibration data
+ 229   5                                      if (OCCUPIED(tm_state))
+ 230   5                                              retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+ 231   5                                      else {
+ 232   6                                              retval = SendACK(msgptr[SOURCE]);
+ 233   6                                              EraseScratchpad();
+ 234   6                                              WriteScratchpad( msgptr+DATA_START, MIN(msgdatalen, SCRATCHLEN));
+ 235   6      
+ 236   6                                              // replenish local copy
+ 237   6                                              ReadScratchpad(scratch.scratchbuff);
+ 238   6      
+ 239   6      #if defined SENSOR && !defined DISPLAYATTACHED
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 5   
+
+                                                      // user settings may have changed so reprogram digipot if available
+                                                      if (su2)
+                                                              DigiPot(AUTOONENABLED);         // usersettings bit 4
+              #endif  
+ 244   6                                      } // else
+ 245   5      
+ 246   5                                      // free up unit for more communications
+ 247   5                                      CTS[msgptr[SOURCE]-1] = 0;
+ 248   5                                      break;
+ 249   5                              } // WRITE_UNIT_INFO
+ 250   4      
+ 251   4      #ifndef DISPLAYATTACHED
+                                      case ERASE_SESSION: {                   // erases a complete session
+                                              tmstatetype save_state = tm_state;
+              
+                                              // free up unit for more communications
+                                              CTS[msgptr[SOURCE]-1] = 0;
+              
+                                              if (OCCUPIED(tm_state))
+                                                      retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+                                              else {
+                                                      tm_state = ERASING;
+                                                      retval = SendACK(msgptr[SOURCE]);
+                                                      Erase_Session(msgptr[DATA_START]);
+                                                      tm_state = save_state;
+                                              } // else
+                                              break;
+                                      } // ERASE_SESSION
+              #ifdef PACKMEM
+                                      case PACK_SESSIONS: {
+                                              tmstatetype save_state = tm_state;
+              
+                                              // free up unit for more communications
+                                              CTS[msgptr[SOURCE]-1] = 0;
+              
+                                              if (OCCUPIED(tm_state))
+                                                      retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+                                              else {
+                                                      tm_state = ERASING;
+                                                      retval = SendACK(msgptr[SOURCE]);
+              
+                                              // pack them and report progress
+                                              Pack_Sessions(TRUE);
+              
+                                                      tm_state = save_state;
+                                              } // else
+                                              break;
+                                      } // PACK_SESSIONS
+              #endif
+              #endif
+ 290   4                              case ERASE_ALL:
+ 291   4                              case ERASE_ALL_SESS: {
+ 292   5                                      tmstatetype save_state = tm_state;
+ 293   5                                      // if erase all then start at page 0, else first data page
+ 294   5                                      u16 starterase = ((ERASE_ALL == msgptr[OPCODE])? 0 : FIRSTDATAPAGE);
+ 295   5                                      u16 enderase = ((ERASE_ALL == msgptr[OPCODE])? numpages - 1 : LASTLAPPAGE);
+ 296   5                                      
+ 297   5                                      // free up unit for more communications
+ 298   5                                      CTS[msgptr[SOURCE]-1] = 0;
+ 299   5      
+ 300   5                                      if (OCCUPIED(tm_state))
+ 301   5                                              retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 6   
+
+ 302   5                                      else {
+ 303   6                                              tm_state = ERASING;
+ 304   6                                              retval = SendACK(msgptr[SOURCE]);
+ 305   6      
+ 306   6                                              // wipe out the indexes
+ 307   6                                              DataFlash_Erase_Page(INDEXPAGE);
+ 308   6      #ifdef DISPLAY
+                                                      // wipe out all data and don't show progress
+                                                      DataFlash_Erase_Range(starterase, enderase, FALSE);
+              #endif
+ 312   6      #ifdef SENSOR
+ 313   6                                              // wipe out all data and show progress
+ 314   6                                              DataFlash_Erase_Range(starterase, enderase, TRUE);
+ 315   6      #endif
+ 316   6                                              tm_state = save_state;
+ 317   6                                      } // else
+ 318   5                                      break;
+ 319   5                              } // ERASE_ALL_SESS
+ 320   4      
+ 321   4                              case RESET_UNIT: {
+ 322   5                                      u08 status;
+ 323   5                                      
+ 324   5                                      retval = SendACK(*(msgptr+SOURCE));
+ 325   5                                      // free up unit for more communications
+ 326   5                                      CTS[msgptr[SOURCE]-1] = 0;
+ 327   5      
+ 328   5                                      // wait for Serial Flash to be finished
+ 329   5                                      do {
+ 330   6                                              status = DataFlash_Read_Status();
+ 331   6                                      } while (!(status & STATUS_READY_MASK));
+ 332   5      
+ 333   5                                      SFRPAGE = LEGACY_PAGE;
+ 334   5      
+ 335   5                                      // pull the reset line to restart everything
+ 336   5                                      RSTSRC = RSTSRC | 0x01;
+ 337   5      
+ 338   5                                      break;
+ 339   5                              } // RESET_UNIT
+ 340   4                              
+ 341   4      #ifdef SENSOR
+ 342   4                              case SERIAL_PASSTHRU: { // this can be used with a PC to run Ublox u-Center PC software on an SU
+ 343   5                                      retval = SendACK(*(msgptr+SOURCE));
+ 344   5      
+ 345   5                                      // initialize serial port to match Ublox
+ 346   5                                      UART_Init(&(com[0]), UBXBAUD);
+ 347   5      
+ 348   5                                      // breath a moment
+ 349   5                                      DELAY_MS(40);
+ 350   5      
+ 351   5                                      // shut off serial port interrupts
+ 352   5                                      SFRPAGE = UART0_PAGE;
+ 353   5                                      ES0 = 0;                                                        // Disable UART0 interrupts
+ 354   5                                      RI0 = 0;                                                        // ready to receive
+ 355   5                                      TI0 = 1;                                                        // ready to transmit
+ 356   5      
+ 357   5                                      SFRPAGE = UART1_PAGE;
+ 358   5                                      EIE2 &= ~0x40;                                          // ES1=0, Disable UART1 interrupts
+ 359   5                                      RI1 = 0;                                                        // ready to receive
+ 360   5                                      TI1 = 1;                                                        // ready to transmit
+ 361   5                                      
+ 362   5                                      // loop until button press swapping bytes between ports
+ 363   5                                      while (1) {
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 7   
+
+ 364   6                                              u08 tempch;
+ 365   6      
+ 366   6                                              SFRPAGE = CONFIG_PAGE;
+ 367   6                                              if (0 != SW1) {
+ 368   7                                                      // see if it has just been released
+ 369   7                                                      if (debounce >= DEBOUNCE_NORMAL) {
+ 370   8                                                              // best way to exit is just to reset the unit
+ 371   8                                                              SFRPAGE = LEGACY_PAGE;
+ 372   8                                                              // pull the reset line to restart everything
+ 373   8                                                              RSTSRC = RSTSRC | 0x01;
+ 374   8                                                      } // if
+ 375   7                                              } // if
+ 376   6      
+ 377   6                                              SFRPAGE = UART0_PAGE;
+ 378   6                                              if (RI0) {                                                      // byte received on UART0
+ 379   7                                                      SFRPAGE = UART1_PAGE;
+ 380   7                                                      if (TI1) {                                              // check to see if UART1 is ready
+ 381   8                                                              TI1 = 0;                                        // clear ready bit
+ 382   8                                                              SFRPAGE = UART0_PAGE;
+ 383   8                                                              tempch = SBUF0;                         // get a char
+ 384   8                                                              RI0 = 0;                                        // clear receive interrupt flag
+ 385   8                                                              LED3 = ~LED3;                           // toggle COM LED
+ 386   8                                                              SFRPAGE = UART1_PAGE;
+ 387   8                                                              SBUF1 = tempch;                         // transmit a char
+ 388   8                                                      } // if
+ 389   7                                              } // if
+ 390   6      
+ 391   6                                              SFRPAGE = UART1_PAGE;
+ 392   6                                              if (RI1) {                                                      // byte received on UART1
+ 393   7                                                      SFRPAGE = UART0_PAGE;
+ 394   7                                                      if (TI0) {                                              // check to see if UART0 is ready
+ 395   8                                                              TI0 = 0;                                        // clear ready bit
+ 396   8                                                              SFRPAGE = UART1_PAGE;
+ 397   8                                                              tempch = SBUF1;                         // get a char
+ 398   8                                                              RI1 = 0;                                        // clear receive interrupt flag
+ 399   8                                                              LED2 = ~LED2;                           // toggle GPS LED
+ 400   8                                                              SFRPAGE = UART0_PAGE;
+ 401   8                                                              SBUF0 = tempch;                         // transmit a char
+ 402   8                                                      } // if
+ 403   7                                              } // if
+ 404   6                                      } // while
+ 405   5                                      break;
+ 406   5                              } // SERIAL_PASSTHRU
+ 407   4                              case SIMULATE_GPS:              // sets or clears GPS Simulate state in SU
+ 408   4                                      retval = SendACK(*(msgptr+SOURCE));
+ 409   4                                      
+ 410   4                                      // free up unit for more communications
+ 411   4                                      CTS[msgptr[SOURCE]-1] = 0;
+ 412   4                                      
+ 413   4                                      simgps = msgptr[DATA_START];
+ 414   4      
+ 415   4                                      break;  
+ 416   4                              case AUTO_ON:           // sets AutoOn bit in SU
+ 417   4                                      retval = SendACK(*(msgptr+SOURCE));
+ 418   4                                      
+ 419   4                                      // free up unit for more communications
+ 420   4                                      CTS[msgptr[SOURCE]-1] = 0;
+ 421   4      
+ 422   4      #ifdef SENSOR
+ 423   4                                      if (su2) {
+ 424   5                                              DigiPot(msgptr[DATA_START]);
+ 425   5      #ifndef DISPLAYATTACHED
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 8   
+
+                                                      // read config data
+                                                      ReadScratchpad(scratch.scratchbuff);
+                                                      // set/clear the autoon bit in the configuration
+                                                      if (msgptr[DATA_START])
+                                                              scratch.calibrate.usersettings |= AUTOONMASK;
+                                                      else
+                                                              scratch.calibrate.usersettings &= !AUTOONMASK;
+                                                      EraseScratchpad();
+                                                      // save it permanently
+                                                      WriteScratchpad(scratch.scratchbuff, SCRATCHLEN);
+              #endif
+ 437   5                                      } // if
+ 438   4      #endif
+ 439   4                                      break;
+ 440   4                              case CALIBRATE:
+ 441   4                                      retval = SendACK(*(msgptr+SOURCE));
+ 442   4                                      
+ 443   4                                      // free up unit for more communications
+ 444   4                                      CTS[msgptr[SOURCE]-1] = 0;
+ 445   4                                      
+ 446   4                                      Calibrate();
+ 447   4                                      break;
+ 448   4                              case INPUTTEST:
+ 449   4                                      retval = SendACK(*(msgptr+SOURCE));
+ 450   4                                      
+ 451   4                                      // free up unit for more communications
+ 452   4                                      CTS[msgptr[SOURCE]-1] = 0;
+ 453   4                                      
+ 454   4                                      InputTest();
+ 455   4                                      break;
+ 456   4                              case OUTPUTTEST:
+ 457   4                                      retval = SendACK(*(msgptr+SOURCE));
+ 458   4                                      
+ 459   4                                      // free up unit for more communications
+ 460   4                                      CTS[msgptr[SOURCE]-1] = 0;
+ 461   4                                      
+ 462   4                                      OutputTest();
+ 463   4                                      break;
+ 464   4                              case ADTEST:
+ 465   4                                      retval = SendACK(*(msgptr+SOURCE));
+ 466   4                                      
+ 467   4                                      // free up unit for more communications
+ 468   4                                      CTS[msgptr[SOURCE]-1] = 0;
+ 469   4                                      
+ 470   4                                      ADTest();
+ 471   4                                      break;
+ 472   4                              case DIGIOTEST:
+ 473   4                                      retval = SendACK(*(msgptr+SOURCE));
+ 474   4                                      
+ 475   4                                      // free up unit for more communications
+ 476   4                                      CTS[msgptr[SOURCE]-1] = 0;
+ 477   4                                      
+ 478   4                                      DigIOTest();
+ 479   4                                      break;
+ 480   4                              case AUTOONTEST:
+ 481   4                                      retval = SendACK(*(msgptr+SOURCE));
+ 482   4                                      
+ 483   4                                      // free up unit for more communications
+ 484   4                                      CTS[msgptr[SOURCE]-1] = 0;
+ 485   4                                      
+ 486   4                                      AutoOnTest();
+ 487   4                                      break;
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 9   
+
+ 488   4                              case SMBMASTERTEST:
+ 489   4                                      retval = SendACK(*(msgptr+SOURCE));
+ 490   4                                      
+ 491   4                                      // free up unit for more communications
+ 492   4                                      CTS[msgptr[SOURCE]-1] = 0;
+ 493   4                                      
+ 494   4                                      SMB_Master_Test();
+ 495   4                                      break;
+ 496   4                              case SMBSLAVETEST:
+ 497   4                                      retval = SendACK(*(msgptr+SOURCE));
+ 498   4                                      
+ 499   4                                      // free up unit for more communications
+ 500   4                                      CTS[msgptr[SOURCE]-1] = 0;
+ 501   4                                      
+ 502   4                                      SMB_Slave_Test();
+ 503   4                                      break;
+ 504   4      #endif
+ 505   4                              case DATAFLASHTEST:
+ 506   4                              case DATAFLASHTEST2:
+ 507   4                                      // free up unit for more communications
+ 508   4                                      CTS[msgptr[SOURCE]-1] = 0;
+ 509   4                                      
+ 510   4                                      DataflashTest(msgptr[OPCODE]);
+ 511   4                                      break;
+ 512   4                              case POWER_DOWN: {
+ 513   5      #ifdef SENSOR
+ 514   5                                      new_mode = SHUTDOWN;
+ 515   5                                      mode_change = TRUE;
+ 516   5      #else // DISPLAY
+                                              u08 status;
+                                              
+                                              // SU has detected power failure and notified the DU
+                                              // save power
+                                              BACKLITEKB = 0;
+                                              BACKLITEDS = 0;
+              
+                                              // tell user
+                                              Info_Screen("PWR LOST");
+              
+                                              // save data
+                                              if (RECORDING(tm_state))
+                                                      End_Session(session, pagecnt, iopagecnt);
+                                              if (TIMING == tm_state ||
+                                                      AUTOXHOLDTIME == tm_state ||
+                                                      HILLCLIMBSTART == tm_state ||
+                                                      HILLCLIMBFINISH == tm_state)
+                                                      Lap_Store();
+              
+                                              // wait for Serial Flash to be finished
+                                              do {
+                                                      status = DataFlash_Read_Status();
+                                              } while (!(status & STATUS_READY_MASK));
+              
+                                              // go away
+                                              while (1) {
+                                                      u16 retry;
+              
+                                                      // tell SU to shut us down
+                                                      SendMessage((u08) DISPLAY_UNIT, (u08) SENSOR_UNIT, (u08) POWER_DOWN, (u08) 0);
+              
+                                                      // wait a bit. if still alive, send it again
+                                                      for (retry = 0; retry < 40000; retry++) ;
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 10  
+
+                                              } // while
+              #endif
+ 552   5      
+ 553   5                                      break;
+ 554   5                              } // POWER_DOWN
+ 555   4                              // uses global variable session to keep cksum total
+ 556   4                              case SW_DOWNLOAD:{
+ 557   5                                      if (START_DOWNLOAD == tm_state) {
+ 558   6                                              SaveDownload(msgptr, &session);         // save in dataflash
+ 559   6                                              retval = SendACK(msgptr[SOURCE]);
+ 560   6                                              pagecnt++;
+ 561   6                                      }
+ 562   5                                      else {
+ 563   6                                              retval = SendNAK(msgptr[SOURCE], (u08) FUNCTION_FAILED);
+ 564   6                                      }
+ 565   5                                      // free up unit for more communications
+ 566   5                                      CTS[msgptr[SOURCE]-1] = 0;
+ 567   5      
+ 568   5                                      break;
+ 569   5                              } // SW_DOWNLOAD
+ 570   4      
+ 571   4                              case SW_REPROGRAM:{
+ 572   5                                      // make sure we are in the right mode and cksum of image is good
+ 573   5                                      if (DOWNLOAD_COMPLETE != tm_state || session != msgptr[DATA_START]) {
+ 574   6                                              retval = SendNAK(msgptr[SOURCE], (u08) FUNCTION_FAILED);
+ 575   6                                              // free up unit for more communications
+ 576   6                                              CTS[msgptr[SOURCE]-1] = 0;
+ 577   6      
+ 578   6                                              DELAY_MS(100);                          // give NAK chance to arrive
+ 579   6      
+ 580   6                                              // abort download, clear flash and reset
+ 581   6                                              new_mode = CANCEL_DOWNLOAD;
+ 582   6                                              mode_change = TRUE;
+ 583   6                                      }
+ 584   5                                      else {
+ 585   6                                              retval = SendACK(msgptr[SOURCE]);
+ 586   6                                              CTS[msgptr[SOURCE]-1] = 0;
+ 587   6      
+ 588   6                                              DELAY_MS(100);                          // give ACK chance to arrive
+ 589   6      
+ 590   6                                              JumpCopy(pagecnt);                      // copy into code space
+ 591   6                                      }
+ 592   5                                      break;
+ 593   5                              } // SW_REPROGRAM
+ 594   4      
+ 595   4                              case MODE_CHANGE: {
+ 596   5                                      mode_change = TRUE;
+ 597   5                                      new_mode = (tmstatetype) msgptr[DATA_START];
+ 598   5      #if defined SENSOR && defined DISPLAYATTACHED
+ 599   5                                      if (msgdatalen > 1) {           // parameter change
+ 600   6                                              // set up sampling rate
+ 601   6                                              new_samp = msgptr[DATA_START+1] & 0x0F;
+ 602   6                                              // set up the I/O collection
+ 603   6                                              new_iocollect = msgptr[DATA_START+2];
+ 604   6                                              // set up input scaling
+ 605   6                                              for (i=0; i<NUMANALOGS; i++)
+ 606   6                                                      ioscaling[i] = msgptr[DATA_START+3+i];
+ 607   6                                              // frequency alarm data for currently selected car
+ 608   6                                              cyl = msgptr[DATA_START+7];
+ 609   6                                              revs = * (u16*) (msgptr+DATA_START+8);
+ 610   6                                      } // if
+ 611   5      #endif
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 11  
+
+ 612   5                                      retval = SendACK(msgptr[SOURCE]);
+ 613   5                                      // free up unit for more communications
+ 614   5                                      CTS[msgptr[SOURCE]-1] = 0;
+ 615   5                                      break;
+ 616   5                              } // MODE_CHANGE
+ 617   4      
+ 618   4      #ifdef DISPLAY
+                                      case WRITE_DISPLAY_TEXT: {
+                                              Write_Line((u08) 3, msgptr+DATA_START, TRUE, '-');              
+                                              retval = SendACK(msgptr[SOURCE]);
+              
+                                              // free up unit for more communications
+                                              CTS[msgptr[SOURCE]-1] = 0;
+                                              break;
+                                      } // WRITE_DISPLAY_TEXT
+                                      case CAM_STATUS: {
+                                              // ignore pesky messages during startup
+                                              if (STARTUP != tm_state) {
+                      
+                                                      // first byte tells whether position data is good
+                                                      camlancstatus = (camlancstatustype) msgptr[DATA_START];
+                      
+                                                      retval = SendACK(*(msgptr+SOURCE));
+                                                                                      
+                                                      // free up unit for more communications
+                                                      CTS[msgptr[SOURCE]-1] = 0;
+                      
+                                                      if (WAITING == tm_state) {
+                                                              // write PDR status icon
+                                                              switch (camlancstatus) {
+                                                                      case UNKNOWNSTATUS:
+                                                                      case CAMLANCNOTCONNECTED:
+                                                                              break;
+                                                                      case CAMLANCREADY:
+                                                                              Write_Icon(105, 0, 16, 8, &(camready[0]), '-');
+                                                                              break;
+                                                                      case CAMLANCRECORD:
+                                                                              Write_Icon(105, 0, 16, 8, &(camrecord[0]), '-');
+                                                                              break;
+                                                                      default:
+                                                                              Write_Icon(105, 0, 16, 8, &(camnotready[0]), '-');
+                                                              } // switch     
+                                                      } // if
+                                              } // if
+                                              break;
+                                      } // CAM_STATUS                         
+                                      case GPS_DATA: {
+                                              u08 linenum;
+              
+                                              // ACK the message
+                                              retval = SendACK(msgptr[SOURCE]);
+              
+                                              // free up unit for more communications
+                                              CTS[msgptr[SOURCE]-1] = 0;
+              
+                                              // first byte tells whether position data is good
+                                              gpslock = msgptr[DATA_START];
+              
+                                              // store the gps position data into the buffer
+                                              // done with or without gpslock because su will interpolate
+                                              flashpage.secsamp10[secondcnt].gps = *((gpstype *)(msgptr+DATA_START+1));
+              
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 12  
+
+                                              if (gpslock) {
+                                                      // save first good date as starting date
+                                                      if (gpslock && 0xFFFFFFFF == sessstarttime &&
+                                                              0L != flashpage.secsamp10[secondcnt].gps.time &&
+                                                              0xFFFFFFFF != flashpage.secsamp10[secondcnt].gps.time)
+                                                                      sessstarttime = flashpage.secsamp10[secondcnt].gps.time;
+              
+                                                      // keep last good date as ending date
+                                                      if (gpslock && 0L != flashpage.secsamp10[secondcnt].gps.time &&
+                                                              0xFFFFFFFF != flashpage.secsamp10[secondcnt].gps.time)
+                                                                      sessendtime = flashpage.secsamp10[secondcnt].gps.time;
+              
+                                                      // save first good week as starting week
+                                                      if (gpslock && 0xFFFF == sessstartweeks &&
+                                                              0 != flashpage.secsamp10[secondcnt].gps.weeks &&
+                                                              0xFFFF != flashpage.secsamp10[secondcnt].gps.weeks)
+                                                                      sessstartweeks = flashpage.secsamp10[secondcnt].gps.weeks;
+              
+                                                      // keep last good week as ending weeks
+                                                      if (gpslock && 0 != flashpage.secsamp10[secondcnt].gps.weeks &&
+                                                              0xFFFF != flashpage.secsamp10[secondcnt].gps.weeks)
+                                                                      sessendweeks = flashpage.secsamp10[secondcnt].gps.weeks;
+                                              } // if
+              
+                                              switch (tm_state) {
+                                                      case TIMING:
+                                                      case HILLCLIMBSTART:
+                                                      case HILLCLIMBFINISH:
+                                                      case HILLCLIMBGETFINISH:
+                                                      case AUTOXGETFINISH:
+                                                      case AUTOXFINISH:
+                                                      case DRAGFINISH:
+                                                              // see if we have lapped
+                                                              Lap_Check(NEW_POSITION, (gpstype *)(msgptr+DATA_START+1));
+                                                              break;
+                                                      case GPSINFO:
+                                                      case GPSREC:
+                                                              if (gpslock >= GPS_GOOD) {
+                                                                      xdata char tempbuf[CHARSSMALL+2];
+                                                                      for (linenum=1; linenum <= 3; linenum++) {
+                                                                              // print all the information on the screen
+                                                                              formatgps((gpstype *)(msgptr+DATA_START+1), gcnt, tempbuf, linenum);
+                                                                              Write_Line(linenum, tempbuf, FALSE, '-');
+                                                                      } // for
+                                                              } // if
+                                                              break;
+                                                      case COMPASS:
+                                                      case DRIVE:
+                                                              if (gpslock >= GPS_GOOD) {
+                                                                      Clear_Screen();
+                                                                      // put up a line bar
+                                                                      Write_Icon(0, 0, NUMBER_OF_COLUMNS, 7, &(menubar[0]), '-');
+                                                                      // write menu centered name
+                                                                      Write_Text(0, 45, "Drive", '-');
+                                                                      // write undertitles
+                                                                      if (scratch.calibrate.usersettings & 0x01) // english
+                                                                              Write_Line(3, "HDG     TIME     MPH", FALSE, '-');
+                                                                      else
+                                                                              Write_Line(3, "HDG     TIME     KPH", FALSE, '-');
+                                                                      // print all the information on the screen
+                                                                      writecompass((gpstype *)(msgptr+DATA_START+1));
+                                                              } // if
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 13  
+
+                                                              else {
+                                                                      Write_Screen((u08 *) findgps, '-');
+                                                              } // else
+                                                              break;
+                                                      case GAUGEA0:
+                                                      case GAUGEA1:
+                                                      case GAUGEA2:
+                                                      case GAUGEA3:
+                                                      case GAUGED4:
+                                                      case GAUGED5:
+                                                              formatgauges(tm_state);
+                                                              break;
+                                                      case GPSRPM:
+                                                      case INSTRUMENT:
+                                                              writerpm((gpstype *)(msgptr+DATA_START+1));
+                                                              break;
+                                                      case INPUTS:
+                                                      case CHKINPUTS:
+                                                              // print all the information on the screen
+                                                              writeinputs();
+                                                              break;
+                                                      case LAPS: // lap and qualifying mode
+                                                      case HILLCLIMB:
+                                                              if (gpslock >= GPS_GOOD) {
+                                                                      // ready to mark the start/finish
+                                                                      Write_Screen((u08 *) startfin, '-');
+                                                                      if (HILLCLIMB == tm_state) {    // blank out "/ FINISH"
+                                                                              Write_Icon(40, 19, 45, 10, (u08 *) blankicon, '-');
+                                                                      } // if                                         
+                                                                      // get a fix on our position
+                                                                      Lap_Check(INITIALIZE, (gpstype *)(msgptr+DATA_START+1));
+                                                              } // if
+                                                              else {
+                                                                      Write_Screen((u08 *) findgps, '-');
+                                                              } // else
+                                                              break;
+                                                      case AUTOXSTAGE:
+                                                              if (gpslock >= GPS_GOOD) {
+                                                                      // prompt user to stage
+                                                                      Write_Screen((u08 *) autoxstage, '-');
+                                                              } // if
+                                                              else
+                                                                      Write_Screen((u08 *) findgps, '-');
+              
+                                                              // get ready to begin timing
+                                                              Lap_Check(INITIALIZE, (gpstype *)(msgptr+DATA_START+1));
+              
+                                                              break;
+                                                      case DRAGSTAGE:
+                                                              if (gpslock >= GPS_GOOD) {
+                                                                      // prompt user to stage
+                                                                      Write_Screen((u08 *) dragstage, '-');
+                                                              } // if
+                                                              else
+                                                                      Write_Screen((u08 *) findgps, '-');
+              
+                                                              // get ready to begin timing
+                                                              Lap_Check(INITIALIZE, (gpstype *)(msgptr+DATA_START+1));
+                      
+                                                              break;
+                                                      case HILLCLIMBWAITSTART:
+                                                      case WAITSTART:
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 14  
+
+                                                              if (gpslock >= GPS_GOOD) {
+                                                                      // ready to look for the start/finish
+                                                                      Write_Screen((u08 *) findstart, '-');
+                                                                      // put up track name
+                                                                      Write_Text(3, 1, menunames.track[lap.tracknum], '-');
+              
+                                                                      // watch for start/finish to begin timing
+                                                                      Lap_Check(INITIALIZE, (gpstype *)(msgptr+DATA_START+1));
+                                                              } // if
+                                                              else {
+                                                                      Write_Screen((u08 *) findgps, '-');
+                                                              } // else
+                                                              break;
+                                                      default:
+                                                              break;
+                                              } // switch
+              
+                                              // exit display scroll mode
+                                              Reset_Top_Line();
+              
+                                              break;
+                                      } // GPS_DATA
+                                      case GPS_PULSE: {
+                                              int i;
+              
+                                              retval = SendACK(msgptr[SOURCE]);
+              
+                                              // free up unit for more communications
+                                              CTS[msgptr[SOURCE]-1] = 0;
+              
+                                              // record the dillution of precision number
+                                              dop = ((u16) msgptr[DATA_START+1] << 8) + (u16) (msgptr[DATA_START+2] & 0x00FF);
+              
+                                              // first byte has camera status
+                                              camlancstatus = (camlancstatustype) (msgptr[DATA_START+3]);
+                                                      
+                                              // don't save any data until we see a GPS pulse so we can
+                                              // synchronize position and io data with accelerometer data
+                                              if (firstpulse) {
+                                                      firstpulse = FALSE;
+                                                      // synched up so start with fresh counters
+                                                      gcnt = 0;
+                                                      secondcnt = 0;
+                                              }
+                                              // only do this if we are storing data
+                                              else if (RECORDING(tm_state)) {
+                                                      // fill in any unprogrammed accel samples with previous values
+                                                      for (; gcnt < SAMP10S_PER_PAGE; gcnt++) {
+                                                              if (gcnt == 0) {
+                                                                      flashpage.secsamp10[secondcnt].accel[gcnt][0] =
+                                                                              ((scratch.calibrate.xzero & 0x0F00) >> 4) +
+                                                                              ((scratch.calibrate.yzero & 0x0F00) >> 8);
+                                                                      flashpage.secsamp10[secondcnt].accel[gcnt][1] =
+                                                                              scratch.calibrate.xzero & 0xFF;
+                                                                      flashpage.secsamp10[secondcnt].accel[gcnt][2] =
+                                                                              scratch.calibrate.yzero & 0xFF;
+                                                              } // if
+                                                              else {
+                                                                      flashpage.secsamp10[secondcnt].accel[gcnt][0] =
+                                                                              flashpage.secsamp10[secondcnt].accel[gcnt-1][0];
+                                                                      flashpage.secsamp10[secondcnt].accel[gcnt][1] =
+                                                                              flashpage.secsamp10[secondcnt].accel[gcnt-1][1];
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 15  
+
+                                                                      flashpage.secsamp10[secondcnt].accel[gcnt][2] =
+                                                                              flashpage.secsamp10[secondcnt].accel[gcnt-1][2];
+                                                              } // else
+                                                      } // for
+              
+                                                      if (secondcnt >= (SAMP10S_PER_PAGE-1)) {        // buffer filled
+                                                              // write buffer to flash
+                                                              DataFlash_Page_Write_Erase(GENBUFFER, pagesize, flashpage.bigbuff, pagecnt);
+                                                              pagecnt++;
+              
+                                                              // clear the buffer
+                                                              for (i=0; i < MAX_PAGE_SIZE; i++) flashpage.bigbuff[i] = 0;
+                                                              secondcnt = 0;
+              
+                                                              if (pagecnt >= iopagecnt-1) { // unit is full
+                                                                      pagecnt--;
+                                                                      // cancel the mode as if the BACK button was pressed
+                                                                      Menu_Op(BUTTONPRESS, BACK);
+                                                              }
+                                                      } // if
+                                                      else {                  // buffer not filled so go to new second
+                                                              secondcnt++;
+                                                      } // else
+                                              } // else
+                                              gcnt = 0;               // either way, start a new second for G data
+                                              break;
+                                      } // GPS_PULSE
+                                      case ACCEL_DATA: {
+                                              s08 checkbits;                  // used to check off the enable bits for data i/o
+                                              float xg, yg;
+                                              xdata u16 tempxy;
+                                              xdata char xchar, ychar;
+              
+                                              retval = SendACK(*(msgptr+SOURCE));
+                                      
+                                              // free up unit for more communications
+                                              CTS[msgptr[SOURCE]-1] = 0;
+              
+                                              if (gcnt >= 10)
+                                                      gcnt = 9;       // error condition
+              
+                                              /// put accel data into buffer
+                                              flashpage.secsamp10[secondcnt].accel[gcnt][0] = msgptr[DATA_START];
+                                              flashpage.secsamp10[secondcnt].accel[gcnt][1] = msgptr[DATA_START+1];
+                                              flashpage.secsamp10[secondcnt].accel[gcnt][2] = msgptr[DATA_START+2];
+              
+                                              // scale the Y Gs
+                                              tempxy = (flashpage.secsamp10[secondcnt].accel[gcnt][0] & 0x0F) << 8;
+                                              tempxy += flashpage.secsamp10[secondcnt].accel[gcnt][2];
+                                              yg = (float) tempxy - (float) scratch.calibrate.yzero;
+                                              if (yg < 0.0) {
+                                                      ychar = 'L';
+                                                      yg = yg / ((float) scratch.calibrate.yzero - (float) scratch.calibrate.yminusg);
+                                              } // if
+                                              else  {
+                                                      ychar = 'R';
+                                                      yg = yg / ((float) scratch.calibrate.yplusg - (float) scratch.calibrate.yzero);
+                                              } // else
+              
+                                              // scale the X Gs
+                                              tempxy = (flashpage.secsamp10[secondcnt].accel[gcnt][0] & 0xF0) << 4;
+                                              tempxy += flashpage.secsamp10[secondcnt].accel[gcnt][1];
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 16  
+
+                                              xg = (float) tempxy - (float) scratch.calibrate.xzero;
+              
+                                              if (xg < 0.0) {
+                                                      xchar = 'A';
+                                                      xg = xg / ((float) scratch.calibrate.xzero - (float) scratch.calibrate.xminusg);
+                                              } // if
+                                              else {
+                                                      xchar = 'B';
+                                                      xg = xg / ((float) scratch.calibrate.xplusg - (float) scratch.calibrate.xzero);
+                                              } // else
+              
+                                              switch (tm_state) {
+                                                      xdata char tempbuf[CHARSSMALL+2];
+                                                      
+                                                      case TIMING:                    // do the lap timer
+                                                      case HILLCLIMBFINISH:
+                                                      case HILLCLIMBGETFINISH:
+                                                      case AUTOXGETFINISH:
+                                                      case AUTOXFINISH:
+                                                      case DRAGFINISH:
+                                                              // only do this if launch has occurred and G is acceleration (negative)
+                                                              if (0 != dragnumbers.launchg && xg < 0) {
+                                                                      xdata u16 tempval = (u16) (-xg * 100.0);
+                                                                      if (tempval > dragnumbers.launchg)
+                                                                              dragnumbers.launchg = tempval;
+                                                              } // if
+                                                              // increment timer and update the display
+                                                              Lap_Check(INC_TIME, NULL);
+                                                              Write_Timer();
+                                                              break;
+                                                      case DRAGREADY:
+              #define LIGHTSPACING    2                                       // seconds between lights
+              #define MAXRATE                 40                                      // autox and drag sampling rate = 40hz
+              
+                                                              draglighttimer++;                       // increment drag light timer by sampling rate
+                                                              switch (draglighttimer) {       // normalized to 40hz
+                                                                      case (MAXRATE * LIGHTSPACING):          // turn on 1st light
+                                                                              Write_Icon(101, 4, 4, 6, (u08 *) stoplight, '^');
+                                                                              Write_Icon(112, 4, 4, 6, (u08 *) stoplight, '^');                                                               
+                                                                              break;
+                                                                      case (2 * MAXRATE * LIGHTSPACING):              // turn off 1st light, turn on 2nd light
+                                                                              Write_Icon(101, 4, 4, 6, (u08 *) stoplight, '^');
+                                                                              Write_Icon(112, 4, 4, 6, (u08 *) stoplight, '^');       
+                                                                              Write_Icon(101, 13, 4, 6, (u08 *) stoplight, '^');
+                                                                              Write_Icon(112, 13, 4, 6, (u08 *) stoplight, '^');                                                              
+                                                                              break;
+                                                                      case (3 * MAXRATE * LIGHTSPACING):      // turn off 2nd light, turn on 3rd light and GO
+                                                                              Write_Icon(101, 13, 4, 6, (u08 *) stoplight, '^');
+                                                                              Write_Icon(112, 13, 4, 6, (u08 *) stoplight, '^');
+                                                                              Write_Icon(101, 22, 4, 6, (u08 *) stoplight, '^');
+                                                                              Write_Icon(112, 22, 4, 6, (u08 *) stoplight, '^');
+                                                                              Write_Icon(0, 0, 59, 32, (u08 *) go, '-');
+                                                                              break;                                  
+                                                              } // switch
+                                                              
+                                                              // fall thru
+                                                      case AUTOXREADY:        // look for launch
+                                                              if (xg < LAUNCHVAL) {
+                                                                      dragnumbers.reaction = (((s16) draglighttimer - (s16) (3 * LIGHTSPACING * samps_per_sec)) * 100) / 
+             -samps_per_sec;
+                                                                      dragnumbers.launchg = (u16) (-xg * 100.0);
+                                                                      gcnt = 0;               // starting with data now
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 17  
+
+                                                                      Lap_Check(START_POSITION, NULL);
+                                                              } // if
+                                                              break;
+              #undef MAXRATE
+              #undef LIGHTSPACING
+                                                      case GPSINFO:
+                                                      case GPSREC:
+                                                              // print it out
+                                                              sprintf(tempbuf, "X %+2.2f Y %+2.2f", xg, yg);
+              
+                                                              if (gpslock)
+                                                                      sprintf(tempbuf + strlen(tempbuf), "%5d ", dop);
+                                                              else
+                                                                      sprintf(tempbuf + strlen(tempbuf), " ---- ", dop);
+              
+                                                              Write_Line((u08) 0, tempbuf, FALSE, '-');
+                                                              break;
+                                                      case GFORCES:
+                                                              // do every other sample
+              //                                              if (gcnt & 0x01) {
+                                                                      if (xg < 0.0) xg = -xg;
+                                                                      if (yg < 0.0) yg = -yg;
+                      
+                                                                      sprintf(tempbuf, "%c:%1.1f ", xchar, xg);
+                                                                      Write_Big_Text(2, 3, tempbuf, '-');
+                                                                      sprintf(tempbuf, "%c:%1.1f", ychar, yg);
+                                                                      // put value on display
+                                                                      Write_Big_Text(2, 69, tempbuf, '-');
+              //                                              } // if
+                                                              break;
+                                              } // switch
+              
+                                              // make copy of inputs for display on DU
+                                              for (checkbits = 0; checkbits < NUMINPUTBYTES; checkbits++)
+                                                      allinputs[checkbits] = msgptr[DATA_START+3+checkbits];
+              
+                                              // check if Data Interface attached - digital byte inverted at this point
+                                              if ((traqdataconnected = (~msgptr[DATA_START+3] & TACHORDATA)) && RECORDING(tm_state)) {
+                                                      // only save i/o data if we have gotten good gps signal
+                                                      if (!firstpulse) {
+                                                              // save the i/o points in the order they arrive, MSB - LSB, DIA3A2A1A0F1F0
+                                                              for (checkbits = 6; checkbits >= 0; checkbits--) {
+                                                                      // check for bit set enabling i/o point
+                                                                      if ((iocollect >> checkbits) & 0x01) {
+                                                                              // write the character
+                                                                              DataFlash_Buffer_Write(IOBUFFER, 1, iobyte, (msgptr+DATA_START+9-checkbits));                                           
+              
+                                                                              // check for io buffer full
+                                                                              if (iobyte != 0)
+                                                                                      iobyte--;       // point to the next byte down in the dataflash buffer
+                                                                              else {
+                                                                                      // check to see if entire dataflash full
+                                                                                      if (pagecnt >= iopagecnt-1) { // unit is full, write performed in menu
+                                                                                              // cancel the mode as if the BACK button was pressed
+                                                                                              Menu_Op(BUTTONPRESS, BACK);
+                                                                                      }
+                                                                                      else {
+                                                                                              // write the buffer
+                                                                                              DataFlash_Page_Write_From_Buffer_Erase(IOBUFFER, iopagecnt);
+              
+                                                                                              // go to next page
+                                                                                              iopagecnt--;
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 18  
+
+                                                                                              iobyte = MAX_PAGE_SIZE - 1;             // point to MSB
+                                                                                              // clear the buffer
+                                                                                              DataFlash_Buffer_Clear(IOBUFFER, pagesize);
+                                                                                      } // else
+                                                                              } // else
+                                                                      } // if
+                                                              } // for
+                                                      } // if
+                                              } // if
+                                              gcnt++;
+                                              break;
+                                      } // ACCEL_DATA
+              #endif // DISPLAY
+1058   4                              default:
+1059   4                                      // grab the port
+1060   4                                      CTS[msgptr[SOURCE]-1] = CTS_COUNTDOWN;
+1061   4      
+1062   4                                      // say what?
+1063   4                                      retval = SendNAK(*(msgptr+SOURCE), UNKNOWN_FUNCTION);
+1064   4                                      retval = -1; // no valid opcode found - normally send NAK
+1065   4      #if defined DISPLAY && defined DEBUG
+                                              Write_Line((u08) 3, "NAK UNKNOWN OP", TRUE, '-');
+              #endif
+1068   4                                      break;          
+1069   4                              } // switch
+1070   3                      } // else
+1071   2              } // else
+1072   1      
+1073   1              return(retval);  // this should be the return value of sending ACK or ACK with
+1074   1                               // data, assuming the opcode processes successfully
+1075   1      }
+1076          
+1077          // The following function calculates the crc16 result and verifies it against*/
+1078          // the received value in the data.  The function returns:    
+1079          // 0 if the crc compares
+1080          // -1 if the crc does not match
+1081          
+1082          s16 Verify_CRC(u08 * dat, u16 bytecount) {
+1083   1              u16 retval, data_crc ;
+1084   1      
+1085   1              retval = crc16(dat, bytecount); // calculate the crc on the received data
+1086   1      
+1087   1              data_crc = (dat[bytecount])<<8 ;  // get the crc from the message
+1088   1              data_crc += (dat[bytecount+1]);
+1089   1      
+1090   1              if (retval == data_crc)  // check calculated against received
+1091   1                      return(0) ;  // if the crc's match
+1092   1              else
+1093   1                      return(-1); // -1 otherwise
+1094   1      }
+1095          
+1096          s16 SendNAK(u08 dest,           // unit id of destination
+1097                                  u08 reason) {
+1098   1              com[msgrouting[dest]].txbuff[DATA_START] = reason ;
+1099   1              SendMessage(msgrouting[0], dest,NAK,1);
+1100   1      
+1101   1              return(0) ;
+1102   1      
+1103   1      }
+1104          
+1105          // this function will write the downloaded code to data flash in 512 byte segments
+1106          // for storage until the complete image is sent
+C51 COMPILER V9.51   MESSAGE                                                               01/05/2016 18:47:25 PAGE 19  
+
+1107          // it also calculates the checksum for later verification
+1108          
+1109          void SaveDownload(u08 *msgptr, u08 *cksum) {
+1110   1              int i= 0;
+1111   1              int len;
+1112   1      
+1113   1              len = (msgptr[UPPER_BYTE_COUNT]<<8) | (msgptr[LOWER_BYTE_COUNT]);
+1114   1              // copy into flash buffer
+1115   1              for (i=0; i < MIN(len-2, CODE_DOWNLOAD_SIZE); i++) {
+1116   2                      *cksum ^= (flashpage.bigbuff[i] = msgptr[DATA_START + i]);
+1117   2              }
+1118   1      
+1119   1              // write using alternate flash buffers
+1120   1              DataFlash_Page_Write_Erase((pagecnt % 2), pagesize, flashpage.bigbuff, pagecnt);
+1121   1      
+1122   1      } // SaveDownload
+1123          
+1124          // this function will skip over the roadblock and get to the real copytocodespace
+1125          void JumpCopy(u16 lastpage) {
+1126   1              xdata void (*f)( void);
+1127   1              xdata u16 tmpint;
+1128   1      
+1129   1              tmpint = * (u16 *) CopytoCodeSpace;
+1130   1      
+1131   1              // check for roadblock at address pointed to by CopytoCodeSpace (usually 0xFE00)
+1132   1              if (0x80FE == tmpint) {
+1133   2                      // start bootloader at FE02 instead of FE00
+1134   2                      f = (void *) 0xFE02;
+1135   2                      (*f)();
+1136   2              } // if
+1137   1              else    
+1138   1                      CopytoCodeSpace(pagecnt);       // copy into code space
+1139   1      } // JumpCopy
+*** WARNING C280 IN LINE 1125 OF ..\CommonFiles\message.c: 'lastpage': unreferenced local variable
+1140          
+1141          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   3299    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----      21
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      45
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  1 WARNING(S),  0 ERROR(S)

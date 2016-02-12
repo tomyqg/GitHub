@@ -1,0 +1,1781 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     14/Jul/2015  19:00:15 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\FS_LogBlock.c                        #
+#    Command line =  C:\DUII\TargetHW\FS\FS_LogBlock.c -D DEBUG=1 -D          #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\FS #
+#                    _LogBlock.lst                                            #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\FS_ #
+#                    LogBlock.o                                               #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\FS_LogBlock.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : FS_LogBlock.c
+     19          Purpose     : Logical Block Layer
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          /*********************************************************************
+     24          *
+     25          *       #include Section
+     26          *
+     27          **********************************************************************
+     28          */
+     29          
+     30          #include "FS_ConfDefaults.h"        /* FS Configuration */
+     31          #include "FS_Int.h"
+     32          
+     33          /*********************************************************************
+     34          *
+     35          *       Macros
+     36          *
+     37          **********************************************************************
+     38          */
+     39          
+     40          #if FS_DEBUG_LEVEL >= FS_DEBUG_LEVEL_CHECK_PARA
+     41            #define CALL_ONDEVICE_HOOK(pDevice, Operation, StartSector, NumSectors, Sectortype)                        \
+     42              {                                                                                                        \
+     43                if (pDevice->Data.pfOnDeviceActivityHook) {                                                            \
+     44                  (pDevice->Data.pfOnDeviceActivityHook)(pDevice, Operation, StartSector, NumSectors, Sectortype);     \
+     45                }                                                                                                      \
+     46              }
+     47          #else
+     48            #define CALL_ONDEVICE_HOOK(pDevice, Operation, StartSector, NumSectors, Sectortype)
+     49          #endif
+     50          
+     51          #if FS_DEBUG_LEVEL >= FS_DEBUG_LEVEL_CHECK_PARA
+     52            #define INC_READ_SECTOR_CNT(NumSectors)           {FS_STORAGE_Counters.ReadOperationCnt++;  FS_STORAGE_Counters.ReadSectorCnt   += NumSectors;}
+     53            #define INC_WRITE_SECTOR_CNT(NumSectors)          {FS_STORAGE_Counters.WriteOperationCnt++; FS_STORAGE_Counters.WriteSectorCnt  += NumSectors;}
+     54            #define INC_READ_CACHE_HIT_CNT()                  {FS_STORAGE_Counters.ReadSectorCachedCnt++;}
+     55          #else
+     56            #define INC_READ_SECTOR_CNT(NumSectors)
+     57            #define INC_WRITE_SECTOR_CNT(NumSectors)
+     58            #define INC_READ_CACHE_HIT_CNT()
+     59          #endif
+     60          
+     61          /*********************************************************************
+     62          *
+     63          *       Code & data for debug builds
+     64          *
+     65          **********************************************************************
+     66          */
+     67          #if FS_DEBUG_LEVEL >= FS_DEBUG_LEVEL_LOG_ALL
+     68          
+     69          typedef struct {
+     70            int Type;
+     71            const char *s;
+     72          } TYPE_DESC;
+     73          
+     74          #define TYPE2NAME(Type)  { Type,          #Type }
+     75          
+     76          static const TYPE_DESC _aDesc[] = {
+     77            { FS_SECTOR_TYPE_DATA, "DATA" },
+     78            { FS_SECTOR_TYPE_MAN,  "MAN " },
+     79            { FS_SECTOR_TYPE_DIR,  "DIR " },
+     80          };
+     81          
+     82          /*********************************************************************
+     83          *
+     84          *       _Type2Name
+     85          *
+     86          */
+     87          // static   -- Code is static, but not declared as such in order to avoid compiler warnings if this function is not referenced (lower debug levels)
+     88          const char * _Type2Name(int Type);    // Avoid "No prototype" warning
+     89          const char * _Type2Name(int Type) {
+     90            unsigned i;
+     91            for (i = 0; i < COUNTOF(_aDesc); i++) {
+     92              if (_aDesc[i].Type == Type) {
+     93                return _aDesc[i].s;
+     94              }
+     95            }
+     96            return "Unknown Type";
+     97          }
+     98          
+     99          #else
+    100          
+    101          #endif
+    102          
+    103          /*********************************************************************
+    104          *
+    105          *       Static code
+    106          *
+    107          **********************************************************************
+    108          */
+    109          
+    110          #if FS_SUPPORT_BUSY_LED
+    111            #define CLR_BUSY_LED(pDevice) _ClrBusyLED(pDevice)
+    112            #define SET_BUSY_LED(pDevice) _SetBusyLED(pDevice)
+    113          
+    114          
+    115          /*********************************************************************
+    116          *
+    117          *       _ClrBusyLED
+    118          *
+    119          *  Function description
+    120          *    Calls the user supplied callback (hook) to switch off the BUSY-LED.
+    121          */
+    122          static void _ClrBusyLED(FS_DEVICE * pDevice) {
+    123            if (pDevice->Data.pfSetBusyLED) {
+    124              pDevice->Data.pfSetBusyLED(0);
+    125            }
+    126          }
+    127          
+    128          /*********************************************************************
+    129          *
+    130          *       _SetBusyLED
+    131          *
+    132          *  Function description
+    133          *    Calls the user supplied callback (hook) to switch on the BUSY-LED.
+    134          */
+    135          static void _SetBusyLED(FS_DEVICE * pDevice) {
+    136            if (pDevice->Data.pfSetBusyLED) {
+    137              pDevice->Data.pfSetBusyLED(1);
+    138            }
+    139          
+    140          }
+    141          
+    142          #else
+    143            #define CLR_BUSY_LED(pDevice)
+    144            #define SET_BUSY_LED(pDevice)
+    145          #endif
+    146          
+    147          /*********************************************************************
+    148          *
+    149          *       _Read
+    150          *
+    151          *  Function description
+    152          *    Static helper function for Write either to device or thru journal.
+    153          *
+    154          *  Return value
+    155          *    ==0         - All sectors have been read sucessfully.
+    156          *    <0          - An error has occurred.
+    157          *
+    158          */
+
+   \                                 In section .text, align 4, keep-with-next
+    159          static int _Read(FS_DEVICE * pDevice, U32 SectorNo, void * pBuffer, U32 NumSectors, U8 Type) {
+   \                     _Read:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    160            int r;
+    161            const FS_DEVICE_TYPE * pDeviceType;
+    162            pDeviceType = pDevice->pType;
+    163            CALL_ONDEVICE_HOOK(pDevice, FS_OPERATION_READ, SectorNo, NumSectors, Type);
+   \   00000008   10C094E5           LDR      R12,[R4, #+16]
+   \   0000000C   0CD04DE2           SUB      SP,SP,#+12
+   \   00000010   0150A0E1           MOV      R5,R1
+   \   00000014   0260A0E1           MOV      R6,R2
+   \   00000018   0370A0E1           MOV      R7,R3
+   \   0000001C   3080DDE5           LDRB     R8,[SP, #+48]
+   \   00000020   009094E5           LDR      R9,[R4, #+0]
+   \   00000024   00005CE3           CMP      R12,#+0
+   \   00000028   0300000A           BEQ      ??_Read_0
+   \   0000002C   00808DE5           STR      R8,[SP, #+0]
+   \   00000030   0520A0E1           MOV      R2,R5
+   \   00000034   0010A0E3           MOV      R1,#+0
+   \   00000038   3CFF2FE1           BLX      R12
+    164          #if FS_SUPPORT_JOURNAL
+    165            if (pDevice->Data.JournalIsActive) {
+    166              r = FS__JOURNAL_Read(pDevice, SectorNo, pBuffer, NumSectors);
+    167            } else
+    168          #endif
+    169            {
+    170              r = (pDeviceType->pfRead)(pDevice->Data.Unit, SectorNo, pBuffer, NumSectors);
+   \                     ??_Read_0:
+   \   0000003C   0730A0E1           MOV      R3,R7
+   \   00000040   0620A0E1           MOV      R2,R6
+   \   00000044   0510A0E1           MOV      R1,R5
+   \   00000048   0400D4E5           LDRB     R0,[R4, #+4]
+   \   0000004C   08C099E5           LDR      R12,[R9, #+8]
+   \   00000050   3CFF2FE1           BLX      R12
+   \   00000054   0090A0E1           MOV      R9,R0
+    171            }
+    172          #if FS_SUPPORT_CACHE
+    173            if (pDevice->Data.pCacheAPI) {
+   \   00000058   080094E5           LDR      R0,[R4, #+8]
+   \   0000005C   000050E3           CMP      R0,#+0
+   \   00000060   2400000A           BEQ      ??_Read_1
+    174              if (r == 0) {                   // Read from device was successfully
+   \   00000064   000059E3           CMP      R9,#+0
+   \   00000068   2200001A           BNE      ??_Read_1
+    175                U16 SectorSize;
+    176                
+    177                SectorSize = FS_GetSectorSize(pDevice);
+   \   0000006C   0500D4E5           LDRB     R0,[R4, #+5]
+   \   00000070   00A0A0E3           MOV      R10,#+0
+   \   00000074   000050E3           CMP      R0,#+0
+   \   00000078   0A00001A           BNE      ??_Read_2
+   \   0000007C   000094E5           LDR      R0,[R4, #+0]
+   \   00000080   00B0A0E3           MOV      R11,#+0
+   \   00000084   141090E5           LDR      R1,[R0, #+20]
+   \   00000088   000051E3           CMP      R1,#+0
+   \   0000008C   0300000A           BEQ      ??_Read_3
+   \   00000090   0400D4E5           LDRB     R0,[R4, #+4]
+   \   00000094   31FF2FE1           BLX      R1
+   \   00000098   000050E3           CMP      R0,#+0
+   \   0000009C   0000001A           BNE      ??_Read_4
+   \                     ??_Read_3:
+   \   000000A0   01B0A0E3           MOV      R11,#+1
+   \                     ??_Read_4:
+   \   000000A4   05B0C4E5           STRB     R11,[R4, #+5]
+   \                     ??_Read_2:
+   \   000000A8   00C094E5           LDR      R12,[R4, #+0]
+   \   000000AC   0D30A0E1           MOV      R3,SP
+   \   000000B0   0020A0E3           MOV      R2,#+0
+   \   000000B4   FB1FA0E3           MOV      R1,#+1004
+   \   000000B8   0400D4E5           LDRB     R0,[R4, #+4]
+   \   000000BC   10C09CE5           LDR      R12,[R12, #+16]
+   \   000000C0   3CFF2FE1           BLX      R12
+   \   000000C4   000050E3           CMP      R0,#+0
+   \   000000C8   B8A0DD01           LDRHEQ   R10,[SP, #+8]
+    178                do {
+    179                  if (pDevice->Data.pCacheAPI->pfUpdateCache(pDevice, SectorNo, pBuffer, Type)) {
+   \                     ??_Read_5:
+   \   000000CC   08C094E5           LDR      R12,[R4, #+8]
+   \   000000D0   0830A0E1           MOV      R3,R8
+   \   000000D4   0620A0E1           MOV      R2,R6
+   \   000000D8   0510A0E1           MOV      R1,R5
+   \   000000DC   0400A0E1           MOV      R0,R4
+   \   000000E0   04C09CE5           LDR      R12,[R12, #+4]
+   \   000000E4   3CFF2FE1           BLX      R12
+    180                    FS_DEBUG_WARN((FS_MTYPE_STORAGE, "Could not update sector in cache"));
+    181                  }
+    182                  SectorNo++;
+   \   000000E8   015085E2           ADD      R5,R5,#+1
+    183                  pBuffer = (void *)((U8 *)pBuffer + SectorSize);
+   \   000000EC   06608AE0           ADD      R6,R10,R6
+    184                } while (--NumSectors);
+   \   000000F0   017057E2           SUBS     R7,R7,#+1
+   \   000000F4   F4FFFF1A           BNE      ??_Read_5
+    185              }
+    186            }
+    187          #endif
+    188            return r;
+   \                     ??_Read_1:
+   \   000000F8   0900A0E1           MOV      R0,R9
+   \   000000FC   0CD08DE2           ADD      SP,SP,#+12
+   \   00000100   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    189          }
+    190          
+    191          /*********************************************************************
+    192          *
+    193          *       _Write
+    194          *
+    195          *  Function description
+    196          *    Static helper function for Write either to device or thru journal.
+    197          *
+    198          *  Return value
+    199          *    ==0           - All sectors have been written successfully.
+    200          *    < 0           - An error has occurred.
+    201          *
+    202          */
+    203          static int _Write(const FS_DEVICE * pDevice, U32 SectorNo, const void * pBuffer, U32 NumSectors, U8 RepeatSame) {
+    204            int r;
+    205            const FS_DEVICE_TYPE * pDeviceType;
+    206            pDeviceType = pDevice->pType;
+    207          #if FS_SUPPORT_JOURNAL
+    208            if (pDevice->Data.JournalIsActive) {
+    209              r = FS__JOURNAL_Write(pDevice, SectorNo, pBuffer, NumSectors, RepeatSame);
+    210            } else
+    211          #endif
+    212            {
+    213              r = (pDeviceType->pfWrite)(pDevice->Data.Unit, SectorNo, pBuffer, NumSectors, RepeatSame);
+    214            }
+    215            return r;
+    216          }
+    217          
+    218          /*********************************************************************
+    219          *
+    220          *       Public code
+    221          *
+    222          **********************************************************************
+    223          *
+    224          *        They should not be called by user application.
+    225          */
+    226          
+    227          /*********************************************************************
+    228          *
+    229          *       FS_LB_GetStatus
+    230          *
+    231          *  Function description
+    232          *    FS internal function. Get status of a device.
+    233          *
+    234          *  Parameters
+    235          *    pDevice     - Pointer to a device driver structure.
+    236          *
+    237          *  Return value
+    238          *    FS_MEDIA_STATE_UNKNOWN  if the state of the media is unknown.
+    239          *    FS_MEDIA_NOT_PRESENT    if media is not present.
+    240          *    FS_MEDIA_IS_PRESENT     if media is     present.
+    241          *
+    242          */
+
+   \                                 In section .text, align 4, keep-with-next
+    243          int FS_LB_GetStatus(FS_DEVICE * pDevice) {
+   \                     FS_LB_GetStatus:
+   \   00000000   0010A0E1           MOV      R1,R0
+    244            int x;
+    245            const FS_DEVICE_TYPE * pDeviceType;
+    246          
+    247            pDeviceType = pDevice->pType;
+    248            x = (pDeviceType->pfGetStatus)(pDevice->Data.Unit);
+    249            return x;
+   \   00000004   0400D1E5           LDRB     R0,[R1, #+4]
+   \   00000008   001091E5           LDR      R1,[R1, #+0]
+   \   0000000C   181091E5           LDR      R1,[R1, #+24]
+   \   00000010   11FF2FE1           BX       R1               ;; tailcall
+    250          }
+    251          
+    252          /*********************************************************************
+    253          *
+    254          *       FS_LB_InitMedium
+    255          *
+    256          *  Function description
+    257          *    This function calls the initialize routine of the driver, if one exists.
+    258          *    If there if no initialization routine available, we assume the driver is
+    259          *    handling this automatically.
+    260          *
+    261          *  Parameters
+    262          *    pDevice     - Pointer to a device driver structure.
+    263          *
+    264          *  Return value
+    265          *    1           - Device/medium has been initialized.
+    266          *    0           - Error, device/medium could not be initialized.
+    267          */
+
+   \                                 In section .text, align 4, keep-with-next
+    268          int FS_LB_InitMedium(FS_DEVICE * pDevice) {
+   \                     FS_LB_InitMedium:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    269            int IsInited = 0;
+    270            const FS_DEVICE_TYPE * pDeviceType;
+    271          
+    272            pDeviceType = pDevice->pType;
+   \   00000008   000094E5           LDR      R0,[R4, #+0]
+   \   0000000C   04D04DE2           SUB      SP,SP,#+4
+    273            if (pDeviceType->pfInitMedium) {
+   \   00000010   141090E5           LDR      R1,[R0, #+20]
+   \   00000014   0050A0E3           MOV      R5,#+0
+   \   00000018   000051E3           CMP      R1,#+0
+   \   0000001C   0300000A           BEQ      ??FS_LB_InitMedium_0
+    274              if ((pDeviceType->pfInitMedium)(pDevice->Data.Unit) == 0) {
+   \   00000020   0400D4E5           LDRB     R0,[R4, #+4]
+   \   00000024   31FF2FE1           BLX      R1
+   \   00000028   000050E3           CMP      R0,#+0
+   \   0000002C   0000001A           BNE      ??FS_LB_InitMedium_1
+    275                IsInited = 1;
+    276              }
+    277            } else {
+    278              IsInited = 1;
+   \                     ??FS_LB_InitMedium_0:
+   \   00000030   0150A0E3           MOV      R5,#+1
+    279            }
+    280            pDevice->Data.IsInited = (U8)IsInited;
+   \                     ??FS_LB_InitMedium_1:
+   \   00000034   0550C4E5           STRB     R5,[R4, #+5]
+    281            return IsInited;
+   \   00000038   0500A0E1           MOV      R0,R5
+   \   0000003C   04D08DE2           ADD      SP,SP,#+4
+   \   00000040   3080BDE8           POP      {R4,R5,PC}       ;; return
+    282          }
+    283          
+    284          /*********************************************************************
+    285          *
+    286          *       FS_LB_InitMediumIfRequired
+    287          *
+    288          *  Function description
+    289          *    Initialize medium if it has not already been initialized.
+    290          *
+    291          *  Parameters
+    292          *    pDevice     - Pointer to a device driver structure.
+    293          *
+    294          */
+
+   \                                 In section .text, align 4, keep-with-next
+    295          int FS_LB_InitMediumIfRequired(FS_DEVICE * pDevice) {
+   \                     FS_LB_InitMediumIfRequired:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    296            if (pDevice->Data.IsInited == 0) {
+   \   00000008   0500D4E5           LDRB     R0,[R4, #+5]
+   \   0000000C   04D04DE2           SUB      SP,SP,#+4
+   \   00000010   000050E3           CMP      R0,#+0
+   \   00000014   0A00001A           BNE      ??FS_LB_InitMediumIfRequired_0
+    297              FS_LB_InitMedium(pDevice);
+   \   00000018   000094E5           LDR      R0,[R4, #+0]
+   \   0000001C   0050A0E3           MOV      R5,#+0
+   \   00000020   141090E5           LDR      R1,[R0, #+20]
+   \   00000024   000051E3           CMP      R1,#+0
+   \   00000028   0300000A           BEQ      ??FS_LB_InitMediumIfRequired_1
+   \   0000002C   0400D4E5           LDRB     R0,[R4, #+4]
+   \   00000030   31FF2FE1           BLX      R1
+   \   00000034   000050E3           CMP      R0,#+0
+   \   00000038   0000001A           BNE      ??FS_LB_InitMediumIfRequired_2
+   \                     ??FS_LB_InitMediumIfRequired_1:
+   \   0000003C   0150A0E3           MOV      R5,#+1
+   \                     ??FS_LB_InitMediumIfRequired_2:
+   \   00000040   0550C4E5           STRB     R5,[R4, #+5]
+    298            }
+    299            return pDevice->Data.IsInited;
+   \                     ??FS_LB_InitMediumIfRequired_0:
+   \   00000044   0500D4E5           LDRB     R0,[R4, #+5]
+   \   00000048   04D08DE2           ADD      SP,SP,#+4
+   \   0000004C   3080BDE8           POP      {R4,R5,PC}       ;; return
+    300          }
+    301          
+    302          
+    303          /*********************************************************************
+    304          *
+    305          *       FS_LB_ReadDevice
+    306          *
+    307          *  Function description
+    308          *    Read sector from device. It also checks whether the sector can be
+    309          *    read from the cache if available.
+    310          *
+    311          *  Parameters
+    312          *    pDriver     - Pointer to a device driver structure.
+    313          *    Sector      - Physical sector to be read from the device.
+    314          *                  The Partition start sector is not added.
+    315          *    pBuffer     - Pointer to buffer for storing the data.
+    316          *    Type        - The type of sector that shall be read.
+    317          *
+    318          *  Return value
+    319          *    ==0         - Sector has been read and copied to pBuffer.
+    320          *    < 0         - An error has occurred.
+    321          */
+
+   \                                 In section .text, align 4, keep-with-next
+    322          int FS_LB_ReadDevice(FS_DEVICE *pDevice, U32 Sector, void *pBuffer, U8 Type) {
+   \                     FS_LB_ReadDevice:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    323            int x;
+    324          
+    325            FS_LB_InitMediumIfRequired(pDevice);
+   \   00000008   0500D4E5           LDRB     R0,[R4, #+5]
+   \   0000000C   08D04DE2           SUB      SP,SP,#+8
+   \   00000010   0150A0E1           MOV      R5,R1
+   \   00000014   0260A0E1           MOV      R6,R2
+   \   00000018   0370A0E1           MOV      R7,R3
+   \   0000001C   000050E3           CMP      R0,#+0
+   \   00000020   0A00001A           BNE      ??FS_LB_ReadDevice_0
+   \   00000024   000094E5           LDR      R0,[R4, #+0]
+   \   00000028   0080A0E3           MOV      R8,#+0
+   \   0000002C   141090E5           LDR      R1,[R0, #+20]
+   \   00000030   000051E3           CMP      R1,#+0
+   \   00000034   0300000A           BEQ      ??FS_LB_ReadDevice_1
+   \   00000038   0400D4E5           LDRB     R0,[R4, #+4]
+   \   0000003C   31FF2FE1           BLX      R1
+   \   00000040   000050E3           CMP      R0,#+0
+   \   00000044   0000001A           BNE      ??FS_LB_ReadDevice_2
+   \                     ??FS_LB_ReadDevice_1:
+   \   00000048   0180A0E3           MOV      R8,#+1
+   \                     ??FS_LB_ReadDevice_2:
+   \   0000004C   0580C4E5           STRB     R8,[R4, #+5]
+    326            INC_READ_SECTOR_CNT(1);             // For statistics / debugging only
+   \                     ??FS_LB_ReadDevice_0:
+   \   00000050   ........           LDR      R8,??DataTable5
+   \   00000054   000098E5           LDR      R0,[R8, #+0]
+   \   00000058   010080E2           ADD      R0,R0,#+1
+   \   0000005C   000088E5           STR      R0,[R8, #+0]
+   \   00000060   040098E5           LDR      R0,[R8, #+4]
+   \   00000064   010080E2           ADD      R0,R0,#+1
+   \   00000068   040088E5           STR      R0,[R8, #+4]
+    327            FS_DEBUG_LOG((FS_MTYPE_STORAGE, "Read          %s:%d: %s Sector: 0x%8x", pDevice->pType->pfGetName(pDevice->Data.Unit), pDevice->Data.Unit, _Type2Name(Type), Sector));
+    328            SET_BUSY_LED(pDevice);
+    329          #if FS_SUPPORT_CACHE
+    330            {
+    331              const FS_DEVICE_DATA * pDevData;
+    332              const FS_CACHE_API   * pCacheAPI;
+    333              pDevData   = &pDevice->Data;
+    334              pCacheAPI  = pDevData->pCacheAPI;
+   \   0000006C   08C094E5           LDR      R12,[R4, #+8]
+    335              if (pCacheAPI) {
+   \   00000070   00005CE3           CMP      R12,#+0
+   \   00000074   0700000A           BEQ      ??FS_LB_ReadDevice_3
+    336                if ((pCacheAPI->pfReadFromCache)(pDevice, Sector, pBuffer, Type)) {
+   \   00000078   0730A0E1           MOV      R3,R7
+   \   0000007C   0620A0E1           MOV      R2,R6
+   \   00000080   0510A0E1           MOV      R1,R5
+   \   00000084   0400A0E1           MOV      R0,R4
+   \   00000088   00C09CE5           LDR      R12,[R12, #+0]
+   \   0000008C   3CFF2FE1           BLX      R12
+   \   00000090   000050E3           CMP      R0,#+0
+   \   00000094   0600000A           BEQ      ??FS_LB_ReadDevice_4
+    337                  x = _Read(pDevice, Sector, pBuffer, 1, Type);
+   \                     ??FS_LB_ReadDevice_3:
+   \   00000098   00708DE5           STR      R7,[SP, #+0]
+   \   0000009C   0130A0E3           MOV      R3,#+1
+   \   000000A0   0620A0E1           MOV      R2,R6
+   \   000000A4   0510A0E1           MOV      R1,R5
+   \   000000A8   0400A0E1           MOV      R0,R4
+   \   000000AC   ........           BL       _Read
+   \   000000B0   030000EA           B        ??FS_LB_ReadDevice_5
+    338                } else {
+    339                  INC_READ_CACHE_HIT_CNT();             // For statistics / debugging only
+   \                     ??FS_LB_ReadDevice_4:
+   \   000000B4   080098E5           LDR      R0,[R8, #+8]
+   \   000000B8   010080E2           ADD      R0,R0,#+1
+   \   000000BC   080088E5           STR      R0,[R8, #+8]
+    340                  FS_DEBUG_LOG((FS_MTYPE_STORAGE, " (cache)"));
+    341                  x = 0;
+   \   000000C0   0000A0E3           MOV      R0,#+0
+    342                }
+    343              } else {
+    344                x = _Read(pDevice, Sector, pBuffer, 1, Type);
+    345              }
+    346            }
+    347          #else
+    348              FS_USE_PARA(Type);
+    349              x = _Read(pDevice, Sector, pBuffer, 1, Type);
+    350          #endif
+    351            CLR_BUSY_LED(pDevice);
+    352            FS_DEBUG_LOG((FS_MTYPE_STORAGE, "\n"));
+    353            return  x;
+   \                     ??FS_LB_ReadDevice_5:
+   \   000000C4   08D08DE2           ADD      SP,SP,#+8        ;; stack cleaning
+   \   000000C8   F081BDE8           POP      {R4-R8,PC}       ;; return
+    354          }
+    355          
+    356          /*********************************************************************
+    357          *
+    358          *       FS_LB_ReadPart
+    359          *
+    360          *  Function description
+    361          *    Read sector from volume.
+    362          *
+    363          *  Parameters
+    364          *    pDriver     - Pointer to a device driver structure.
+    365          *    Sector      - Physical sector to be read from the partition.
+    366          *                  The partition start sector is added.
+    367          *    pBuffer     - Pointer to buffer for storing the data.
+    368          *    Type        - The type of sector that shall be read.
+    369          *
+    370          *  Return value
+    371          *    ==0         - Sector has been read and copied to pBuffer.
+    372          *    <0          - An error has occurred.
+    373          */
+
+   \                                 In section .text, align 4, keep-with-next
+    374          int FS_LB_ReadPart(FS_PARTITION *pPart, U32 Sector, void *pBuffer, U8 Type) {
+   \                     FS_LB_ReadPart:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    375            return FS_LB_ReadDevice(&pPart->Device, pPart->StartSector + Sector, pBuffer, Type);
+   \   00000008   140094E5           LDR      R0,[R4, #+20]
+   \   0000000C   08D04DE2           SUB      SP,SP,#+8
+   \   00000010   007081E0           ADD      R7,R1,R0
+   \   00000014   0500D4E5           LDRB     R0,[R4, #+5]
+   \   00000018   0250A0E1           MOV      R5,R2
+   \   0000001C   0360A0E1           MOV      R6,R3
+   \   00000020   000050E3           CMP      R0,#+0
+   \   00000024   0A00001A           BNE      ??FS_LB_ReadPart_0
+   \   00000028   000094E5           LDR      R0,[R4, #+0]
+   \   0000002C   0080A0E3           MOV      R8,#+0
+   \   00000030   141090E5           LDR      R1,[R0, #+20]
+   \   00000034   000051E3           CMP      R1,#+0
+   \   00000038   0300000A           BEQ      ??FS_LB_ReadPart_1
+   \   0000003C   0400D4E5           LDRB     R0,[R4, #+4]
+   \   00000040   31FF2FE1           BLX      R1
+   \   00000044   000050E3           CMP      R0,#+0
+   \   00000048   0000001A           BNE      ??FS_LB_ReadPart_2
+   \                     ??FS_LB_ReadPart_1:
+   \   0000004C   0180A0E3           MOV      R8,#+1
+   \                     ??FS_LB_ReadPart_2:
+   \   00000050   0580C4E5           STRB     R8,[R4, #+5]
+   \                     ??FS_LB_ReadPart_0:
+   \   00000054   ........           LDR      R8,??DataTable5
+   \   00000058   000098E5           LDR      R0,[R8, #+0]
+   \   0000005C   010080E2           ADD      R0,R0,#+1
+   \   00000060   000088E5           STR      R0,[R8, #+0]
+   \   00000064   040098E5           LDR      R0,[R8, #+4]
+   \   00000068   010080E2           ADD      R0,R0,#+1
+   \   0000006C   040088E5           STR      R0,[R8, #+4]
+   \   00000070   08C094E5           LDR      R12,[R4, #+8]
+   \   00000074   00005CE3           CMP      R12,#+0
+   \   00000078   0700000A           BEQ      ??FS_LB_ReadPart_3
+   \   0000007C   0630A0E1           MOV      R3,R6
+   \   00000080   0520A0E1           MOV      R2,R5
+   \   00000084   0710A0E1           MOV      R1,R7
+   \   00000088   0400A0E1           MOV      R0,R4
+   \   0000008C   00C09CE5           LDR      R12,[R12, #+0]
+   \   00000090   3CFF2FE1           BLX      R12
+   \   00000094   000050E3           CMP      R0,#+0
+   \   00000098   0600000A           BEQ      ??FS_LB_ReadPart_4
+   \                     ??FS_LB_ReadPart_3:
+   \   0000009C   00608DE5           STR      R6,[SP, #+0]
+   \   000000A0   0130A0E3           MOV      R3,#+1
+   \   000000A4   0520A0E1           MOV      R2,R5
+   \   000000A8   0710A0E1           MOV      R1,R7
+   \   000000AC   0400A0E1           MOV      R0,R4
+   \   000000B0   ........           BL       _Read
+   \   000000B4   030000EA           B        ??FS_LB_ReadPart_5
+   \                     ??FS_LB_ReadPart_4:
+   \   000000B8   080098E5           LDR      R0,[R8, #+8]
+   \   000000BC   010080E2           ADD      R0,R0,#+1
+   \   000000C0   080088E5           STR      R0,[R8, #+8]
+   \   000000C4   0000A0E3           MOV      R0,#+0
+   \                     ??FS_LB_ReadPart_5:
+   \   000000C8   08D08DE2           ADD      SP,SP,#+8        ;; stack cleaning
+   \   000000CC   F081BDE8           POP      {R4-R8,PC}       ;; return
+    376          }
+    377          
+    378          /*********************************************************************
+    379          *
+    380          *       FS_LB_ReadBurst
+    381          *
+    382          *  Function description
+    383          *    Read multiple sectors from device.
+    384          *
+    385          *  Parameters
+    386          *    pDriver     - Pointer to a device driver structure.
+    387          *    Unit        - Unit number.
+    388          *    SectorNo    - First sector to be read from the device.
+    389          *    NumSectors  - Number of sectors to be read from the device.
+    390          *    pBuffer     - Pointer to buffer for storing the data.
+    391          *    Type        - The type of sector that shall be read.
+    392          *
+    393          *  Return value
+    394          *    ==0         - Sectors have been read and copied to pBuffer.
+    395          *    <0          - An error has occurred.
+    396          */
+
+   \                                 In section .text, align 4, keep-with-next
+    397          int FS_LB_ReadBurst(FS_DEVICE * pDevice, U32 SectorNo, U32 NumSectors, void *pBuffer, U8 Type) {
+   \                     FS_LB_ReadBurst:
+   \   00000000   F84F2DE9           PUSH     {R3-R11,LR}
+   \   00000004   0050A0E1           MOV      R5,R0
+    398            int x = 0;
+    399          
+    400            FS_LB_InitMediumIfRequired(pDevice);
+   \   00000008   0500D5E5           LDRB     R0,[R5, #+5]
+   \   0000000C   20D04DE2           SUB      SP,SP,#+32
+   \   00000010   0160A0E1           MOV      R6,R1
+   \   00000014   0270A0E1           MOV      R7,R2
+   \   00000018   4880DDE5           LDRB     R8,[SP, #+72]
+   \   0000001C   0090A0E3           MOV      R9,#+0
+   \   00000020   000050E3           CMP      R0,#+0
+   \   00000024   0A00001A           BNE      ??FS_LB_ReadBurst_0
+   \   00000028   000095E5           LDR      R0,[R5, #+0]
+   \   0000002C   0040A0E3           MOV      R4,#+0
+   \   00000030   141090E5           LDR      R1,[R0, #+20]
+   \   00000034   000051E3           CMP      R1,#+0
+   \   00000038   0300000A           BEQ      ??FS_LB_ReadBurst_1
+   \   0000003C   0400D5E5           LDRB     R0,[R5, #+4]
+   \   00000040   31FF2FE1           BLX      R1
+   \   00000044   000050E3           CMP      R0,#+0
+   \   00000048   0000001A           BNE      ??FS_LB_ReadBurst_2
+   \                     ??FS_LB_ReadBurst_1:
+   \   0000004C   0140A0E3           MOV      R4,#+1
+   \                     ??FS_LB_ReadBurst_2:
+   \   00000050   0540C5E5           STRB     R4,[R5, #+5]
+   \                     ??FS_LB_ReadBurst_0:
+   \   00000054   ........           LDR      R0,??DataTable5
+   \   00000058   ........           LDR      R1,??DataTable5
+   \   0000005C   000090E5           LDR      R0,[R0, #+0]
+    401            INC_READ_SECTOR_CNT(NumSectors);             // For statistics / debugging only
+   \   00000060   0040A0E3           MOV      R4,#+0
+   \   00000064   010080E2           ADD      R0,R0,#+1
+   \   00000068   000081E5           STR      R0,[R1, #+0]
+   \   0000006C   040091E5           LDR      R0,[R1, #+4]
+    402            FS_DEBUG_LOG((FS_MTYPE_STORAGE, "ReadBurst     %s:%d: %s Sector: 0x%8x, NumSectors: %d", pDevice->pType->pfGetName(pDevice->Data.Unit), pDevice->Data.Unit, _Type2Name(Type), SectorNo, NumSectors));
+    403            SET_BUSY_LED(pDevice);
+    404          #if FS_SUPPORT_CACHE
+    405            {
+    406              const FS_CACHE_API * pCacheAPI;
+    407              U32                  NumSectors2Read;
+    408              U32                  FirstSector;
+    409              U16                  SectorSize;
+    410              char                 NeedReadBurst;
+    411              void               * pReadBuffer;
+    412              NeedReadBurst   = 0;
+    413              NumSectors2Read = 0;
+    414              FirstSector     = 0;
+   \   00000070   08408DE5           STR      R4,[SP, #+8]
+   \   00000074   000087E0           ADD      R0,R7,R0
+   \   00000078   040081E5           STR      R0,[R1, #+4]
+    415              pReadBuffer     = NULL;
+   \   0000007C   04408DE5           STR      R4,[SP, #+4]
+    416              pCacheAPI       = pDevice->Data.pCacheAPI;
+   \   00000080   080095E5           LDR      R0,[R5, #+8]
+    417              SectorSize      = FS_GetSectorSize(pDevice);
+   \   00000084   B040CDE1           STRH     R4,[SP, #+0]
+   \   00000088   0C008DE5           STR      R0,[SP, #+12]
+   \   0000008C   0500D5E5           LDRB     R0,[R5, #+5]
+   \   00000090   00B0A0E3           MOV      R11,#+0
+   \   00000094   000050E3           CMP      R0,#+0
+   \   00000098   0A00001A           BNE      ??FS_LB_ReadBurst_3
+   \   0000009C   000095E5           LDR      R0,[R5, #+0]
+   \   000000A0   00A0A0E3           MOV      R10,#+0
+   \   000000A4   141090E5           LDR      R1,[R0, #+20]
+   \   000000A8   000051E3           CMP      R1,#+0
+   \   000000AC   0300000A           BEQ      ??FS_LB_ReadBurst_4
+   \   000000B0   0400D5E5           LDRB     R0,[R5, #+4]
+   \   000000B4   31FF2FE1           BLX      R1
+   \   000000B8   000050E3           CMP      R0,#+0
+   \   000000BC   0000001A           BNE      ??FS_LB_ReadBurst_5
+   \                     ??FS_LB_ReadBurst_4:
+   \   000000C0   01A0A0E3           MOV      R10,#+1
+   \                     ??FS_LB_ReadBurst_5:
+   \   000000C4   05A0C5E5           STRB     R10,[R5, #+5]
+   \                     ??FS_LB_ReadBurst_3:
+   \   000000C8   00C095E5           LDR      R12,[R5, #+0]
+   \   000000CC   10308DE2           ADD      R3,SP,#+16
+   \   000000D0   0020A0E3           MOV      R2,#+0
+   \   000000D4   FB1FA0E3           MOV      R1,#+1004
+   \   000000D8   0400D5E5           LDRB     R0,[R5, #+4]
+   \   000000DC   10C09CE5           LDR      R12,[R12, #+16]
+   \   000000E0   3CFF2FE1           BLX      R12
+   \   000000E4   000050E3           CMP      R0,#+0
+   \   000000E8   B801DD01           LDRHEQ   R0,[SP, #+24]
+   \   000000EC   B000CD01           STRHEQ   R0,[SP, #+0]
+   \   000000F0   B010DDE1           LDRH     R1,[SP, #+0]
+    418              if (pCacheAPI) {
+   \   000000F4   0C009DE5           LDR      R0,[SP, #+12]
+   \   000000F8   10108DE5           STR      R1,[SP, #+16]
+   \   000000FC   000050E3           CMP      R0,#+0
+   \   00000100   2D00000A           BEQ      ??FS_LB_ReadBurst_6
+    419                U8 * p;
+    420                char    r;
+    421                p = (U8 *)pBuffer;
+   \   00000104   20A09DE5           LDR      R10,[SP, #+32]
+    422                do {
+    423                  r = (pCacheAPI->pfReadFromCache)(pDevice, SectorNo, p, Type);
+    424                  if (r) {
+   \                     ??FS_LB_ReadBurst_7:
+   \   00000108   0CC09DE5           LDR      R12,[SP, #+12]
+   \   0000010C   0830A0E1           MOV      R3,R8
+   \   00000110   0A20A0E1           MOV      R2,R10
+   \   00000114   0610A0E1           MOV      R1,R6
+   \   00000118   0500A0E1           MOV      R0,R5
+   \   0000011C   00C09CE5           LDR      R12,[R12, #+0]
+   \   00000120   3CFF2FE1           BLX      R12
+   \   00000124   000050E3           CMP      R0,#+0
+   \   00000128   0700000A           BEQ      ??FS_LB_ReadBurst_8
+    425                    /* Cache miss. We need to read from hardware. Since we try to use burst mode, we do not read immediately */
+    426                    if (NeedReadBurst) {
+   \   0000012C   000054E3           CMP      R4,#+0
+    427                      NumSectors2Read++;
+   \   00000130   01B08B12           ADDNE    R11,R11,#+1
+   \   00000134   1400001A           BNE      ??FS_LB_ReadBurst_9
+    428                    } else {
+    429                      FirstSector     = SectorNo;
+   \   00000138   08608DE5           STR      R6,[SP, #+8]
+    430                      pReadBuffer     = p;
+   \   0000013C   04A08DE5           STR      R10,[SP, #+4]
+    431                      NumSectors2Read = 1;
+   \   00000140   0140A0E3           MOV      R4,#+1
+   \   00000144   01B0A0E3           MOV      R11,#+1
+    432                      NeedReadBurst   = 1;
+   \   00000148   0F0000EA           B        ??FS_LB_ReadBurst_9
+    433                    }
+    434                  } else {
+    435                    INC_READ_CACHE_HIT_CNT();             // For statistics / debugging only
+   \                     ??FS_LB_ReadBurst_8:
+   \   0000014C   ........           LDR      R0,??DataTable5
+   \   00000150   ........           LDR      R1,??DataTable5
+   \   00000154   080090E5           LDR      R0,[R0, #+8]
+    436                    if (NeedReadBurst) {
+   \   00000158   000054E3           CMP      R4,#+0
+   \   0000015C   010080E2           ADD      R0,R0,#+1
+   \   00000160   080081E5           STR      R0,[R1, #+8]
+   \   00000164   0800000A           BEQ      ??FS_LB_ReadBurst_9
+    437                      NeedReadBurst   = 0;
+   \   00000168   0040A0E3           MOV      R4,#+0
+    438                      x = _Read(pDevice, FirstSector, pReadBuffer, NumSectors2Read, Type);
+   \   0000016C   00808DE5           STR      R8,[SP, #+0]
+   \   00000170   0B30A0E1           MOV      R3,R11
+   \   00000174   04209DE5           LDR      R2,[SP, #+4]
+   \   00000178   08109DE5           LDR      R1,[SP, #+8]
+   \   0000017C   0500A0E1           MOV      R0,R5
+   \   00000180   ........           BL       _Read
+   \   00000184   0090B0E1           MOVS     R9,R0
+    439                      if (x) {
+   \   00000188   1200001A           BNE      ??FS_LB_ReadBurst_10
+    440                        break;                     /* End read operation because of read failure */
+    441                      }
+    442                    }
+    443                  }
+    444                  p  += SectorSize;
+   \                     ??FS_LB_ReadBurst_9:
+   \   0000018C   10009DE5           LDR      R0,[SP, #+16]
+    445                  SectorNo++;
+   \   00000190   016086E2           ADD      R6,R6,#+1
+   \   00000194   0AA080E0           ADD      R10,R0,R10
+    446                } while(--NumSectors);
+   \   00000198   017057E2           SUBS     R7,R7,#+1
+   \   0000019C   D9FFFF1A           BNE      ??FS_LB_ReadBurst_7
+    447                /*
+    448                 * End of read routine reached. There may be a hardware "read burst" operation pending, which needs to be executed in this case.
+    449                 */
+    450                if (NeedReadBurst) {
+   \   000001A0   000054E3           CMP      R4,#+0
+   \   000001A4   0B00000A           BEQ      ??FS_LB_ReadBurst_10
+    451                  x = _Read(pDevice, FirstSector, pReadBuffer, NumSectors2Read, Type);
+   \   000001A8   00808DE5           STR      R8,[SP, #+0]
+   \   000001AC   0B30A0E1           MOV      R3,R11
+   \   000001B0   04209DE5           LDR      R2,[SP, #+4]
+   \   000001B4   08109DE5           LDR      R1,[SP, #+8]
+   \   000001B8   030000EA           B        ??FS_LB_ReadBurst_11
+    452                }
+    453              } else {
+    454                x = _Read(pDevice, SectorNo, pBuffer, NumSectors, Type);
+   \                     ??FS_LB_ReadBurst_6:
+   \   000001BC   00808DE5           STR      R8,[SP, #+0]
+   \   000001C0   0730A0E1           MOV      R3,R7
+   \   000001C4   20209DE5           LDR      R2,[SP, #+32]
+   \   000001C8   0610A0E1           MOV      R1,R6
+   \                     ??FS_LB_ReadBurst_11:
+   \   000001CC   0500A0E1           MOV      R0,R5
+   \   000001D0   ........           BL       _Read
+   \   000001D4   0090A0E1           MOV      R9,R0
+    455              }
+    456            }
+    457          #else
+    458            FS_USE_PARA(Type);
+    459            x = _Read(pDevice, SectorNo, pBuffer, NumSectors, Type);
+    460          #endif
+    461            CLR_BUSY_LED(pDevice);
+    462            FS_DEBUG_LOG((FS_MTYPE_STORAGE, "\n"));
+    463            return  x;
+   \                     ??FS_LB_ReadBurst_10:
+   \   000001D8   0900A0E1           MOV      R0,R9
+   \   000001DC   24D08DE2           ADD      SP,SP,#+36
+   \   000001E0   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    464          }
+    465          
+    466          /*********************************************************************
+    467          *
+    468          *       FS_LB_ReadBurstPart
+    469          *
+    470          *  Function description
+    471          *    Read multiple sectors from device.
+    472          *
+    473          *  Parameters
+    474          *    pPart       - Pointer to a partition structure.
+    475          *    SectorNo    - First sector to be read from the device.
+    476          *    NumSectors  - Number of sectors to be read from the device.
+    477          *    pBuffer     - Pointer to buffer for storing the data.
+    478          *    Type        - The type of sector that shall be read.
+    479          *
+    480          *  Return value
+    481          *    ==0         - Sectors have been read and copied to pBuffer.
+    482          *    <0          - An error has occurred.
+    483          */
+
+   \                                 In section .text, align 4, keep-with-next
+    484          int FS_LB_ReadBurstPart(FS_PARTITION *pPart, U32 SectorNo, U32 NumSectors, void *pBuffer, U8 Type) {
+   \                     FS_LB_ReadBurstPart:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   08C0DDE5           LDRB     R12,[SP, #+8]
+    485            FS_DEVICE      * pDevice;
+    486          
+    487            pDevice     = &pPart->Device;
+    488            SectorNo   += pPart->StartSector;
+    489            return  FS_LB_ReadBurst(pDevice, SectorNo, NumSectors, pBuffer, Type);
+   \   0000000C   00C08DE5           STR      R12,[SP, #+0]
+   \   00000010   14C090E5           LDR      R12,[R0, #+20]
+   \   00000014   01108CE0           ADD      R1,R12,R1
+   \   00000018   ........           BL       FS_LB_ReadBurst
+   \   0000001C   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000020   0080BDE8           POP      {PC}             ;; return
+    490          }
+    491          
+    492          /*********************************************************************
+    493          *
+    494          *       FS_LB_WriteBurst
+    495          *
+    496          *  Function description
+    497          *    Write multiple sectors to device.
+    498          *
+    499          *  Parameters
+    500          *    pDriver     - Pointer to a device driver structure.
+    501          *    SectorNo    - First sector to be written to the device.
+    502          *    NumSectors  - Number of sectors to be written.
+    503          *    pBuffer     - Pointer to buffer for holding the data.
+    504          *    Type        - The type of sector that shall be written.
+    505          *
+    506          *  Return value
+    507          *    ==0         - Sectors have been read and copied to pBuffer.
+    508          *    <0          - An error has occurred.
+    509          */
+
+   \                                 In section .text, align 4, keep-with-next
+    510          int FS_LB_WriteBurst(FS_DEVICE * pDevice, U32 SectorNo, U32 NumSectors, const void *pBuffer, U8 Type) {
+   \                     FS_LB_WriteBurst:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    511            int         x;
+    512          
+    513            FS_USE_PARA(Type);
+    514            FS_LB_InitMediumIfRequired(pDevice);
+   \   00000008   0500D4E5           LDRB     R0,[R4, #+5]
+   \   0000000C   14D04DE2           SUB      SP,SP,#+20
+   \   00000010   0150A0E1           MOV      R5,R1
+   \   00000014   0260A0E1           MOV      R6,R2
+   \   00000018   0370A0E1           MOV      R7,R3
+   \   0000001C   3880DDE5           LDRB     R8,[SP, #+56]
+   \   00000020   000050E3           CMP      R0,#+0
+   \   00000024   0A00001A           BNE      ??FS_LB_WriteBurst_0
+   \   00000028   000094E5           LDR      R0,[R4, #+0]
+   \   0000002C   0090A0E3           MOV      R9,#+0
+   \   00000030   141090E5           LDR      R1,[R0, #+20]
+   \   00000034   000051E3           CMP      R1,#+0
+   \   00000038   0300000A           BEQ      ??FS_LB_WriteBurst_1
+   \   0000003C   0400D4E5           LDRB     R0,[R4, #+4]
+   \   00000040   31FF2FE1           BLX      R1
+   \   00000044   000050E3           CMP      R0,#+0
+   \   00000048   0000001A           BNE      ??FS_LB_WriteBurst_2
+   \                     ??FS_LB_WriteBurst_1:
+   \   0000004C   0190A0E3           MOV      R9,#+1
+   \                     ??FS_LB_WriteBurst_2:
+   \   00000050   0590C4E5           STRB     R9,[R4, #+5]
+    515            INC_WRITE_SECTOR_CNT(NumSectors);             // For statistics / debugging only
+   \                     ??FS_LB_WriteBurst_0:
+   \   00000054   ........           LDR      R0,??DataTable5
+   \   00000058   0C1090E5           LDR      R1,[R0, #+12]
+   \   0000005C   011081E2           ADD      R1,R1,#+1
+   \   00000060   0C1080E5           STR      R1,[R0, #+12]
+   \   00000064   101090E5           LDR      R1,[R0, #+16]
+   \   00000068   011086E0           ADD      R1,R6,R1
+   \   0000006C   101080E5           STR      R1,[R0, #+16]
+    516            CALL_ONDEVICE_HOOK(pDevice, FS_OPERATION_WRITE, SectorNo, NumSectors, Type);
+   \   00000070   10C094E5           LDR      R12,[R4, #+16]
+   \   00000074   00005CE3           CMP      R12,#+0
+   \   00000078   0500000A           BEQ      ??FS_LB_WriteBurst_3
+   \   0000007C   00808DE5           STR      R8,[SP, #+0]
+   \   00000080   0630A0E1           MOV      R3,R6
+   \   00000084   0520A0E1           MOV      R2,R5
+   \   00000088   0110A0E3           MOV      R1,#+1
+   \   0000008C   0400A0E1           MOV      R0,R4
+   \   00000090   3CFF2FE1           BLX      R12
+    517            FS_DEBUG_LOG((FS_MTYPE_STORAGE, "WriteBurst    %s:%d: %s Sector: 0x%8x, NumSectors: %d", pDevice->pType->pfGetName(pDevice->Data.Unit), pDevice->Data.Unit, _Type2Name(Type), SectorNo, NumSectors));
+    518            SET_BUSY_LED(pDevice);
+    519            x = _Write(pDevice, SectorNo, pBuffer, NumSectors, 0);
+   \                     ??FS_LB_WriteBurst_3:
+   \   00000094   0000A0E3           MOV      R0,#+0
+   \   00000098   00008DE5           STR      R0,[SP, #+0]
+   \   0000009C   00C094E5           LDR      R12,[R4, #+0]
+   \   000000A0   0630A0E1           MOV      R3,R6
+   \   000000A4   0720A0E1           MOV      R2,R7
+   \   000000A8   0510A0E1           MOV      R1,R5
+   \   000000AC   0400D4E5           LDRB     R0,[R4, #+4]
+   \   000000B0   0CC09CE5           LDR      R12,[R12, #+12]
+   \   000000B4   3CFF2FE1           BLX      R12
+   \   000000B8   00008DE5           STR      R0,[SP, #+0]
+    520            CLR_BUSY_LED(pDevice);
+    521          #if FS_SUPPORT_CACHE
+    522            if (x == 0) {
+   \   000000BC   000050E3           CMP      R0,#+0
+   \   000000C0   2800001A           BNE      ??FS_LB_WriteBurst_4
+    523              const FS_DEVICE_DATA * pDevData;
+    524              const FS_CACHE_API   * pCacheAPI;
+    525              U16                 SectorSize;
+    526              pDevData   = &pDevice->Data;
+   \   000000C4   049084E2           ADD      R9,R4,#+4
+    527              pCacheAPI  = pDevData->pCacheAPI;
+   \   000000C8   041099E5           LDR      R1,[R9, #+4]
+    528              SectorSize = FS_GetSectorSize(pDevice);
+   \   000000CC   00A0A0E3           MOV      R10,#+0
+   \   000000D0   04108DE5           STR      R1,[SP, #+4]
+   \   000000D4   0500D4E5           LDRB     R0,[R4, #+5]
+   \   000000D8   000050E3           CMP      R0,#+0
+   \   000000DC   0A00001A           BNE      ??FS_LB_WriteBurst_5
+   \   000000E0   000094E5           LDR      R0,[R4, #+0]
+   \   000000E4   00B0A0E3           MOV      R11,#+0
+   \   000000E8   141090E5           LDR      R1,[R0, #+20]
+   \   000000EC   000051E3           CMP      R1,#+0
+   \   000000F0   0300000A           BEQ      ??FS_LB_WriteBurst_6
+   \   000000F4   0400D4E5           LDRB     R0,[R4, #+4]
+   \   000000F8   31FF2FE1           BLX      R1
+   \   000000FC   000050E3           CMP      R0,#+0
+   \   00000100   0000001A           BNE      ??FS_LB_WriteBurst_7
+   \                     ??FS_LB_WriteBurst_6:
+   \   00000104   01B0A0E3           MOV      R11,#+1
+   \                     ??FS_LB_WriteBurst_7:
+   \   00000108   05B0C4E5           STRB     R11,[R4, #+5]
+   \                     ??FS_LB_WriteBurst_5:
+   \   0000010C   00C094E5           LDR      R12,[R4, #+0]
+   \   00000110   08308DE2           ADD      R3,SP,#+8
+   \   00000114   0020A0E3           MOV      R2,#+0
+   \   00000118   FB1FA0E3           MOV      R1,#+1004
+   \   0000011C   0400D4E5           LDRB     R0,[R4, #+4]
+   \   00000120   10C09CE5           LDR      R12,[R12, #+16]
+   \   00000124   3CFF2FE1           BLX      R12
+   \   00000128   000050E3           CMP      R0,#+0
+    529              if (pCacheAPI) {
+   \   0000012C   04009DE5           LDR      R0,[SP, #+4]
+   \   00000130   B0A1DD01           LDRHEQ   R10,[SP, #+16]
+   \   00000134   000050E3           CMP      R0,#+0
+   \   00000138   0A00000A           BEQ      ??FS_LB_WriteBurst_4
+    530                do {
+    531                  const U8 * p;
+    532                  /* ToDo: Return value of write cache is ignored now. Optimization possible */
+    533                  if ((pDevData->pCacheAPI->pfUpdateCache)(pDevice, SectorNo++, pBuffer, Type)) {
+   \                     ??FS_LB_WriteBurst_8:
+   \   0000013C   04C099E5           LDR      R12,[R9, #+4]
+   \   00000140   0830A0E1           MOV      R3,R8
+   \   00000144   0720A0E1           MOV      R2,R7
+   \   00000148   0510A0E1           MOV      R1,R5
+   \   0000014C   0400A0E1           MOV      R0,R4
+   \   00000150   04C09CE5           LDR      R12,[R12, #+4]
+   \   00000154   3CFF2FE1           BLX      R12
+   \   00000158   015085E2           ADD      R5,R5,#+1
+    534                    FS_DEBUG_WARN((FS_MTYPE_STORAGE, "Could not update sector in cache"));
+    535                  }
+    536                  p = (const U8 *)pBuffer;
+    537                  pBuffer = p + SectorSize;
+   \   0000015C   07708AE0           ADD      R7,R10,R7
+    538                } while(--NumSectors);
+   \   00000160   016056E2           SUBS     R6,R6,#+1
+   \   00000164   F4FFFF1A           BNE      ??FS_LB_WriteBurst_8
+    539              }
+    540            }
+    541          #endif
+    542            FS_DEBUG_LOG((FS_MTYPE_STORAGE, "\n"));
+    543            return  x;
+   \                     ??FS_LB_WriteBurst_4:
+   \   00000168   00009DE5           LDR      R0,[SP, #+0]
+   \   0000016C   14D08DE2           ADD      SP,SP,#+20
+   \   00000170   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    544          }
+    545          
+    546          
+    547          /*********************************************************************
+    548          *
+    549          *       FS_LB_WriteBurstPart
+    550          *
+    551          *  Function description
+    552          *    Write multiple sectors to device.
+    553          *
+    554          *  Parameters
+    555          *    pPart       - Pointer to the partition structure.
+    556          *    SectorNo    - First sector to be written to the device.
+    557          *    NumSectors  - Number of sectors to be written.
+    558          *    pBuffer     - Pointer to buffer for holding the data.
+    559          *    Type        - The type of sector that shall be written.
+    560          *
+    561          *  Return value
+    562          *    ==0         - Sectors have been read and copied to pBuffer.
+    563          *    <0          - An error has occurred.
+    564          */
+
+   \                                 In section .text, align 4, keep-with-next
+    565          int FS_LB_WriteBurstPart(FS_PARTITION *pPart, U32 SectorNo, U32 NumSectors, const void *pBuffer, U8 Type) {
+   \                     FS_LB_WriteBurstPart:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   08C0DDE5           LDRB     R12,[SP, #+8]
+    566            FS_DEVICE * pDevice;
+    567          
+    568            FS_USE_PARA(Type);
+    569            pDevice     = &pPart->Device;
+    570            SectorNo   += pPart->StartSector;
+    571            return  FS_LB_WriteBurst(pDevice, SectorNo, NumSectors, pBuffer, Type);
+   \   0000000C   00C08DE5           STR      R12,[SP, #+0]
+   \   00000010   14C090E5           LDR      R12,[R0, #+20]
+   \   00000014   01108CE0           ADD      R1,R12,R1
+   \   00000018   ........           BL       FS_LB_WriteBurst
+   \   0000001C   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000020   0080BDE8           POP      {PC}             ;; return
+    572          }
+    573          
+    574          /*********************************************************************
+    575          *
+    576          *       FS_LB_WriteMultiple
+    577          *
+    578          *  Function description
+    579          *    Write multiple sectors to device.
+    580          *
+    581          *  Parameters
+    582          *    pDriver     - Pointer to a device driver structure.
+    583          *    Unit        - Unit number.
+    584          *    SectorNo    - First sector to be written to the device.
+    585          *    NumSectors  - Number of sectors to be written.
+    586          *    pBuffer     - Pointer to buffer for holding the data.
+    587          *    Type        - The type of sector that shall be written.
+    588          *
+    589          *  Return value
+    590          *    ==0         - Sectors have been read and copied to pBuffer.
+    591          *    <0          - An error has occurred.
+    592          */
+
+   \                                 In section .text, align 4, keep-with-next
+    593          int FS_LB_WriteMultiple(FS_DEVICE * pDevice, U32 SectorNo, U32 NumSectors, const void *pBuffer, U8 Type) {
+   \                     FS_LB_WriteMultiple:
+   \   00000000   F0472DE9           PUSH     {R4-R10,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    594            int         x;
+    595          
+    596            FS_USE_PARA(Type);
+    597            FS_LB_InitMediumIfRequired(pDevice);
+   \   00000008   0500D4E5           LDRB     R0,[R4, #+5]
+   \   0000000C   08D04DE2           SUB      SP,SP,#+8
+   \   00000010   0150A0E1           MOV      R5,R1
+   \   00000014   0260A0E1           MOV      R6,R2
+   \   00000018   0370A0E1           MOV      R7,R3
+   \   0000001C   2880DDE5           LDRB     R8,[SP, #+40]
+   \   00000020   000050E3           CMP      R0,#+0
+   \   00000024   0A00001A           BNE      ??FS_LB_WriteMultiple_0
+   \   00000028   000094E5           LDR      R0,[R4, #+0]
+   \   0000002C   0090A0E3           MOV      R9,#+0
+   \   00000030   141090E5           LDR      R1,[R0, #+20]
+   \   00000034   000051E3           CMP      R1,#+0
+   \   00000038   0300000A           BEQ      ??FS_LB_WriteMultiple_1
+   \   0000003C   0400D4E5           LDRB     R0,[R4, #+4]
+   \   00000040   31FF2FE1           BLX      R1
+   \   00000044   000050E3           CMP      R0,#+0
+   \   00000048   0000001A           BNE      ??FS_LB_WriteMultiple_2
+   \                     ??FS_LB_WriteMultiple_1:
+   \   0000004C   0190A0E3           MOV      R9,#+1
+   \                     ??FS_LB_WriteMultiple_2:
+   \   00000050   0590C4E5           STRB     R9,[R4, #+5]
+    598            INC_WRITE_SECTOR_CNT(NumSectors);             // For statistics / debugging only
+   \                     ??FS_LB_WriteMultiple_0:
+   \   00000054   ........           LDR      R0,??DataTable5
+   \   00000058   0C1090E5           LDR      R1,[R0, #+12]
+   \   0000005C   011081E2           ADD      R1,R1,#+1
+   \   00000060   0C1080E5           STR      R1,[R0, #+12]
+   \   00000064   101090E5           LDR      R1,[R0, #+16]
+   \   00000068   011086E0           ADD      R1,R6,R1
+   \   0000006C   101080E5           STR      R1,[R0, #+16]
+    599            CALL_ONDEVICE_HOOK(pDevice, FS_OPERATION_WRITE, SectorNo, NumSectors, Type);
+   \   00000070   10C094E5           LDR      R12,[R4, #+16]
+   \   00000074   00005CE3           CMP      R12,#+0
+   \   00000078   0500000A           BEQ      ??FS_LB_WriteMultiple_3
+   \   0000007C   00808DE5           STR      R8,[SP, #+0]
+   \   00000080   0630A0E1           MOV      R3,R6
+   \   00000084   0520A0E1           MOV      R2,R5
+   \   00000088   0110A0E3           MOV      R1,#+1
+   \   0000008C   0400A0E1           MOV      R0,R4
+   \   00000090   3CFF2FE1           BLX      R12
+    600            FS_DEBUG_LOG((FS_MTYPE_STORAGE, "WriteMultiple %s:%d: %s Sector: 0x%8x, NumSectors: %d", pDevice->pType->pfGetName(pDevice->Data.Unit), pDevice->Data.Unit, _Type2Name(Type), SectorNo, NumSectors));
+    601            SET_BUSY_LED(pDevice);
+    602            x = _Write(pDevice, SectorNo, pBuffer, NumSectors, 1);
+   \                     ??FS_LB_WriteMultiple_3:
+   \   00000094   0100A0E3           MOV      R0,#+1
+   \   00000098   00008DE5           STR      R0,[SP, #+0]
+   \   0000009C   00C094E5           LDR      R12,[R4, #+0]
+   \   000000A0   0630A0E1           MOV      R3,R6
+   \   000000A4   0720A0E1           MOV      R2,R7
+   \   000000A8   0510A0E1           MOV      R1,R5
+   \   000000AC   0400D4E5           LDRB     R0,[R4, #+4]
+   \   000000B0   0CC09CE5           LDR      R12,[R12, #+12]
+   \   000000B4   3CFF2FE1           BLX      R12
+   \   000000B8   0090B0E1           MOVS     R9,R0
+    603            CLR_BUSY_LED(pDevice);
+    604          #if FS_SUPPORT_CACHE
+    605            if (x == 0) {
+   \   000000BC   0D00001A           BNE      ??FS_LB_WriteMultiple_4
+    606              const FS_DEVICE_DATA * pDevData;
+    607              const FS_CACHE_API   * pCacheAPI;
+    608              pDevData   = &pDevice->Data;
+   \   000000C0   04A084E2           ADD      R10,R4,#+4
+    609              pCacheAPI  = pDevData->pCacheAPI;
+    610              if (pCacheAPI) {
+   \   000000C4   04009AE5           LDR      R0,[R10, #+4]
+   \   000000C8   000050E3           CMP      R0,#+0
+   \   000000CC   0900000A           BEQ      ??FS_LB_WriteMultiple_4
+    611                do {
+    612                  /* ToDo: Return value of write cache is ignored now. Optimization possible */
+    613                  if (pDevData->pCacheAPI->pfUpdateCache(pDevice, SectorNo++, pBuffer, Type)) {
+   \                     ??FS_LB_WriteMultiple_5:
+   \   000000D0   04C09AE5           LDR      R12,[R10, #+4]
+   \   000000D4   0830A0E1           MOV      R3,R8
+   \   000000D8   0720A0E1           MOV      R2,R7
+   \   000000DC   0510A0E1           MOV      R1,R5
+   \   000000E0   0400A0E1           MOV      R0,R4
+   \   000000E4   04C09CE5           LDR      R12,[R12, #+4]
+   \   000000E8   3CFF2FE1           BLX      R12
+   \   000000EC   015085E2           ADD      R5,R5,#+1
+    614                    FS_DEBUG_WARN((FS_MTYPE_STORAGE, "Could not update sector in cache"));
+    615                  }
+    616                } while(--NumSectors);
+   \   000000F0   016056E2           SUBS     R6,R6,#+1
+   \   000000F4   F5FFFF1A           BNE      ??FS_LB_WriteMultiple_5
+    617              }
+    618            }
+    619          #endif
+    620            FS_DEBUG_LOG((FS_MTYPE_STORAGE, "\n"));
+    621            return  x;
+   \                     ??FS_LB_WriteMultiple_4:
+   \   000000F8   0900A0E1           MOV      R0,R9
+   \   000000FC   08D08DE2           ADD      SP,SP,#+8
+   \   00000100   F087BDE8           POP      {R4-R10,PC}      ;; return
+    622          }
+    623          
+    624          /*********************************************************************
+    625          *
+    626          *       FS_LB_WriteMultiplePart
+    627          *
+    628          *  Function description
+    629          *    Write multiple sectors to device.
+    630          *
+    631          *  Parameters
+    632          *    pPart       - Pointer to the partition structure.
+    633          *    Unit        - Unit number.
+    634          *    SectorNo    - First sector to be written to the device.
+    635          *    NumSectors  - Number of sectors to be written.
+    636          *    pBuffer     - Pointer to buffer for holding the data.
+    637          *    Type        - The type of sector that shall be written.
+    638          *
+    639          *  Return value
+    640          *    ==0         - Sectors have been read and copied to pBuffer.
+    641          *    <0          - An error has occurred.
+    642          */
+
+   \                                 In section .text, align 4, keep-with-next
+    643          int FS_LB_WriteMultiplePart(FS_PARTITION *pPart, U32 SectorNo, U32 NumSectors, const void *pBuffer, U8 Type) {
+   \                     FS_LB_WriteMultiplePart:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   08C0DDE5           LDRB     R12,[SP, #+8]
+    644            FS_DEVICE * pDevice;
+    645          
+    646            FS_USE_PARA(Type);
+    647            pDevice     = &pPart->Device;
+    648            SectorNo   += pPart->StartSector;
+    649            return  FS_LB_WriteMultiple(pDevice, SectorNo, NumSectors, pBuffer, Type);
+   \   0000000C   00C08DE5           STR      R12,[SP, #+0]
+   \   00000010   14C090E5           LDR      R12,[R0, #+20]
+   \   00000014   01108CE0           ADD      R1,R12,R1
+   \   00000018   ........           BL       FS_LB_WriteMultiple
+   \   0000001C   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000020   0080BDE8           POP      {PC}             ;; return
+    650          }
+    651          
+    652          /*********************************************************************
+    653          *
+    654          *       FS_LB_WriteDevice
+    655          *
+    656          *  Function description
+    657          *    FS internal function. Write sector to device.
+    658          *
+    659          *  Parameters
+    660          *    pDriver     - Pointer to a device driver structure.
+    661          *    Unit        - Unit number.
+    662          *    Sector      - Sector to be written to the device.
+    663          *    pBuffer     - Pointer to data to be stored.
+    664          *    Type        - The type of sector that shall be written.
+    665          *
+    666          *  Return value
+    667          *    == 0        - Sector has been written to the device.
+    668          *    <  0        - An error has occurred.
+    669          */
+    670          #if FS_VERIFY_WRITE
+    671          static U8 * _pVerifyBuffer;
+    672          #endif
+    673          
+
+   \                                 In section .text, align 4, keep-with-next
+    674          int FS_LB_WriteDevice(FS_DEVICE *pDevice, U32 Sector, const void *pBuffer, U8 Type) {
+   \                     FS_LB_WriteDevice:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    675            char IsWritten = 0;
+    676          
+    677            FS_USE_PARA(Type);
+    678            FS_LB_InitMediumIfRequired(pDevice);
+   \   00000008   0500D4E5           LDRB     R0,[R4, #+5]
+   \   0000000C   08D04DE2           SUB      SP,SP,#+8
+   \   00000010   0150A0E1           MOV      R5,R1
+   \   00000014   0260A0E1           MOV      R6,R2
+   \   00000018   0370A0E1           MOV      R7,R3
+   \   0000001C   000050E3           CMP      R0,#+0
+   \   00000020   0A00001A           BNE      ??FS_LB_WriteDevice_0
+   \   00000024   000094E5           LDR      R0,[R4, #+0]
+   \   00000028   0080A0E3           MOV      R8,#+0
+   \   0000002C   141090E5           LDR      R1,[R0, #+20]
+   \   00000030   000051E3           CMP      R1,#+0
+   \   00000034   0300000A           BEQ      ??FS_LB_WriteDevice_1
+   \   00000038   0400D4E5           LDRB     R0,[R4, #+4]
+   \   0000003C   31FF2FE1           BLX      R1
+   \   00000040   000050E3           CMP      R0,#+0
+   \   00000044   0000001A           BNE      ??FS_LB_WriteDevice_2
+   \                     ??FS_LB_WriteDevice_1:
+   \   00000048   0180A0E3           MOV      R8,#+1
+   \                     ??FS_LB_WriteDevice_2:
+   \   0000004C   0580C4E5           STRB     R8,[R4, #+5]
+    679            INC_WRITE_SECTOR_CNT(1);             // For statistics / debugging only
+   \                     ??FS_LB_WriteDevice_0:
+   \   00000050   ........           LDR      R0,??DataTable5
+   \   00000054   0C1090E5           LDR      R1,[R0, #+12]
+   \   00000058   011081E2           ADD      R1,R1,#+1
+   \   0000005C   0C1080E5           STR      R1,[R0, #+12]
+   \   00000060   101090E5           LDR      R1,[R0, #+16]
+   \   00000064   011081E2           ADD      R1,R1,#+1
+   \   00000068   101080E5           STR      R1,[R0, #+16]
+    680            FS_DEBUG_LOG((FS_MTYPE_STORAGE, "Write         %s:%d: %s Sector: 0x%8x", pDevice->pType->pfGetName(pDevice->Data.Unit), pDevice->Data.Unit, _Type2Name(Type), Sector));
+    681            CALL_ONDEVICE_HOOK(pDevice, FS_OPERATION_WRITE, Sector, 1, Type);
+   \   0000006C   10C094E5           LDR      R12,[R4, #+16]
+   \   00000070   00005CE3           CMP      R12,#+0
+   \   00000074   0500000A           BEQ      ??FS_LB_WriteDevice_3
+   \   00000078   00708DE5           STR      R7,[SP, #+0]
+   \   0000007C   0130A0E3           MOV      R3,#+1
+   \   00000080   0520A0E1           MOV      R2,R5
+   \   00000084   0110A0E3           MOV      R1,#+1
+   \   00000088   0400A0E1           MOV      R0,R4
+   \   0000008C   3CFF2FE1           BLX      R12
+    682          #if FS_SUPPORT_CACHE
+    683            {
+    684              const FS_DEVICE_DATA * pDevData;
+    685              const FS_CACHE_API   * pCacheAPI;
+    686              pDevData   = &pDevice->Data;
+    687              pCacheAPI  = pDevData->pCacheAPI;
+   \                     ??FS_LB_WriteDevice_3:
+   \   00000090   08C094E5           LDR      R12,[R4, #+8]
+    688              if (pCacheAPI) {
+   \   00000094   00005CE3           CMP      R12,#+0
+   \   00000098   0700000A           BEQ      ??FS_LB_WriteDevice_4
+    689                IsWritten = (pCacheAPI->pfWriteIntoCache)(pDevice, Sector, pBuffer, Type);
+    690                if (IsWritten) {
+    691                  FS_DEBUG_LOG((FS_MTYPE_STORAGE, " (cache)"));
+    692                }
+    693              }
+    694            }
+    695          #endif
+    696            if (IsWritten == 0) {
+   \   0000009C   0730A0E1           MOV      R3,R7
+   \   000000A0   0620A0E1           MOV      R2,R6
+   \   000000A4   0510A0E1           MOV      R1,R5
+   \   000000A8   0400A0E1           MOV      R0,R4
+   \   000000AC   10C09CE5           LDR      R12,[R12, #+16]
+   \   000000B0   3CFF2FE1           BLX      R12
+   \   000000B4   000050E3           CMP      R0,#+0
+   \   000000B8   0A00001A           BNE      ??FS_LB_WriteDevice_5
+    697              SET_BUSY_LED(pDevice);
+    698              if (_Write(pDevice, Sector, pBuffer, 1, 0) == 0) {
+   \                     ??FS_LB_WriteDevice_4:
+   \   000000BC   0000A0E3           MOV      R0,#+0
+   \   000000C0   00008DE5           STR      R0,[SP, #+0]
+   \   000000C4   00C094E5           LDR      R12,[R4, #+0]
+   \   000000C8   0130A0E3           MOV      R3,#+1
+   \   000000CC   0620A0E1           MOV      R2,R6
+   \   000000D0   0510A0E1           MOV      R1,R5
+   \   000000D4   0400D4E5           LDRB     R0,[R4, #+4]
+   \   000000D8   0CC09CE5           LDR      R12,[R12, #+12]
+   \   000000DC   3CFF2FE1           BLX      R12
+   \   000000E0   000050E3           CMP      R0,#+0
+   \   000000E4   0100001A           BNE      ??FS_LB_WriteDevice_6
+   \                     ??FS_LB_WriteDevice_5:
+   \   000000E8   0000A0E3           MOV      R0,#+0
+   \   000000EC   000000EA           B        ??FS_LB_WriteDevice_7
+   \                     ??FS_LB_WriteDevice_6:
+   \   000000F0   0000E0E3           MVN      R0,#+0
+   \                     ??FS_LB_WriteDevice_7:
+   \   000000F4   08D08DE2           ADD      SP,SP,#+8        ;; stack cleaning
+   \   000000F8   F081BDE8           POP      {R4-R8,PC}       ;; return
+    699                IsWritten = 1;
+    700              } else {
+    701                FS_DEBUG_ERROROUT((FS_MTYPE_STORAGE, "Failed to write Sector: %d on %s:%d.\n", Sector, pDevice->pType->pfGetName(pDevice->Data.Unit), pDevice->Data.Unit));
+    702              }
+    703          #if FS_VERIFY_WRITE
+    704              /* In higher debug levels, read medium once more to verify write operation */
+    705              {
+    706                U16 SectorSize;
+    707          
+    708                SectorSize = FS_GetSectorSize(pDevice);
+    709                FS_AllocZeroedPtr((void **)&_pVerifyBuffer, SectorSize);
+    710                _Read(pDevice, Sector, _pVerifyBuffer, 1, Type);
+    711                if (FS_MEMCMP(pBuffer, (const void *)_pVerifyBuffer, SectorSize)) {
+    712                  FS_DEBUG_ERROROUT((FS_MTYPE_STORAGE, "Verify failed after write. Sector %d on %s:%d:.\n", Sector, pDevice->pType->pfGetName(pDevice->Data.Unit), pDevice->Data.Unit));
+    713                }
+    714              }
+    715          #endif
+    716              CLR_BUSY_LED(pDevice);
+    717            }
+    718            FS_DEBUG_LOG((FS_MTYPE_STORAGE, "\n"));
+    719            return IsWritten ? 0 : -1;
+    720          }
+    721          
+    722          /*********************************************************************
+    723          *
+    724          *         FS_LB_WritePart
+    725          *
+    726          *  Function description
+    727          *    Read sector from volume.
+    728          *
+    729          *  Parameters
+    730          *    pDriver     - Pointer to a device driver structure.
+    731          *    Sector      - Physical sector to be written to the partition.
+    732          *                  The partition start sector is added.
+    733          *    pBuffer     - Pointer to buffer for storing the data.
+    734          *    Type        - The type of sector that shall be written.
+    735          *
+    736          *  Return value
+    737          *    ==0         - Sector has been read and copied to pBuffer.
+    738          *    <0          - An error has occurred.
+    739          */
+
+   \                                 In section .text, align 4, keep-with-next
+    740          int FS_LB_WritePart(FS_PARTITION *pPart, U32 Sector, const void *pBuffer, U8 Type) {
+    741            return FS_LB_WriteDevice(&pPart->Device, pPart->StartSector + Sector, pBuffer, Type);
+   \                     FS_LB_WritePart:
+   \   00000000   14C090E5           LDR      R12,[R0, #+20]
+   \   00000004   0C1081E0           ADD      R1,R1,R12
+   \   00000008   ........           B        FS_LB_WriteDevice  ;; tailcall
+    742          }
+    743          
+    744          
+    745          /*********************************************************************
+    746          *
+    747          *       FS_LB_Ioctl
+    748          *
+    749          *  Function description
+    750          *    Executes device command.
+    751          *
+    752          *  Parameters
+    753          *    pDriver     - Pointer to a device driver structure.
+    754          *    Cmd         - Command to be executed.
+    755          *    Aux         - Parameter depending on command.
+    756          *    pBuffer     - Pointer to a buffer used for the command.
+    757          *
+    758          *  Return value
+    759          *    Command specific. In general a negative value means an error.
+    760          */
+
+   \                                 In section .text, align 4, keep-with-next
+    761          int FS_LB_Ioctl(FS_DEVICE * pDevice, I32 Cmd, I32 Aux, void *pBuffer) {
+   \                     FS_LB_Ioctl:
+   \   00000000   F0432DE9           PUSH     {R4-R9,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   0180A0E1           MOV      R8,R1
+    762            int x;
+    763            const FS_DEVICE_TYPE * pDeviceType;
+    764          
+    765            pDeviceType = pDevice->pType;
+   \   0000000C   000094E5           LDR      R0,[R4, #+0]
+    766            switch (Cmd) {
+   \   00000010   FC1F41E2           SUB      R1,R1,#+1008
+   \   00000014   04D04DE2           SUB      SP,SP,#+4
+   \   00000018   0250A0E1           MOV      R5,R2
+   \   0000001C   0360A0E1           MOV      R6,R3
+   \   00000020   0070A0E1           MOV      R7,R0
+   \   00000024   010051E3           CMP      R1,#+1
+   \   00000028   0C00009A           BLS      ??FS_LB_Ioctl_0
+    767            case FS_CMD_UNMOUNT:
+    768            case FS_CMD_UNMOUNT_FORCED:
+    769              break;
+    770            default:
+    771              FS_LB_InitMediumIfRequired(pDevice);
+   \   0000002C   0510D4E5           LDRB     R1,[R4, #+5]
+   \   00000030   000051E3           CMP      R1,#+0
+   \   00000034   0900001A           BNE      ??FS_LB_Ioctl_0
+   \   00000038   141090E5           LDR      R1,[R0, #+20]
+   \   0000003C   0090A0E3           MOV      R9,#+0
+   \   00000040   000051E3           CMP      R1,#+0
+   \   00000044   0300000A           BEQ      ??FS_LB_Ioctl_1
+   \   00000048   0400D4E5           LDRB     R0,[R4, #+4]
+   \   0000004C   31FF2FE1           BLX      R1
+   \   00000050   000050E3           CMP      R0,#+0
+   \   00000054   0000001A           BNE      ??FS_LB_Ioctl_2
+   \                     ??FS_LB_Ioctl_1:
+   \   00000058   0190A0E3           MOV      R9,#+1
+   \                     ??FS_LB_Ioctl_2:
+   \   0000005C   0590C4E5           STRB     R9,[R4, #+5]
+    772              break;
+    773            }
+    774            x = (pDeviceType->pfIoCtl)(pDevice->Data.Unit, Cmd, Aux, pBuffer);
+    775            return x;
+   \                     ??FS_LB_Ioctl_0:
+   \   00000060   0630A0E1           MOV      R3,R6
+   \   00000064   0520A0E1           MOV      R2,R5
+   \   00000068   0810A0E1           MOV      R1,R8
+   \   0000006C   0400D4E5           LDRB     R0,[R4, #+4]
+   \   00000070   10C097E5           LDR      R12,[R7, #+16]
+   \   00000074   04D08DE2           ADD      SP,SP,#+4
+   \   00000078   F043BDE8           POP      {R4-R9,LR}
+   \   0000007C   1CFF2FE1           BX       R12              ;; tailcall
+    776          }
+    777          
+    778          /*********************************************************************
+    779          *
+    780          *       FS_GetSectorSize
+    781          *
+    782          *  Function description
+    783          *    Returns the sector size of a device.
+    784          *
+    785          */
+
+   \                                 In section .text, align 4, keep-with-next
+    786          U16 FS_GetSectorSize(FS_DEVICE * pDevice) {
+   \                     FS_GetSectorSize:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    787            U16 r = 0;
+    788            FS_DEV_INFO DevInfo;
+    789          
+    790            FS_LB_InitMediumIfRequired(pDevice);
+   \   00000008   0500D4E5           LDRB     R0,[R4, #+5]
+   \   0000000C   10D04DE2           SUB      SP,SP,#+16
+   \   00000010   0050A0E3           MOV      R5,#+0
+   \   00000014   000050E3           CMP      R0,#+0
+   \   00000018   0A00001A           BNE      ??FS_GetSectorSize_0
+   \   0000001C   000094E5           LDR      R0,[R4, #+0]
+   \   00000020   0060A0E3           MOV      R6,#+0
+   \   00000024   141090E5           LDR      R1,[R0, #+20]
+   \   00000028   000051E3           CMP      R1,#+0
+   \   0000002C   0300000A           BEQ      ??FS_GetSectorSize_1
+   \   00000030   0400D4E5           LDRB     R0,[R4, #+4]
+   \   00000034   31FF2FE1           BLX      R1
+   \   00000038   000050E3           CMP      R0,#+0
+   \   0000003C   0000001A           BNE      ??FS_GetSectorSize_2
+   \                     ??FS_GetSectorSize_1:
+   \   00000040   0160A0E3           MOV      R6,#+1
+   \                     ??FS_GetSectorSize_2:
+   \   00000044   0560C4E5           STRB     R6,[R4, #+5]
+    791            if (pDevice->pType->pfIoCtl(pDevice->Data.Unit, FS_CMD_GET_DEVINFO, 0, &DevInfo) == 0) {
+   \                     ??FS_GetSectorSize_0:
+   \   00000048   00C094E5           LDR      R12,[R4, #+0]
+   \   0000004C   0D30A0E1           MOV      R3,SP
+   \   00000050   0020A0E3           MOV      R2,#+0
+   \   00000054   FB1FA0E3           MOV      R1,#+1004
+   \   00000058   0400D4E5           LDRB     R0,[R4, #+4]
+   \   0000005C   10C09CE5           LDR      R12,[R12, #+16]
+   \   00000060   3CFF2FE1           BLX      R12
+   \   00000064   000050E3           CMP      R0,#+0
+    792              r = DevInfo.BytesPerSector;
+   \   00000068   B850DD01           LDRHEQ   R5,[SP, #+8]
+    793            }
+    794            return r;
+   \   0000006C   10D08DE2           ADD      SP,SP,#+16
+   \   00000070   0500A0E1           MOV      R0,R5
+   \   00000074   7080BDE8           POP      {R4-R6,PC}       ;; return
+    795          }
+    796          
+    797          /*********************************************************************
+    798          *
+    799          *       FS_LB_GetDeviceInfo
+    800          *
+    801          */
+
+   \                                 In section .text, align 4, keep-with-next
+    802          int FS_LB_GetDeviceInfo(FS_DEVICE * pDevice, FS_DEV_INFO * pDevInfo) {
+   \                     FS_LB_GetDeviceInfo:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   0050A0E1           MOV      R5,R0
+    803            int r;
+    804          
+    805            r = 0;
+    806            FS_LB_InitMediumIfRequired(pDevice);
+   \   00000008   0500D5E5           LDRB     R0,[R5, #+5]
+   \   0000000C   04D04DE2           SUB      SP,SP,#+4
+   \   00000010   0160A0E1           MOV      R6,R1
+   \   00000014   0040A0E3           MOV      R4,#+0
+   \   00000018   000050E3           CMP      R0,#+0
+   \   0000001C   0A00001A           BNE      ??FS_LB_GetDeviceInfo_0
+   \   00000020   000095E5           LDR      R0,[R5, #+0]
+   \   00000024   0070A0E3           MOV      R7,#+0
+   \   00000028   141090E5           LDR      R1,[R0, #+20]
+   \   0000002C   000051E3           CMP      R1,#+0
+   \   00000030   0300000A           BEQ      ??FS_LB_GetDeviceInfo_1
+   \   00000034   0400D5E5           LDRB     R0,[R5, #+4]
+   \   00000038   31FF2FE1           BLX      R1
+   \   0000003C   000050E3           CMP      R0,#+0
+   \   00000040   0000001A           BNE      ??FS_LB_GetDeviceInfo_2
+   \                     ??FS_LB_GetDeviceInfo_1:
+   \   00000044   0170A0E3           MOV      R7,#+1
+   \                     ??FS_LB_GetDeviceInfo_2:
+   \   00000048   0570C5E5           STRB     R7,[R5, #+5]
+    807            if (pDevice->pType->pfIoCtl(pDevice->Data.Unit, FS_CMD_GET_DEVINFO, 0, (void *)pDevInfo)) {
+   \                     ??FS_LB_GetDeviceInfo_0:
+   \   0000004C   00C095E5           LDR      R12,[R5, #+0]
+   \   00000050   0630A0E1           MOV      R3,R6
+   \   00000054   0020A0E3           MOV      R2,#+0
+   \   00000058   FB1FA0E3           MOV      R1,#+1004
+   \   0000005C   0400D5E5           LDRB     R0,[R5, #+4]
+   \   00000060   10C09CE5           LDR      R12,[R12, #+16]
+   \   00000064   3CFF2FE1           BLX      R12
+   \   00000068   000050E3           CMP      R0,#+0
+    808              r = -1;
+   \   0000006C   0440E011           MVNNE    R4,R4
+    809            }
+    810            return r;
+   \   00000070   0400A0E1           MOV      R0,R4
+   \   00000074   04D08DE2           ADD      SP,SP,#+4
+   \   00000078   F080BDE8           POP      {R4-R7,PC}       ;; return
+    811          }
+    812          
+    813          /*********************************************************************
+    814          *
+    815          *       FS_LB_FreeSectors
+    816          *
+    817          *  Function description
+    818          *    Frees unused sectors (from cache and devices) of a partition
+    819          *
+    820          */
+
+   \                                 In section .text, align 4, keep-with-next
+    821          void FS_LB_FreePartSectors(FS_PARTITION* pPart, U32 SectorIndex, U32 NumSectors) {
+   \                     FS_LB_FreePartSectors:
+   \   00000000   B0412DE9           PUSH     {R4,R5,R7,R8,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   04002DE9           PUSH     {R2}
+   \   0000000C   0040A0E1           MOV      R4,R0
+    822            FS_DEVICE * pDevice;
+    823          
+    824            pDevice = &pPart->Device;
+    825            SectorIndex += pPart->StartSector;      /* Convert into device sector index */
+   \   00000010   140094E5           LDR      R0,[R4, #+20]
+   \   00000014   0CD04DE2           SUB      SP,SP,#+12
+   \   00000018   015080E0           ADD      R5,R0,R1
+    826            FS_USE_PARA(pDevice);
+    827            FS_DEBUG_LOG((FS_MTYPE_STORAGE, "FreeSectors   %s:%d:      Sector: 0x%8x, NumSectors:  0x%8x", pDevice->pType->pfGetName(pDevice->Data.Unit), pDevice->Data.Unit, SectorIndex, NumSectors));
+    828          #if FS_SUPPORT_JOURNAL
+    829            if (pDevice->Data.JournalIsActive) {
+    830          //    r = FS_JOURNAL_FreeSector(pDevice, SectorNo, pBuffer, NumSectors, RepeatSame);
+    831          // TBD: This can be optimized if the journal can also manage "freed" sectors.
+    832            } else
+    833          #endif
+    834            {
+    835              FS_LB_Ioctl(pDevice, FS_CMD_FREE_SECTORS, SectorIndex, &NumSectors);
+   \   0000001C   0510D4E5           LDRB     R1,[R4, #+5]
+   \   00000020   000094E5           LDR      R0,[R4, #+0]
+   \   00000024   0070A0E1           MOV      R7,R0
+   \   00000028   000051E3           CMP      R1,#+0
+   \   0000002C   0900001A           BNE      ??FS_LB_FreePartSectors_0
+   \   00000030   141090E5           LDR      R1,[R0, #+20]
+   \   00000034   0080A0E3           MOV      R8,#+0
+   \   00000038   000051E3           CMP      R1,#+0
+   \   0000003C   0300000A           BEQ      ??FS_LB_FreePartSectors_1
+   \   00000040   0400D4E5           LDRB     R0,[R4, #+4]
+   \   00000044   31FF2FE1           BLX      R1
+   \   00000048   000050E3           CMP      R0,#+0
+   \   0000004C   0000001A           BNE      ??FS_LB_FreePartSectors_2
+   \                     ??FS_LB_FreePartSectors_1:
+   \   00000050   0180A0E3           MOV      R8,#+1
+   \                     ??FS_LB_FreePartSectors_2:
+   \   00000054   0580C4E5           STRB     R8,[R4, #+5]
+   \                     ??FS_LB_FreePartSectors_0:
+   \   00000058   EE10A0E3           MOV      R1,#+238
+   \   0000005C   0C308DE2           ADD      R3,SP,#+12
+   \   00000060   0520A0E1           MOV      R2,R5
+   \   00000064   C01F81E3           ORR      R1,R1,#0x300
+   \   00000068   0400D4E5           LDRB     R0,[R4, #+4]
+   \   0000006C   10C097E5           LDR      R12,[R7, #+16]
+   \   00000070   3CFF2FE1           BLX      R12
+    836            }
+    837          
+    838            #if FS_SUPPORT_CACHE
+    839            {
+    840              CACHE_FREE CacheFree;
+    841          
+    842              CacheFree.FirstSector = SectorIndex;
+    843              CacheFree.NumSectors  = NumSectors;
+   \   00000074   0C109DE5           LDR      R1,[SP, #+12]
+   \   00000078   00508DE5           STR      R5,[SP, #+0]
+   \   0000007C   04108DE5           STR      R1,[SP, #+4]
+    844              FS__CACHE_CommandDeviceNL(pDevice, FS_CMD_CACHE_FREE_SECTORS, &CacheFree);
+   \   00000080   7310A0E3           MOV      R1,#+115
+   \   00000084   0D20A0E1           MOV      R2,SP
+   \   00000088   5C1D81E3           ORR      R1,R1,#0x1700
+   \   0000008C   0400A0E1           MOV      R0,R4
+   \   00000090   ........           BL       FS__CACHE_CommandDeviceNL
+    845            }
+    846            #endif
+    847            FS_DEBUG_LOG((FS_MTYPE_STORAGE, "\n"));
+    848          }
+   \   00000094   14D08DE2           ADD      SP,SP,#+20       ;; stack cleaning
+   \   00000098   B081BDE8           POP      {R4,R5,R7,R8,PC}  ;; return
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5:
+   \   00000000   ........           DC32     FS_STORAGE_Counters
+    849          
+    850          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function                   .cstack
+     --------                   -------
+     FS_GetSectorSize               32
+     FS_LB_FreePartSectors          40
+     FS_LB_GetDeviceInfo            24
+     FS_LB_GetStatus                 8
+     FS_LB_InitMedium               16
+     FS_LB_InitMediumIfRequired     16
+     FS_LB_Ioctl                    32
+     FS_LB_ReadBurst                72
+     FS_LB_ReadBurstPart             8
+     FS_LB_ReadDevice               32
+     FS_LB_ReadPart                 32
+     FS_LB_WriteBurst               56
+     FS_LB_WriteBurstPart            8
+     FS_LB_WriteDevice              32
+     FS_LB_WriteMultiple            40
+     FS_LB_WriteMultiplePart         8
+     FS_LB_WritePart                 8
+     _Read                          48
+
+
+   Section sizes:
+
+     Function/Label             Bytes
+     --------------             -----
+     _Read                       260
+     FS_LB_GetStatus              20
+     FS_LB_InitMedium             68
+     FS_LB_InitMediumIfRequired   80
+     FS_LB_ReadDevice            204
+     FS_LB_ReadPart              208
+     FS_LB_ReadBurst             484
+     FS_LB_ReadBurstPart          36
+     FS_LB_WriteBurst            372
+     FS_LB_WriteBurstPart         36
+     FS_LB_WriteMultiple         260
+     FS_LB_WriteMultiplePart      36
+     FS_LB_WriteDevice           252
+     FS_LB_WritePart              12
+     FS_LB_Ioctl                 128
+     FS_GetSectorSize            120
+     FS_LB_GetDeviceInfo         124
+     FS_LB_FreePartSectors       156
+     ??DataTable5                  4
+
+ 
+ 2 860 bytes in section .text
+ 
+ 2 860 bytes of CODE memory
+
+Errors: none
+Warnings: none

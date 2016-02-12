@@ -1,0 +1,3115 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     14/Jul/2015  19:01:36 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\MMC_SD_CardMode_Drv.c                #
+#    Command line =  C:\DUII\TargetHW\FS\MMC_SD_CardMode_Drv.c -D DEBUG=1 -D  #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\MM #
+#                    C_SD_CardMode_Drv.lst                                    #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\MMC #
+#                    _SD_CardMode_Drv.o                                       #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\MMC_SD_CardMode_Drv.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : MMC_SD_CardMode_Drv.c
+     19          Purpose     : File system generic MMC/SD card mode driver
+     20          
+     21          Literature  : []
+     22                        \\fileserver\techinfo\Company\MMCA.org
+     23                        "\\fileserver\techinfo\Company\SDCard_org\Copyrighted\Part 01 Physical Layer\Part 1 Physical Layer Specification Ver2.00 Final 060509.pdf"
+     24          
+     25          ---------------------------END-OF-HEADER------------------------------
+     26          */
+     27          
+     28          /*********************************************************************
+     29          *
+     30          *       #include Section
+     31          *
+     32          **********************************************************************
+     33          */
+     34          #include "FS_Int.h"
+     35          #include "MMC_SD_CardMode_X_HW.h"
+     36          #include "FS_CLib.h"
+     37          
+     38          #ifdef FS_MMC_MAXUNIT
+     39            #define NUM_UNITS FS_MMC_MAXUNIT
+     40          #else
+     41            #define NUM_UNITS   1
+     42          #endif
+     43          
+     44          #ifndef   NUM_RETRIES
+     45            #define NUM_RETRIES    5
+     46          #endif
+     47          
+     48          /*********************************************************************
+     49          *
+     50          *             #define constants
+     51          *
+     52          **********************************************************************
+     53          */
+     54          
+     55          /*********************************************************************
+     56          *
+     57          *       ASSERT_UNIT_NO_IS_IN_RANGE
+     58          */
+     59          #if FS_DEBUG_LEVEL >= FS_DEBUG_LEVEL_CHECK_ALL
+     60            #define ASSERT_UNIT_NO_IS_IN_RANGE(Unit)  if (Unit >= _NumUnits)               { FS_DEBUG_ERROROUT((FS_MTYPE_DRIVER,  "MMC CM: Illegal unit number.\n"));   }
+     61          #else
+     62            #define ASSERT_UNIT_NO_IS_IN_RANGE(Unit)
+     63          #endif
+     64          
+     65          
+     66          /*********************************************************************
+     67          *
+     68          *       CSD register access macros
+     69          */
+     70          #define CSD_STRUCTURE(pCSD)            _GetFromCSD(pCSD, 126, 127)
+     71          #define CSD_WRITE_PROTECT(pCSD)        _GetFromCSD(pCSD, 12, 13)
+     72          #define CSD_FILE_FORMAT_GRP(pCSD)      _GetFromCSD(pCSD, 15, 15)
+     73          #define CSD_WRITE_BL_LEN(pCSD)         _GetFromCSD(pCSD, 22, 25)
+     74          #define CSD_R2W_FACTOR(pCSD)           _GetFromCSD(pCSD, 26, 28)
+     75          #define CSD_C_SIZE_MULT(pCSD)          _GetFromCSD(pCSD, 47, 49)
+     76          #define CSD_C_SIZE(pCSD)               _GetFromCSD(pCSD, 62, 73)
+     77          #define CSD_READ_BL_LEN(pCSD)          _GetFromCSD(pCSD, 80, 83)
+     78          #define CSD_TRAN_SPEED(pCSD)           (pCSD->aData[3])   // Same as, but more efficient than: _GetFromCSD(pCSD,  96, 103)
+     79          #define CSD_NSAC(pCSD)                 (pCSD->aData[2])   // Same as, but more efficient than: _GetFromCSD(pCSD, 104, 111)
+     80          #define CSD_TAAC(pCSD)                 (pCSD->aData[1])   // Same as, but more efficient than: _GetFromCSD(pCSD, 112, 119)
+     81          #define CSD_C_SIZE_V2(pCSD)            _GetFromCSD(pCSD,  48, 69)
+     82          #define CSD_CCC_CLASSES(pCSD)          _GetFromCSD(pCSD,  84, 95)
+     83          
+     84          #define STARTUPFREQ              400  /* Max. startup frequency */
+     85          
+     86          #define BYTES_PER_SECTOR              512
+     87          /*********************************************************************
+     88          *
+     89          *       Command definitions
+     90          */
+     91          #define CMD_GO_IDLE_STATE           0
+     92          #define CMD_SEND_OP_COND            1        // MMC Cards only
+     93          #define CMD_ALL_SEND_CID            2
+     94          #define CMD_SET_REL_ADDR            3
+     95          #define CMD_SELECT_CARD             7
+     96          #define CMD_SWITCH_FUNC             6
+     97          #define CMD_SEND_CSD                9
+     98          #define CMD_SEND_IF_COND            8
+     99          #define CMD_SEND_CID               10
+    100          #define CMD_STOP_TRANSMISSION      12
+    101          #define CMD_SEND_STATUS            13
+    102          #define CMD_GO_INACTIVE_STATE      15
+    103          #define CMD_SET_BLOCKLEN           16
+    104          #define CMD_READ_SINGLE_BLOCK      17
+    105          #define CMD_READ_MULTIPLE_BLOCKS   18
+    106          
+    107          #define CMD_WRITE_BLOCK            24
+    108          #define CMD_WRITE_MULTIPLE_BLOCKS  25
+    109          #define CMD_ACMD_CMD               55
+    110          
+    111          #define ACMD_SET_BUS_WIDTH          6
+    112          #define ACMD_SD_STATUS             13
+    113          #define ACMD_SEND_OP_COND          41
+    114          #define ACMD_SET_CLR_CARD_DETECT   42
+    115          #define ACMD_SEND_SCR              51
+    116          
+    117          #define BUS_WIDTH_1BIT              (0)
+    118          #define BUS_WIDTH_4BIT              (2)
+    119          
+    120          #define SD_HC_SUPPORT                      (1UL << 30)
+    121          #define SD_CCS                             (1 <<  6)
+    122          
+    123          #define FS_MMC_CARDTYPE_NONE              (0)
+    124          #define FS_MMC_CARDTYPE_MMC               (1 << 0)
+    125          #define FS_MMC_CARDTYPE_SD                (1 << 1)
+    126          #define FS_MMC_CARDTYPE_SDHC             ((1 << 1) | (1 << 2))
+    127          
+    128          #define SD_SPEC_VER_100           0
+    129          #define SD_SPEC_VER_110           1
+    130          #define SD_SPEC_VER_200           2
+    131          
+    132          /*********************************************************************
+    133          *
+    134          *       Defines non configurable
+    135          *
+    136          **********************************************************************
+    137          */
+    138          #define VRANGE_OCR      0x001C0000UL  // MMC cards allowed at 3.0 to 3.3v
+    139          #define OCR_RDY_MASK    0x80          // Mask to check OCR ready bit
+    140          #define MAX_OCR_RET     0x2ff         // Maximum OCR request retries
+    141          
+    142          #define MAX_RESPONSE_TIMEOUT 0xff
+    143          #define MAX_READ_TIMEOUT     0xffffffffUL
+    144          
+    145          /*********************************************************************
+    146          *
+    147          *       Types
+    148          *
+    149          **********************************************************************
+    150          */
+    151          typedef struct {           /* CSD register structure */
+    152            U8 Dummy;
+    153            U8 aData[16];  /* CSD size is 128 bit */
+    154          } CM_CSD;
+    155          
+    156          typedef struct {
+    157            U8 aStatus[6];  /* CardStatus answer is 48 bit wide */
+    158          } MMC_CARD_STATUS;
+    159          
+    160          typedef struct {
+    161            U8 aOCR[6];  /* OCR answer is 48 bit wide */
+    162          } MMC_OCR_RESPONSE;
+    163          
+    164          typedef struct {
+    165            U8  IsInited;
+    166            U8  Unit;
+    167            U8  HasError;
+    168            U8  CardType;
+    169            U8  Use4BitMode;
+    170            U8  IsWriteProtected;
+    171            U16 BytesPerSector;
+    172            U16 Rca;
+    173            U16 MaxReadBurst;
+    174            U16 MaxWriteBurst;
+    175            U16 MaxReadBurstSave;
+    176            U16 MaxWriteBurstSave;
+    177            U32 NumSectors;
+    178            MMC_CARD_ID CardId;
+    179            U8   Allow4bitMode;
+    180            U8   IsSelected;
+    181            U8   AllowHighSpeedMode;
+    182            U8   WrRepeatSameAllowed;
+    183          } MMC_CM_INST;
+    184          
+    185          /*********************************************************************
+    186          *
+    187          *       Static const
+    188          *
+    189          **********************************************************************
+    190          */
+
+   \                                 In section .text, align 4, keep-with-next
+    191          static const U32 _aUnit[8] = {
+   \                     _aUnit:
+   \   00000000                      ; Initializer data, 32 bytes
+   \   00000000   809698004042       DC32 10000000, 1000000, 100000, 10000, 1000, 100, 10, 1
+   \              0F00A0860100
+   \              10270000E803
+   \              000064000000
+   \              0A0000000100
+   \              0000        
+    192            10000000UL,
+    193            1000000UL,
+    194            100000UL,
+    195            10000UL,
+    196            1000UL,
+    197            100UL,
+    198            10UL,
+    199            1UL,
+    200          };
+    201          
+
+   \                                 In section .text, align 4, keep-with-next
+    202          static const U8 _aFactor[16] = {
+   \                     _aFactor:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   000A0C0D0F14       DC8 0, 10, 12, 13, 15, 20, 25, 30, 35, 40
+   \              191E2328    
+   \   0000000A   2D32373C4150       DC8 45, 50, 55, 60, 65, 80
+    203            0,    /* 0: reserved - not supported */
+    204            10,   /* 1 */
+    205            12,   /* 2 */
+    206            13,   /* 3 */
+    207            15,   /* 4 */
+    208            20,   /* 5 */
+    209            25,   /* 6 */
+    210            30,   /* 7 */
+    211            35,   /* 8 */
+    212            40,   /* 9 */
+    213            45,   /* 10 */
+    214            50,   /* 11 */
+    215            55,   /* 12 */
+    216            60,   /* 13 */
+    217            65,   /* 14 */
+    218            80    /* 15 */
+    219          };
+    220          
+    221          /*********************************************************************
+    222          *
+    223          *       Static data
+    224          *
+    225          **********************************************************************
+    226          */
+    227          
+
+   \                                 In section .bss, align 4
+    228          static MMC_CM_INST *  _apInst[NUM_UNITS];
+   \                     _apInst:
+   \   00000000                      DS8 4
+   \   00000004                      DS8 4
+    229          static int         _NumUnits;
+    230          
+    231          /*********************************************************************
+    232          *
+    233          *       Static code
+    234          *
+    235          **********************************************************************
+    236          */
+    237          
+    238          
+    239          /*********************************************************************
+    240          *
+    241          *       _GetBits
+    242          *
+    243          *  Function description
+    244          *    Returns a value from the bit field.
+    245          */
+    246          static unsigned _GetBits(const U8 * pData, unsigned FirstBit, unsigned LastBit, unsigned NumBytesAvailable) {
+    247            unsigned Off;
+    248            unsigned OffLast;
+    249            unsigned NumBytes;
+    250            U32 Data;
+    251          
+    252          
+    253            Off      = FirstBit / 8;
+    254            OffLast  = LastBit / 8;
+    255            NumBytes = OffLast - Off + 1;
+    256            Off      = (NumBytesAvailable - 1) - OffLast;                      // Bytes are reversed in CSD
+    257            Data = 0;
+    258            //
+    259            // Read data into 32 bits
+    260            //
+    261            do {
+    262              Data <<= 8;
+    263              Data |= pData[Off++];
+    264            } while (--NumBytes);
+    265            //
+    266            // Shift and mask result
+    267            //
+    268            Data >>= (FirstBit & 7);
+    269            Data &= (2 << (LastBit - FirstBit)) - 1;                // Mask out bits that are outside of given bit range
+    270            return Data;
+    271          }
+    272          
+    273          /*********************************************************************
+    274          *
+    275          *       _GetFromCSD
+    276          *
+    277          *  Function description
+    278          *    Returns a value from the CSD field. These values are stored in
+    279          *    a 128 bit array; the bit-indices documented in [1]: 5.3 CSD register, page 69
+    280          *    can be used as parameters when calling the function
+    281          */
+    282          static unsigned _GetFromCSD(const CM_CSD * pCSD, unsigned FirstBit, unsigned LastBit) {
+    283            U32 Data;
+    284            Data = _GetBits(pCSD->aData, FirstBit, LastBit, sizeof(pCSD->aData));
+    285            return Data;
+    286          }
+    287          
+    288          /*********************************************************************
+    289          *
+    290          *       _SendCmd
+    291          */
+    292          static void _SendCmd(MMC_CM_INST * pInst, unsigned Cmd, unsigned CmdFlags, unsigned ResponseType, U32 Arg) {
+    293            FS_MMC_HW_X_SendCmd(pInst->Unit, Cmd, CmdFlags, ResponseType, Arg);
+    294          }
+    295          
+    296          /*********************************************************************
+    297          *
+    298          *       _GetResponse
+    299          *
+    300          *  Function description
+    301          *
+    302          *  Return value
+    303          *    TBD
+    304          */
+    305          static int _GetResponse(MMC_CM_INST * pInst, void *pBuffer, U32 Size) {
+    306             return FS_MMC_HW_X_GetResponse(pInst->Unit, pBuffer, Size);
+    307          }
+    308          
+    309          
+    310          /*********************************************************************
+    311          *
+    312          *       _SendAdvCommand
+    313          *
+    314          *  Function description
+    315          *
+    316          *  Return value
+    317          *    TBD
+    318          *
+    319          *  Notes
+    320          *    If "success" is returned, caller MUST call _GetResponse
+    321          */
+    322          static int _SendAdvCommand(MMC_CM_INST * pInst, U32 ACmd, unsigned CmdFlags, unsigned ResponseType, U32 Arg, int MaxRetry) {
+    323            int             r;
+    324            MMC_CARD_STATUS CardStatus;
+    325          
+    326            do {
+    327              FS_MEMSET(&CardStatus, 0, sizeof(MMC_CARD_STATUS));
+    328              _SendCmd(pInst, CMD_ACMD_CMD, 0, FS_MMC_RESPONSE_FORMAT_R1, (U32)(pInst->Rca) << 16);
+    329              r = _GetResponse(pInst, &CardStatus, sizeof (CardStatus));
+    330              if (r == 0) {
+    331                _SendCmd(pInst, ACmd, CmdFlags, ResponseType, Arg);
+    332                break;
+    333              }
+    334            } while(--MaxRetry);
+    335            return r;
+    336          }
+    337          
+    338          
+    339          /**********************************************************
+    340          *
+    341          *       _HWInit
+    342          */
+    343          static void _HWInit(MMC_CM_INST * pInst) {
+    344            FS_MMC_HW_X_InitHW(pInst->Unit);
+    345          }
+    346          
+    347          /**********************************************************
+    348          *
+    349          *       _CheckCardType
+    350          *
+    351          *  Function description
+    352          *    TBD
+    353          *
+    354          *  Return value
+    355          *    FS_MMC_CARDTYPE_SD      SD Card
+    356          *    FS_MMC_CARDTYPE_MMC     MMC Card
+    357          *    FS_MMC_CARDTYPE_NONE    No card found
+    358          */
+
+   \                                 In section .text, align 4, keep-with-next
+    359          static int _CheckCardType(MMC_CM_INST * pInst) {
+   \                     _CheckCardType:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   18D04DE2           SUB      SP,SP,#+24
+   \   00000008   0040A0E1           MOV      R4,R0
+    360            MMC_OCR_RESPONSE ocr;
+    361            int    ocrAttempts;
+    362            // Poll card until it has completed the power-up sequence
+    363            FS_MEMSET(&ocr.aOCR[0], 0, sizeof(ocr));
+   \   0000000C   0610A0E3           MOV      R1,#+6
+   \   00000010   04008DE2           ADD      R0,SP,#+4
+   \   00000014   ........           BL       __aeabi_memclr4
+    364            ocrAttempts = MAX_OCR_RET;
+   \   00000018   FF50A0E3           MOV      R5,#+255
+   \   0000001C   805F85E3           ORR      R5,R5,#0x200
+   \   00000020   4074A0E3           MOV      R7,#+1073741824
+   \   00000024   0560A0E1           MOV      R6,R5
+   \   00000028   707987E3           ORR      R7,R7,#0x1C0000
+    365            //
+    366            // We initialize first a SD card. A SD card needs to be initialized differently
+    367            // from the MMC card -> Send an ACMD41 to card which will give us the OCR information
+    368            // and of course if card is ready. MMC cards with an invalid command and ignores this command
+    369            // sequence.
+    370            //
+    371            while (ocrAttempts > 0) {
+    372              //
+    373              // If controller reports timeout, then the card is rather a MMC card than a SD card.
+    374              //
+    375              if (_SendAdvCommand(pInst, ACMD_SEND_OP_COND, 0, FS_MMC_RESPONSE_FORMAT_R3, VRANGE_OCR | (1UL << 30), 4) == FS_MMC_CARD_NO_ERROR) {
+   \                     ??_CheckCardType_0:
+   \   0000002C   0480A0E3           MOV      R8,#+4
+   \                     ??_CheckCardType_1:
+   \   00000030   0610A0E3           MOV      R1,#+6
+   \   00000034   0C008DE2           ADD      R0,SP,#+12
+   \   00000038   ........           BL       __aeabi_memclr4
+   \   0000003C   B800D4E1           LDRH     R0,[R4, #+8]
+   \   00000040   0130A0E3           MOV      R3,#+1
+   \   00000044   0020A0E3           MOV      R2,#+0
+   \   00000048   0008A0E1           LSL      R0,R0,#+16
+   \   0000004C   00008DE5           STR      R0,[SP, #+0]
+   \   00000050   3710A0E3           MOV      R1,#+55
+   \   00000054   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000058   ........           BL       FS_MMC_HW_X_SendCmd
+   \   0000005C   0620A0E3           MOV      R2,#+6
+   \   00000060   0C108DE2           ADD      R1,SP,#+12
+   \   00000064   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000068   ........           BL       FS_MMC_HW_X_GetResponse
+   \   0000006C   000050E3           CMP      R0,#+0
+   \   00000070   0200000A           BEQ      ??_CheckCardType_2
+   \   00000074   018058E2           SUBS     R8,R8,#+1
+   \   00000078   ECFFFF1A           BNE      ??_CheckCardType_1
+   \   0000007C   100000EA           B        ??_CheckCardType_3
+   \                     ??_CheckCardType_2:
+   \   00000080   00708DE5           STR      R7,[SP, #+0]
+   \   00000084   0330A0E3           MOV      R3,#+3
+   \   00000088   0020A0E3           MOV      R2,#+0
+   \   0000008C   2910A0E3           MOV      R1,#+41
+   \   00000090   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000094   ........           BL       FS_MMC_HW_X_SendCmd
+    376                if (_GetResponse(pInst, &ocr, sizeof (ocr)) == FS_MMC_CARD_NO_ERROR) {
+   \   00000098   0620A0E3           MOV      R2,#+6
+   \   0000009C   04108DE2           ADD      R1,SP,#+4
+   \   000000A0   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000000A4   ........           BL       FS_MMC_HW_X_GetResponse
+   \   000000A8   000050E3           CMP      R0,#+0
+    377                  if (ocr.aOCR[1] == OCR_RDY_MASK) {
+   \   000000AC   0500DD05           LDRBEQ   R0,[SP, #+5]
+   \   000000B0   80005003           CMPEQ    R0,#+128
+    378                    return FS_MMC_CARDTYPE_SD;
+   \   000000B4   0200A003           MOVEQ    R0,#+2
+   \   000000B8   1900000A           BEQ      ??_CheckCardType_4
+    379                  }
+    380                }
+    381              } else {
+    382                 break;
+    383              }
+    384              ocrAttempts--;
+   \   000000BC   016056E2           SUBS     R6,R6,#+1
+    385            }
+   \   000000C0   D9FFFF1A           BNE      ??_CheckCardType_0
+    386            FS_MEMSET(&ocr, 0, sizeof(ocr));
+   \                     ??_CheckCardType_3:
+   \   000000C4   0610A0E3           MOV      R1,#+6
+   \   000000C8   04008DE2           ADD      R0,SP,#+4
+   \   000000CC   ........           BL       __aeabi_memclr4
+    387            ocrAttempts = MAX_OCR_RET;
+    388            while (ocrAttempts > 0) {
+    389              //
+    390              // MMC card will answer to this command if the MMC card is ready
+    391              //
+    392              FS_MEMSET(&ocr, 0, sizeof(ocr));
+   \                     ??_CheckCardType_5:
+   \   000000D0   0610A0E3           MOV      R1,#+6
+   \   000000D4   04008DE2           ADD      R0,SP,#+4
+   \   000000D8   ........           BL       __aeabi_memclr4
+    393              _SendCmd(pInst, CMD_SEND_OP_COND, 0, FS_MMC_RESPONSE_FORMAT_R3, VRANGE_OCR);
+   \   000000DC   7009A0E3           MOV      R0,#+1835008
+   \   000000E0   00008DE5           STR      R0,[SP, #+0]
+   \   000000E4   0330A0E3           MOV      R3,#+3
+   \   000000E8   0020A0E3           MOV      R2,#+0
+   \   000000EC   0110A0E3           MOV      R1,#+1
+   \   000000F0   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000000F4   ........           BL       FS_MMC_HW_X_SendCmd
+    394              _GetResponse(pInst, &ocr, sizeof(ocr));
+   \   000000F8   0620A0E3           MOV      R2,#+6
+   \   000000FC   04108DE2           ADD      R1,SP,#+4
+   \   00000100   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000104   ........           BL       FS_MMC_HW_X_GetResponse
+    395              ocrAttempts--;
+    396              if ((ocr.aOCR[1] & OCR_RDY_MASK) != 0) {
+   \   00000108   0500DDE5           LDRB     R0,[SP, #+5]
+   \   0000010C   015045E2           SUB      R5,R5,#+1
+   \   00000110   800010E3           TST      R0,#0x80
+   \   00000114   0400001A           BNE      ??_CheckCardType_6
+   \   00000118   000055E3           CMP      R5,#+0
+   \   0000011C   EBFFFF1A           BNE      ??_CheckCardType_5
+    397                return FS_MMC_CARDTYPE_MMC;
+    398              }
+    399            }
+    400            return FS_MMC_CARDTYPE_NONE;   // No valid card found
+   \   00000120   0000A0E3           MOV      R0,#+0
+   \                     ??_CheckCardType_4:
+   \   00000124   18D08DE2           ADD      SP,SP,#+24       ;; stack cleaning
+   \   00000128   F081BDE8           POP      {R4-R8,PC}       ;; return
+   \                     ??_CheckCardType_6:
+   \   0000012C   0100A0E3           MOV      R0,#+1
+   \   00000130   FBFFFFEA           B        ??_CheckCardType_4
+    401          }
+    402          
+    403          
+    404          /**********************************************************
+    405          *
+    406          *       _CheckCardTypeV2
+    407          */
+    408          static int _CheckCardTypeV2(MMC_CM_INST * pInst, U8 * pCCS) {
+    409            MMC_OCR_RESPONSE ocr;
+    410            int    ocrAttempts;
+    411            /* Poll card until it has completed the power-up sequence */
+    412            FS_MEMSET(&ocr.aOCR[0], 0, sizeof(ocr));
+    413            ocrAttempts = MAX_OCR_RET;
+    414            //
+    415            // Initialization is almost the same as in SD card V1
+    416            //
+    417            while (ocrAttempts > 0) {
+    418              _SendAdvCommand(pInst, ACMD_SEND_OP_COND, 0, FS_MMC_RESPONSE_FORMAT_R3, VRANGE_OCR | SD_HC_SUPPORT, 1);
+    419              if (_GetResponse(pInst, &ocr, sizeof (ocr)) == FS_MMC_CARD_RESPONSE_TIMEOUT) {
+    420                return FS_MMC_CARDTYPE_NONE;   // No valid card found
+    421              }
+    422              ocrAttempts--;
+    423              if ((ocr.aOCR[1] & OCR_RDY_MASK)) {
+    424                break;
+    425              }
+    426            }
+    427            //
+    428            // When card is in ready state, we additionlly check  which card type it is.
+    429            // Bit 30 in OCR field indicates that card is a SDHC card.
+    430            //
+    431            if (ocr.aOCR[1] & SD_CCS) {
+    432              *pCCS = 1;
+    433            }
+    434            return FS_MMC_CARDTYPE_SD;
+    435          }
+    436          
+    437          
+    438          /**********************************************************
+    439          *
+    440          *       _SelectCard
+    441          */
+
+   \                                 In section .text, align 4, keep-with-next
+    442          static int _SelectCard(MMC_CM_INST * pInst, MMC_CARD_STATUS * pCardStatus) {
+   \                     _SelectCard:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   0150A0E1           MOV      R5,R1
+   \   0000000C   08D04DE2           SUB      SP,SP,#+8
+    443            unsigned CardState;
+    444            unsigned NumRetries;
+    445            int      r;
+    446          
+    447          
+    448            FS_MEMSET(pCardStatus, 0, sizeof(MMC_CARD_STATUS));
+   \   00000010   0610A0E3           MOV      R1,#+6
+   \   00000014   0500A0E1           MOV      R0,R5
+   \   00000018   ........           BL       __aeabi_memclr
+    449            NumRetries = 0x20;
+   \   0000001C   2060A0E3           MOV      R6,#+32
+    450            r          = 1;
+   \   00000020   0170A0E3           MOV      R7,#+1
+    451            do {
+    452              U32 rca;
+    453              rca = pInst->Rca;
+   \                     ??_SelectCard_0:
+   \   00000024   B800D4E1           LDRH     R0,[R4, #+8]
+    454              _SendCmd(pInst, CMD_SELECT_CARD,  FS_MMC_CMD_FLAG_SETBUSY, FS_MMC_RESPONSE_FORMAT_R1, rca << 16);
+   \   00000028   0130A0E3           MOV      R3,#+1
+   \   0000002C   0420A0E3           MOV      R2,#+4
+   \   00000030   0088A0E1           LSL      R8,R0,#+16
+   \   00000034   00808DE5           STR      R8,[SP, #+0]
+   \   00000038   0710A0E3           MOV      R1,#+7
+   \   0000003C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000040   ........           BL       FS_MMC_HW_X_SendCmd
+    455              _GetResponse(pInst, pCardStatus, sizeof(MMC_CARD_STATUS));
+   \   00000044   0620A0E3           MOV      R2,#+6
+   \   00000048   0510A0E1           MOV      R1,R5
+   \   0000004C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000050   ........           BL       FS_MMC_HW_X_GetResponse
+    456              _SendCmd(pInst, CMD_SEND_STATUS, 0, FS_MMC_RESPONSE_FORMAT_R1, rca << 16);
+   \   00000054   00808DE5           STR      R8,[SP, #+0]
+   \   00000058   0130A0E3           MOV      R3,#+1
+   \   0000005C   0020A0E3           MOV      R2,#+0
+   \   00000060   0D10A0E3           MOV      R1,#+13
+   \   00000064   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000068   ........           BL       FS_MMC_HW_X_SendCmd
+    457              _GetResponse(pInst, pCardStatus, sizeof (MMC_CARD_STATUS));
+   \   0000006C   0620A0E3           MOV      R2,#+6
+   \   00000070   0510A0E1           MOV      R1,R5
+   \   00000074   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000078   ........           BL       FS_MMC_HW_X_GetResponse
+    458              if ((pCardStatus->aStatus[1]) || (pCardStatus->aStatus[2] & 0x3f)) {
+   \   0000007C   0100D5E5           LDRB     R0,[R5, #+1]
+   \   00000080   000050E3           CMP      R0,#+0
+   \   00000084   0200D505           LDRBEQ   R0,[R5, #+2]
+   \   00000088   3F001003           TSTEQ    R0,#0x3F
+   \   0000008C   0E00001A           BNE      ??_SelectCard_1
+    459                FS_DEBUG_ERROROUT((FS_MTYPE_DRIVER,  "MMC CM: Card reports an error after selecting card.\n"));
+    460                break;
+    461              }
+    462              CardState = pCardStatus->aStatus[3];
+   \   00000090   0300D5E5           LDRB     R0,[R5, #+3]
+    463              if (((CardState >> 1) == 0x04) && ((CardState & 1))) {
+   \   00000094   A010A0E1           LSR      R1,R0,#+1
+   \   00000098   040051E3           CMP      R1,#+4
+   \   0000009C   0800001A           BNE      ??_SelectCard_2
+   \   000000A0   010010E3           TST      R0,#0x1
+   \   000000A4   0600000A           BEQ      ??_SelectCard_2
+    464                r = 0;
+    465                if (pInst->IsSelected) {
+   \   000000A8   2900D4E5           LDRB     R0,[R4, #+41]
+   \   000000AC   0070A0E3           MOV      R7,#+0
+   \   000000B0   000050E3           CMP      R0,#+0
+    466                  pInst->IsSelected = 0;
+   \   000000B4   2970C415           STRBNE   R7,[R4, #+41]
+    467                }
+    468                pInst->IsSelected = 1;
+   \   000000B8   0100A0E3           MOV      R0,#+1
+   \   000000BC   2900C4E5           STRB     R0,[R4, #+41]
+    469                break;
+   \   000000C0   010000EA           B        ??_SelectCard_1
+    470              }
+    471            } while (--NumRetries);
+   \                     ??_SelectCard_2:
+   \   000000C4   016056E2           SUBS     R6,R6,#+1
+   \   000000C8   D5FFFF1A           BNE      ??_SelectCard_0
+    472            return r;
+   \                     ??_SelectCard_1:
+   \   000000CC   0700A0E1           MOV      R0,R7
+   \   000000D0   08D08DE2           ADD      SP,SP,#+8
+   \   000000D4   F081BDE8           POP      {R4-R8,PC}       ;; return
+    473          }
+    474          
+    475          /**********************************************************
+    476          *
+    477          *       _DeSelectCard
+    478          */
+    479          static int _DeSelectCard(MMC_CM_INST * pInst) {
+    480            unsigned CmdFlags;
+    481          
+    482            CmdFlags = 0;
+    483            if ((pInst->CardType & FS_MMC_CARDTYPE_SD) == 0) { /* It is a MMC card */
+    484              CmdFlags |= FS_MMC_CMD_FLAG_SETBUSY;
+    485            }
+    486            //
+    487            // No response is expected after deselecting the card.
+    488            //
+    489            _SendCmd(pInst, CMD_SELECT_CARD, CmdFlags, FS_MMC_RESPONSE_FORMAT_NONE, 0);
+    490            pInst->IsSelected = 0;
+    491            return 0;
+    492          }
+    493          
+    494          /**********************************************************
+    495          *
+    496          *       _SetBlockLen
+    497          */
+    498          static int _SetBlockLen(MMC_CM_INST * pInst, MMC_CARD_STATUS * pCardStatus) {
+    499            //
+    500            // Setup the SD controller to transfer the standard sector size of the card.
+    501            //
+    502            FS_MMC_HW_X_SetHWBlockLen(pInst->Unit, pInst->BytesPerSector);
+    503            // Send block length command to card
+    504            _SendCmd(pInst, CMD_SET_BLOCKLEN, 0, FS_MMC_RESPONSE_FORMAT_R1, BYTES_PER_SECTOR);
+    505            return _GetResponse(pInst, pCardStatus, sizeof (MMC_CARD_STATUS));
+    506          }
+    507          
+    508          /**********************************************************
+    509          *
+    510          *       _Wait4Ready
+    511          *
+    512          */
+    513          static int _Wait4Ready(MMC_CM_INST * pInst) {
+    514            MMC_CARD_STATUS CardStatus;
+    515            U32 TimeOut;
+    516            TimeOut = 0xFFFFFFUL;
+    517            FS_MEMSET(&CardStatus, 0, sizeof(CardStatus));
+    518            do {
+    519              _SendCmd(pInst, CMD_SEND_STATUS, 0, FS_MMC_RESPONSE_FORMAT_R1, ((U32)pInst->Rca) << 16);
+    520              if (_GetResponse(pInst, &CardStatus, sizeof (CardStatus)) == FS_MMC_CARD_RESPONSE_TIMEOUT) {
+    521                FS_DEBUG_ERROROUT((FS_MTYPE_DRIVER, "Card did not respond to send card status command.\n"));
+    522                return 1;
+    523              }
+    524              if ((CardStatus.aStatus[1]) || (CardStatus.aStatus[2] & 0x3f)) {
+    525                FS_DEBUG_ERROROUT((FS_MTYPE_DRIVER, "Card reports error 0x%x.\n", (((U32)CardStatus.aStatus[1] << 24) | ((U32)CardStatus.aStatus[2] << 16) |
+    526                                                                                   ((U32)CardStatus.aStatus[3] <<  8) | (CardStatus.aStatus[4]))));
+    527                pInst->HasError = 1;
+    528                return 1;
+    529              }
+    530              if (CardStatus.aStatus[3] == 0x09) {
+    531                return 0;
+    532              }
+    533            } while (--TimeOut);
+    534            FS_DEBUG_ERROROUT((FS_MTYPE_DRIVER,  "MMC CM: Card ran into timeout.\n"));
+    535            return 1;
+    536          }
+    537          
+    538          /**********************************************************
+    539          *
+    540          *       _Use4BitMode
+    541          */
+
+   \                                 In section .text, align 4, keep-with-next
+    542          static void _Use4BitMode(MMC_CM_INST * pInst) {
+   \                     _Use4BitMode:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    543            MMC_CARD_STATUS CardStatus;
+    544          
+    545            if (pInst->Use4BitMode == 0) {
+   \   00000008   0400D4E5           LDRB     R0,[R4, #+4]
+   \   0000000C   60D04DE2           SUB      SP,SP,#+96
+   \   00000010   000050E3           CMP      R0,#+0
+   \   00000014   FC00001A           BNE      ??_Use4BitMode_0
+    546              if (pInst->CardType & FS_MMC_CARDTYPE_SD) {
+   \   00000018   0300D4E5           LDRB     R0,[R4, #+3]
+   \   0000001C   020010E3           TST      R0,#0x2
+   \   00000020   F900000A           BEQ      ??_Use4BitMode_0
+    547                U8  aSCR[8] = {0};
+   \   00000024   0C008DE2           ADD      R0,SP,#+12
+   \   00000028   0010A0E3           MOV      R1,#+0
+   \   0000002C   0020A0E3           MOV      R2,#+0
+   \   00000030   0600A0E8           STM      R0!,{R1,R2}
+    548                U8  aStatus[64] = {0};
+   \   00000034   1C008DE2           ADD      R0,SP,#+28
+   \   00000038   0030A0E3           MOV      R3,#+0
+   \   0000003C   00C0A0E3           MOV      R12,#+0
+   \   00000040   0E10A0E8           STM      R0!,{R1-R3,R12}
+   \   00000044   0E10A0E8           STM      R0!,{R1-R3,R12}
+   \   00000048   0E10A0E8           STM      R0!,{R1-R3,R12}
+   \   0000004C   0E10A0E8           STM      R0!,{R1-R3,R12}
+    549                U8  Unit;
+    550                int r;
+    551          
+    552                _SelectCard(pInst, &CardStatus);
+   \   00000050   04108DE2           ADD      R1,SP,#+4
+   \   00000054   0400A0E1           MOV      R0,R4
+   \   00000058   ........           BL       _SelectCard
+    553                Unit  = pInst->Unit;
+   \   0000005C   0150D4E5           LDRB     R5,[R4, #+1]
+    554                //
+    555                // Send initially a "get SD Status"
+    556                //
+    557                FS_MMC_HW_X_SetHWNumBlocks(pInst->Unit, 1);
+   \   00000060   0110A0E3           MOV      R1,#+1
+   \   00000064   0500A0E1           MOV      R0,R5
+   \   00000068   ........           BL       FS_MMC_HW_X_SetHWNumBlocks
+    558                FS_MMC_HW_X_SetHWBlockLen(pInst->Unit, sizeof(aStatus));
+   \   0000006C   4010A0E3           MOV      R1,#+64
+   \   00000070   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000074   ........           BL       FS_MMC_HW_X_SetHWBlockLen
+    559                FS_MMC_HW_X_SetDataPointer(pInst->Unit, aStatus);
+   \   00000078   1C108DE2           ADD      R1,SP,#+28
+   \   0000007C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000080   ........           BL       FS_MMC_HW_X_SetDataPointer
+    560                _SendAdvCommand(pInst, ACMD_SD_STATUS, FS_MMC_CMD_FLAG_DATATRANSFER, FS_MMC_RESPONSE_FORMAT_R1, 0, 10);
+   \   00000084   0A60A0E3           MOV      R6,#+10
+   \                     ??_Use4BitMode_1:
+   \   00000088   0610A0E3           MOV      R1,#+6
+   \   0000008C   14008DE2           ADD      R0,SP,#+20
+   \   00000090   ........           BL       __aeabi_memclr4
+   \   00000094   B800D4E1           LDRH     R0,[R4, #+8]
+   \   00000098   0130A0E3           MOV      R3,#+1
+   \   0000009C   0020A0E3           MOV      R2,#+0
+   \   000000A0   0008A0E1           LSL      R0,R0,#+16
+   \   000000A4   00008DE5           STR      R0,[SP, #+0]
+   \   000000A8   3710A0E3           MOV      R1,#+55
+   \   000000AC   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000000B0   ........           BL       FS_MMC_HW_X_SendCmd
+   \   000000B4   0620A0E3           MOV      R2,#+6
+   \   000000B8   14108DE2           ADD      R1,SP,#+20
+   \   000000BC   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000000C0   ........           BL       FS_MMC_HW_X_GetResponse
+   \   000000C4   000050E3           CMP      R0,#+0
+   \   000000C8   0200000A           BEQ      ??_Use4BitMode_2
+   \   000000CC   016056E2           SUBS     R6,R6,#+1
+   \   000000D0   ECFFFF1A           BNE      ??_Use4BitMode_1
+   \   000000D4   050000EA           B        ??_Use4BitMode_3
+   \                     ??_Use4BitMode_2:
+   \   000000D8   00008DE5           STR      R0,[SP, #+0]
+   \   000000DC   0130A0E3           MOV      R3,#+1
+   \   000000E0   0120A0E3           MOV      R2,#+1
+   \   000000E4   0D10A0E3           MOV      R1,#+13
+   \   000000E8   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000000EC   ........           BL       FS_MMC_HW_X_SendCmd
+    561                _GetResponse(pInst, &CardStatus, sizeof (CardStatus));
+   \                     ??_Use4BitMode_3:
+   \   000000F0   0620A0E3           MOV      R2,#+6
+   \   000000F4   04108DE2           ADD      R1,SP,#+4
+   \   000000F8   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000000FC   ........           BL       FS_MMC_HW_X_GetResponse
+    562                FS_MMC_HW_X_ReadData(Unit, aStatus, sizeof(aStatus), 1);
+   \   00000100   0130A0E3           MOV      R3,#+1
+   \   00000104   4020A0E3           MOV      R2,#+64
+   \   00000108   1C108DE2           ADD      R1,SP,#+28
+   \   0000010C   0500A0E1           MOV      R0,R5
+   \   00000110   ........           BL       FS_MMC_HW_X_ReadData
+    563                //
+    564                // Retrieve if SD card supports 4-bit mode
+    565                //
+    566                FS_MMC_HW_X_SetHWNumBlocks(pInst->Unit, 1);
+   \   00000114   0110A0E3           MOV      R1,#+1
+   \   00000118   0100D4E5           LDRB     R0,[R4, #+1]
+   \   0000011C   ........           BL       FS_MMC_HW_X_SetHWNumBlocks
+    567                FS_MMC_HW_X_SetHWBlockLen(pInst->Unit, sizeof(aSCR));
+   \   00000120   0810A0E3           MOV      R1,#+8
+   \   00000124   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000128   ........           BL       FS_MMC_HW_X_SetHWBlockLen
+    568                FS_MMC_HW_X_SetDataPointer(pInst->Unit, aSCR);
+   \   0000012C   0C108DE2           ADD      R1,SP,#+12
+   \   00000130   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000134   ........           BL       FS_MMC_HW_X_SetDataPointer
+    569                _SendAdvCommand(pInst, ACMD_SEND_SCR, FS_MMC_CMD_FLAG_DATATRANSFER, FS_MMC_RESPONSE_FORMAT_R1, 0, 10);
+   \   00000138   0A50A0E3           MOV      R5,#+10
+   \                     ??_Use4BitMode_4:
+   \   0000013C   0610A0E3           MOV      R1,#+6
+   \   00000140   14008DE2           ADD      R0,SP,#+20
+   \   00000144   ........           BL       __aeabi_memclr4
+   \   00000148   B800D4E1           LDRH     R0,[R4, #+8]
+   \   0000014C   0130A0E3           MOV      R3,#+1
+   \   00000150   0020A0E3           MOV      R2,#+0
+   \   00000154   0008A0E1           LSL      R0,R0,#+16
+   \   00000158   00008DE5           STR      R0,[SP, #+0]
+   \   0000015C   3710A0E3           MOV      R1,#+55
+   \   00000160   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000164   ........           BL       FS_MMC_HW_X_SendCmd
+   \   00000168   0620A0E3           MOV      R2,#+6
+   \   0000016C   14108DE2           ADD      R1,SP,#+20
+   \   00000170   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000174   ........           BL       FS_MMC_HW_X_GetResponse
+   \   00000178   000050E3           CMP      R0,#+0
+   \   0000017C   0200000A           BEQ      ??_Use4BitMode_5
+   \   00000180   015055E2           SUBS     R5,R5,#+1
+   \   00000184   ECFFFF1A           BNE      ??_Use4BitMode_4
+   \   00000188   050000EA           B        ??_Use4BitMode_6
+   \                     ??_Use4BitMode_5:
+   \   0000018C   00008DE5           STR      R0,[SP, #+0]
+   \   00000190   0130A0E3           MOV      R3,#+1
+   \   00000194   0120A0E3           MOV      R2,#+1
+   \   00000198   3310A0E3           MOV      R1,#+51
+   \   0000019C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000001A0   ........           BL       FS_MMC_HW_X_SendCmd
+    570                _GetResponse(pInst, &CardStatus, sizeof (CardStatus));
+   \                     ??_Use4BitMode_6:
+   \   000001A4   0620A0E3           MOV      R2,#+6
+   \   000001A8   04108DE2           ADD      R1,SP,#+4
+   \   000001AC   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000001B0   ........           BL       FS_MMC_HW_X_GetResponse
+    571                r = FS_MMC_HW_X_ReadData(pInst->Unit, aSCR, sizeof(aSCR), 1);
+    572                if (r == 0) {
+   \   000001B4   0130A0E3           MOV      R3,#+1
+   \   000001B8   0820A0E3           MOV      R2,#+8
+   \   000001BC   0C108DE2           ADD      R1,SP,#+12
+   \   000001C0   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000001C4   ........           BL       FS_MMC_HW_X_ReadData
+   \   000001C8   000050E3           CMP      R0,#+0
+   \   000001CC   8300001A           BNE      ??_Use4BitMode_7
+    573                  //
+    574                  // SD 4-bit mode supported
+    575                  //
+    576                  if (aSCR[1] & (1 << 2)) {
+   \   000001D0   0D00DDE5           LDRB     R0,[SP, #+13]
+   \   000001D4   040010E3           TST      R0,#0x4
+   \   000001D8   8000000A           BEQ      ??_Use4BitMode_7
+    577                    //
+    578                    // Setup the card into 4-bit mode
+    579                    //
+    580                    _SendAdvCommand(pInst, ACMD_SET_BUS_WIDTH, 0, FS_MMC_RESPONSE_FORMAT_R1, BUS_WIDTH_4BIT, 10);
+   \   000001DC   0A50A0E3           MOV      R5,#+10
+   \                     ??_Use4BitMode_8:
+   \   000001E0   0610A0E3           MOV      R1,#+6
+   \   000001E4   14008DE2           ADD      R0,SP,#+20
+   \   000001E8   ........           BL       __aeabi_memclr4
+   \   000001EC   B800D4E1           LDRH     R0,[R4, #+8]
+   \   000001F0   0130A0E3           MOV      R3,#+1
+   \   000001F4   0020A0E3           MOV      R2,#+0
+   \   000001F8   0008A0E1           LSL      R0,R0,#+16
+   \   000001FC   00008DE5           STR      R0,[SP, #+0]
+   \   00000200   3710A0E3           MOV      R1,#+55
+   \   00000204   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000208   ........           BL       FS_MMC_HW_X_SendCmd
+   \   0000020C   0620A0E3           MOV      R2,#+6
+   \   00000210   14108DE2           ADD      R1,SP,#+20
+   \   00000214   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000218   ........           BL       FS_MMC_HW_X_GetResponse
+   \   0000021C   000050E3           CMP      R0,#+0
+   \   00000220   0200000A           BEQ      ??_Use4BitMode_9
+   \   00000224   015055E2           SUBS     R5,R5,#+1
+   \   00000228   ECFFFF1A           BNE      ??_Use4BitMode_8
+   \   0000022C   060000EA           B        ??_Use4BitMode_10
+   \                     ??_Use4BitMode_9:
+   \   00000230   0200A0E3           MOV      R0,#+2
+   \   00000234   00008DE5           STR      R0,[SP, #+0]
+   \   00000238   0130A0E3           MOV      R3,#+1
+   \   0000023C   0020A0E3           MOV      R2,#+0
+   \   00000240   0610A0E3           MOV      R1,#+6
+   \   00000244   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000248   ........           BL       FS_MMC_HW_X_SendCmd
+    581                    if (_GetResponse(pInst, &CardStatus, sizeof (CardStatus)) == 0) {
+   \                     ??_Use4BitMode_10:
+   \   0000024C   0620A0E3           MOV      R2,#+6
+   \   00000250   04108DE2           ADD      R1,SP,#+4
+   \   00000254   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000258   ........           BL       FS_MMC_HW_X_GetResponse
+    582                      //
+    583                      //  These line have been commented out since it may not work with hardware where an external pull-up on that line (DAT3, pin1)
+    584                      //  on the board is not connected or available. As the internal pull-up is between 10-90 kOhm, it may not hurt when an external
+    585                      //  is available.
+    586                      //
+    587                      //
+    588                      // _SendAdvCommand(pInst, ACMD_SET_CLR_CARD_DETECT, 0, FS_MMC_RESPONSE_FORMAT_R1, 0, 10);
+    589                      // _GetResponse(pInst, &CardStatus, sizeof (CardStatus));
+    590                    }
+    591                    _DeSelectCard(pInst);
+   \   0000025C   0300D4E5           LDRB     R0,[R4, #+3]
+   \   00000260   0050A0E3           MOV      R5,#+0
+   \   00000264   0020A0E3           MOV      R2,#+0
+   \   00000268   020010E3           TST      R0,#0x2
+   \   0000026C   00508DE5           STR      R5,[SP, #+0]
+   \   00000270   0420A003           MOVEQ    R2,#+4
+   \   00000274   0030A0E3           MOV      R3,#+0
+   \   00000278   0710A0E3           MOV      R1,#+7
+   \   0000027C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000280   ........           BL       FS_MMC_HW_X_SendCmd
+   \   00000284   2950C4E5           STRB     R5,[R4, #+41]
+    592                    _SelectCard(pInst, &CardStatus);
+   \   00000288   04108DE2           ADD      R1,SP,#+4
+   \   0000028C   0400A0E1           MOV      R0,R4
+   \   00000290   ........           BL       _SelectCard
+    593                    FS_MMC_HW_X_Delay(10);
+   \   00000294   0A00A0E3           MOV      R0,#+10
+   \   00000298   ........           BL       FS_MMC_HW_X_Delay
+    594                    //
+    595                    // Send a SD send status to check if SD 4-bit mode is working, otherwise we switch back to SD 1-bit mode (hardware reports read timeout)
+    596                    //
+    597                    FS_MMC_HW_X_SetHWNumBlocks(pInst->Unit, 1);
+   \   0000029C   0110A0E3           MOV      R1,#+1
+   \   000002A0   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000002A4   ........           BL       FS_MMC_HW_X_SetHWNumBlocks
+    598                    FS_MMC_HW_X_SetHWBlockLen(pInst->Unit, sizeof(aStatus));
+   \   000002A8   4010A0E3           MOV      R1,#+64
+   \   000002AC   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000002B0   ........           BL       FS_MMC_HW_X_SetHWBlockLen
+    599                    FS_MMC_HW_X_SetDataPointer(pInst->Unit, aStatus);
+   \   000002B4   1C108DE2           ADD      R1,SP,#+28
+   \   000002B8   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000002BC   ........           BL       FS_MMC_HW_X_SetDataPointer
+    600                    _SendAdvCommand(pInst, ACMD_SD_STATUS, FS_MMC_CMD_FLAG_DATATRANSFER | FS_MMC_CMD_FLAG_USE_SD4MODE, FS_MMC_RESPONSE_FORMAT_R1, 0, 10);
+   \   000002C0   0A60A0E3           MOV      R6,#+10
+   \                     ??_Use4BitMode_11:
+   \   000002C4   0610A0E3           MOV      R1,#+6
+   \   000002C8   14008DE2           ADD      R0,SP,#+20
+   \   000002CC   ........           BL       __aeabi_memclr4
+   \   000002D0   B800D4E1           LDRH     R0,[R4, #+8]
+   \   000002D4   0130A0E3           MOV      R3,#+1
+   \   000002D8   0020A0E3           MOV      R2,#+0
+   \   000002DC   0008A0E1           LSL      R0,R0,#+16
+   \   000002E0   00008DE5           STR      R0,[SP, #+0]
+   \   000002E4   3710A0E3           MOV      R1,#+55
+   \   000002E8   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000002EC   ........           BL       FS_MMC_HW_X_SendCmd
+   \   000002F0   0620A0E3           MOV      R2,#+6
+   \   000002F4   14108DE2           ADD      R1,SP,#+20
+   \   000002F8   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000002FC   ........           BL       FS_MMC_HW_X_GetResponse
+   \   00000300   000050E3           CMP      R0,#+0
+   \   00000304   0200000A           BEQ      ??_Use4BitMode_12
+   \   00000308   016056E2           SUBS     R6,R6,#+1
+   \   0000030C   ECFFFF1A           BNE      ??_Use4BitMode_11
+   \   00000310   050000EA           B        ??_Use4BitMode_13
+   \                     ??_Use4BitMode_12:
+   \   00000314   00008DE5           STR      R0,[SP, #+0]
+   \   00000318   0130A0E3           MOV      R3,#+1
+   \   0000031C   1120A0E3           MOV      R2,#+17
+   \   00000320   0D10A0E3           MOV      R1,#+13
+   \   00000324   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000328   ........           BL       FS_MMC_HW_X_SendCmd
+    601                    _GetResponse(pInst, &CardStatus, sizeof (CardStatus));
+   \                     ??_Use4BitMode_13:
+   \   0000032C   0620A0E3           MOV      R2,#+6
+   \   00000330   04108DE2           ADD      R1,SP,#+4
+   \   00000334   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000338   ........           BL       FS_MMC_HW_X_GetResponse
+    602                    r = FS_MMC_HW_X_ReadData(pInst->Unit, aStatus, sizeof(aStatus), 1);
+    603                    if (r == 0) {
+   \   0000033C   0130A0E3           MOV      R3,#+1
+   \   00000340   4020A0E3           MOV      R2,#+64
+   \   00000344   1C108DE2           ADD      R1,SP,#+28
+   \   00000348   0100D4E5           LDRB     R0,[R4, #+1]
+   \   0000034C   ........           BL       FS_MMC_HW_X_ReadData
+   \   00000350   000050E3           CMP      R0,#+0
+    604                      pInst->Use4BitMode = 1;
+   \   00000354   0100A003           MOVEQ    R0,#+1
+   \   00000358   0400C405           STRBEQ   R0,[R4, #+4]
+   \   0000035C   1F00000A           BEQ      ??_Use4BitMode_7
+    605                    } else {
+    606                      _SendAdvCommand(pInst, ACMD_SET_BUS_WIDTH, 0, FS_MMC_RESPONSE_FORMAT_R1, BUS_WIDTH_1BIT, 10);
+   \   00000360   0A60A0E3           MOV      R6,#+10
+   \                     ??_Use4BitMode_14:
+   \   00000364   0610A0E3           MOV      R1,#+6
+   \   00000368   14008DE2           ADD      R0,SP,#+20
+   \   0000036C   ........           BL       __aeabi_memclr4
+   \   00000370   B800D4E1           LDRH     R0,[R4, #+8]
+   \   00000374   0130A0E3           MOV      R3,#+1
+   \   00000378   0020A0E3           MOV      R2,#+0
+   \   0000037C   0008A0E1           LSL      R0,R0,#+16
+   \   00000380   00008DE5           STR      R0,[SP, #+0]
+   \   00000384   3710A0E3           MOV      R1,#+55
+   \   00000388   0100D4E5           LDRB     R0,[R4, #+1]
+   \   0000038C   ........           BL       FS_MMC_HW_X_SendCmd
+   \   00000390   0620A0E3           MOV      R2,#+6
+   \   00000394   14108DE2           ADD      R1,SP,#+20
+   \   00000398   0100D4E5           LDRB     R0,[R4, #+1]
+   \   0000039C   ........           BL       FS_MMC_HW_X_GetResponse
+   \   000003A0   000050E3           CMP      R0,#+0
+   \   000003A4   0200000A           BEQ      ??_Use4BitMode_15
+   \   000003A8   016056E2           SUBS     R6,R6,#+1
+   \   000003AC   ECFFFF1A           BNE      ??_Use4BitMode_14
+   \   000003B0   050000EA           B        ??_Use4BitMode_16
+   \                     ??_Use4BitMode_15:
+   \   000003B4   00008DE5           STR      R0,[SP, #+0]
+   \   000003B8   0130A0E3           MOV      R3,#+1
+   \   000003BC   0020A0E3           MOV      R2,#+0
+   \   000003C0   0610A0E3           MOV      R1,#+6
+   \   000003C4   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000003C8   ........           BL       FS_MMC_HW_X_SendCmd
+    607                      _GetResponse(pInst, &CardStatus, sizeof (CardStatus));
+   \                     ??_Use4BitMode_16:
+   \   000003CC   0620A0E3           MOV      R2,#+6
+   \   000003D0   04108DE2           ADD      R1,SP,#+4
+   \   000003D4   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000003D8   ........           BL       FS_MMC_HW_X_GetResponse
+    608                      pInst->Use4BitMode = 0;
+   \   000003DC   0450C4E5           STRB     R5,[R4, #+4]
+    609                    }
+    610                  }
+    611                }
+    612                _DeSelectCard(pInst);
+   \                     ??_Use4BitMode_7:
+   \   000003E0   0300D4E5           LDRB     R0,[R4, #+3]
+   \   000003E4   0050A0E3           MOV      R5,#+0
+   \   000003E8   0020A0E3           MOV      R2,#+0
+   \   000003EC   020010E3           TST      R0,#0x2
+   \   000003F0   00508DE5           STR      R5,[SP, #+0]
+   \   000003F4   0420A003           MOVEQ    R2,#+4
+   \   000003F8   0030A0E3           MOV      R3,#+0
+   \   000003FC   0710A0E3           MOV      R1,#+7
+   \   00000400   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000404   ........           BL       FS_MMC_HW_X_SendCmd
+   \   00000408   2950C4E5           STRB     R5,[R4, #+41]
+    613              }
+    614            }
+    615          }
+   \                     ??_Use4BitMode_0:
+   \   0000040C   60D08DE2           ADD      SP,SP,#+96       ;; stack cleaning
+   \   00000410   7080BDE8           POP      {R4-R6,PC}       ;; return
+    616          
+    617          /*********************************************************************
+    618          *
+    619          *       _ReadCSD
+    620          *
+    621          *  Description:
+    622          *    Read the card's CSD (card specific data) registers and check
+    623          *    its contents.
+    624          *
+    625          *  Parameters:
+    626          *    Unit      - Device unit number
+    627          *    pCSD      - pointer to CSD structure
+    628          *
+    629          *  Return value:
+    630          *    ==0           - CSD has been read and all parameters are valid.
+    631          *    <0            - An error has occurred.
+    632          */
+    633          static U8 _ReadCSD(MMC_CM_INST * pInst, CM_CSD * pCSD) {
+    634            FS_MEMSET(pCSD, 0, sizeof(CM_CSD));
+    635            _SendCmd(pInst, CMD_SEND_CSD, 0, FS_MMC_RESPONSE_FORMAT_R2, (U32)(pInst->Rca) << 16);
+    636            if (_GetResponse(pInst, pCSD, sizeof (CM_CSD)) != FS_MMC_CARD_NO_ERROR) {
+    637              return 0xff;
+    638            }
+    639            return 0;     /* No problem ! */
+    640          }
+    641          
+    642          /*********************************************************************
+    643          *
+    644          *       _ExecSwitchFunc
+    645          *
+    646          */
+    647          static int _ExecSwitchFunc(MMC_CM_INST * pInst, int Mode, int Group, U8 Value, U8 * pResp) {
+    648            U32             Arg;
+    649            MMC_CARD_STATUS CardStatus;
+    650            U8              Unit;
+    651          
+    652            Unit     = pInst->Unit;
+    653            Arg = Mode << 31 | 0x00FFFFFF;
+    654            Arg &= ~(0x0FUL << (Group * 4));
+    655            Arg |= Value << (Group * 4);
+    656            FS_MMC_HW_X_SetHWBlockLen(pInst->Unit, 64);
+    657            FS_MMC_HW_X_SetHWNumBlocks(pInst->Unit, 1);
+    658            FS_MMC_HW_X_SetDataPointer(pInst->Unit, pResp);
+    659            _SendCmd(pInst, CMD_SWITCH_FUNC, FS_MMC_CMD_FLAG_DATATRANSFER, FS_MMC_RESPONSE_FORMAT_R1, Arg);
+    660            if (_GetResponse(pInst, &CardStatus, sizeof (CardStatus)) == FS_MMC_CARD_NO_ERROR) {
+    661              FS_MMC_HW_X_ReadData(Unit, pResp, 64, 1);
+    662            } else {
+    663              return -1;
+    664            }
+    665            return 0;
+    666          }
+    667          
+    668          /*********************************************************************
+    669          *
+    670          *       _CheckAndSwitchToHighSpeed
+    671          *
+    672          */
+
+   \                                 In section .text, align 4, keep-with-next
+    673          static int _CheckAndSwitchToHighSpeed(MMC_CM_INST * pInst, const CM_CSD * pCSD) {
+   \                     _CheckAndSwitchToHighSpeed:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    674            int r;
+    675            U32      CCCSupported;
+    676          
+    677            r = -1;
+    678            if (pInst->AllowHighSpeedMode) {
+   \   00000008   2A00D4E5           LDRB     R0,[R4, #+42]
+   \   0000000C   60D04DE2           SUB      SP,SP,#+96
+   \   00000010   0050E0E3           MVN      R5,#+0
+   \   00000014   000050E3           CMP      R0,#+0
+   \   00000018   8700000A           BEQ      ??_CheckAndSwitchToHighSpeed_0
+    679              CCCSupported = CSD_CCC_CLASSES(pCSD);
+    680              //
+    681              //  If the switch function is supported, we
+    682              //  ask the card whether it supports high speed mode.
+    683              //  This is only true for SD-Cards.
+    684              //  MMCs do not support such a command class
+    685              //
+    686              if ((CCCSupported & (1 << 10)) && (pInst->CardType & FS_MMC_CARDTYPE_SD)) {
+   \   0000001C   0500D1E5           LDRB     R0,[R1, #+5]
+   \   00000020   401EA0E3           MOV      R1,#+1024
+   \   00000024   000211E1           TST      R1,R0, LSL #+4
+   \   00000028   0300D415           LDRBNE   R0,[R4, #+3]
+   \   0000002C   02001013           TSTNE    R0,#0x2
+   \   00000030   8100000A           BEQ      ??_CheckAndSwitchToHighSpeed_0
+    687                MMC_CARD_STATUS CardStatus;
+    688                U8              aSCR[8];
+    689                U8              ScrVersion;
+    690                _SelectCard(pInst, &CardStatus);
+   \   00000034   14108DE2           ADD      R1,SP,#+20
+   \   00000038   0400A0E1           MOV      R0,R4
+   \   0000003C   ........           BL       _SelectCard
+    691                //
+    692                // Send initially a "get SCR"
+    693                //
+    694                FS_MMC_HW_X_SetHWNumBlocks(pInst->Unit, 1);
+   \   00000040   0110A0E3           MOV      R1,#+1
+   \   00000044   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000048   ........           BL       FS_MMC_HW_X_SetHWNumBlocks
+    695                FS_MMC_HW_X_SetHWBlockLen(pInst->Unit, sizeof(aSCR));
+   \   0000004C   0810A0E3           MOV      R1,#+8
+   \   00000050   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000054   ........           BL       FS_MMC_HW_X_SetHWBlockLen
+    696                //lint -e{603} suppress "Symol aSCR not initialized"
+    697                FS_MMC_HW_X_SetDataPointer(pInst->Unit, &aSCR[0]);
+   \   00000058   04108DE2           ADD      R1,SP,#+4
+   \   0000005C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000060   ........           BL       FS_MMC_HW_X_SetDataPointer
+    698                _SendAdvCommand(pInst, ACMD_SEND_SCR, FS_MMC_CMD_FLAG_DATATRANSFER, FS_MMC_RESPONSE_FORMAT_R1, 0, 10);
+   \   00000064   0A60A0E3           MOV      R6,#+10
+   \                     ??_CheckAndSwitchToHighSpeed_1:
+   \   00000068   0610A0E3           MOV      R1,#+6
+   \   0000006C   0C008DE2           ADD      R0,SP,#+12
+   \   00000070   ........           BL       __aeabi_memclr4
+   \   00000074   B800D4E1           LDRH     R0,[R4, #+8]
+   \   00000078   0130A0E3           MOV      R3,#+1
+   \   0000007C   0020A0E3           MOV      R2,#+0
+   \   00000080   0008A0E1           LSL      R0,R0,#+16
+   \   00000084   00008DE5           STR      R0,[SP, #+0]
+   \   00000088   3710A0E3           MOV      R1,#+55
+   \   0000008C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000090   ........           BL       FS_MMC_HW_X_SendCmd
+   \   00000094   0620A0E3           MOV      R2,#+6
+   \   00000098   0C108DE2           ADD      R1,SP,#+12
+   \   0000009C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000000A0   ........           BL       FS_MMC_HW_X_GetResponse
+   \   000000A4   000050E3           CMP      R0,#+0
+   \   000000A8   0200000A           BEQ      ??_CheckAndSwitchToHighSpeed_2
+   \   000000AC   016056E2           SUBS     R6,R6,#+1
+   \   000000B0   ECFFFF1A           BNE      ??_CheckAndSwitchToHighSpeed_1
+   \   000000B4   050000EA           B        ??_CheckAndSwitchToHighSpeed_3
+   \                     ??_CheckAndSwitchToHighSpeed_2:
+   \   000000B8   00008DE5           STR      R0,[SP, #+0]
+   \   000000BC   0130A0E3           MOV      R3,#+1
+   \   000000C0   0120A0E3           MOV      R2,#+1
+   \   000000C4   3310A0E3           MOV      R1,#+51
+   \   000000C8   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000000CC   ........           BL       FS_MMC_HW_X_SendCmd
+    699                if (_GetResponse(pInst, &CardStatus, sizeof (CardStatus)) == FS_MMC_CARD_NO_ERROR) {
+   \                     ??_CheckAndSwitchToHighSpeed_3:
+   \   000000D0   0620A0E3           MOV      R2,#+6
+   \   000000D4   14108DE2           ADD      R1,SP,#+20
+   \   000000D8   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000000DC   ........           BL       FS_MMC_HW_X_GetResponse
+   \   000000E0   000050E3           CMP      R0,#+0
+   \   000000E4   4900001A           BNE      ??_CheckAndSwitchToHighSpeed_4
+    700                  FS_MMC_HW_X_ReadData(pInst->Unit, aSCR, sizeof(aSCR), 1);
+   \   000000E8   0130A0E3           MOV      R3,#+1
+   \   000000EC   0820A0E3           MOV      R2,#+8
+   \   000000F0   04108DE2           ADD      R1,SP,#+4
+   \   000000F4   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000000F8   ........           BL       FS_MMC_HW_X_ReadData
+    701                  //
+    702                  //  Check the SCR version
+    703                  //
+    704                  ScrVersion = _GetBits(aSCR, 56, 59, sizeof(aSCR));
+    705                  if (ScrVersion >= SD_SPEC_VER_200) {
+   \   000000FC   0400DDE5           LDRB     R0,[SP, #+4]
+   \   00000100   0F0000E2           AND      R0,R0,#0xF
+   \   00000104   020050E3           CMP      R0,#+2
+   \   00000108   4000003A           BCC      ??_CheckAndSwitchToHighSpeed_4
+    706                    U8 aSwitch[64];
+    707                    U32 Data;
+    708                    //
+    709                    // In case we deal with a card that conforms to the SD specification V2.00
+    710                    // we check the available functions on the card
+    711                    //
+    712                    if (_ExecSwitchFunc(pInst, 0, 0, 1, aSwitch) == 0) {
+   \   0000010C   0160D4E5           LDRB     R6,[R4, #+1]
+   \   00000110   4010A0E3           MOV      R1,#+64
+   \   00000114   0600A0E1           MOV      R0,R6
+   \   00000118   ........           BL       FS_MMC_HW_X_SetHWBlockLen
+   \   0000011C   0110A0E3           MOV      R1,#+1
+   \   00000120   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000124   ........           BL       FS_MMC_HW_X_SetHWNumBlocks
+   \   00000128   1C108DE2           ADD      R1,SP,#+28
+   \   0000012C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000130   ........           BL       FS_MMC_HW_X_SetDataPointer
+   \   00000134   0E00E0E3           MVN      R0,#+14
+   \   00000138   FF04C0E3           BIC      R0,R0,#0xFF000000
+   \   0000013C   00008DE5           STR      R0,[SP, #+0]
+   \   00000140   0130A0E3           MOV      R3,#+1
+   \   00000144   0120A0E3           MOV      R2,#+1
+   \   00000148   0610A0E3           MOV      R1,#+6
+   \   0000014C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000150   ........           BL       FS_MMC_HW_X_SendCmd
+   \   00000154   0620A0E3           MOV      R2,#+6
+   \   00000158   0C108DE2           ADD      R1,SP,#+12
+   \   0000015C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000160   ........           BL       FS_MMC_HW_X_GetResponse
+   \   00000164   000050E3           CMP      R0,#+0
+   \   00000168   2800001A           BNE      ??_CheckAndSwitchToHighSpeed_4
+   \   0000016C   0130A0E3           MOV      R3,#+1
+   \   00000170   4020A0E3           MOV      R2,#+64
+   \   00000174   1C108DE2           ADD      R1,SP,#+28
+   \   00000178   0600A0E1           MOV      R0,R6
+   \   0000017C   ........           BL       FS_MMC_HW_X_ReadData
+    713                      Data = _GetBits(aSwitch, 400, 415, 64);
+    714                      //
+    715                      // Is function 1 and group 1 supported, we try to switch card in high-speed mode
+    716                      //
+    717                      if (Data & 1) {
+   \   00000180   2900DDE5           LDRB     R0,[SP, #+41]
+   \   00000184   010010E3           TST      R0,#0x1
+   \   00000188   2000000A           BEQ      ??_CheckAndSwitchToHighSpeed_4
+    718                        if (_ExecSwitchFunc(pInst, 1, 0, 1, aSwitch) == 0) {
+   \   0000018C   0160D4E5           LDRB     R6,[R4, #+1]
+   \   00000190   4010A0E3           MOV      R1,#+64
+   \   00000194   0600A0E1           MOV      R0,R6
+   \   00000198   ........           BL       FS_MMC_HW_X_SetHWBlockLen
+   \   0000019C   0110A0E3           MOV      R1,#+1
+   \   000001A0   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000001A4   ........           BL       FS_MMC_HW_X_SetHWNumBlocks
+   \   000001A8   1C108DE2           ADD      R1,SP,#+28
+   \   000001AC   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000001B0   ........           BL       FS_MMC_HW_X_SetDataPointer
+   \   000001B4   0E00E0E3           MVN      R0,#+14
+   \   000001B8   7F04C0E3           BIC      R0,R0,#0x7F000000
+   \   000001BC   00008DE5           STR      R0,[SP, #+0]
+   \   000001C0   0130A0E3           MOV      R3,#+1
+   \   000001C4   0120A0E3           MOV      R2,#+1
+   \   000001C8   0610A0E3           MOV      R1,#+6
+   \   000001CC   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000001D0   ........           BL       FS_MMC_HW_X_SendCmd
+   \   000001D4   0620A0E3           MOV      R2,#+6
+   \   000001D8   0C108DE2           ADD      R1,SP,#+12
+   \   000001DC   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000001E0   ........           BL       FS_MMC_HW_X_GetResponse
+   \   000001E4   000050E3           CMP      R0,#+0
+   \   000001E8   0800001A           BNE      ??_CheckAndSwitchToHighSpeed_4
+   \   000001EC   0130A0E3           MOV      R3,#+1
+   \   000001F0   4020A0E3           MOV      R2,#+64
+   \   000001F4   1C108DE2           ADD      R1,SP,#+28
+   \   000001F8   0600A0E1           MOV      R0,R6
+   \   000001FC   ........           BL       FS_MMC_HW_X_ReadData
+    719                          Data = _GetBits(aSwitch, 376, 379, 64);
+    720                          //
+    721                          // If the card switches to high-speed mode,
+    722                          // the card will respond with "0x01" otherwise the
+    723                          // response will be "0x0f"
+    724                          //
+    725                          if ((Data & 0xF) == 1) {
+   \   00000200   2C00DDE5           LDRB     R0,[SP, #+44]
+   \   00000204   0F0000E2           AND      R0,R0,#0xF
+   \   00000208   010050E3           CMP      R0,#+1
+    726                            r = 0;
+   \   0000020C   0050A003           MOVEQ    R5,#+0
+    727                          }
+    728                        }
+    729                      }
+    730                    }
+    731                  }
+    732                }
+    733                _DeSelectCard(pInst);
+   \                     ??_CheckAndSwitchToHighSpeed_4:
+   \   00000210   0300D4E5           LDRB     R0,[R4, #+3]
+   \   00000214   0060A0E3           MOV      R6,#+0
+   \   00000218   0020A0E3           MOV      R2,#+0
+   \   0000021C   020010E3           TST      R0,#0x2
+   \   00000220   00608DE5           STR      R6,[SP, #+0]
+   \   00000224   0420A003           MOVEQ    R2,#+4
+   \   00000228   0030A0E3           MOV      R3,#+0
+   \   0000022C   0710A0E3           MOV      R1,#+7
+   \   00000230   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000234   ........           BL       FS_MMC_HW_X_SendCmd
+   \   00000238   2960C4E5           STRB     R6,[R4, #+41]
+    734              }
+    735            }
+    736            return r;
+   \                     ??_CheckAndSwitchToHighSpeed_0:
+   \   0000023C   0500A0E1           MOV      R0,R5
+   \   00000240   60D08DE2           ADD      SP,SP,#+96
+   \   00000244   7080BDE8           POP      {R4-R6,PC}       ;; return
+    737          }
+    738          
+    739          /*********************************************************************
+    740          *
+    741          *       _ApplyCSD
+    742          *
+    743          *  Description:
+    744          *    Read the card's CSD (card specific data) registers and check
+    745          *    its contents.
+    746          *
+    747          *  Parameters:
+    748          *    Unit      - Device unit number
+    749          *    pCSD      - pointer to CSD structure
+    750          *
+    751          *  Return value:
+    752          *    ==0           - CSD has been read and all parameters are valid.
+    753          *    <0            - An error has occurred.
+    754          */
+
+   \                                 In section .text, align 4, keep-with-next
+    755          static U8 _ApplyCSD(MMC_CM_INST * pInst, const CM_CSD * pCSD, U8 ccs) {
+   \                     _ApplyCSD:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    756            int   c;
+    757            int   tmp;
+    758            U32   Factor;
+    759            U32   Freq;
+    760            U32   CardSize;
+    761            U8    Unit;
+    762            unsigned CSDVersion;
+    763          
+    764            Unit = pInst->Unit;
+    765            //
+    766            // CSD version is only check for SD card. MMC card have almost the same
+    767            // CSD structure as SD V1 cards.
+    768            //
+    769            if (pInst->CardType == FS_MMC_CARDTYPE_SD) {
+   \   00000008   0300D4E5           LDRB     R0,[R4, #+3]
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0270A0E1           MOV      R7,R2
+   \   00000014   020050E3           CMP      R0,#+2
+    770              CSDVersion = CSD_STRUCTURE(pCSD);
+   \   00000018   0100D505           LDRBEQ   R0,[R5, #+1]
+    771            } else {
+    772              CSDVersion = 0;
+    773            }
+    774            //
+    775            // Calculate maximum communication speed according to card specification
+    776            //
+    777            tmp = CSD_TRAN_SPEED(pCSD);
+    778            c = 6 - (tmp & 0x03);
+    779            Freq = _aUnit[c];
+    780            c = ((tmp & 0x78) >> 3); /* filter frequency bits */
+    781            Freq *= _aFactor[c];
+    782            Freq = FS_MMC_HW_X_SetMaxSpeed(Unit, (U16)Freq);
+    783            if (Freq == 0) {
+   \   0000001C   ............       ADRL     R2,_aUnit
+   \              ....        
+   \   00000024   0160D4E5           LDRB     R6,[R4, #+1]
+   \   00000028   2083A001           LSREQ    R8,R0,#+6
+   \   0000002C   0400D5E5           LDRB     R0,[R5, #+4]
+   \   00000030   0080A013           MOVNE    R8,#+0
+   \   00000034   031000E2           AND      R1,R0,#0x3
+   \   00000038   001061E2           RSB      R1,R1,#+0
+   \   0000003C   011182E0           ADD      R1,R2,R1, LSL #+2
+   \   00000040   0F20A0E3           MOV      R2,#+15
+   \   00000044   C00102E0           AND      R0,R2,R0, ASR #+3
+   \   00000048   ............       ADRL     R2,_aFactor
+   \              ....        
+   \   00000050   181091E5           LDR      R1,[R1, #+24]
+   \   00000054   0200D0E7           LDRB     R0,[R0, +R2]
+   \   00000058   810061E1           SMULBB   R1,R1,R0
+   \   0000005C   0600A0E1           MOV      R0,R6
+   \   00000060   0118A0E1           LSL      R1,R1,#+16
+   \   00000064   2118A0E1           LSR      R1,R1,#+16
+   \   00000068   ........           BL       FS_MMC_HW_X_SetMaxSpeed
+   \   0000006C   000050E3           CMP      R0,#+0
+   \   00000070   0100001A           BNE      ??_ApplyCSD_0
+    784              return 0xff;
+   \   00000074   FF00A0E3           MOV      R0,#+255
+   \   00000078   F081BDE8           POP      {R4-R8,PC}
+    785            }
+    786            /* Card parameter interpretation */
+    787            if (CSDVersion == 0) {
+   \                     ??_ApplyCSD_0:
+   \   0000007C   000058E3           CMP      R8,#+0
+   \   00000080   2900001A           BNE      ??_ApplyCSD_1
+    788              //
+    789              //  Calc number of sectors available on the medium
+    790              //
+    791              Factor     = (U16)(1 << CSD_READ_BL_LEN(pCSD)) / BYTES_PER_SECTOR;
+    792              Factor     *= 1 << (CSD_C_SIZE_MULT(pCSD) + 2);
+    793              CardSize   = CSD_C_SIZE(pCSD) + 1;
+   \   00000084   012085E2           ADD      R2,R5,#+1
+    794              CardSize   *= Factor;
+   \   00000088   063082E2           ADD      R3,R2,#+6
+   \   0000008C   0620D2E5           LDRB     R2,[R2, #+6]
+   \   00000090   01C0D3E5           LDRB     R12,[R3, #+1]
+   \   00000094   0230D3E5           LDRB     R3,[R3, #+2]
+   \   00000098   0110A0E3           MOV      R1,#+1
+   \   0000009C   02248CE1           ORR      R2,R12,R2, LSL #+8
+   \   000000A0   06C0D5E5           LDRB     R12,[R5, #+6]
+   \   000000A4   022483E1           ORR      R2,R3,R2, LSL #+8
+   \   000000A8   0227A0E1           LSL      R2,R2,#+14
+   \   000000AC   0FC00CE2           AND      R12,R12,#0xF
+   \   000000B0   113CA0E1           LSL      R3,R1,R12
+   \   000000B4   0338A0E1           LSL      R3,R3,#+16
+   \   000000B8   222A81E0           ADD      R2,R1,R2, LSR #+20
+   \   000000BC   A33CA0E1           LSR      R3,R3,#+25
+   \   000000C0   010085E2           ADD      R0,R5,#+1
+   \   000000C4   830262E1           SMULBB   R2,R3,R2
+   \   000000C8   0930D0E5           LDRB     R3,[R0, #+9]
+   \   000000CC   0A00D0E5           LDRB     R0,[R0, #+10]
+   \   000000D0   030480E1           ORR      R0,R0,R3, LSL #+8
+   \   000000D4   A003A0E1           LSR      R0,R0,#+7
+   \   000000D8   070000E2           AND      R0,R0,#0x7
+   \   000000DC   020080E2           ADD      R0,R0,#+2
+   \   000000E0   1100A0E1           LSL      R0,R1,R0
+   \   000000E4   900208E0           MUL      R8,R0,R2
+    795              //
+    796              //  Store calced values into medium's instance structure
+    797              //
+    798              pInst->IsWriteProtected = CSD_WRITE_PROTECT(pCSD);
+   \   000000E8   0F00D5E5           LDRB     R0,[R5, #+15]
+   \   000000EC   2002A0E1           LSR      R0,R0,#+4
+   \   000000F0   030000E2           AND      R0,R0,#0x3
+   \   000000F4   0500C4E5           STRB     R0,[R4, #+5]
+    799              if (pInst->CardType != FS_MMC_CARDTYPE_MMC) {
+   \   000000F8   0300D4E5           LDRB     R0,[R4, #+3]
+   \   000000FC   010050E3           CMP      R0,#+1
+   \   00000100   0400000A           BEQ      ??_ApplyCSD_2
+    800                pInst->IsWriteProtected |= FS_MMC_HW_X_IsWriteProtected(Unit);
+   \   00000104   0600A0E1           MOV      R0,R6
+   \   00000108   ........           BL       FS_MMC_HW_X_IsWriteProtected
+   \   0000010C   0510D4E5           LDRB     R1,[R4, #+5]
+   \   00000110   010080E1           ORR      R0,R0,R1
+   \   00000114   0500C4E5           STRB     R0,[R4, #+5]
+    801              }
+    802              pInst->BytesPerSector   = BYTES_PER_SECTOR;
+   \                     ??_ApplyCSD_2:
+   \   00000118   800FA0E3           MOV      R0,#+512
+   \   0000011C   B600C4E1           STRH     R0,[R4, #+6]
+    803              pInst->NumSectors       = CardSize;
+   \   00000120   148084E5           STR      R8,[R4, #+20]
+    804              return 0;
+   \                     ??_ApplyCSD_3:
+   \   00000124   0000A0E3           MOV      R0,#+0
+   \   00000128   F081BDE8           POP      {R4-R8,PC}
+    805            } else if (CSDVersion == 1) {  // Newer SD V2 cards.
+   \                     ??_ApplyCSD_1:
+   \   0000012C   010058E3           CMP      R8,#+1
+   \   00000130   1500001A           BNE      ??_ApplyCSD_4
+    806              //
+    807              //  Calc number of sectors available on the medium
+    808              //
+    809              CardSize   = CSD_C_SIZE_V2(pCSD) << 10;
+   \   00000134   010085E2           ADD      R0,R5,#+1
+   \   00000138   0710D0E5           LDRB     R1,[R0, #+7]
+   \   0000013C   0820D0E5           LDRB     R2,[R0, #+8]
+   \   00000140   0900D0E5           LDRB     R0,[R0, #+9]
+   \   00000144   011482E1           ORR      R1,R2,R1, LSL #+8
+   \   00000148   010480E1           ORR      R0,R0,R1, LSL #+8
+   \   0000014C   0085A0E1           LSL      R8,R0,#+10
+    810              //
+    811              //  Store calced values into medium's instance structure
+    812              //
+    813              pInst->IsWriteProtected = CSD_WRITE_PROTECT(pCSD) | FS_MMC_HW_X_IsWriteProtected(Unit);
+   \   00000150   0F00D5E5           LDRB     R0,[R5, #+15]
+   \   00000154   2002A0E1           LSR      R0,R0,#+4
+   \   00000158   035000E2           AND      R5,R0,#0x3
+   \   0000015C   0600A0E1           MOV      R0,R6
+   \   00000160   ........           BL       FS_MMC_HW_X_IsWriteProtected
+   \   00000164   050080E1           ORR      R0,R0,R5
+   \   00000168   0500C4E5           STRB     R0,[R4, #+5]
+    814              pInst->BytesPerSector   = BYTES_PER_SECTOR;
+   \   0000016C   800FA0E3           MOV      R0,#+512
+   \   00000170   B600C4E1           STRH     R0,[R4, #+6]
+    815              pInst->NumSectors       = CardSize;
+   \   00000174   148084E5           STR      R8,[R4, #+20]
+    816              if (ccs) {
+   \   00000178   000057E3           CMP      R7,#+0
+   \   0000017C   E8FFFF0A           BEQ      ??_ApplyCSD_3
+    817                pInst->CardType         = FS_MMC_CARDTYPE_SDHC;
+   \   00000180   0600A0E3           MOV      R0,#+6
+   \   00000184   0300C4E5           STRB     R0,[R4, #+3]
+    818              }
+    819              return 0;
+   \   00000188   E5FFFFEA           B        ??_ApplyCSD_3
+    820          
+    821            }
+    822            FS_DEBUG_ERROROUT((FS_MTYPE_DRIVER, "_ApplyCSD: Unsupported CSD version"));
+    823            return 1;
+   \                     ??_ApplyCSD_4:
+   \   0000018C   0100A0E3           MOV      R0,#+1
+   \   00000190   F081BDE8           POP      {R4-R8,PC}       ;; return
+    824          }
+    825          
+    826          /*********************************************************************
+    827          *
+    828          *       _MMC_Init
+    829          *
+    830          *  Description:
+    831          *    MMC/SD driver internal function.
+    832          *    Initialize the SD host controller and MMC/SD card
+    833          *    contents.
+    834          *
+    835          *  Parameters:
+    836          *    Unit      - Device unit number
+    837          *
+    838          *  Return value:
+    839          *    ==0           - Initialization was successful
+    840          *    ==1           - An error has occurred.
+    841          */
+
+   \                                 In section .text, align 4, keep-with-next
+    842          static int _MMC_Init(MMC_CM_INST * pInst) {
+   \                     _MMC_Init:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    843            int               Init;
+    844            int               CardType;
+    845            int               IsPresent;
+    846            int               r;
+    847            CM_CSD            csd;
+    848            MMC_CARD_STATUS   CardStatus;
+    849            U8                Unit;
+    850            U8                ccs = 0;
+    851            U8                aCardId[16];  // Card identifier number (128 bits)
+    852          
+    853            r = 1;
+    854            if (pInst->IsInited == 0) {
+   \   00000008   0000D4E5           LDRB     R0,[R4, #+0]
+   \   0000000C   44D04DE2           SUB      SP,SP,#+68
+   \   00000010   0050A0E3           MOV      R5,#+0
+   \   00000014   0060A0E3           MOV      R6,#+0
+   \   00000018   000050E3           CMP      R0,#+0
+   \   0000001C   0401001A           BNE      ??_MMC_Init_0
+    855              Unit = pInst->Unit;
+   \   00000020   0180D4E5           LDRB     R8,[R4, #+1]
+    856              //
+    857              // Initialize all values
+    858              //
+    859              pInst->HasError         = 0;
+   \   00000024   0250C4E5           STRB     R5,[R4, #+2]
+    860              pInst->CardType         = 0;
+   \   00000028   0350C4E5           STRB     R5,[R4, #+3]
+    861              pInst->Use4BitMode      = 0;
+   \   0000002C   0450C4E5           STRB     R5,[R4, #+4]
+    862              pInst->IsWriteProtected = 0;
+   \   00000030   0550C4E5           STRB     R5,[R4, #+5]
+    863              pInst->BytesPerSector   = 0;
+   \   00000034   B650C4E1           STRH     R5,[R4, #+6]
+    864              pInst->Rca              = 0;
+   \   00000038   B850C4E1           STRH     R5,[R4, #+8]
+    865              pInst->NumSectors       = 0;
+   \   0000003C   145084E5           STR      R5,[R4, #+20]
+    866              pInst->MaxWriteBurst    = FS_MMC_HW_X_GetMaxWriteBurst(Unit);
+   \   00000040   0800A0E1           MOV      R0,R8
+   \   00000044   ........           BL       FS_MMC_HW_X_GetMaxWriteBurst
+   \   00000048   BC00C4E1           STRH     R0,[R4, #+12]
+    867              pInst->MaxReadBurst     = FS_MMC_HW_X_GetMaxReadBurst(Unit);
+   \   0000004C   0800A0E1           MOV      R0,R8
+   \   00000050   ........           BL       FS_MMC_HW_X_GetMaxReadBurst
+   \   00000054   BA00C4E1           STRH     R0,[R4, #+10]
+    868              pInst->MaxWriteBurstSave= 1;
+   \   00000058   0170A0E3           MOV      R7,#+1
+   \   0000005C   B071C4E1           STRH     R7,[R4, #+16]
+    869              pInst->MaxReadBurstSave = 1;
+   \   00000060   BE70C4E1           STRH     R7,[R4, #+14]
+    870              _HWInit(pInst);
+   \   00000064   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000068   ........           BL       FS_MMC_HW_X_InitHW
+    871              IsPresent = FS_MMC_HW_X_IsPresent(Unit);
+    872              if (IsPresent != FS_MEDIA_NOT_PRESENT) {
+   \   0000006C   0800A0E1           MOV      R0,R8
+   \   00000070   ........           BL       FS_MMC_HW_X_IsPresent
+   \   00000074   000050E3           CMP      R0,#+0
+   \   00000078   EB00000A           BEQ      ??_MMC_Init_1
+    873                FS_MMC_HW_X_SetMaxSpeed(Unit, STARTUPFREQ);
+   \   0000007C   641FA0E3           MOV      R1,#+400
+   \   00000080   0800A0E1           MOV      R0,R8
+   \   00000084   ........           BL       FS_MMC_HW_X_SetMaxSpeed
+    874                FS_MMC_HW_X_SetResponseTimeOut(Unit, MAX_RESPONSE_TIMEOUT);
+   \   00000088   FF10A0E3           MOV      R1,#+255
+   \   0000008C   0800A0E1           MOV      R0,R8
+   \   00000090   ........           BL       FS_MMC_HW_X_SetResponseTimeOut
+    875                FS_MMC_HW_X_SetReadDataTimeOut(Unit, MAX_READ_TIMEOUT);
+   \   00000094   0510E0E1           MVN      R1,R5
+   \   00000098   0800A0E1           MOV      R0,R8
+   \   0000009C   ........           BL       FS_MMC_HW_X_SetReadDataTimeOut
+    876                // Set all cards to IDLE mode
+    877                _SendCmd(pInst, CMD_GO_IDLE_STATE, FS_MMC_CMD_FLAG_INITIALIZE, FS_MMC_RESPONSE_FORMAT_NONE , 0);
+   \   000000A0   00508DE5           STR      R5,[SP, #+0]
+   \   000000A4   0030A0E3           MOV      R3,#+0
+   \   000000A8   0820A0E3           MOV      R2,#+8
+   \   000000AC   0010A0E3           MOV      R1,#+0
+   \   000000B0   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000000B4   ........           BL       FS_MMC_HW_X_SendCmd
+    878                FS_MMC_HW_X_Delay(10);
+   \   000000B8   0A00A0E3           MOV      R0,#+10
+   \   000000BC   ........           BL       FS_MMC_HW_X_Delay
+    879                //
+    880                // Initially send command SEND_IF_COND to determine whether card is SD V2 or SD V1/MMC Vx
+    881                // If card does respond to this command, card is SD V2 compliant.
+    882                //
+    883                FS_MEMSET(&CardStatus, 0, sizeof(CardStatus));
+   \   000000C0   0610A0E3           MOV      R1,#+6
+   \   000000C4   04008DE2           ADD      R0,SP,#+4
+   \   000000C8   ........           BL       __aeabi_memclr4
+    884                _SendCmd(pInst, CMD_SEND_IF_COND, 0, FS_MMC_RESPONSE_FORMAT_R1, (0x01 << 8) | 0xAA);
+   \   000000CC   AA00A0E3           MOV      R0,#+170
+   \   000000D0   400F80E3           ORR      R0,R0,#0x100
+   \   000000D4   00008DE5           STR      R0,[SP, #+0]
+   \   000000D8   0130A0E3           MOV      R3,#+1
+   \   000000DC   0020A0E3           MOV      R2,#+0
+   \   000000E0   0810A0E3           MOV      R1,#+8
+   \   000000E4   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000000E8   ........           BL       FS_MMC_HW_X_SendCmd
+    885                r = _GetResponse(pInst, &CardStatus, sizeof(CardStatus));
+   \   000000EC   0620A0E3           MOV      R2,#+6
+   \   000000F0   04108DE2           ADD      R1,SP,#+4
+   \   000000F4   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000000F8   ........           BL       FS_MMC_HW_X_GetResponse
+   \   000000FC   0080A0E1           MOV      R8,R0
+    886                if (r == FS_MMC_CARD_RESPONSE_TIMEOUT || CardStatus.aStatus[4] != 0xAA) {
+   \   00000100   010058E3           CMP      R8,#+1
+   \   00000104   0200000A           BEQ      ??_MMC_Init_2
+   \   00000108   0800DDE5           LDRB     R0,[SP, #+8]
+   \   0000010C   AA0050E3           CMP      R0,#+170
+   \   00000110   0400000A           BEQ      ??_MMC_Init_3
+    887                  CardType = _CheckCardType(pInst);
+   \                     ??_MMC_Init_2:
+   \   00000114   0400A0E1           MOV      R0,R4
+   \   00000118   ........           BL       _CheckCardType
+   \   0000011C   0090B0E1           MOVS     R9,R0
+    888                } else {
+    889                  CardType = _CheckCardTypeV2(pInst, &ccs);
+    890                }
+    891                if (CardType != FS_MMC_CARDTYPE_NONE) {
+   \   00000120   3100001A           BNE      ??_MMC_Init_4
+   \   00000124   C30000EA           B        ??_MMC_Init_5
+   \                     ??_MMC_Init_3:
+   \   00000128   0610A0E3           MOV      R1,#+6
+   \   0000012C   0C008DE2           ADD      R0,SP,#+12
+   \   00000130   ........           BL       __aeabi_memclr4
+   \   00000134   FFA0A0E3           MOV      R10,#+255
+   \   00000138   4094A0E3           MOV      R9,#+1073741824
+   \   0000013C   80AF8AE3           ORR      R10,R10,#0x200
+   \   00000140   709989E3           ORR      R9,R9,#0x1C0000
+   \                     ??_MMC_Init_6:
+   \   00000144   01B0A0E3           MOV      R11,#+1
+   \                     ??_MMC_Init_7:
+   \   00000148   0610A0E3           MOV      R1,#+6
+   \   0000014C   14008DE2           ADD      R0,SP,#+20
+   \   00000150   ........           BL       __aeabi_memclr4
+   \   00000154   B800D4E1           LDRH     R0,[R4, #+8]
+   \   00000158   0130A0E3           MOV      R3,#+1
+   \   0000015C   0020A0E3           MOV      R2,#+0
+   \   00000160   0008A0E1           LSL      R0,R0,#+16
+   \   00000164   00008DE5           STR      R0,[SP, #+0]
+   \   00000168   3710A0E3           MOV      R1,#+55
+   \   0000016C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000170   ........           BL       FS_MMC_HW_X_SendCmd
+   \   00000174   0620A0E3           MOV      R2,#+6
+   \   00000178   14108DE2           ADD      R1,SP,#+20
+   \   0000017C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000180   ........           BL       FS_MMC_HW_X_GetResponse
+   \   00000184   000050E3           CMP      R0,#+0
+   \   00000188   0200000A           BEQ      ??_MMC_Init_8
+   \   0000018C   01B05BE2           SUBS     R11,R11,#+1
+   \   00000190   ECFFFF1A           BNE      ??_MMC_Init_7
+   \   00000194   050000EA           B        ??_MMC_Init_9
+   \                     ??_MMC_Init_8:
+   \   00000198   00908DE5           STR      R9,[SP, #+0]
+   \   0000019C   0330A0E3           MOV      R3,#+3
+   \   000001A0   0020A0E3           MOV      R2,#+0
+   \   000001A4   2910A0E3           MOV      R1,#+41
+   \   000001A8   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000001AC   ........           BL       FS_MMC_HW_X_SendCmd
+   \                     ??_MMC_Init_9:
+   \   000001B0   0620A0E3           MOV      R2,#+6
+   \   000001B4   0C108DE2           ADD      R1,SP,#+12
+   \   000001B8   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000001BC   ........           BL       FS_MMC_HW_X_GetResponse
+   \   000001C0   010050E3           CMP      R0,#+1
+   \   000001C4   9B00000A           BEQ      ??_MMC_Init_5
+   \   000001C8   0D00DDE5           LDRB     R0,[SP, #+13]
+   \   000001CC   01A04AE2           SUB      R10,R10,#+1
+   \   000001D0   800010E3           TST      R0,#0x80
+   \   000001D4   0100001A           BNE      ??_MMC_Init_10
+   \   000001D8   00005AE3           CMP      R10,#+0
+   \   000001DC   D8FFFF1A           BNE      ??_MMC_Init_6
+   \                     ??_MMC_Init_10:
+   \   000001E0   400010E3           TST      R0,#0x40
+   \   000001E4   0160A013           MOVNE    R6,#+1
+   \   000001E8   0290A0E3           MOV      R9,#+2
+    892                  // Request the CID from the MMC/SD card(s)
+    893                  _SendCmd(pInst, CMD_ALL_SEND_CID, 0, FS_MMC_RESPONSE_FORMAT_R2 , 0);
+   \                     ??_MMC_Init_4:
+   \   000001EC   00508DE5           STR      R5,[SP, #+0]
+   \   000001F0   0230A0E3           MOV      R3,#+2
+   \   000001F4   0020A0E3           MOV      R2,#+0
+   \   000001F8   0210A0E3           MOV      R1,#+2
+   \   000001FC   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000200   ........           BL       FS_MMC_HW_X_SendCmd
+    894                  _GetResponse(pInst, &aCardId[0], sizeof (aCardId));
+   \   00000204   1020A0E3           MOV      R2,#+16
+   \   00000208   30108DE2           ADD      R1,SP,#+48
+   \   0000020C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000210   ........           BL       FS_MMC_HW_X_GetResponse
+    895                  //
+    896                  // Set the relative address of this card (only 1 card is
+    897                  // currently supported)
+    898                  //
+    899                  if (CardType & FS_MMC_CARDTYPE_SD) {
+   \   00000214   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000218   020019E3           TST      R9,#0x2
+   \   0000021C   0D00000A           BEQ      ??_MMC_Init_11
+    900                    //
+    901                    // A SD card tells us its RCA (relative card address)
+    902                    //
+    903                    _SendCmd(pInst, CMD_SET_REL_ADDR, 0, FS_MMC_RESPONSE_FORMAT_R1, 0);
+   \   00000220   00508DE5           STR      R5,[SP, #+0]
+   \   00000224   0130A0E3           MOV      R3,#+1
+   \   00000228   0020A0E3           MOV      R2,#+0
+   \   0000022C   0310A0E3           MOV      R1,#+3
+   \   00000230   ........           BL       FS_MMC_HW_X_SendCmd
+    904                    _GetResponse(pInst, &CardStatus, sizeof (CardStatus));
+   \   00000234   0620A0E3           MOV      R2,#+6
+   \   00000238   04108DE2           ADD      R1,SP,#+4
+   \   0000023C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000240   ........           BL       FS_MMC_HW_X_GetResponse
+    905                    pInst->Rca = (CardStatus.aStatus[1] << 8) | CardStatus.aStatus[2];
+   \   00000244   0500DDE5           LDRB     R0,[SP, #+5]
+   \   00000248   0610DDE5           LDRB     R1,[SP, #+6]
+   \   0000024C   000481E1           ORR      R0,R1,R0, LSL #+8
+   \   00000250   B800C4E1           STRH     R0,[R4, #+8]
+   \   00000254   0C0000EA           B        ??_MMC_Init_12
+    906                  } else {
+    907                    //
+    908                    // MMC cards need to set a RCA
+    909                    //
+    910                    pInst->Rca = 0x0001;
+   \                     ??_MMC_Init_11:
+   \   00000258   B870C4E1           STRH     R7,[R4, #+8]
+    911                    _SendCmd(pInst, CMD_SET_REL_ADDR, 0, FS_MMC_RESPONSE_FORMAT_R1, (U32)pInst->Rca << 16);
+   \   0000025C   401BA0E3           MOV      R1,#+65536
+   \   00000260   00108DE5           STR      R1,[SP, #+0]
+   \   00000264   0130A0E3           MOV      R3,#+1
+   \   00000268   0020A0E3           MOV      R2,#+0
+   \   0000026C   0310A0E3           MOV      R1,#+3
+   \   00000270   ........           BL       FS_MMC_HW_X_SendCmd
+    912                    FS_MMC_HW_X_Delay(10);
+   \   00000274   0A00A0E3           MOV      R0,#+10
+   \   00000278   ........           BL       FS_MMC_HW_X_Delay
+    913                    _GetResponse(pInst, &CardStatus, sizeof (CardStatus));
+   \   0000027C   0620A0E3           MOV      R2,#+6
+   \   00000280   04108DE2           ADD      R1,SP,#+4
+   \   00000284   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000288   ........           BL       FS_MMC_HW_X_GetResponse
+    914          
+    915                  }
+    916                  Init = _ReadCSD(pInst, &csd);
+   \                     ??_MMC_Init_12:
+   \   0000028C   1110A0E3           MOV      R1,#+17
+   \   00000290   1C008DE2           ADD      R0,SP,#+28
+   \   00000294   ........           BL       __aeabi_memclr4
+   \   00000298   B800D4E1           LDRH     R0,[R4, #+8]
+   \   0000029C   0230A0E3           MOV      R3,#+2
+   \   000002A0   0020A0E3           MOV      R2,#+0
+   \   000002A4   0008A0E1           LSL      R0,R0,#+16
+   \   000002A8   00008DE5           STR      R0,[SP, #+0]
+   \   000002AC   0910A0E3           MOV      R1,#+9
+   \   000002B0   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000002B4   ........           BL       FS_MMC_HW_X_SendCmd
+   \   000002B8   1120A0E3           MOV      R2,#+17
+   \   000002BC   1C108DE2           ADD      R1,SP,#+28
+   \   000002C0   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000002C4   ........           BL       FS_MMC_HW_X_GetResponse
+   \   000002C8   000050E3           CMP      R0,#+0
+   \   000002CC   5600001A           BNE      ??_MMC_Init_1
+    917                  if (Init != 0) {
+    918                     return 1;
+    919                  }
+    920                  pInst->CardType = CardType;
+   \   000002D0   0390C4E5           STRB     R9,[R4, #+3]
+    921                  if (_CheckAndSwitchToHighSpeed(pInst, &csd) == 0) {
+   \   000002D4   1C108DE2           ADD      R1,SP,#+28
+   \   000002D8   0400A0E1           MOV      R0,R4
+   \   000002DC   ........           BL       _CheckAndSwitchToHighSpeed
+   \   000002E0   000050E3           CMP      R0,#+0
+   \   000002E4   0E00001A           BNE      ??_MMC_Init_13
+    922                    Init = _ReadCSD(pInst, &csd);
+   \   000002E8   1110A0E3           MOV      R1,#+17
+   \   000002EC   1C008DE2           ADD      R0,SP,#+28
+   \   000002F0   ........           BL       __aeabi_memclr4
+   \   000002F4   B800D4E1           LDRH     R0,[R4, #+8]
+   \   000002F8   0230A0E3           MOV      R3,#+2
+   \   000002FC   0020A0E3           MOV      R2,#+0
+   \   00000300   0008A0E1           LSL      R0,R0,#+16
+   \   00000304   00008DE5           STR      R0,[SP, #+0]
+   \   00000308   0910A0E3           MOV      R1,#+9
+   \   0000030C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000310   ........           BL       FS_MMC_HW_X_SendCmd
+   \   00000314   1120A0E3           MOV      R2,#+17
+   \   00000318   1C108DE2           ADD      R1,SP,#+28
+   \   0000031C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000320   ........           BL       FS_MMC_HW_X_GetResponse
+    923                  }
+    924          
+    925                  //
+    926                  // Retrieve the Card ID from card to set the card from identification mode to ready mode
+    927                  //
+    928                  _SendCmd(pInst, CMD_SEND_CID, 0, FS_MMC_RESPONSE_FORMAT_R2, (U32)pInst->Rca << 16);
+   \                     ??_MMC_Init_13:
+   \   00000324   B800D4E1           LDRH     R0,[R4, #+8]
+   \   00000328   0230A0E3           MOV      R3,#+2
+   \   0000032C   0020A0E3           MOV      R2,#+0
+   \   00000330   0008A0E1           LSL      R0,R0,#+16
+   \   00000334   00008DE5           STR      R0,[SP, #+0]
+   \   00000338   0A10A0E3           MOV      R1,#+10
+   \   0000033C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000340   ........           BL       FS_MMC_HW_X_SendCmd
+    929                  pInst->CardType = CardType;
+   \   00000344   0390C4E5           STRB     R9,[R4, #+3]
+    930                  FS_MMC_HW_X_Delay(1);
+   \   00000348   0100A0E3           MOV      R0,#+1
+   \   0000034C   ........           BL       FS_MMC_HW_X_Delay
+    931                  _GetResponse(pInst, &pInst->CardId, sizeof (MMC_CARD_ID));
+   \   00000350   1020A0E3           MOV      R2,#+16
+   \   00000354   181084E2           ADD      R1,R4,#+24
+   \   00000358   0100D4E5           LDRB     R0,[R4, #+1]
+   \   0000035C   ........           BL       FS_MMC_HW_X_GetResponse
+    932                  _DeSelectCard(pInst);
+   \   00000360   0300D4E5           LDRB     R0,[R4, #+3]
+   \   00000364   0020A0E3           MOV      R2,#+0
+   \   00000368   00508DE5           STR      R5,[SP, #+0]
+   \   0000036C   020010E3           TST      R0,#0x2
+   \   00000370   0420A003           MOVEQ    R2,#+4
+   \   00000374   0030A0E3           MOV      R3,#+0
+   \   00000378   0710A0E3           MOV      R1,#+7
+   \   0000037C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000380   ........           BL       FS_MMC_HW_X_SendCmd
+   \   00000384   2950C4E5           STRB     R5,[R4, #+41]
+    933                  Init = _ApplyCSD(pInst, &csd, ccs);
+   \   00000388   0620A0E1           MOV      R2,R6
+   \   0000038C   1C108DE2           ADD      R1,SP,#+28
+   \   00000390   0400A0E1           MOV      R0,R4
+   \   00000394   ........           BL       _ApplyCSD
+    934                  pInst->IsInited       = 1;
+   \   00000398   0070C4E5           STRB     R7,[R4, #+0]
+    935                  if (pInst->Allow4bitMode) {
+   \   0000039C   2800D4E5           LDRB     R0,[R4, #+40]
+   \   000003A0   000050E3           CMP      R0,#+0
+   \   000003A4   0100000A           BEQ      ??_MMC_Init_14
+    936                    _Use4BitMode(pInst);
+   \   000003A8   0400A0E1           MOV      R0,R4
+   \   000003AC   ........           BL       _Use4BitMode
+    937                  }
+    938                  _SelectCard(pInst, &CardStatus);
+   \                     ??_MMC_Init_14:
+   \   000003B0   04108DE2           ADD      R1,SP,#+4
+   \   000003B4   0400A0E1           MOV      R0,R4
+   \   000003B8   ........           BL       _SelectCard
+    939                  _SetBlockLen(pInst, &CardStatus);
+   \   000003BC   B610D4E1           LDRH     R1,[R4, #+6]
+   \   000003C0   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000003C4   ........           BL       FS_MMC_HW_X_SetHWBlockLen
+   \   000003C8   800FA0E3           MOV      R0,#+512
+   \   000003CC   00008DE5           STR      R0,[SP, #+0]
+   \   000003D0   0130A0E3           MOV      R3,#+1
+   \   000003D4   0020A0E3           MOV      R2,#+0
+   \   000003D8   1010A0E3           MOV      R1,#+16
+   \   000003DC   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000003E0   ........           BL       FS_MMC_HW_X_SendCmd
+   \   000003E4   0620A0E3           MOV      R2,#+6
+   \   000003E8   04108DE2           ADD      R1,SP,#+4
+   \   000003EC   0100D4E5           LDRB     R0,[R4, #+1]
+   \   000003F0   ........           BL       FS_MMC_HW_X_GetResponse
+    940                  _DeSelectCard(pInst);
+   \   000003F4   0300D4E5           LDRB     R0,[R4, #+3]
+   \   000003F8   0020A0E3           MOV      R2,#+0
+   \   000003FC   00508DE5           STR      R5,[SP, #+0]
+   \   00000400   020010E3           TST      R0,#0x2
+   \   00000404   0420A003           MOVEQ    R2,#+4
+   \   00000408   0030A0E3           MOV      R3,#+0
+   \   0000040C   0710A0E3           MOV      R1,#+7
+   \   00000410   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000414   ........           BL       FS_MMC_HW_X_SendCmd
+   \   00000418   2950C4E5           STRB     R5,[R4, #+41]
+    941                  r = 0;
+   \   0000041C   0080A0E3           MOV      R8,#+0
+    942                  FS_MMC_HW_X_Delay(10);
+   \   00000420   0A00A0E3           MOV      R0,#+10
+   \   00000424   ........           BL       FS_MMC_HW_X_Delay
+   \   00000428   020000EA           B        ??_MMC_Init_5
+   \                     ??_MMC_Init_1:
+   \   0000042C   0100A0E3           MOV      R0,#+1
+   \   00000430   010000EA           B        ??_MMC_Init_15
+    943                }
+    944              } else {
+    945                return 1;
+    946              }
+    947            } else {
+    948              r = 0;
+   \                     ??_MMC_Init_0:
+   \   00000434   0080A0E3           MOV      R8,#+0
+    949            }
+    950            return r;
+   \                     ??_MMC_Init_5:
+   \   00000438   0800A0E1           MOV      R0,R8
+   \                     ??_MMC_Init_15:
+   \   0000043C   44D08DE2           ADD      SP,SP,#+68       ;; stack cleaning
+   \   00000440   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    951          }
+    952          
+    953          /*********************************************************************
+    954          *
+    955          *       _ReadSectors
+    956          *
+    957          */
+
+   \                                 In section .text, align 4, keep-with-next
+    958          static int _ReadSectors(MMC_CM_INST * pInst, U32 SectorNo, void *pBuffer, U32 NumSectors, U16 MaxReadBurst) {
+   \                     _ReadSectors:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   0050A0E1           MOV      R5,R0
+    959            int             r;
+    960            MMC_CARD_STATUS CardStatus;
+    961            unsigned        CmdFlags;
+    962            U32             SectorSize;
+    963            U8              Unit;
+    964            unsigned        Cmd;
+    965            int             Status;
+    966            U8            * p;
+    967          
+    968            if (pInst->HasError) {
+   \   00000008   0200D5E5           LDRB     R0,[R5, #+2]
+   \   0000000C   1CD04DE2           SUB      SP,SP,#+28
+   \   00000010   0170A0E1           MOV      R7,R1
+   \   00000014   000050E3           CMP      R0,#+0
+   \   00000018   0380A0E1           MOV      R8,R3
+    969              return -1;
+   \   0000001C   0000E013           MVNNE    R0,#+0
+   \   00000020   8100001A           BNE      ??_ReadSectors_0
+    970            }
+    971            r          = 0;
+    972            Unit       = pInst->Unit;
+   \   00000024   0100D5E5           LDRB     R0,[R5, #+1]
+    973            SectorSize = pInst->BytesPerSector;
+    974            p          = (U8 *)pBuffer;
+   \   00000028   0240A0E1           MOV      R4,R2
+    975            // Select card 'rca' as the active card
+    976            if (_SelectCard(pInst, &CardStatus) == 0) {
+   \   0000002C   10108DE2           ADD      R1,SP,#+16
+   \   00000030   0400CDE5           STRB     R0,[SP, #+4]
+   \   00000034   B690D5E1           LDRH     R9,[R5, #+6]
+   \   00000038   0500A0E1           MOV      R0,R5
+   \   0000003C   ........           BL       _SelectCard
+   \   00000040   000050E3           CMP      R0,#+0
+   \   00000044   7600001A           BNE      ??_ReadSectors_1
+    977              do {
+    978                U32 NumSectorsAtOnce;
+    979                U32 Addr;
+    980          
+    981                NumSectorsAtOnce = MIN(NumSectors, MaxReadBurst);
+   \                     ??_ReadSectors_2:
+   \   00000048   B004DDE1           LDRH     R0,[SP, #+64]
+   \   0000004C   08A0A0E1           MOV      R10,R8
+    982                _SetBlockLen(pInst, &CardStatus);
+   \   00000050   B610D5E1           LDRH     R1,[R5, #+6]
+   \   00000054   000058E1           CMP      R8,R0
+   \   00000058   00A0A081           MOVHI    R10,R0
+   \   0000005C   0100D5E5           LDRB     R0,[R5, #+1]
+   \   00000060   ........           BL       FS_MMC_HW_X_SetHWBlockLen
+   \   00000064   800FA0E3           MOV      R0,#+512
+   \   00000068   00008DE5           STR      R0,[SP, #+0]
+   \   0000006C   0130A0E3           MOV      R3,#+1
+   \   00000070   0020A0E3           MOV      R2,#+0
+   \   00000074   1010A0E3           MOV      R1,#+16
+   \   00000078   0100D5E5           LDRB     R0,[R5, #+1]
+   \   0000007C   ........           BL       FS_MMC_HW_X_SendCmd
+   \   00000080   0620A0E3           MOV      R2,#+6
+   \   00000084   10108DE2           ADD      R1,SP,#+16
+   \   00000088   0100D5E5           LDRB     R0,[R5, #+1]
+   \   0000008C   ........           BL       FS_MMC_HW_X_GetResponse
+    983                Cmd = (NumSectorsAtOnce == 1) ? CMD_READ_SINGLE_BLOCK : CMD_READ_MULTIPLE_BLOCKS;
+    984                // Issue the read block command
+    985                CmdFlags = FS_MMC_CMD_FLAG_DATATRANSFER;
+    986                if (pInst->Allow4bitMode) {
+   \   00000090   2800D5E5           LDRB     R0,[R5, #+40]
+   \   00000094   01005AE3           CMP      R10,#+1
+   \   00000098   11B0A003           MOVEQ    R11,#+17
+   \   0000009C   12B0A013           MOVNE    R11,#+18
+   \   000000A0   000050E3           CMP      R0,#+0
+    987                  if (pInst->Use4BitMode) {
+   \   000000A4   0400D515           LDRBNE   R0,[R5, #+4]
+   \   000000A8   0160A0E3           MOV      R6,#+1
+    988                    CmdFlags |= FS_MMC_CMD_FLAG_USE_SD4MODE;
+    989                  }
+    990                }
+    991                if (pInst->CardType != FS_MMC_CARDTYPE_SDHC) {
+    992                  Addr   = SectorNo * SectorSize;
+    993                } else {
+    994                  Addr   = SectorNo;
+    995                }
+    996                FS_MMC_HW_X_SetHWNumBlocks(pInst->Unit, (U16)NumSectorsAtOnce);
+   \   000000AC   0A18A0E1           LSL      R1,R10,#+16
+   \   000000B0   00005013           CMPNE    R0,#+0
+   \   000000B4   0300D5E5           LDRB     R0,[R5, #+3]
+   \   000000B8   1160A013           MOVNE    R6,#+17
+   \   000000BC   2118A0E1           LSR      R1,R1,#+16
+   \   000000C0   060050E3           CMP      R0,#+6
+   \   000000C4   99070010           MULNE    R0,R9,R7
+   \   000000C8   08708D05           STREQ    R7,[SP, #+8]
+   \   000000CC   08008D15           STRNE    R0,[SP, #+8]
+   \   000000D0   0100D5E5           LDRB     R0,[R5, #+1]
+   \   000000D4   ........           BL       FS_MMC_HW_X_SetHWNumBlocks
+    997                FS_MMC_HW_X_SetDataPointer(pInst->Unit, p);
+   \   000000D8   0410A0E1           MOV      R1,R4
+   \   000000DC   0100D5E5           LDRB     R0,[R5, #+1]
+   \   000000E0   ........           BL       FS_MMC_HW_X_SetDataPointer
+    998                _SendCmd(pInst, Cmd, CmdFlags, FS_MMC_RESPONSE_FORMAT_R1, Addr);
+   \   000000E4   08009DE5           LDR      R0,[SP, #+8]
+   \   000000E8   0130A0E3           MOV      R3,#+1
+   \   000000EC   00008DE5           STR      R0,[SP, #+0]
+   \   000000F0   0620A0E1           MOV      R2,R6
+   \   000000F4   0B10A0E1           MOV      R1,R11
+   \   000000F8   0100D5E5           LDRB     R0,[R5, #+1]
+   \   000000FC   ........           BL       FS_MMC_HW_X_SendCmd
+    999                _GetResponse(pInst, &CardStatus, sizeof(CardStatus));
+   \   00000100   0620A0E3           MOV      R2,#+6
+   \   00000104   10108DE2           ADD      R1,SP,#+16
+   \   00000108   0100D5E5           LDRB     R0,[R5, #+1]
+   \   0000010C   ........           BL       FS_MMC_HW_X_GetResponse
+   1000                r = FS_MMC_HW_X_ReadData(Unit, p, SectorSize, NumSectorsAtOnce);
+   \   00000110   0A30A0E1           MOV      R3,R10
+   \   00000114   0920A0E1           MOV      R2,R9
+   \   00000118   0410A0E1           MOV      R1,R4
+   \   0000011C   0400DDE5           LDRB     R0,[SP, #+4]
+   \   00000120   ........           BL       FS_MMC_HW_X_ReadData
+   \   00000124   0060B0E1           MOVS     R6,R0
+   1001                if (r) {
+   1002                  FS_DEBUG_ERROROUT((FS_MTYPE_DRIVER, "FS__MMC_CM_ReadSector: Hardware reports error: %d.\n", r));
+   1003                  r = -1;
+   \   00000128   0060E013           MVNNE    R6,#+0
+   1004                }
+   1005                //
+   1006                // In case of multi block transfer or we got an error, a stop command is sent to the card.
+   1007                //
+   1008                if ((Cmd == CMD_READ_MULTIPLE_BLOCKS) || (r == -1)) {
+   \   0000012C   12005BE3           CMP      R11,#+18
+   \   00000130   01007613           CMNNE    R6,#+1
+   \   00000134   0A00001A           BNE      ??_ReadSectors_3
+   1009                  _SendCmd(pInst, CMD_STOP_TRANSMISSION, 0, FS_MMC_RESPONSE_FORMAT_R1, 0);
+   \   00000138   0000A0E3           MOV      R0,#+0
+   \   0000013C   00008DE5           STR      R0,[SP, #+0]
+   \   00000140   0130A0E3           MOV      R3,#+1
+   \   00000144   0020A0E3           MOV      R2,#+0
+   \   00000148   0C10A0E3           MOV      R1,#+12
+   \   0000014C   0100D5E5           LDRB     R0,[R5, #+1]
+   \   00000150   ........           BL       FS_MMC_HW_X_SendCmd
+   1010                  _GetResponse(pInst, &CardStatus, sizeof(CardStatus));
+   \   00000154   0620A0E3           MOV      R2,#+6
+   \   00000158   10108DE2           ADD      R1,SP,#+16
+   \   0000015C   0100D5E5           LDRB     R0,[R5, #+1]
+   \   00000160   ........           BL       FS_MMC_HW_X_GetResponse
+   1011                }
+   1012                Status = _Wait4Ready(pInst);
+   \                     ??_ReadSectors_3:
+   \   00000164   FFB4E0E3           MVN      R11,#-16777216
+   \   00000168   0610A0E3           MOV      R1,#+6
+   \   0000016C   08008DE2           ADD      R0,SP,#+8
+   \   00000170   ........           BL       __aeabi_memclr4
+   \                     ??_ReadSectors_4:
+   \   00000174   B800D5E1           LDRH     R0,[R5, #+8]
+   \   00000178   0130A0E3           MOV      R3,#+1
+   \   0000017C   0020A0E3           MOV      R2,#+0
+   \   00000180   0008A0E1           LSL      R0,R0,#+16
+   \   00000184   00008DE5           STR      R0,[SP, #+0]
+   \   00000188   0D10A0E3           MOV      R1,#+13
+   \   0000018C   0100D5E5           LDRB     R0,[R5, #+1]
+   \   00000190   ........           BL       FS_MMC_HW_X_SendCmd
+   \   00000194   0620A0E3           MOV      R2,#+6
+   \   00000198   08108DE2           ADD      R1,SP,#+8
+   \   0000019C   0100D5E5           LDRB     R0,[R5, #+1]
+   \   000001A0   ........           BL       FS_MMC_HW_X_GetResponse
+   \   000001A4   010050E3           CMP      R0,#+1
+   \   000001A8   0A00000A           BEQ      ??_ReadSectors_5
+   \   000001AC   0900DDE5           LDRB     R0,[SP, #+9]
+   \   000001B0   000050E3           CMP      R0,#+0
+   \   000001B4   0A00DD05           LDRBEQ   R0,[SP, #+10]
+   \   000001B8   3F001003           TSTEQ    R0,#0x3F
+   \   000001BC   0100A013           MOVNE    R0,#+1
+   \   000001C0   0200C515           STRBNE   R0,[R5, #+2]
+   \   000001C4   0300001A           BNE      ??_ReadSectors_5
+   \   000001C8   0B00DDE5           LDRB     R0,[SP, #+11]
+   \   000001CC   090050E3           CMP      R0,#+9
+   \   000001D0   01B05B12           SUBSNE   R11,R11,#+1
+   \   000001D4   E6FFFF1A           BNE      ??_ReadSectors_4
+   1013                FS_USE_PARA(Status);
+   1014                if (r) {
+   \                     ??_ReadSectors_5:
+   \   000001D8   000056E3           CMP      R6,#+0
+   \   000001DC   0400001A           BNE      ??_ReadSectors_6
+   1015                  break;
+   1016                }
+   1017                NumSectors -= NumSectorsAtOnce;
+   \   000001E0   0A8048E0           SUB      R8,R8,R10
+   1018                SectorNo   += NumSectorsAtOnce;
+   1019                p          += NumSectorsAtOnce * SectorSize;
+   \   000001E4   994A24E0           MLA      R4,R9,R10,R4
+   \   000001E8   07708AE0           ADD      R7,R10,R7
+   1020              } while (NumSectors);
+   \   000001EC   000058E3           CMP      R8,#+0
+   \   000001F0   94FFFF1A           BNE      ??_ReadSectors_2
+   1021              // Set card 'rca' as an inactive card
+   1022              _DeSelectCard(pInst);
+   \                     ??_ReadSectors_6:
+   \   000001F4   0300D5E5           LDRB     R0,[R5, #+3]
+   \   000001F8   0040A0E3           MOV      R4,#+0
+   \   000001FC   0020A0E3           MOV      R2,#+0
+   \   00000200   020010E3           TST      R0,#0x2
+   \   00000204   00408DE5           STR      R4,[SP, #+0]
+   \   00000208   0420A003           MOVEQ    R2,#+4
+   \   0000020C   0030A0E3           MOV      R3,#+0
+   \   00000210   0710A0E3           MOV      R1,#+7
+   \   00000214   0100D5E5           LDRB     R0,[R5, #+1]
+   \   00000218   ........           BL       FS_MMC_HW_X_SendCmd
+   \   0000021C   2940C5E5           STRB     R4,[R5, #+41]
+   1023            } else {
+   \   00000220   000000EA           B        ??_ReadSectors_7
+   1024              FS_DEBUG_ERROROUT((FS_MTYPE_DRIVER,  "MMC CM: Card could not be selected.\n"));
+   1025              r = -1;  // Error
+   \                     ??_ReadSectors_1:
+   \   00000224   0060E0E3           MVN      R6,#+0
+   1026            }
+   1027            return r;
+   \                     ??_ReadSectors_7:
+   \   00000228   0600A0E1           MOV      R0,R6
+   \                     ??_ReadSectors_0:
+   \   0000022C   1CD08DE2           ADD      SP,SP,#+28       ;; stack cleaning
+   \   00000230   F08FBDE8           POP      {R4-R11,PC}      ;; return
+   1028          }
+   1029          
+   1030          /*********************************************************************
+   1031          *
+   1032          *       _WriteSectors
+   1033          *
+   1034          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1035          static int _WriteSectors(MMC_CM_INST * pInst, U32 SectorNo, const void *pBuffer, U32 NumSectors, U8 RepeatSame, U16 MaxWriteBurst) {
+   \                     _WriteSectors:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   0050A0E1           MOV      R5,R0
+   1036            MMC_CARD_STATUS CardStatus;
+   1037            MMC_CARD_STATUS CardStatus1;
+   1038            unsigned        CmdFlags;
+   1039            int             r;
+   1040            U32             SectorSize;
+   1041            int             Status;
+   1042            U8              Unit;
+   1043            const U8      * p;
+   1044            unsigned        Cmd;
+   1045          
+   1046            if (pInst->HasError) {
+   \   00000008   0200D5E5           LDRB     R0,[R5, #+2]
+   \   0000000C   24D04DE2           SUB      SP,SP,#+36
+   \   00000010   0170A0E1           MOV      R7,R1
+   \   00000014   0380A0E1           MOV      R8,R3
+   \   00000018   000050E3           CMP      R0,#+0
+   \   0000001C   0100000A           BEQ      ??_WriteSectors_0
+   1047              return -1;
+   \                     ??_WriteSectors_1:
+   \   00000020   0000E0E3           MVN      R0,#+0
+   \   00000024   920000EA           B        ??_WriteSectors_2
+   1048            }
+   1049            if (pInst->IsWriteProtected) {
+   \                     ??_WriteSectors_0:
+   \   00000028   0500D5E5           LDRB     R0,[R5, #+5]
+   \   0000002C   000050E3           CMP      R0,#+0
+   \   00000030   FAFFFF1A           BNE      ??_WriteSectors_1
+   1050              return -1;
+   1051            }
+   1052            SectorSize = pInst->BytesPerSector;
+   1053            r          = 0;
+   1054            Unit       = pInst->Unit;
+   \   00000034   0110D5E5           LDRB     R1,[R5, #+1]
+   \   00000038   B690D5E1           LDRH     R9,[R5, #+6]
+   1055            p          = (const U8 *)pBuffer;
+   \   0000003C   0240A0E1           MOV      R4,R2
+   \   00000040   0410CDE5           STRB     R1,[SP, #+4]
+   1056            CmdFlags   = FS_MMC_CMD_FLAG_WRITETRANSFER | FS_MMC_CMD_FLAG_DATATRANSFER;
+   \   00000044   0310A0E3           MOV      R1,#+3
+   \   00000048   08108DE5           STR      R1,[SP, #+8]
+   1057            if (pInst->Allow4bitMode && pInst->Use4BitMode) {
+   \   0000004C   2800D5E5           LDRB     R0,[R5, #+40]
+   \   00000050   000050E3           CMP      R0,#+0
+   \   00000054   0400D515           LDRBNE   R0,[R5, #+4]
+   \   00000058   00005013           CMPNE    R0,#+0
+   1058              CmdFlags |= FS_MMC_CMD_FLAG_USE_SD4MODE;
+   1059            }
+   1060            if (RepeatSame) {
+   \   0000005C   4800DDE5           LDRB     R0,[SP, #+72]
+   \   00000060   1310A013           MOVNE    R1,#+19
+   \   00000064   08108D15           STRNE    R1,[SP, #+8]
+   \   00000068   000050E3           CMP      R0,#+0
+   1061              CmdFlags |= FS_MMC_CMD_FLAG_REPEAT_SAME_SECTOR_DATA;
+   \   0000006C   08109D15           LDRNE    R1,[SP, #+8]
+   1062            }
+   1063            // Select card 'rca' as the active card
+   1064            if (_SelectCard(pInst, &CardStatus) == 0) {
+   \   00000070   0500A0E1           MOV      R0,R5
+   \   00000074   40108113           ORRNE    R1,R1,#0x40
+   \   00000078   08108D15           STRNE    R1,[SP, #+8]
+   \   0000007C   14108DE2           ADD      R1,SP,#+20
+   \   00000080   ........           BL       _SelectCard
+   \   00000084   000050E3           CMP      R0,#+0
+   \   00000088   7700001A           BNE      ??_WriteSectors_3
+   1065              do {
+   1066                U32 NumSectorsAtOnce;
+   1067                U32 Addr;
+   1068          
+   1069                //
+   1070                // In case of write multiple sectors the same data,
+   1071                // we set NumSectorsAtOnce to 1
+   1072                //
+   1073                if (RepeatSame && (pInst->WrRepeatSameAllowed == 0)) {
+   \                     ??_WriteSectors_4:
+   \   0000008C   4800DDE5           LDRB     R0,[SP, #+72]
+   \   00000090   000050E3           CMP      R0,#+0
+   \   00000094   0300000A           BEQ      ??_WriteSectors_5
+   \   00000098   2B00D5E5           LDRB     R0,[R5, #+43]
+   \   0000009C   000050E3           CMP      R0,#+0
+   1074                  NumSectorsAtOnce = 1;
+   \   000000A0   01A0A003           MOVEQ    R10,#+1
+   \   000000A4   0300000A           BEQ      ??_WriteSectors_6
+   1075                } else {
+   1076                  NumSectorsAtOnce = MIN(NumSectors, MaxWriteBurst);
+   \                     ??_WriteSectors_5:
+   \   000000A8   BC04DDE1           LDRH     R0,[SP, #+76]
+   \   000000AC   08A0A0E1           MOV      R10,R8
+   \   000000B0   000058E1           CMP      R8,R0
+   \   000000B4   00A0A081           MOVHI    R10,R0
+   1077                }
+   1078                
+   1079                if (pInst->CardType != FS_MMC_CARDTYPE_SDHC) {
+   \                     ??_WriteSectors_6:
+   \   000000B8   0300D5E5           LDRB     R0,[R5, #+3]
+   1080                  Addr = SectorNo * SectorSize;
+   1081                } else {
+   1082                  Addr  = SectorNo;
+   1083                }
+   1084                Cmd = (NumSectorsAtOnce == 1) ? CMD_WRITE_BLOCK : CMD_WRITE_MULTIPLE_BLOCKS;
+   1085                _SetBlockLen(pInst, &CardStatus);
+   \   000000BC   B610D5E1           LDRH     R1,[R5, #+6]
+   \   000000C0   060050E3           CMP      R0,#+6
+   \   000000C4   99070610           MULNE    R6,R9,R7
+   \   000000C8   0760A001           MOVEQ    R6,R7
+   \   000000CC   01005AE3           CMP      R10,#+1
+   \   000000D0   18B0A003           MOVEQ    R11,#+24
+   \   000000D4   19B0A013           MOVNE    R11,#+25
+   \   000000D8   0100D5E5           LDRB     R0,[R5, #+1]
+   \   000000DC   ........           BL       FS_MMC_HW_X_SetHWBlockLen
+   \   000000E0   800FA0E3           MOV      R0,#+512
+   \   000000E4   00008DE5           STR      R0,[SP, #+0]
+   \   000000E8   0130A0E3           MOV      R3,#+1
+   \   000000EC   0020A0E3           MOV      R2,#+0
+   \   000000F0   1010A0E3           MOV      R1,#+16
+   \   000000F4   0100D5E5           LDRB     R0,[R5, #+1]
+   \   000000F8   ........           BL       FS_MMC_HW_X_SendCmd
+   \   000000FC   0620A0E3           MOV      R2,#+6
+   \   00000100   14108DE2           ADD      R1,SP,#+20
+   \   00000104   0100D5E5           LDRB     R0,[R5, #+1]
+   \   00000108   ........           BL       FS_MMC_HW_X_GetResponse
+   1086                //
+   1087                // Issue the write block command
+   1088                //
+   1089                FS_MMC_HW_X_SetHWNumBlocks(Unit, (U16)NumSectorsAtOnce);
+   \   0000010C   0A18A0E1           LSL      R1,R10,#+16
+   \   00000110   2118A0E1           LSR      R1,R1,#+16
+   \   00000114   0400DDE5           LDRB     R0,[SP, #+4]
+   \   00000118   ........           BL       FS_MMC_HW_X_SetHWNumBlocks
+   1090                FS_MMC_HW_X_SetDataPointer(pInst->Unit, p);
+   \   0000011C   0410A0E1           MOV      R1,R4
+   \   00000120   0100D5E5           LDRB     R0,[R5, #+1]
+   \   00000124   ........           BL       FS_MMC_HW_X_SetDataPointer
+   1091                _SendCmd(pInst, Cmd, CmdFlags, FS_MMC_RESPONSE_FORMAT_R1, Addr);
+   \   00000128   00608DE5           STR      R6,[SP, #+0]
+   \   0000012C   0130A0E3           MOV      R3,#+1
+   \   00000130   08209DE5           LDR      R2,[SP, #+8]
+   \   00000134   0B10A0E1           MOV      R1,R11
+   \   00000138   0100D5E5           LDRB     R0,[R5, #+1]
+   \   0000013C   ........           BL       FS_MMC_HW_X_SendCmd
+   1092                _GetResponse(pInst, &CardStatus1, sizeof (CardStatus1));
+   \   00000140   0620A0E3           MOV      R2,#+6
+   \   00000144   1C108DE2           ADD      R1,SP,#+28
+   \   00000148   0100D5E5           LDRB     R0,[R5, #+1]
+   \   0000014C   ........           BL       FS_MMC_HW_X_GetResponse
+   1093                r = FS_MMC_HW_X_WriteData(Unit, p, SectorSize, NumSectorsAtOnce);
+   \   00000150   0A30A0E1           MOV      R3,R10
+   \   00000154   0920A0E1           MOV      R2,R9
+   \   00000158   0410A0E1           MOV      R1,R4
+   \   0000015C   0400DDE5           LDRB     R0,[SP, #+4]
+   \   00000160   ........           BL       FS_MMC_HW_X_WriteData
+   \   00000164   0060B0E1           MOVS     R6,R0
+   1094                if (r) {
+   1095                  FS_DEBUG_ERROROUT((FS_MTYPE_DRIVER, "FS__MMC_CM_WriteBurst: Hardware reports error: %d.\n", r));
+   1096                  r = -1;
+   \   00000168   0060E013           MVNNE    R6,#+0
+   1097                }
+   1098                //
+   1099                // In case of multi block transfer or we got an error, a stop command is sent to the card.
+   1100                //
+   1101                if ((Cmd == CMD_WRITE_MULTIPLE_BLOCKS) || (r == -1)) {
+   \   0000016C   19005BE3           CMP      R11,#+25
+   \   00000170   01007613           CMNNE    R6,#+1
+   \   00000174   0A00001A           BNE      ??_WriteSectors_7
+   1102                  _SendCmd(pInst, CMD_STOP_TRANSMISSION, FS_MMC_CMD_FLAG_SETBUSY | FS_MMC_CMD_FLAG_STOP_TRANS, FS_MMC_RESPONSE_FORMAT_R1, 0);
+   \   00000178   0000A0E3           MOV      R0,#+0
+   \   0000017C   00008DE5           STR      R0,[SP, #+0]
+   \   00000180   0130A0E3           MOV      R3,#+1
+   \   00000184   2420A0E3           MOV      R2,#+36
+   \   00000188   0C10A0E3           MOV      R1,#+12
+   \   0000018C   0100D5E5           LDRB     R0,[R5, #+1]
+   \   00000190   ........           BL       FS_MMC_HW_X_SendCmd
+   1103                  _GetResponse(pInst, &CardStatus, sizeof(CardStatus));
+   \   00000194   0620A0E3           MOV      R2,#+6
+   \   00000198   14108DE2           ADD      R1,SP,#+20
+   \   0000019C   0100D5E5           LDRB     R0,[R5, #+1]
+   \   000001A0   ........           BL       FS_MMC_HW_X_GetResponse
+   1104                }
+   1105                //
+   1106                // Wait until card is ready.
+   1107                //
+   1108                Status = _Wait4Ready(pInst);
+   \                     ??_WriteSectors_7:
+   \   000001A4   FFB4E0E3           MVN      R11,#-16777216
+   \   000001A8   0610A0E3           MOV      R1,#+6
+   \   000001AC   0C008DE2           ADD      R0,SP,#+12
+   \   000001B0   ........           BL       __aeabi_memclr4
+   \                     ??_WriteSectors_8:
+   \   000001B4   B800D5E1           LDRH     R0,[R5, #+8]
+   \   000001B8   0130A0E3           MOV      R3,#+1
+   \   000001BC   0020A0E3           MOV      R2,#+0
+   \   000001C0   0008A0E1           LSL      R0,R0,#+16
+   \   000001C4   00008DE5           STR      R0,[SP, #+0]
+   \   000001C8   0D10A0E3           MOV      R1,#+13
+   \   000001CC   0100D5E5           LDRB     R0,[R5, #+1]
+   \   000001D0   ........           BL       FS_MMC_HW_X_SendCmd
+   \   000001D4   0620A0E3           MOV      R2,#+6
+   \   000001D8   0C108DE2           ADD      R1,SP,#+12
+   \   000001DC   0100D5E5           LDRB     R0,[R5, #+1]
+   \   000001E0   ........           BL       FS_MMC_HW_X_GetResponse
+   \   000001E4   010050E3           CMP      R0,#+1
+   \   000001E8   0A00000A           BEQ      ??_WriteSectors_9
+   \   000001EC   0D00DDE5           LDRB     R0,[SP, #+13]
+   \   000001F0   000050E3           CMP      R0,#+0
+   \   000001F4   0E00DD05           LDRBEQ   R0,[SP, #+14]
+   \   000001F8   3F001003           TSTEQ    R0,#0x3F
+   \   000001FC   0100A013           MOVNE    R0,#+1
+   \   00000200   0200C515           STRBNE   R0,[R5, #+2]
+   \   00000204   0300001A           BNE      ??_WriteSectors_9
+   \   00000208   0F00DDE5           LDRB     R0,[SP, #+15]
+   \   0000020C   090050E3           CMP      R0,#+9
+   \   00000210   01B05B12           SUBSNE   R11,R11,#+1
+   \   00000214   E6FFFF1A           BNE      ??_WriteSectors_8
+   1109                FS_USE_PARA(Status);      
+   1110                if (r) {
+   \                     ??_WriteSectors_9:
+   \   00000218   000056E3           CMP      R6,#+0
+   \   0000021C   0600001A           BNE      ??_WriteSectors_10
+   1111                  break;
+   1112                }
+   1113                NumSectors -= NumSectorsAtOnce;
+   1114                SectorNo   += NumSectorsAtOnce;
+   1115                if (RepeatSame == 0) {
+   \   00000220   4800DDE5           LDRB     R0,[SP, #+72]
+   \   00000224   0A8048E0           SUB      R8,R8,R10
+   \   00000228   07708AE0           ADD      R7,R10,R7
+   \   0000022C   000050E3           CMP      R0,#+0
+   1116                  p += NumSectorsAtOnce * SectorSize;
+   \   00000230   994A2400           MLAEQ    R4,R9,R10,R4
+   1117                }
+   1118              } while (NumSectors);
+   \   00000234   000058E3           CMP      R8,#+0
+   \   00000238   93FFFF1A           BNE      ??_WriteSectors_4
+   1119              // Set all cards inactive
+   1120              _DeSelectCard(pInst);
+   \                     ??_WriteSectors_10:
+   \   0000023C   0300D5E5           LDRB     R0,[R5, #+3]
+   \   00000240   0040A0E3           MOV      R4,#+0
+   \   00000244   0020A0E3           MOV      R2,#+0
+   \   00000248   020010E3           TST      R0,#0x2
+   \   0000024C   00408DE5           STR      R4,[SP, #+0]
+   \   00000250   0420A003           MOVEQ    R2,#+4
+   \   00000254   0030A0E3           MOV      R3,#+0
+   \   00000258   0710A0E3           MOV      R1,#+7
+   \   0000025C   0100D5E5           LDRB     R0,[R5, #+1]
+   \   00000260   ........           BL       FS_MMC_HW_X_SendCmd
+   \   00000264   2940C5E5           STRB     R4,[R5, #+41]
+   1121            } else {
+   \   00000268   000000EA           B        ??_WriteSectors_11
+   1122              FS_DEBUG_ERROROUT((FS_MTYPE_DRIVER,  "MMC CM: Card could not be selected"));
+   1123              r = -1;  // Error
+   \                     ??_WriteSectors_3:
+   \   0000026C   0060E0E3           MVN      R6,#+0
+   1124            }
+   1125            return r;
+   \                     ??_WriteSectors_11:
+   \   00000270   0600A0E1           MOV      R0,R6
+   \                     ??_WriteSectors_2:
+   \   00000274   24D08DE2           ADD      SP,SP,#+36       ;; stack cleaning
+   \   00000278   F08FBDE8           POP      {R4-R11,PC}      ;; return
+   1126          }
+   1127          
+   1128          /*********************************************************************
+   1129          *
+   1130          *       _MMC_GetStatus
+   1131          *
+   1132          *  Description:
+   1133          *    Get status of the media.
+   1134          *
+   1135          *  Parameters:
+   1136          *    Unit        - Unit number.
+   1137          *
+   1138          *  Return value:
+   1139          *    FS_MEDIA_STATE_UNKNOWN if the state of the media is unknown.
+   1140          *    FS_MEDIA_NOT_PRESENT   if no card is present.
+   1141          *    FS_MEDIA_IS_PRESENT    if a card is present.
+   1142          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1143          static int _MMC_GetStatus(U8 Unit) {
+   1144            return FS_MMC_HW_X_IsPresent(Unit); /* Check if a card is present */
+   \                     _MMC_GetStatus:
+   \   00000000   ........           B        FS_MMC_HW_X_IsPresent  ;; tailcall
+   1145          }
+   1146          
+   1147          /*********************************************************************
+   1148          *
+   1149          *       _MMC_Unmount
+   1150          *
+   1151          *  Description:
+   1152          *    FS driver function. Unmounts the volume.
+   1153          *
+   1154          *  Parameters:
+   1155          *    Unit        - Unit number.
+   1156          *
+   1157          */
+   1158          static void _Unmount(MMC_CM_INST * pInst) {
+   1159              pInst->IsInited = 0;
+   1160          }
+   1161          
+   1162          /*********************************************************************
+   1163          *
+   1164          *       _MMC_IoCtl
+   1165          *
+   1166          *  Description:
+   1167          *    Execute device command.
+   1168          *
+   1169          *  Parameters:
+   1170          *    Unit      - Device Index.
+   1171          *    Cmd         - Command to be executed.
+   1172          *    Aux         - Parameter depending on command.
+   1173          *    pBuffer     - Pointer to a buffer used for the command.
+   1174          *
+   1175          *  Return value:
+   1176          *    Command specific. In general a negative value means an error.
+   1177          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1178          static int _MMC_IoCtl(U8 Unit, I32 Cmd, I32 Aux, void *pBuffer) {
+   1179            FS_DEV_INFO * pDevInfo;
+   1180            MMC_CM_INST    * pInst;
+   1181          
+   1182            pInst = _apInst[Unit];
+   \                     _MMC_IoCtl:
+   \   00000000   ........           LDR      R2,??DataTable15_1
+   1183            FS_USE_PARA(Aux);
+   1184            switch (Cmd) {
+   \   00000004   FB1F51E2           SUBS     R1,R1,#+1004
+   \   00000008   000192E7           LDR      R0,[R2, +R0, LSL #+2]
+   \   0000000C   0500000A           BEQ      ??_MMC_IoCtl_0
+   \   00000010   041041E2           SUB      R1,R1,#+4
+   \   00000014   010051E3           CMP      R1,#+1
+   \   00000018   0500008A           BHI      ??_MMC_IoCtl_1
+   1185            case FS_CMD_UNMOUNT:
+   1186            case FS_CMD_UNMOUNT_FORCED:
+   1187              _Unmount(pInst);
+   \   0000001C   0010A0E3           MOV      R1,#+0
+   \   00000020   0010C0E5           STRB     R1,[R0, #+0]
+   1188              break;
+   \   00000024   080000EA           B        ??_MMC_IoCtl_2
+   1189            case FS_CMD_GET_DEVINFO: /* Get general device information */
+   1190              if (pInst->HasError) {
+   \                     ??_MMC_IoCtl_0:
+   \   00000028   0210D0E5           LDRB     R1,[R0, #+2]
+   \   0000002C   000051E3           CMP      R1,#+0
+   \   00000030   0100000A           BEQ      ??_MMC_IoCtl_3
+   1191                return -1;
+   \                     ??_MMC_IoCtl_1:
+   \   00000034   0000E0E3           MVN      R0,#+0
+   \   00000038   1EFF2FE1           BX       LR
+   1192              }
+   1193              pDevInfo = (FS_DEV_INFO *)pBuffer;
+   1194              pDevInfo->BytesPerSector = pInst->BytesPerSector;
+   \                     ??_MMC_IoCtl_3:
+   \   0000003C   B610D0E1           LDRH     R1,[R0, #+6]
+   \   00000040   B810C3E1           STRH     R1,[R3, #+8]
+   1195              pDevInfo->NumSectors     = pInst->NumSectors;
+   \   00000044   140090E5           LDR      R0,[R0, #+20]
+   \   00000048   040083E5           STR      R0,[R3, #+4]
+   1196              break;
+   1197          #if FS_SUPPORT_DEINIT
+   1198            case FS_CMD_DEINIT:
+   1199              FS_FREE(pInst);
+   1200              _NumUnits--;
+   1201              return 0;
+   1202          #endif
+   1203            default:
+   1204              return -1;
+   1205            }
+   1206            return 0;
+   \                     ??_MMC_IoCtl_2:
+   \   0000004C   0000A0E3           MOV      R0,#+0
+   \   00000050   1EFF2FE1           BX       LR               ;; return
+   1207          }
+   1208          
+   1209          
+   1210          /*********************************************************************
+   1211          *
+   1212          *       _MMC_Write
+   1213          *
+   1214          *  Description:
+   1215          *    Write one ore more sectors to the media.
+   1216          *
+   1217          *  Parameters:
+   1218          *    Unit          - Device index number
+   1219          *    Sector        - Sector to be written to the device.
+   1220          *    NumSectors    - Number of sectors to be transferred
+   1221          *    pBuffer       - Pointer to data to be stored.
+   1222          *    RepeatSame    - Shall be the same data written
+   1223          *
+   1224          *  Return value:
+   1225          *    ==0           - Sector has been written to the device.
+   1226          *    <0            - An error has occurred.
+   1227          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1228          static int _MMC_Write(U8 Unit, U32 SectorNo, const void * p, U32 NumSectors, U8 RepeatSame) {
+   \                     _MMC_Write:
+   \   00000000   F0432DE9           PUSH     {R4-R9,LR}
+   \   00000004   0140A0E1           MOV      R4,R1
+   1229            MMC_CM_INST * pInst;
+   1230            int           r;
+   1231            int           Retry = NUM_RETRIES;
+   1232          
+   1233            pInst = _apInst[Unit];
+   \   00000008   ........           LDR      R1,??DataTable15_1
+   \   0000000C   0CD04DE2           SUB      SP,SP,#+12
+   \   00000010   009191E7           LDR      R9,[R1, +R0, LSL #+2]
+   \   00000014   0250A0E1           MOV      R5,R2
+   1234            if (pInst->IsInited) {
+   \   00000018   0000D9E5           LDRB     R0,[R9, #+0]
+   \   0000001C   0360A0E1           MOV      R6,R3
+   \   00000020   2870DDE5           LDRB     R7,[SP, #+40]
+   \   00000024   0580A0E3           MOV      R8,#+5
+   \   00000028   000050E3           CMP      R0,#+0
+   \   0000002C   0E00000A           BEQ      ??_MMC_Write_0
+   1235          OnRetry:
+   1236              r = _WriteSectors(pInst, SectorNo, p, NumSectors, RepeatSame, pInst->MaxWriteBurst);
+   \                     ??_MMC_Write_1:
+   \   00000030   BC00D9E1           LDRH     R0,[R9, #+12]
+   \   00000034   00708DE5           STR      R7,[SP, #+0]
+   \   00000038   0630A0E1           MOV      R3,R6
+   \   0000003C   04008DE5           STR      R0,[SP, #+4]
+   \   00000040   0520A0E1           MOV      R2,R5
+   \   00000044   0410A0E1           MOV      R1,R4
+   \   00000048   0900A0E1           MOV      R0,R9
+   \   0000004C   ........           BL       _WriteSectors
+   1237              if (r && Retry) {
+   \   00000050   000050E3           CMP      R0,#+0
+   \   00000054   00005813           CMPNE    R8,#+0
+   1238                --Retry;
+   1239                pInst->MaxWriteBurst = pInst->MaxWriteBurstSave;
+   \   00000058   B001D911           LDRHNE   R0,[R9, #+16]
+   \   0000005C   01804812           SUBNE    R8,R8,#+1
+   \   00000060   BC00C911           STRHNE   R0,[R9, #+12]
+   1240                goto OnRetry;
+   \   00000064   F1FFFF1A           BNE      ??_MMC_Write_1
+   \   00000068   000000EA           B        ??_MMC_Write_2
+   1241              }
+   1242            } else {
+   1243              FS_DEBUG_WARN((FS_MTYPE_DRIVER, "Card is not initialized\n"));
+   1244              r = -1;
+   \                     ??_MMC_Write_0:
+   \   0000006C   0000E0E3           MVN      R0,#+0
+   1245            }
+   1246            return r;
+   \                     ??_MMC_Write_2:
+   \   00000070   0CD08DE2           ADD      SP,SP,#+12       ;; stack cleaning
+   \   00000074   F083BDE8           POP      {R4-R9,PC}       ;; return
+   1247          }
+   1248          
+   1249          
+   1250          /*********************************************************************
+   1251          *
+   1252          *       _MMC_Read
+   1253          *
+   1254          *  Description:
+   1255          *    Reads one or more sectors from the media.
+   1256          *
+   1257          *    Unit          - Device index number
+   1258          *    Sector        - Sector to be read from the device.
+   1259          *    NumSectors    - Number of sectors to be transferred
+   1260          *    pBuffer       - Pointer to buffer to be stored.
+   1261          *    RepeatSame    - Shall be the same data written
+   1262          *
+   1263          *  Return value:
+   1264          *    ==0         - All sector(s) have been read
+   1265          *    <0          - An error has occurred.
+   1266          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1267          static int _MMC_Read(U8 Unit, U32 SectorNo, void * p, U32 NumSectors) {
+   \                     _MMC_Read:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0140A0E1           MOV      R4,R1
+   1268            MMC_CM_INST * pInst;
+   1269            int           r;
+   1270            int           Retry = NUM_RETRIES;
+   1271          
+   1272            pInst = _apInst[Unit];
+   \   00000008   ........           LDR      R1,??DataTable15_1
+   \   0000000C   08D04DE2           SUB      SP,SP,#+8
+   \   00000010   008191E7           LDR      R8,[R1, +R0, LSL #+2]
+   \   00000014   0250A0E1           MOV      R5,R2
+   1273            if (pInst->IsInited) {
+   \   00000018   0000D8E5           LDRB     R0,[R8, #+0]
+   \   0000001C   0360A0E1           MOV      R6,R3
+   \   00000020   0570A0E3           MOV      R7,#+5
+   \   00000024   000050E3           CMP      R0,#+0
+   \   00000028   0D00000A           BEQ      ??_MMC_Read_0
+   1274          OnRetry:
+   1275              r = _ReadSectors(pInst, SectorNo, p, NumSectors, pInst->MaxReadBurst);
+   \                     ??_MMC_Read_1:
+   \   0000002C   BA00D8E1           LDRH     R0,[R8, #+10]
+   \   00000030   0630A0E1           MOV      R3,R6
+   \   00000034   0520A0E1           MOV      R2,R5
+   \   00000038   00008DE5           STR      R0,[SP, #+0]
+   \   0000003C   0410A0E1           MOV      R1,R4
+   \   00000040   0800A0E1           MOV      R0,R8
+   \   00000044   ........           BL       _ReadSectors
+   1276              if (r && Retry) {
+   \   00000048   000050E3           CMP      R0,#+0
+   \   0000004C   00005713           CMPNE    R7,#+0
+   1277                --Retry;
+   1278                pInst->MaxReadBurst = pInst->MaxReadBurstSave;
+   \   00000050   BE00D811           LDRHNE   R0,[R8, #+14]
+   \   00000054   01704712           SUBNE    R7,R7,#+1
+   \   00000058   BA00C811           STRHNE   R0,[R8, #+10]
+   1279                goto OnRetry;
+   \   0000005C   F2FFFF1A           BNE      ??_MMC_Read_1
+   \   00000060   000000EA           B        ??_MMC_Read_2
+   1280              }
+   1281            } else {
+   1282              FS_DEBUG_WARN((FS_MTYPE_DRIVER, "Card is not initialized\n"));
+   1283              r = -1;
+   \                     ??_MMC_Read_0:
+   \   00000064   0000E0E3           MVN      R0,#+0
+   1284            }
+   1285            return r;
+   \                     ??_MMC_Read_2:
+   \   00000068   08D08DE2           ADD      SP,SP,#+8        ;; stack cleaning
+   \   0000006C   F081BDE8           POP      {R4-R8,PC}       ;; return
+   1286          
+   1287          }
+   1288          /*********************************************************************
+   1289          *
+   1290          *       _MMC_InitMedium
+   1291          *
+   1292          *  Description:
+   1293          *    Initialize the card.
+   1294          *
+   1295          *  Parameters:
+   1296          *    Unit        - Unit number.
+   1297          *
+   1298          *  Return value:
+   1299          *    == 0                       - Device okay and ready for operation.
+   1300          *    <  0                       - An error has occurred.
+   1301          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1302          static int _MMC_InitMedium(U8 Unit) {
+   \                     _MMC_InitMedium:
+   \   00000000   00402DE9           PUSH     {LR}
+   1303            int        r;
+   1304            MMC_CM_INST * pInst;
+   1305          
+   1306            pInst = _apInst[Unit];
+   \   00000004   ........           LDR      R1,??DataTable15_1
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   000191E7           LDR      R0,[R1, +R0, LSL #+2]
+   1307            r     = 0;
+   \   00000010   0010A0E3           MOV      R1,#+0
+   1308            if (pInst->IsInited == 0) {
+   \   00000014   0020D0E5           LDRB     R2,[R0, #+0]
+   \   00000018   000052E3           CMP      R2,#+0
+   \   0000001C   0100001A           BNE      ??_MMC_InitMedium_0
+   1309              r = _MMC_Init(pInst);
+   \   00000020   ........           BL       _MMC_Init
+   \   00000024   0010A0E1           MOV      R1,R0
+   1310              if (r != 0) { /* init failed, no valid card in slot */
+   1311                FS_DEBUG_WARN((FS_MTYPE_DRIVER, "MMC CM: Init failure, no valid card found"));
+   1312              }
+   1313            }
+   1314            return r;
+   \                     ??_MMC_InitMedium_0:
+   \   00000028   0100A0E1           MOV      R0,R1
+   \   0000002C   04D08DE2           ADD      SP,SP,#+4
+   \   00000030   0080BDE8           POP      {PC}             ;; return
+   1315          }
+   1316          
+   1317          
+   1318          /*********************************************************************
+   1319          *
+   1320          *       _MMC_AddDevice
+   1321          *
+   1322          *  Description:
+   1323          *    Initializes the low-level driver object.
+   1324          *
+   1325          *  Return value:
+   1326          *    >= 0                       - Command successfully executed, Unit no.
+   1327          *    <  0                       - Error, could not add device
+   1328          *
+   1329          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1330          static int _MMC_AddDevice(void) {
+   \                     _MMC_AddDevice:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   1331            U8         Unit;
+   1332            MMC_CM_INST * pInst;
+   1333          
+   1334            if (_NumUnits >= NUM_UNITS) {
+   \   00000004   ........           LDR      R4,??DataTable15_1
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   040094E5           LDR      R0,[R4, #+4]
+   \   00000010   010050E3           CMP      R0,#+1
+   1335              return -1;
+   \   00000014   0000E0A3           MVNGE    R0,#+0
+   \   00000018   080000AA           BGE      ??_MMC_AddDevice_0
+   1336            }
+   1337            Unit = _NumUnits++;
+   \   0000001C   0050A0E1           MOV      R5,R0
+   \   00000020   010080E2           ADD      R0,R0,#+1
+   \   00000024   040084E5           STR      R0,[R4, #+4]
+   1338            pInst = (MMC_CM_INST *)FS_AllocZeroed(sizeof(MMC_CM_INST));   // Alloc memory. This is guaranteed to work by the memory module.
+   \   00000028   2C00A0E3           MOV      R0,#+44
+   \   0000002C   ........           BL       FS_AllocZeroed
+   1339            _apInst[Unit] = pInst;
+   \   00000030   FF1005E2           AND      R1,R5,#0xFF
+   \   00000034   010184E7           STR      R0,[R4, +R1, LSL #+2]
+   1340            pInst->Unit   = Unit;
+   \   00000038   0150C0E5           STRB     R5,[R0, #+1]
+   1341            return Unit;
+   \   0000003C   0100A0E1           MOV      R0,R1
+   \                     ??_MMC_AddDevice_0:
+   \   00000040   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000044   3080BDE8           POP      {R4,R5,PC}       ;; return
+   1342          }
+   1343          
+   1344          /*********************************************************************
+   1345          *
+   1346          *       _MMC_GetNumUnits
+   1347          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1348          static int _MMC_GetNumUnits(void) {
+   1349            return _NumUnits;
+   \                     _MMC_GetNumUnits:
+   \   00000000   ........           LDR      R0,??DataTable15_1
+   \   00000004   040090E5           LDR      R0,[R0, #+4]
+   \   00000008   1EFF2FE1           BX       LR               ;; return
+   1350          }
+   1351          
+   1352          /*********************************************************************
+   1353          *
+   1354          *       _MMC_GetDriverName
+   1355          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1356          static const char * _MMC_GetDriverName(U8 Unit) {
+   1357            FS_USE_PARA(Unit);
+   1358            return "mmc";
+   \                     _MMC_GetDriverName:
+   \   00000000   ........           ADR      R0,??DataTable15  ;; "mmc"
+   \   00000004   1EFF2FE1           BX       LR               ;; return
+   1359          }
+   1360          
+   1361          /*********************************************************************
+   1362          *
+   1363          *       Public data
+   1364          *
+   1365          **********************************************************************
+   1366          */
+
+   \                                 In section .rodata, align 4, keep-with-next
+   1367          const FS_DEVICE_TYPE FS_MMC_CardMode_Driver = {
+   \                     FS_MMC_CardMode_Driver:
+   \   00000000                      ; Initializer data, 32 bytes
+   \   00000000   ............       DC32 _MMC_GetDriverName, _MMC_AddDevice, _MMC_Read, _MMC_Write, _MMC_IoCtl, _MMC_InitMedium, _MMC_GetStatus, _MMC_GetNumUnits
+   \              ............
+   \              ............
+   \              ............
+   \              ............
+   \              ....        
+   1368            _MMC_GetDriverName,
+   1369            _MMC_AddDevice,
+   1370            _MMC_Read,
+   1371            _MMC_Write,
+   1372            _MMC_IoCtl,
+   1373            _MMC_InitMedium,
+   1374            _MMC_GetStatus,
+   1375            _MMC_GetNumUnits
+   1376          };
+   1377          
+   1378          
+   1379          /*********************************************************************
+   1380          *
+   1381          *       FS_MMC_CM_Allow4bitMode
+   1382          *
+   1383          *  Description:
+   1384          *    Allows the driver to use 4bit mode for SD cards.
+   1385          *    This function shall only be used when configuring the driver
+   1386          *    in FS_X_AddDevices().
+   1387          *
+   1388          *  Parameters:
+   1389          *    Unit     - Unit number to configure
+   1390          *    OnOff    - Enable or disables the 4bit mode.
+   1391          *
+   1392          *
+   1393          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1394          void FS_MMC_CM_Allow4bitMode(U8 Unit, U8 OnOff) {
+   1395            MMC_CM_INST * pInst;
+   1396          
+   1397            ASSERT_UNIT_NO_IS_IN_RANGE(Unit);
+   1398            pInst = _apInst[Unit];
+   \                     FS_MMC_CM_Allow4bitMode:
+   \   00000000   ........           LDR      R2,??DataTable15_1
+   \   00000004   000192E7           LDR      R0,[R2, +R0, LSL #+2]
+   1399            if (pInst) {
+   \   00000008   000050E3           CMP      R0,#+0
+   1400              pInst->Allow4bitMode = OnOff;
+   \   0000000C   2810C015           STRBNE   R1,[R0, #+40]
+   1401            }
+   1402          }
+   \   00000010   1EFF2FE1           BX       LR               ;; return
+   1403          
+   1404          /*********************************************************************
+   1405          *
+   1406          *       FS_MMC_CM_AllowHighSpeedMode
+   1407          *
+   1408          *  Description:
+   1409          *    Allows the driver to use high speed mode for SD v2 cards.
+   1410          *    This function shall only be used when configuring the driver
+   1411          *    in FS_X_AddDevices().
+   1412          *
+   1413          *  Parameters:
+   1414          *    Unit     - Unit number to configure
+   1415          *    OnOff    - Enable or disables the high speed mode.
+   1416          *
+   1417          *
+   1418          */
+   1419          void FS_MMC_CM_AllowHighSpeedMode(U8 Unit, U8 OnOff);
+
+   \                                 In section .text, align 4, keep-with-next
+   1420          void FS_MMC_CM_AllowHighSpeedMode(U8 Unit, U8 OnOff) {
+   1421            MMC_CM_INST * pInst;
+   1422          
+   1423            ASSERT_UNIT_NO_IS_IN_RANGE(Unit);
+   1424            pInst = _apInst[Unit];
+   \                     FS_MMC_CM_AllowHighSpeedMode:
+   \   00000000   ........           LDR      R2,??DataTable15_1
+   \   00000004   000192E7           LDR      R0,[R2, +R0, LSL #+2]
+   1425            if (pInst) {
+   \   00000008   000050E3           CMP      R0,#+0
+   1426              pInst->AllowHighSpeedMode = OnOff;
+   \   0000000C   2A10C015           STRBNE   R1,[R0, #+42]
+   1427            }
+   1428          }
+   \   00000010   1EFF2FE1           BX       LR               ;; return
+   1429          
+   1430          /*********************************************************************
+   1431          *
+   1432          *       FS_MMC_CM_IsWrRepeatSameAllowed
+   1433          *
+   1434          *  Description:
+   1435          *    Allows writing multiple sectors with the same sector data.
+   1436          *    
+   1437          *
+   1438          *  Parameters:
+   1439          *    Unit     - Unit number to configure
+   1440          *    OnOff    - Enable or disables the high speed mode.
+   1441          *
+   1442          *
+   1443          */
+   1444          void FS_MMC_CM_IsWrRepeatSameAllowed(U8 Unit, U8 OnOff);
+
+   \                                 In section .text, align 4, keep-with-next
+   1445          void FS_MMC_CM_IsWrRepeatSameAllowed(U8 Unit, U8 OnOff) {
+   1446            MMC_CM_INST * pInst;
+   1447          
+   1448            ASSERT_UNIT_NO_IS_IN_RANGE(Unit);
+   1449            pInst = _apInst[Unit];
+   \                     FS_MMC_CM_IsWrRepeatSameAllowed:
+   \   00000000   ........           LDR      R2,??DataTable15_1
+   \   00000004   000192E7           LDR      R0,[R2, +R0, LSL #+2]
+   1450            if (pInst) {
+   \   00000008   000050E3           CMP      R0,#+0
+   1451              pInst->WrRepeatSameAllowed = OnOff;
+   \   0000000C   2B10C015           STRBNE   R1,[R0, #+43]
+   1452            }
+   1453          }
+   \   00000010   1EFF2FE1           BX       LR               ;; return
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable15:
+   \   00000000   6D6D6300           DC8      "mmc"
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable15_1:
+   \   00000000   ........           DC32     _apInst
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant {0}>`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0
+   \              0000        
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant {0}>_1`:
+   \   00000000                      ; Initializer data, 64 bytes
+   \   00000000   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              00000000    
+   \   0000000A   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              00000000    
+   \   00000014   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              00000000    
+   \   0000001E   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              00000000    
+   \   00000028   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              00000000    
+   \   00000032   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              00000000    
+   \   0000003C   00000000           DC8 0, 0, 0, 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "mmc">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   6D6D6300           DC8 109, 109, 99, 0
+   1454          
+   1455          
+   1456          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function                       .cstack
+     --------                       -------
+     FS_MMC_CM_Allow4bitMode             0
+     FS_MMC_CM_AllowHighSpeedMode        0
+     FS_MMC_CM_IsWrRepeatSameAllowed
+                                         0
+     _ApplyCSD                          24
+     _CheckAndSwitchToHighSpeed        112
+     _CheckCardType                     48
+     _MMC_AddDevice                     16
+     _MMC_GetDriverName                  0
+     _MMC_GetNumUnits                    0
+     _MMC_GetStatus                      8
+     _MMC_Init                         104
+     _MMC_InitMedium                     8
+     _MMC_IoCtl                          0
+     _MMC_Read                          32
+     _MMC_Write                         40
+     _ReadSectors                       64
+     _SelectCard                        32
+     _Use4BitMode                      112
+     _WriteSectors                      72
+
+
+   Section sizes:
+
+     Function/Label                 Bytes
+     --------------                 -----
+     _aUnit                           32
+     _aFactor                         16
+     _apInst                           8
+     _NumUnits
+     _CheckCardType                  308
+     _SelectCard                     216
+     _Use4BitMode                   1044
+     _CheckAndSwitchToHighSpeed      584
+     _ApplyCSD                       404
+     _MMC_Init                      1092
+     _ReadSectors                    564
+     _WriteSectors                   636
+     _MMC_GetStatus                    4
+     _MMC_IoCtl                       84
+     _MMC_Write                      120
+     _MMC_Read                       112
+     _MMC_InitMedium                  52
+     _MMC_AddDevice                   72
+     _MMC_GetNumUnits                 12
+     _MMC_GetDriverName                8
+     FS_MMC_CardMode_Driver           32
+     FS_MMC_CM_Allow4bitMode          20
+     FS_MMC_CM_AllowHighSpeedMode     20
+     FS_MMC_CM_IsWrRepeatSameAllowed
+                                      20
+     ??DataTable15                     4
+     ??DataTable15_1                   4
+     ?<Constant {0}>                   8
+     ?<Constant {0}>_1                64
+     ?<Constant "mmc">                 4
+
+ 
+     8 bytes in section .bss
+   108 bytes in section .rodata
+ 5 428 bytes in section .text
+ 
+ 5 428 bytes of CODE  memory
+   108 bytes of CONST memory
+     8 bytes of DATA  memory
+
+Errors: none
+Warnings: none

@@ -1,0 +1,110 @@
+C51 COMPILER V9.51   LANCSETUP                                                             01/05/2016 18:47:24 PAGE 1   
+
+
+C51 COMPILER V9.51, COMPILATION OF MODULE LANCSETUP
+OBJECT MODULE PLACED IN lancsetup.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE lancsetup.c OPTIMIZE(SIZE) BROWSE MDU_F120 INCDIR(..\..\C51\INC\;..\CommonF
+                    -iles\;..\SU\) DB OE DEFINE(SENSOR,EXTCLK6,NODEBUG,UBLOX,DISPLAYATTACHED) DEBUG OBJECTEXTEND
+
+line level    source
+
+   1          // Part of traqmate.c
+   2          // 1/13/10
+   3          //
+   4          // Author: GAStephens
+   5          //
+   6          // These functions setup the LANC interface
+   7          // 
+   8          
+   9          #include <stdlib.h>
+  10          #include <sensor.h>
+  11          
+  12          void New_Accessory_Setup( void ) {
+  13   1      
+  14   1              if (0 == DIGIN0 && 1 == DIGIN1) {       // check for CHASECAM or LANC
+  15   2                      u16 timeoutctr = 0;     
+  16   2      
+  17   2                      // get LANC setup bits in case we need it
+  18   2                      DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, IODEFPAGE);
+  19   2      
+  20   2                      // check for LANC
+  21   2                      DIGOUT0 = 0;
+  22   2                      DIGOUT2 = 0;                    
+  23   2                      
+  24   2                      DELAY_MS(1);            // wait for LANC to handshake
+  25   2                      if (1 == DIGIN3 && 1 == DIGIN4) {       // either no accessory or LANC connected
+  26   3                              DIGOUT2 = 1;                                    // put out 1 on D2 to check for LANC
+  27   3      
+  28   3                              for (timeoutctr = 0; timeoutctr < 1000; timeoutctr++)
+  29   3                                      if (0 == DIGIN4) break;
+  30   3      
+  31   3                              if (0 != DIGIN4) {                                      // LANC interface handshake failed
+  32   4                                      accessory = DIRECTACC;                  // no accessory (tach, data, sync) connected
+  33   4                              } // if
+  34   3                              else {          // continue handshake
+  35   4                                      u08 bitctr;
+  36   4                                      u08 handshakebits;
+  37   4      
+  38   4                                      // make sure we are valid
+  39   4                                      if (flashpage.io.lancconfig < MINLANC || flashpage.io.lancconfig > MAXLANC)
+  40   4                                              flashpage.io.lancconfig = DEFAULTLANC;
+  41   4                                                                              
+  42   4                                      // put same 4 bits in upper and lower nibble
+  43   4                                      handshakebits = (((flashpage.io.lancconfig & 0x0F) << 4) | (flashpage.io.lancconfig & 0x0F));
+  44   4      
+  45   4      // GPSLED = 1;          // indicate first part of handshake successful
+  46   4              
+  47   4                                      // write the configuration bits out to LANC interface
+  48   4                                      for (bitctr = 0; bitctr < 8; bitctr++) {
+  49   5                                              DIGOUT0 = handshakebits & 0x01;                 // put bits out there, LSB first
+  50   5                                              DIGOUT2 = ~DIGOUT2;                                             // toggle the strobe line
+  51   5                                              DELAY_MS(1);                                                    // wait for the interface
+  52   5                                              handshakebits = handshakebits >> 1;             // shift down the next bit
+  53   5                                      } // for
+  54   4              
+C51 COMPILER V9.51   LANCSETUP                                                             01/05/2016 18:47:24 PAGE 2   
+
+  55   4                                      for (timeoutctr = 0; timeoutctr < 1000; timeoutctr++)
+  56   4                                              if (1 == DIGIN4) break;                 // byte transfer ok
+  57   4                      
+  58   4                                      if (1 == DIGIN4) {
+  59   5                                              accessory = DIRECTLANC;                 // handshake successful. LANC verified.
+  60   5                                              camlanc.ports = ENABLED4LANC;   // indicate LANC connected on D4
+  61   5                                              
+  62   5                                              // initialize to not recording and not test mode
+  63   5                                              LANCMODE = LANCNORMALMODE;
+  64   5                                              LANCCMD = LANCRECSTOP;
+  65   5                                              camlanc.status = CAMLANCNOTREADY;
+  66   5                                      } // if                 
+  67   4                                      else {                  
+  68   5                                              accessory = DIRECTACC;                          // bits not received correctly. handshake failed
+  69   5                                              camlanc.ports = NOCAMLANC;                      // other camera presence determined later
+  70   5                                              camlanc.status = UNKNOWNSTATUS;         // status determined later
+  71   5                                      } // else
+  72   4                              } // else
+  73   3                      } // if
+  74   2                      else {
+  75   3                              accessory = DIRECTACC;                          // bits not received correctly. handshake failed
+  76   3                              camlanc.ports = NOCAMLANC;                      // other camera presence determined later
+  77   3                              camlanc.status = UNKNOWNSTATUS;         // status determined later              
+  78   3      
+  79   3                              if (su2) {                                              // test for new style accessories
+  80   4                                      // **** INSERT SMBUS COMMUNICATIONS HERE - EXCEPT NOT INITIALIZED YET
+  81   4                              } // else
+  82   3                      } // else
+  83   2              } // if
+  84   1      } // New_Accessory_Setup
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    314    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----       8
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----       4
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

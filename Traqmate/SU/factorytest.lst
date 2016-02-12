@@ -1,0 +1,1060 @@
+C51 COMPILER V9.51   FACTORYTEST                                                           01/05/2016 18:47:25 PAGE 1   
+
+
+C51 COMPILER V9.51, COMPILATION OF MODULE FACTORYTEST
+OBJECT MODULE PLACED IN .\factorytest.obj
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE ..\CommonFiles\factorytest.c OPTIMIZE(SIZE) BROWSE MDU_F120 INCDIR(..\..\C5
+                    -1\INC\;..\CommonFiles\;..\SU\) DB OE DEFINE(SENSOR,EXTCLK6,NODEBUG,UBLOX,DISPLAYATTACHED) DEBUG OBJECTEXTEND PRINT(.\fac
+                    -torytest.lst) OBJECT(.\factorytest.obj)
+
+line level    source
+
+   1          /* This is a collection of test routines that are used to checkout the product at the factory
+   2          
+   3          For Traqmate Sensor Unit 2 axis units this is the algorithm:
+   4          Sit level, allow to settle.
+   5          Adjust PWM values until both X and Y read zero.
+   6          Store PWM values in microprocessor flash.
+   7          Rotate through positions to get ranges for x and y.
+   8          
+   9          For Traqmate Sensor Unit 3 axis units this is the algorithm:
+  10          Sit level, allow to settle.
+  11          Rotate through positions to get ranges for x, y, and z.
+  12          
+  13          */
+  14          
+  15          #ifdef SENSOR
+  16          #include <sensor.h>
+  17          #endif
+  18          #ifdef DISPLAY
+              #include <display.h>
+              #endif
+  21          
+  22          void Stabilize(void);
+  23          void ZeroOutXY(void);
+  24          void dfwait(void);
+  25          
+  26          #define STABILITY       4                                       // range of values to allow
+  27          #define CALIBRATED      5                                       // max variation from midpoint to allow. 3 is too small.
+  28          #define PWMHI           255                                     // highest PWM calibration value
+  29          #define PWMLO           0                                       // lowest PWM calibration value
+  30          //#define STARTZERO     (PWMHI-PWMLO)/2         // middle of road value to start with
+  31          #define STARTZERO       160                                     // approximate PWM value for current hardware, speeds up cal
+  32          #define SETTLING        40                                      // number of samples to collect to see if settled
+  33          #define MINACCEL        0                                       // minimum accelerometer reading
+  34          #define MAXACCEL        4095                            // maximum accelerometer reading
+  35          #define MIDACCEL        ((MAXACCEL+1-MINACCEL)/2)       // midpoint of accelerometer range (12 bits)
+  36          
+  37          #define TEXTDELAY       200                                     // number of ms to wait between text writes (150 just slightly too short)
+  38          
+  39          #ifdef SENSOR
+  40          // globals
+  41          xdata u16 minx, maxx, miny, maxy, minz, maxz, mintemp, maxtemp;
+  42          
+  43          void Calibrate(void) {
+  44   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+  45   1              u16 temp;
+  46   1              xdata char textline[80];
+  47   1      
+  48   1              calibrating = TRUE;
+  49   1              SFRPAGE = CONFIG_PAGE;
+  50   1      
+  51   1              // get current values
+  52   1              ReadScratchpad(scratch.scratchbuff);
+  53   1      
+C51 COMPILER V9.51   FACTORYTEST                                                           01/05/2016 18:47:25 PAGE 2   
+
+  54   1              // initialize
+  55   1              scratch.calibrate.timecode = (s08) 0;
+  56   1              scratch.calibrate.model = msgrouting[0];                // what are we?
+  57   1              if (su2)
+  58   1                      scratch.calibrate.hwrev = HWREVSU2;
+  59   1              else
+  60   1                      scratch.calibrate.hwrev = HWREVSU1;
+  61   1              scratch.calibrate.swrev = SWREV;
+  62   1              scratch.calibrate.datarev = DATAREV;
+  63   1              if (0xFFFFFFFF == scratch.calibrate.serno)
+  64   1                      scratch.calibrate.serno = 0;
+  65   1              if (0xFF == scratch.calibrate.week)
+  66   1                      scratch.calibrate.week = 1;
+  67   1              if (0xFF == scratch.calibrate.year)
+  68   1                      scratch.calibrate.year = CURRENTYEAR;
+  69   1              scratch.calibrate.contrast = 0xFF;
+  70   1              scratch.calibrate.hwconfig = 0xFF;
+  71   1              scratch.calibrate.xzero = MIDACCEL;
+  72   1              scratch.calibrate.yzero = MIDACCEL;
+  73   1              scratch.calibrate.owner[0] = '\0';
+  74   1              scratch.calibrate.phone[0] = '\0';
+  75   1              scratch.calibrate.note[0] = '\0';
+  76   1      
+  77   1              scratch.calibrate.calx = scratch.calibrate.caly = STARTZERO;
+  78   1      
+  79   1              debounce = 0;
+  80   1      
+  81   1              LED0 = 1; LED1 = 1; LED2 = 1; LED3 = 1;
+  82   1      
+  83   1              DELAY_MS(TEXTDELAY);
+  84   1              PRINTPC0( "Place unit flat on level surface.");
+  85   1              DELAY_MS(TEXTDELAY);    // give the user some time
+  86   1      
+  87   1              Stabilize();
+  88   1      
+  89   1              if (su2) {
+  90   2                      scratch.calibrate.xzero = AVG(minx, maxx);
+  91   2                      scratch.calibrate.yzero = AVG(miny, maxy);
+  92   2                      scratch.calibrate.zplusg = AVG(minz, maxz);
+  93   2              } // if
+  94   1              else
+  95   1                      ZeroOutXY();
+  96   1      
+  97   1              if (su2) {
+  98   2                      LED0 = 0; LED2 = 0;
+  99   2                      
+ 100   2                      // min z
+ 101   2                      PRINTPC0( "Flip over. Face down.");
+ 102   2                      DELAY_MS(TEXTDELAY);
+ 103   2      
+ 104   2                      Stabilize();
+ 105   2                      scratch.calibrate.zminusg = AVG(minz, maxz);
+ 106   2              } // if
+ 107   1      
+ 108   1              LED0 = 0; LED1 = 0; LED2 = 0; LED3 = 0;
+ 109   1              
+ 110   1              // max x, zero z
+ 111   1              PRINTPC0( "Hold vertical, GPS antenna jack up.");
+ 112   1              DELAY_MS(TEXTDELAY);
+ 113   1      
+ 114   1              Stabilize();
+ 115   1              scratch.calibrate.xplusg = AVG(minx, maxx);
+C51 COMPILER V9.51   FACTORYTEST                                                           01/05/2016 18:47:25 PAGE 3   
+
+ 116   1      
+ 117   1              if (su2)
+ 118   1                      scratch.calibrate.zzero = AVG(minz, maxz);
+ 119   1      
+ 120   1              LED0 = 1;
+ 121   1      
+ 122   1              // min x
+ 123   1              PRINTPC0( "Hold vertical, GPS antenna jack down.");
+ 124   1              DELAY_MS(TEXTDELAY);
+ 125   1      
+ 126   1              Stabilize();
+ 127   1              scratch.calibrate.xminusg = AVG(minx, maxx);
+ 128   1              
+ 129   1              LED1 = 1;
+ 130   1      
+ 131   1              // min y
+ 132   1              PRINTPC0( "Stand on right side.");
+ 133   1              DELAY_MS(TEXTDELAY);
+ 134   1      
+ 135   1              Stabilize();
+ 136   1              scratch.calibrate.yminusg = AVG(miny, maxy);
+ 137   1              
+ 138   1              LED2 = 1;
+ 139   1      
+ 140   1              // max y
+ 141   1              PRINTPC0( "Stand on left side.");
+ 142   1              DELAY_MS(TEXTDELAY);
+ 143   1      
+ 144   1              Stabilize();
+ 145   1              scratch.calibrate.yplusg = AVG(miny, maxy);
+ 146   1              
+ 147   1              LED3 = 1;
+ 148   1      
+ 149   1              if (scratch.calibrate.xplusg < scratch.calibrate.xminusg) {
+ 150   2                      PRINTPC0("Inverting X Values");
+ 151   2                      DELAY_MS(TEXTDELAY);
+ 152   2                      temp = scratch.calibrate.xplusg;
+ 153   2                      scratch.calibrate.xplusg = scratch.calibrate.xminusg;
+ 154   2                      scratch.calibrate.xminusg = temp;
+ 155   2              }
+ 156   1              if (scratch.calibrate.yplusg < scratch.calibrate.yminusg) {
+ 157   2                      PRINTPC0("Inverting Y Values");
+ 158   2                      DELAY_MS(TEXTDELAY);            
+ 159   2                      temp = scratch.calibrate.yplusg;
+ 160   2                      scratch.calibrate.yplusg = scratch.calibrate.yminusg;
+ 161   2                      scratch.calibrate.yminusg = temp;
+ 162   2              }
+ 163   1      
+ 164   1              if (su2) {
+ 165   2                      if (scratch.calibrate.zplusg < scratch.calibrate.zminusg) {
+ 166   3                              PRINTPC0("Inverting Z Values");
+ 167   3                              DELAY_MS(TEXTDELAY);
+ 168   3                              temp = scratch.calibrate.zplusg;
+ 169   3                              scratch.calibrate.zplusg = scratch.calibrate.zminusg;
+ 170   3                              scratch.calibrate.zminusg = temp;
+ 171   3                      }
+ 172   2              } // if
+ 173   1      
+ 174   1              PRINTPC0( " ");
+ 175   1              DELAY_MS(TEXTDELAY);
+ 176   1      //      PRINTPC2( "Calibration Values: %u, %u", scratch.calibrate.calx, scratch.calibrate.caly);
+ 177   1      //      DELAY_MS(TEXTDELAY);    // wait for message to go out
+C51 COMPILER V9.51   FACTORYTEST                                                           01/05/2016 18:47:25 PAGE 4   
+
+ 178   1              sprintf(textline, "Zero Points: X %u, Y %u, Z %u", scratch.calibrate.xzero, scratch.calibrate.yzero, scra
+             -tch.calibrate.zzero);
+ 179   1              PRINTPC0(textline);
+ 180   1              DELAY_MS(TEXTDELAY);    // wait for message to go out   
+ 181   1              PRINTPC2( "X Range: %u, %u", scratch.calibrate.xminusg, scratch.calibrate.xplusg);
+ 182   1              DELAY_MS(TEXTDELAY);    // wait for message to go out
+ 183   1              PRINTPC2( "Y Range: %u, %u", scratch.calibrate.yminusg, scratch.calibrate.yplusg);
+ 184   1              DELAY_MS(TEXTDELAY);    // wait for message to go out
+ 185   1              PRINTPC2( "Z Range: %u, %u", scratch.calibrate.zminusg, scratch.calibrate.zplusg);
+ 186   1              DELAY_MS(TEXTDELAY);    // wait for message to go out
+ 187   1              PRINTPC0( "Storing Calibration Data in Flash.");
+ 188   1      
+ 189   1              EraseScratchpad();
+ 190   1      
+ 191   1              WriteScratchpad(scratch.scratchbuff, sizeof(caltype));
+ 192   1      
+ 193   1              DELAY_MS(TEXTDELAY);
+ 194   1              PRINTPC0( "Calibration Complete.");
+ 195   1      
+ 196   1              LED0 = 1; LED1 = 0; LED2 = 0; LED3 = 0;
+ 197   1      
+ 198   1              calibrating = FALSE;
+ 199   1      
+ 200   1              // get the configuration data
+ 201   1              InitSUScratchpad();
+ 202   1      
+ 203   1              SFRPAGE = SFRPAGE_SAVE;
+ 204   1      } // Calibrate
+ 205          
+ 206          void Stabilize( void ) {
+ 207   1              int counter;
+ 208   1      
+ 209   1              do {            // sit here until values stabilize
+ 210   2                      // initialize
+ 211   2                      minx = miny = minz = MAXACCEL;
+ 212   2                      maxx = maxy = maxz = MINACCEL;
+ 213   2      
+ 214   2                      for (counter=0; counter < SETTLING; counter++) { // collect several values to compare
+ 215   3                              // wait for the next valid sample
+ 216   3                              while (!adcresults) ;
+ 217   3      
+ 218   3                              minx = MIN(minx, result[0]);
+ 219   3                              miny = MIN(miny, result[1]);
+ 220   3                              minz = MIN(minz, result[3]);
+ 221   3      
+ 222   3                              maxx = MAX(maxx, result[0]);
+ 223   3                              maxy = MAX(maxy, result[1]);
+ 224   3                              maxz = MAX(maxz, result[3]);
+ 225   3      
+ 226   3                              adcresults = FALSE;
+ 227   3                      } // for
+ 228   2              } while ((ABS(maxy - miny) > STABILITY) || (ABS(maxx - minx) > STABILITY));
+ 229   1              
+ 230   1      } // Stabilize
+ 231          
+ 232          void ZeroOutXY( void ) {
+ 233   1      
+ 234   1              unsigned char xdone = FALSE;
+ 235   1              unsigned char ydone = FALSE;
+ 236   1              xdata char textline[80];
+ 237   1      
+ 238   1              SFRPAGE = PCA0_PAGE;
+C51 COMPILER V9.51   FACTORYTEST                                                           01/05/2016 18:47:25 PAGE 5   
+
+ 239   1      
+ 240   1              // put initial values in PWM
+ 241   1              PCA0CPL1 =      scratch.calibrate.caly;
+ 242   1              PCA0CPH1 =      scratch.calibrate.caly;
+ 243   1              PCA0CPL0 =      scratch.calibrate.calx;
+ 244   1              PCA0CPH0 =      scratch.calibrate.calx;
+ 245   1      
+ 246   1              PRINTPC0("Zeroing X, Y PWM");
+ 247   1              DELAY_MS(TEXTDELAY);
+ 248   1      
+ 249   1              do {            // zero in on x,y
+ 250   2                      // throw out any old results
+ 251   2                      while (!adcresults) ;
+ 252   2                      adcresults = FALSE;
+ 253   2              
+ 254   2                      // get a round of samples with new PWM settings
+ 255   2                      while (!adcresults) ;
+ 256   2                      
+ 257   2                      // record the actual zero points
+ 258   2                      if (!xdone) scratch.calibrate.xzero = result[0];
+ 259   2                      if (!ydone) scratch.calibrate.yzero = result[1];
+ 260   2                      adcresults = FALSE;
+ 261   2      
+ 262   2      //              DELAY_MS(TEXTDELAY);
+ 263   2      //              PRINTPC2( "Cal: %d,%d", scratch.calibrate.calx, scratch.calibrate.caly);
+ 264   2      //              sprintf(textline, "Val: %u,%u", scratch.calibrate.xzero, scratch.calibrate.yzero);
+ 265   2      //              DELAY_MS(TEXTDELAY);
+ 266   2      //              PRINTPC0(textline);
+ 267   2      
+ 268   2                      if (!xdone) xdone = (ABS(((s16) scratch.calibrate.xzero)-MIDACCEL) <= CALIBRATED);
+ 269   2                      if (!xdone) {
+ 270   3                              if (scratch.calibrate.xzero < MIDACCEL)
+ 271   3                                      if (PWMLO == scratch.calibrate.calx)
+ 272   3                                              // couldn't get to middle so go with what we got
+ 273   3                                              xdone = TRUE;
+ 274   3                                      else
+ 275   3                                              // drop the cal value and try again
+ 276   3                                              scratch.calibrate.calx -= 1;
+ 277   3                              else
+ 278   3                                      if (PWMHI == scratch.calibrate.calx)
+ 279   3                                              // couldn't get to middle so go with what we got
+ 280   3                                              xdone = TRUE;
+ 281   3                                      else
+ 282   3                                              // raise the cal value and try again
+ 283   3                                              scratch.calibrate.calx += 1;
+ 284   3      
+ 285   3                              // reprogram the PWM
+ 286   3                              PCA0CPL0 =      scratch.calibrate.calx;
+ 287   3                              PCA0CPH0 =      scratch.calibrate.calx;
+ 288   3                      }
+ 289   2      
+ 290   2                      if (!ydone) ydone = (ABS(((s16) scratch.calibrate.yzero)-MIDACCEL) <= CALIBRATED);
+ 291   2                      if (!ydone) {
+ 292   3                              if (scratch.calibrate.yzero < MIDACCEL)
+ 293   3                                      if (PWMLO == scratch.calibrate.caly)
+ 294   3                                              // couldn't get to middle so go with what we got
+ 295   3                                              ydone = TRUE;
+ 296   3                                      else
+ 297   3                                              // drop the cal value and try again
+ 298   3                                              scratch.calibrate.caly -= 1;
+ 299   3                              else
+ 300   3                                      if (PWMHI == scratch.calibrate.caly)
+C51 COMPILER V9.51   FACTORYTEST                                                           01/05/2016 18:47:25 PAGE 6   
+
+ 301   3                                              // couldn't get to middle so go with what we got
+ 302   3                                              ydone = TRUE;
+ 303   3                                      else
+ 304   3                                              // raise the cal value and try again
+ 305   3                                              scratch.calibrate.caly += 1;
+ 306   3      
+ 307   3                              // reprogram the PWM
+ 308   3                              PCA0CPL1 =      scratch.calibrate.caly;
+ 309   3                              PCA0CPH1 =      scratch.calibrate.caly;
+ 310   3                      } // if
+ 311   2              } while (!(xdone && ydone));
+ 312   1      
+ 313   1      //      DELAY_MS(TEXTDELAY);
+ 314   1      //      PRINTPC0( "X, Y Zeroed Out");
+ 315   1      
+ 316   1              Stabilize();
+ 317   1              // record the actual zero points
+ 318   1              scratch.calibrate.xzero = result[0];
+ 319   1              scratch.calibrate.yzero = result[1];
+ 320   1      
+ 321   1              PRINTPC2( "Final Cal: %u,%u", scratch.calibrate.calx, scratch.calibrate.caly);
+ 322   1              DELAY_MS(TEXTDELAY);
+ 323   1              sprintf(textline, "Final Val: %u,%u", scratch.calibrate.xzero, scratch.calibrate.yzero);
+ 324   1              PRINTPC0(textline);
+ 325   1              DELAY_MS(TEXTDELAY);
+ 326   1      
+ 327   1      } // ZeroOutXY
+ 328          #endif // SENSOR
+ 329          
+ 330          void DataflashTest(u08 whichtest) {
+ 331   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 332   1              int pagenum = 0;
+ 333   1              int i;
+ 334   1              BOOL flashfail = FALSE;
+ 335   1              
+ 336   1              // initialize
+ 337   1              PRINTPC0( "Dataflash Test");
+ 338   1      
+ 339   1      #ifdef SENSOR
+ 340   1              debounce = 0;
+ 341   1      #else
+                      debounce[SEL] = 0;
+              #endif
+ 344   1      
+ 345   1              // initialize page to write
+ 346   1              for (i=0; i<pagesize; i++) flashpage.bigbuff[i] = i % 256;
+ 347   1      
+ 348   1              do {
+ 349   2                      SFRPAGE = CONFIG_PAGE;
+ 350   2      #ifdef SENSOR
+ 351   2                      if (0 != SW1) {
+ 352   3                              // see if it has just been released
+ 353   3                              if (debounce >= DEBOUNCE_NORMAL) break;
+ 354   3      
+ 355   3                              debounce = 0;
+ 356   3                      } // if
+ 357   2      #else
+                              if (SEL_SW) {
+                                      // see if it has just been released
+                                      if (debounce[SEL] >= DEBOUNCE_NORMAL) break;
+              
+                                      debounce[SEL] = 0;
+C51 COMPILER V9.51   FACTORYTEST                                                           01/05/2016 18:47:25 PAGE 7   
+
+                              } // if
+              #endif
+ 365   2      
+ 366   2                      // write buffer to flash
+ 367   2                      DataFlash_Page_Write_Erase(0, pagesize, flashpage.bigbuff, pagenum);
+ 368   2      
+ 369   2                      // read back and verify
+ 370   2                      DataFlash_Page_Read(pagesize, flashpage.bigbuff, pagenum);
+ 371   2      
+ 372   2                      // initialize page to write
+ 373   2                      for (i=0; i<pagesize; i++) {
+ 374   3                              if (flashpage.bigbuff[i] != (i % 256)) {
+ 375   4                                      flashfail = TRUE;
+ 376   4                                      break;
+ 377   4                              } // if
+ 378   3                      } // for
+ 379   2      
+ 380   2                      if (flashfail) {
+ 381   3                              PRINTPC2("** Flash FAILED **, page %d, byte%d", pagenum, i);
+ 382   3                              break;
+ 383   3                      } // if
+ 384   2      
+ 385   2                      DELAY_MS(TEXTDELAY);
+ 386   2                      PRINTPC1("Page %d ok", pagenum);
+ 387   2      
+ 388   2                      // erase the page
+ 389   2                      DataFlash_Erase_Page(pagenum);
+ 390   2      
+ 391   2                      // at the end yet?
+ 392   2                      if (pagenum >= numpages)
+ 393   2                              pagenum = 0;
+ 394   2                      else 
+ 395   2                              // go to next page
+ 396   2                              pagenum++;
+ 397   2      
+ 398   2              } while (whichtest == DATAFLASHTEST || pagenum <= 4);
+ 399   1      
+ 400   1      #ifdef SENSOR
+ 401   1              debounce = 0;
+ 402   1      #else
+                      debounce[SEL] = 0;
+              #endif
+ 405   1      
+ 406   1              DELAY_MS((TEXTDELAY));
+ 407   1              PRINTPC0( "Test Complete.");
+ 408   1      
+ 409   1              SFRPAGE = SFRPAGE_SAVE;
+ 410   1      } // DataflashTest
+ 411          
+ 412          #ifdef SENSOR
+ 413          void InputTest(void) {
+ 414   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 415   1              xdata u08 mask[] = { 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80 };
+ 416   1              xdata char textline[80];
+ 417   1      
+ 418   1              calibrating = TRUE;
+ 419   1      
+ 420   1              // initialize
+ 421   1              DELAY_MS(TEXTDELAY);
+ 422   1              PRINTPC0( "Input Test");
+ 423   1      
+ 424   1              debounce = 0;
+C51 COMPILER V9.51   FACTORYTEST                                                           01/05/2016 18:47:25 PAGE 8   
+
+ 425   1              while (1) {
+ 426   2                      u08 port5;
+ 427   2                      int i;
+ 428   2      
+ 429   2                      SFRPAGE = CONFIG_PAGE;
+ 430   2                      if (0 != SW1) {
+ 431   3                              // see if it has just been released
+ 432   3                              if (debounce >= DEBOUNCE_NORMAL) break;
+ 433   3      
+ 434   3                              debounce = 0;
+ 435   3                      } // if
+ 436   2      
+ 437   2                      if (adcresults) {
+ 438   3                              adcresults = FALSE;
+ 439   3      
+ 440   3                              port5 = P5;
+ 441   3      
+ 442   3                              DELAY_MS(1000);
+ 443   3                              PRINTPC0(" ");
+ 444   3      
+ 445   3                              DELAY_MS(TEXTDELAY);
+ 446   3                              sprintf(textline, "DIGIN: ");
+ 447   3                              for (i = 6; i >= 0; i--)
+ 448   3                                      sprintf(textline+strlen(textline), (port5 & mask[i])? "1" : "0");
+ 449   3                              PRINTPC0(textline);
+ 450   3      
+ 451   3                              DELAY_MS(TEXTDELAY);
+ 452   3                              sprintf(textline, "X: %u, Y: %u", result[0], result[1]);                        
+ 453   3                              PRINTPC0(textline);
+ 454   3      
+ 455   3                              DELAY_MS(TEXTDELAY);
+ 456   3                              if (su2)
+ 457   3                                      sprintf(textline, "Z: %u, 5V: %u", result[3], result[2]);
+ 458   3                              else
+ 459   3                                      sprintf(textline, "5V: %u, T: %u", result[2], result[3]);                       
+ 460   3                              PRINTPC0(textline);
+ 461   3      
+ 462   3                              DELAY_MS(TEXTDELAY);
+ 463   3                              sprintf(textline, "A0: %u, A1: %u", result[4], result[5]);
+ 464   3                              PRINTPC0(textline);
+ 465   3      
+ 466   3                              DELAY_MS(TEXTDELAY);
+ 467   3                              sprintf(textline, "A2: %u, A3: %u", result[6], result[7]);
+ 468   3                              PRINTPC0(textline);
+ 469   3                      } // if
+ 470   2      
+ 471   2              } // while
+ 472   1              debounce = 0;
+ 473   1      
+ 474   1              DELAY_MS(TEXTDELAY);
+ 475   1              PRINTPC0( "InputTest Complete.");
+ 476   1      
+ 477   1              LED0 = 1; LED1 = 0; LED2 = 0; LED3 = 0;
+ 478   1      
+ 479   1              calibrating = FALSE;
+ 480   1      
+ 481   1              SFRPAGE = SFRPAGE_SAVE;
+ 482   1      } // InputTest
+ 483          
+ 484          void OutputTest(void) {
+ 485   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 486   1              u16 clocksave;                  // saves the clock for elapsed time calculations
+C51 COMPILER V9.51   FACTORYTEST                                                           01/05/2016 18:47:25 PAGE 9   
+
+ 487   1              int bitnum = 0;
+ 488   1              xdata u08 mask[] = { 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80 };
+ 489   1      
+ 490   1      #define BIT_CHANGE_RATE 1       // once per second
+ 491   1      
+ 492   1              // initialize
+ 493   1              DELAY_MS(TEXTDELAY);
+ 494   1              PRINTPC0( "Output Test");
+ 495   1              DELAY_MS(TEXTDELAY);
+ 496   1      
+ 497   1              debounce = 0;
+ 498   1              clocksave = clocktick + (SAMPLE_RATE*BIT_CHANGE_RATE);  // change bit every 1 seconds
+ 499   1      
+ 500   1              while (1) {
+ 501   2      
+ 502   2                      SFRPAGE = CONFIG_PAGE;
+ 503   2                      if (0 != SW1) {
+ 504   3                              // see if it has just been released
+ 505   3                              if (debounce >= DEBOUNCE_NORMAL) break;
+ 506   3      
+ 507   3                              debounce = 0;
+ 508   3                      } // if
+ 509   2      
+ 510   2                      if (clocksave == clocktick) {
+ 511   3                              // get next tickover
+ 512   3                              clocksave = clocktick + (SAMPLE_RATE*BIT_CHANGE_RATE);  // change bit every 1 seconds
+ 513   3      
+ 514   3                              PRINTPC1("bit %d", bitnum);
+ 515   3      
+ 516   3                              P4 = mask[bitnum];
+ 517   3                              bitnum = ++bitnum % 7;
+ 518   3                      } // if
+ 519   2      
+ 520   2              } // while
+ 521   1              debounce = 0;
+ 522   1      
+ 523   1              DELAY_MS(TEXTDELAY);
+ 524   1              PRINTPC0( "OutputTest Complete.");
+ 525   1      
+ 526   1              LED0 = 1; LED1 = 0; LED2 = 0; LED3 = 0;
+ 527   1      
+ 528   1              SFRPAGE = SFRPAGE_SAVE;
+ 529   1      } // OutputTest
+ 530          
+ 531          void ADTest(void) {
+ 532   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 533   1              xdata char textline[80];
+ 534   1              BOOL testgood;
+ 535   1              BOOL pass = TRUE;
+ 536   1              u08 i;
+ 537   1      
+ 538   1              textline[0] = '\0';
+ 539   1              calibrating = TRUE;
+ 540   1      
+ 541   1              // initialize
+ 542   1              DELAY_MS(TEXTDELAY);
+ 543   1              PRINTPC0( "A/D Test");
+ 544   1              DELAY_MS(TEXTDELAY);
+ 545   1              PRINTPC0( "Board flat. Test fixture attached.");
+ 546   1              DELAY_MS(TEXTDELAY);
+ 547   1              PRINTPC0( "X  Y  5V Z  A0 A1 A2 A3");
+ 548   1      
+C51 COMPILER V9.51   FACTORYTEST                                                           01/05/2016 18:47:25 PAGE 10  
+
+ 549   1              // wait for the next valid sample set
+ 550   1              while (!adcresults) ;
+ 551   1              
+ 552   1              for (i=0; i<8; i++) {           // step through all 8 channels
+ 553   2                      switch (i) {
+ 554   3                              case 0:         // x and y accelerometers
+ 555   3                              case 1:
+ 556   3                                      testgood = (result[i] >= 1700 && result[i] <= 2300);
+ 557   3                                      break;
+ 558   3                              case 2:         // 5v voltage monitor
+ 559   3                                      testgood = (result[i] >= 3716 && result[i] <= 4252);
+ 560   3                                      break;
+ 561   3                              case 3:         // z channel or temperature
+ 562   3                                      if (su2)
+ 563   3                                              testgood = (result[i] >= 1450 && result[i] <= 1900);
+ 564   3                                      else    // no z channel so its a gimme
+ 565   3                                              testgood = 1;
+ 566   3                                      break;
+ 567   3                              case 4:         // analog input 0
+ 568   3                                      testgood = (result[i] >= 1072 && result[i] <= 1376);
+ 569   3                                      break;          
+ 570   3                              case 5:         // analog input 1
+ 571   3                                      testgood = (result[i] >= 714 && result[i] <= 918);
+ 572   3                                      break;          
+ 573   3                              case 6:         // analog input 2
+ 574   3                                      testgood = (result[i] >= 357 && result[i] <= 459);
+ 575   3                                      break;          
+ 576   3                              case 7:         // analog input 3
+ 577   3                                      testgood = (result[i] >= 831 && result[i] <= 1067);
+ 578   3                                      break;
+ 579   3                      } // switch
+ 580   2                      // one failure equals test fail
+ 581   2                      if (!testgood)
+ 582   2                              pass = FALSE;
+ 583   2                      sprintf(textline+strlen(textline), testgood? "1   " : "0   ");
+ 584   2              } // for
+ 585   1              adcresults = FALSE;
+ 586   1      
+ 587   1              DELAY_MS(TEXTDELAY);
+ 588   1              PRINTPC0(textline);
+ 589   1      
+ 590   1              DELAY_MS(TEXTDELAY);
+ 591   1              if (pass)
+ 592   1                      PRINTPC0( "ADTest PASS.");
+ 593   1              else
+ 594   1                      PRINTPC0( "** ADTest FAIL **");
+ 595   1      
+ 596   1              LED0 = 1; LED1 = 0; LED2 = 0; LED3 = 0;
+ 597   1      
+ 598   1              calibrating = FALSE;
+ 599   1      
+ 600   1              SFRPAGE = SFRPAGE_SAVE;
+ 601   1      } // ADTest
+ 602          
+ 603          void DigIOTest(void) {                                  // this test is only valid for SU2
+ 604   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 605   1              BOOL pass = TRUE;
+ 606   1              BOOL testgood;
+ 607   1              u08 testval = 0x00;                                     // initial value = 0
+ 608   1              u08 i;
+ 609   1      
+ 610   1              calibrating = TRUE;
+C51 COMPILER V9.51   FACTORYTEST                                                           01/05/2016 18:47:25 PAGE 11  
+
+ 611   1      
+ 612   1              // configure Comparator 1
+ 613   1              SFRPAGE = CPT1_PAGE;
+ 614   1              CPT1CN = 0x80;                                          // 10000000, CPT1 enabled, no hysteresis
+ 615   1              SFRPAGE = SFRPAGE_SAVE;
+ 616   1      
+ 617   1              // initialize
+ 618   1              DELAY_MS(TEXTDELAY);
+ 619   1              PRINTPC0( "Digital IO Test");
+ 620   1              
+ 621   1              if (!su2) {
+ 622   2                      DELAY_MS(TEXTDELAY);
+ 623   2                      PRINTPC0( "Only Valid for SU2 - Exiting.");
+ 624   2              } // if
+ 625   1              else {
+ 626   2                      for (i=0; i <= 8; i++) {                // step through all 8 channels
+ 627   3                              if (8 == i) {
+ 628   4                                      P4 = 0x00;
+ 629   4                                      ENSMBPU = 1;
+ 630   4                              } // if
+ 631   3                              else {
+ 632   4                                      P4 = testval;
+ 633   4                                      ENSMBPU = 0;
+ 634   4                              } // else
+ 635   3              
+ 636   3                              DELAY_MS(TEXTDELAY);
+ 637   3                              PRINTPC1("DigIOTest Point %d", (int) i);
+ 638   3              
+ 639   3                              // wait for the next valid sample set
+ 640   3                              while (!adcresults) ;
+ 641   3                              
+ 642   3                              // comparing with A1 values. (reads x4) 
+ 643   3                              switch (i) {
+ 644   4                                      case 0: // testval == 0x00
+ 645   4                                              SFRPAGE = SFRPAGE_SAVE;
+ 646   4                                              testgood = ((P5 & 0x7F) == testval) && (result[5] > 714) && (1 == SMBSDA) && (1 == SMBSCL);
+ 647   4                                              SFRPAGE = CPT0_PAGE;
+ 648   4                                              testgood = testgood && (0 == CP0OUT);
+ 649   4                                              SFRPAGE = CPT1_PAGE;                                    
+ 650   4                                              testgood = testgood && (0 == CP1OUT);
+ 651   4                                              SFRPAGE = SFRPAGE_SAVE;
+ 652   4                                              break;
+ 653   4                                      case 1: // testval == 0x01
+ 654   4                                              SFRPAGE = SFRPAGE_SAVE;
+ 655   4                                              testgood = ((P5 & 0x7F) == testval) && (result[5] < 350) && (0 == SMBSDA) && (1 == SMBSCL);
+ 656   4                                              SFRPAGE = CPT0_PAGE;
+ 657   4                                              testgood = testgood && (0 == CP0OUT);
+ 658   4                                              SFRPAGE = CPT1_PAGE;                                    
+ 659   4                                              testgood = testgood && (0 == CP1OUT);
+ 660   4                                              SFRPAGE = SFRPAGE_SAVE;
+ 661   4                                              break;
+ 662   4                                      case 2: // testval == 0x02
+ 663   4                                              SFRPAGE = SFRPAGE_SAVE;
+ 664   4                                              testgood = ((P5 & 0x7F) == testval) && (result[5] < 350) && (1 == SMBSDA) && (0 == SMBSCL);
+ 665   4                                              SFRPAGE = CPT0_PAGE;
+ 666   4                                              testgood = testgood && (0 == CP0OUT);
+ 667   4                                              SFRPAGE = CPT1_PAGE;                                    
+ 668   4                                              testgood = testgood && (0 == CP1OUT);
+ 669   4                                              SFRPAGE = SFRPAGE_SAVE;
+ 670   4                                              break;
+ 671   4                                      case 3: // testval == 0x04
+ 672   4                                              SFRPAGE = SFRPAGE_SAVE;
+C51 COMPILER V9.51   FACTORYTEST                                                           01/05/2016 18:47:25 PAGE 12  
+
+ 673   4                                              testgood = ((P5 & 0x7F) == testval) && (result[5] < 350) && (1 == SMBSDA) && (1 == SMBSCL);
+ 674   4                                              SFRPAGE = CPT0_PAGE;
+ 675   4                                              testgood = testgood && (0 == CP0OUT);
+ 676   4                                              SFRPAGE = CPT1_PAGE;                                    
+ 677   4                                              testgood = testgood && (0 == CP1OUT);
+ 678   4                                              SFRPAGE = SFRPAGE_SAVE;
+ 679   4                                              break;
+ 680   4                                      case 4: // testval == 0x08
+ 681   4                                              SFRPAGE = SFRPAGE_SAVE;
+ 682   4                                              testgood = ((P5 & 0x7F) == testval) && (result[5] < 350) && (1 == SMBSDA) && (1 == SMBSCL);
+ 683   4                                              SFRPAGE = CPT0_PAGE;
+ 684   4                                              testgood = testgood && (0 == CP0OUT);
+ 685   4                                              SFRPAGE = CPT1_PAGE;                                    
+ 686   4                                              testgood = testgood && (0 == CP1OUT);
+ 687   4                                              SFRPAGE = SFRPAGE_SAVE;
+ 688   4                                              break;
+ 689   4                                      case 5: // testval == 0x10
+ 690   4                                              SFRPAGE = SFRPAGE_SAVE;
+ 691   4                                              testgood = ((P5 & 0x7F) == testval) && (result[5] < 350) && (1 == SMBSDA) && (1 == SMBSCL);
+ 692   4                                              SFRPAGE = CPT0_PAGE;
+ 693   4                                              testgood = testgood && (0 == CP0OUT);
+ 694   4                                              SFRPAGE = CPT1_PAGE;                                    
+ 695   4                                              testgood = testgood && (0 == CP1OUT);
+ 696   4                                              SFRPAGE = SFRPAGE_SAVE;
+ 697   4                                              break;
+ 698   4                                      case 6: // testval == 0x20
+ 699   4                                              SFRPAGE = SFRPAGE_SAVE;
+ 700   4                                              testgood = ((P5 & 0x7F) == testval) && (result[5] < 350) && (1 == SMBSDA) && (1 == SMBSCL);
+ 701   4                                              SFRPAGE = CPT0_PAGE;
+ 702   4                                              testgood = testgood && (0 == CP0OUT);
+ 703   4                                              SFRPAGE = CPT1_PAGE;                                    
+ 704   4                                              testgood = testgood && (1 == CP1OUT);
+ 705   4                                              SFRPAGE = SFRPAGE_SAVE;
+ 706   4                                              break;
+ 707   4                                      case 7: // testval == 0x40
+ 708   4                                              SFRPAGE = SFRPAGE_SAVE;
+ 709   4                                              testgood = ((P5 & 0x7F) == testval) && (result[5] < 350) && (1 == SMBSDA) && (1 == SMBSCL);
+ 710   4                                              SFRPAGE = CPT0_PAGE;
+ 711   4                                              testgood = testgood && (1 == CP0OUT);
+ 712   4                                              SFRPAGE = CPT1_PAGE;                                    
+ 713   4                                              testgood = testgood && (0 == CP1OUT);
+ 714   4                                              SFRPAGE = SFRPAGE_SAVE;
+ 715   4                                              break;
+ 716   4                                      case 8: // special case
+ 717   4      //      commented out waiting for hardware change to test rig, GAS 1/11/10
+ 718   4      //                                      testgood = (0x03 == testval) && (0 == SMBSDA) && (0 == SMBSCL);
+ 719   4                                              testgood = TRUE;
+ 720   4                                              break;
+ 721   4                              } // switch
+ 722   3                              
+ 723   3                              adcresults = FALSE;
+ 724   3                                              
+ 725   3                              if (!testgood) {
+ 726   4                                      DELAY_MS(TEXTDELAY);
+ 727   4                                      PRINTPC0("**  FAIL **");
+ 728   4                                      pass = FALSE;
+ 729   4                              } // if
+ 730   3              
+ 731   3                              // get the next value
+ 732   3                              if (i == 0)
+ 733   3                                      testval = 0x01;
+ 734   3                              else
+C51 COMPILER V9.51   FACTORYTEST                                                           01/05/2016 18:47:25 PAGE 13  
+
+ 735   3                                      testval = testval << 1;           // walk a 1 up through the test value
+ 736   3                      } // for
+ 737   2              
+ 738   2                      DELAY_MS(TEXTDELAY);
+ 739   2                      if (pass)
+ 740   2                              PRINTPC0( "DigIOTest PASS.");
+ 741   2                      else
+ 742   2                              PRINTPC0( "** DigIOTest FAIL **");
+ 743   2              } // else
+ 744   1      
+ 745   1              // configure Comparator 1
+ 746   1              SFRPAGE = CPT1_PAGE;
+ 747   1              CPT1CN = 0x00;                                          // 10000000, CPT1 disabled, no hysteresis
+ 748   1              
+ 749   1              LED0 = 1; LED1 = 0; LED2 = 0; LED3 = 0;
+ 750   1      
+ 751   1              calibrating = FALSE;
+ 752   1      
+ 753   1              SFRPAGE = SFRPAGE_SAVE;
+ 754   1      } // DigIoTest
+ 755          
+ 756          void AutoOnTest(void) {                                 // only valid for su2
+ 757   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 758   1      
+ 759   1              calibrating = TRUE;
+ 760   1      
+ 761   1              // initialize
+ 762   1              DELAY_MS(TEXTDELAY);
+ 763   1              PRINTPC0( "AutoOn Test");
+ 764   1      
+ 765   1              if (!su2) {
+ 766   2                      DELAY_MS(TEXTDELAY);
+ 767   2                      PRINTPC0( "Only Valid for SU2 - Exiting.");
+ 768   2              } // if
+ 769   1              else {
+ 770   2                      P4 = 0x20;              // disable the ON/OFF signal at DIN connector
+ 771   2                      
+ 772   2                      DELAY_MS(TEXTDELAY);
+ 773   2                      PRINTPC0( "Enabling AutoOn...");
+ 774   2                      DigiPot(TRUE);  // turn on AutoOn feature
+ 775   2      
+ 776   2                      P4 = 0x60;              // disable ON/OFF signal at the DIN connector
+ 777   2      
+ 778   2                      DELAY_MS(TEXTDELAY);
+ 779   2                      PRINTPC0( "Dropping 5V Enable");
+ 780   2                      EN5V = 0;
+ 781   2                      DELAY_MS(1000);         // wait a cotton pickin second here
+ 782   2                      
+ 783   2                      EN5V = 1;
+ 784   2              
+ 785   2                      DELAY_MS(TEXTDELAY);
+ 786   2                      PRINTPC0( "Disabling AutoOn...");
+ 787   2                      DigiPot(FALSE); // turn off AutoOn feature
+ 788   2      
+ 789   2                      P4 = 0x00;
+ 790   2      
+ 791   2                      DELAY_MS(TEXTDELAY);
+ 792   2                      PRINTPC0( "AutoOnTest PASS.");
+ 793   2              } // else
+ 794   1      
+ 795   1              LED0 = 1; LED1 = 0; LED2 = 0; LED3 = 0;
+ 796   1      
+C51 COMPILER V9.51   FACTORYTEST                                                           01/05/2016 18:47:25 PAGE 14  
+
+ 797   1              calibrating = FALSE;
+ 798   1      
+ 799   1              SFRPAGE = SFRPAGE_SAVE;
+ 800   1      } // AutoOnTest
+ 801          
+ 802          void SMB_Master_Test(void) {            // only valid for su2
+ 803   1      
+ 804   1      #define TEST_BYTES      8                               // number of bytes to send/receive
+ 805   1      #define NUM_CYCLES      50                              // number of round-trip transfers in test
+ 806   1      
+ 807   1              u16 i, j;                                               // counters
+ 808   1              u16 timeoutctr;                                 // timeout counter
+ 809   1              BOOL xmit_error = FALSE;                // indicates transmission error
+ 810   1              bit savesmbpu = ENSMBPU;                // save state of SMBus Pullups
+ 811   1              
+ 812   1              u08 SFRPAGE_SAVE = SFRPAGE;             // Save Current SFR page
+ 813   1      
+ 814   1              calibrating = TRUE;
+ 815   1      
+ 816   1              // initialize
+ 817   1              DELAY_MS(TEXTDELAY);
+ 818   1              PRINTPC0( "SMBus Test - Master");
+ 819   1      
+ 820   1              if (!su2) {
+ 821   2                      DELAY_MS(TEXTDELAY);
+ 822   2                      PRINTPC0( "Only Valid for SU2 - Exiting.");
+ 823   2              } // if
+ 824   1              else {
+ 825   2                      ENSMBPU = 0;                    // enable pullups
+ 826   2                      SFRPAGE = SMB0_PAGE;
+ 827   2                      ENSMB = 1;                              // Enable the bus
+ 828   2                      DELAY_MS(TEXTDELAY);
+ 829   2                      i = TEST_BYTES; j = NUM_CYCLES;
+ 830   2                      PRINTPC2( "%u Bytes, %u Cycles", i, j);
+ 831   2      #if 0
+                              // If slave is holding SMBSDA low because of an improper SMBus reset or error
+                              while(!SMBSDA) {
+                                      // Provide clock pulses to allow the slave to advance out
+                                      // of its current state. This will allow it to release SMBSDA.
+                                      XBR1 = 0x40;                                                    // Enable Crossbar
+                                      SMBSCL = 0;                                                              // Drive the clock low
+                                      for(i = 0; i < 255; i++);                 // Hold the clock low
+                                      SMBSCL = 1;                                                              // Release the clock
+                                      while(!SMBSCL);                                                 // Wait for open-drain
+                                                                                                                              // clock output to rise
+                                      for(i = 0; i < 10; i++);                        // Hold the clock high
+                                      XBR1 = 0x00;                                                    // Disable Crossbar
+                              } // while
+              #endif
+ 846   2                      // set up the LEDs for the test
+ 847   2                      PWRLED = RECLED = 1;
+ 848   2                      GPSLED = COMLED = 0;
+ 849   2      
+ 850   2                      smbus.txbuff[0] = TEST_BYTES;                   // put payload byte count in first byte
+ 851   2                      for (i = 0; i < TEST_BYTES; i++)                // fill the buffer with sequential integers starting at 0x40
+ 852   2                              smbus.txbuff[i+1] = i + 0x40;
+ 853   2                      smbus.txbytes = TEST_BYTES + 1;                 // number of bytes to send plus one for the count
+ 854   2                      smbus.rxbytes = TEST_BYTES;                             // number of bytes to receive
+ 855   2                      smbus.target = SMBUS_SLAVE_1;                   // address 4
+ 856   2      
+ 857   2                      for (j=0; j < NUM_CYCLES; j++) {
+ 858   3                              // indicate no receive data ready
+C51 COMPILER V9.51   FACTORYTEST                                                           01/05/2016 18:47:25 PAGE 15  
+
+ 859   3                              smbus.data_ready = FALSE;                               // reset smbus ready flag               
+ 860   3      
+ 861   3                              SMB_Write();                                                    // initiate SMBus write to slave
+ 862   3      
+ 863   3                              // toggle LED every 10 cycles
+ 864   3                              if (j % 10) GPSLED = ~GPSLED;
+ 865   3      
+ 866   3                              // if switch pressed, exit
+ 867   3                              if (0 != SW1) {
+ 868   4                                      // see if it has just been released
+ 869   4                                      if (debounce >= DEBOUNCE_NORMAL) break;
+ 870   4      
+ 871   4                                      debounce = 0;
+ 872   4                              } // if
+ 873   3      
+ 874   3                              DELAY_MS(10);                                                   // wait a bit
+ 875   3      
+ 876   3                              SMB_Read();                                                             // and read it back in
+ 877   3      
+ 878   3                              timeoutctr = 0;
+ 879   3                              // wait for a valid smbus response with approx 1 msec timeout
+ 880   3                              do {} while (!smbus.data_ready && ++timeoutctr < 11500) ;
+ 881   3      
+ 882   3                              // check for timeout
+ 883   3                              if (!smbus.data_ready)
+ 884   3                                      xmit_error = TRUE;
+ 885   3                              else { // transmission successful, look for errors                              
+ 886   4                                      // Check transfer data
+ 887   4                                      for (i = 0; i < TEST_BYTES; i++)
+ 888   4                                              // Received data match transmit data?
+ 889   4                                              if(smbus.rxbuff[i] != smbus.txbuff[i+1])
+ 890   4                                                      xmit_error = TRUE;                                // Indicate error
+ 891   4                              } // else
+ 892   3      
+ 893   3                              if (xmit_error) break;                                  // no reason to continue
+ 894   3      
+ 895   3                              DELAY_MS(10);                                                   // wait a bit and do it again
+ 896   3                      } // for
+ 897   2      
+ 898   2                      ENSMBPU = savesmbpu;            // restore pullups
+ 899   2                      SFRPAGE = SFRPAGE_SAVE;
+ 900   2                      ENSMB = 0;                                      // Disable the bus
+ 901   2      
+ 902   2                      DELAY_MS(TEXTDELAY);
+ 903   2                      if (xmit_error)
+ 904   2                              PRINTPC0( "** SMBus Test FAIL **");
+ 905   2                      else
+ 906   2                              PRINTPC0( "SMBus Test Pass.");
+ 907   2              } // else
+ 908   1              
+ 909   1              PWRLED = 1; RECLED = GPSLED = COMLED = 0;
+ 910   1              calibrating = FALSE;
+ 911   1      
+ 912   1      } // SMBus_Master_Test
+ 913          
+ 914          void SMB_Slave_Test(void) {             // only valid for su2
+ 915   1              u16 i, j;                                               // counter
+ 916   1              bit savesmbpu = ENSMBPU;                // save state of SMBus Pullups
+ 917   1              
+ 918   1              u08 SFRPAGE_SAVE = SFRPAGE;             // Save Current SFR page
+ 919   1      
+ 920   1              calibrating = TRUE;
+C51 COMPILER V9.51   FACTORYTEST                                                           01/05/2016 18:47:25 PAGE 16  
+
+ 921   1              smbus.txbytes = SMBTXSIZE;
+ 922   1              smbus.rxbytes = SMBRXSIZE;
+ 923   1              smbus.data_ready = FALSE;
+ 924   1              
+ 925   1              // initialize
+ 926   1              if (!su2) {
+ 927   2      #ifndef SUSLAVETEST
+ 928   2                      DELAY_MS(TEXTDELAY);
+ 929   2                      PRINTPC0( "Only Valid for SU2 - Exiting.");
+ 930   2      #endif
+ 931   2              } // if
+ 932   1              else {
+ 933   2      #ifndef SUSLAVETEST
+ 934   2                      DELAY_MS(TEXTDELAY);
+ 935   2                      PRINTPC0( "SMBus Test - Slave");
+ 936   2      #endif  
+ 937   2                      ENSMBPU = 0;                    // enable pullups
+ 938   2                      i = TEST_BYTES; j = NUM_CYCLES;
+ 939   2      #if 0
+                              // If slave is holding SMBSDA low because of an improper SMBus reset or error
+                              while(!SMBSDA) {
+                                      // Provide clock pulses to allow the slave to advance out
+                                      // of its current state. This will allow it to release SMBSDA.
+                                      XBR1 = 0x40;                                                    // Enable Crossbar
+                                      SMBSCL = 0;                                                              // Drive the clock low
+                                      for(i = 0; i < 255; i++);                 // Hold the clock low
+                                      SMBSCL = 1;                                                              // Release the clock
+                                      while(!SMBSCL);                                                 // Wait for open-drain
+                                                                                                                              // clock output to rise
+                                      for(i = 0; i < 10; i++);                        // Hold the clock high
+                                      XBR1 = 0x00;                                                    // Disable Crossbar
+                              } // while
+              #endif
+ 954   2                      // set up the LEDs for the test
+ 955   2                      PWRLED = RECLED = 1;
+ 956   2                      GPSLED = COMLED = 0;
+ 957   2      
+ 958   2                      SFRPAGE = SMB0_PAGE;
+ 959   2                      SMB0ADR = SMBUS_SLAVE_1;                        // Set my slave address (4)
+ 960   2                      SI = 0;
+ 961   2                                              
+ 962   2                 // Initialize the outgoing data array in case a read is done before a write
+ 963   2                      for (i = 0; i < TEST_BYTES; i++) {
+ 964   3                              smbus.txbuff[i] = 0xF0 + i;
+ 965   3                      } // for
+ 966   2              
+ 967   2                      while(1) {
+ 968   3                              // check for new data received
+ 969   3                              while(!smbus.data_ready) ;
+ 970   3      
+ 971   3                              // if switch pressed, exit      
+ 972   3                              if (0 != SW1) {
+ 973   4                                      // see if it has just been released
+ 974   4                                      if (debounce >= DEBOUNCE_NORMAL) break;
+ 975   4              
+ 976   4                                      debounce = 0;
+ 977   4                              } // if
+ 978   3                              
+ 979   3                              smbus.data_ready = FALSE;
+ 980   3              
+ 981   3                              // Copy the data from the input array to the output array
+ 982   3                              for (i = 0; i < smbus.rxbytes; i++) {
+C51 COMPILER V9.51   FACTORYTEST                                                           01/05/2016 18:47:25 PAGE 17  
+
+ 983   4                                      smbus.txbuff[i] = smbus.rxbuff[i];
+ 984   4                              } // for
+ 985   3              
+ 986   3                              // flash the GPS LED to indicate receive data
+ 987   3                              GPSLED = ~GPSLED;
+ 988   3                      } // while
+ 989   2      
+ 990   2                      ENSMBPU = savesmbpu;            // restore pullups
+ 991   2                      SFRPAGE = SFRPAGE_SAVE;
+ 992   2                      ENSMB = 0;                                      // Disable the bus
+ 993   2      
+ 994   2              } // else
+ 995   1              
+ 996   1              PWRLED = 1; RECLED = GPSLED = COMLED = 0;
+ 997   1      
+ 998   1              calibrating = FALSE;
+ 999   1      
+1000   1              SFRPAGE = SFRPAGE_SAVE;
+1001   1      } // SMBus_Slave_Test
+1002          #endif
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =  14293    ----
+   CONSTANT SIZE    =   1074    ----
+   XDATA SIZE       =     16     564
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      40
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----       2
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

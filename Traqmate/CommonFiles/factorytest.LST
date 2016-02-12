@@ -1,0 +1,506 @@
+C51 COMPILER V8.02   FACTORYTEST                                                           04/22/2007 00:08:15 PAGE 1   
+
+
+C51 COMPILER V8.02, COMPILATION OF MODULE FACTORYTEST
+OBJECT MODULE PLACED IN factorytest.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE factorytest.c DB DF(SENSOR) DF(EXTCLK6) DF(NODEBUG) INCDIR(C:\Keil\C51\INC;
+                    -C:\Keil\Traqmate\132micro\CommonFiles;C:\Keil\Traqmate\132micro\SU) OT(8,SIZE) NOCO
+
+line level    source
+
+   1          // This is a collection of test routines that are used to checkout the product at the factory
+   2          //
+   3          
+   4          #ifdef SENSOR
+   5          #include <sensor.h>
+   6          #endif
+   7          #ifdef DISPLAY
+  10          
+  11          void Stabilize(void);
+  12          void ZeroOutXY(void);
+  13          
+  14          #define STABILITY       4                                       // range of values to allow
+  15          #define CALIBRATED      20                                      // max variation from midpoint to allow
+  16          #define PWMHI           255                                     // highest PWM calibration value
+  17          #define PWMLO           0                                       // lowest PWM calibration value
+  18          //#define STARTZERO     (PWMHI-PWMLO)/2         // middle of road value to start with
+  19          #define STARTZERO       160                                     // approximate PWM value for current hardware
+  20          #define SETTLING        40                                      // number of samples to collect to see if settled
+  21          #define MIDPOINT        2048                            // midpoint of accelerometer range (12 bits)
+  22          
+  23          #define TEXTDELAY       150                                     // number of ms to wait between text writes
+  24          
+  25          #ifdef SENSOR
+  26          // globals
+  27          xdata u16 minx, maxx, miny, maxy, mintemp, maxtemp;
+  28          
+  29          void Calibrate(void) {
+  30   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+  31   1              u16 temp;
+  32   1      
+  33   1              calibrating = TRUE;
+  34   1              SFRPAGE = CONFIG_PAGE;
+  35   1      
+  36   1              // get current values
+  37   1              ReadScratchpad(scratch.scratchbuff);
+  38   1      
+  39   1              // initialize
+  40   1              scratch.calibrate.timecode = (s08) 0;
+  41   1              scratch.calibrate.model = msgrouting[0];                // what are we?
+  42   1              scratch.calibrate.hwrev = HWREV;
+  43   1              scratch.calibrate.swrev = SWREV;
+  44   1              scratch.calibrate.datarev = DATAREV;
+  45   1              if (0xFFFFFFFF == scratch.calibrate.serno)
+  46   1                      scratch.calibrate.serno = 0;
+  47   1              if (0xFF == scratch.calibrate.week)
+  48   1                      scratch.calibrate.week = 1;
+  49   1              if (0xFF == scratch.calibrate.year)
+  50   1                      scratch.calibrate.year = CURRENTYEAR;
+  51   1              scratch.calibrate.contrast = 0xFF;
+  52   1              scratch.calibrate.hwconfig = 0xFF;
+  53   1              scratch.calibrate.xzero = MIDPOINT;
+  54   1              scratch.calibrate.yzero = MIDPOINT;
+  55   1              scratch.calibrate.owner[0] = '\0';
+  56   1              scratch.calibrate.phone[0] = '\0';
+C51 COMPILER V8.02   FACTORYTEST                                                           04/22/2007 00:08:15 PAGE 2   
+
+  57   1              scratch.calibrate.note[0] = '\0';
+  58   1      
+  59   1              scratch.calibrate.calx = scratch.calibrate.caly = STARTZERO;
+  60   1      
+  61   1              debounce = 0;
+  62   1      
+  63   1              HI(LED0); HI(LED1); HI(LED2); HI(LED3);
+  64   1      
+  65   1              PRINTPC0( "Place unit flat on level surface.");
+  66   1      
+  67   1              Stabilize();
+  68   1      
+  69   1              ZeroOutXY();
+  70   1      
+  71   1              LO(LED0); LO(LED1); LO(LED2); LO(LED3);
+  72   1      
+  73   1              DELAY_MS(TEXTDELAY);
+  74   1              PRINTPC0( "Hold vertical, GPS antenna jack up.");
+  75   1      
+  76   1              Stabilize();
+  77   1              scratch.calibrate.xplusg = AVG(minx, maxx);
+  78   1      
+  79   1              HI(LED0);
+  80   1      
+  81   1              DELAY_MS(TEXTDELAY);
+  82   1              PRINTPC0( "Hold vertical, GPS antenna jack down.");
+  83   1      
+  84   1              Stabilize();
+  85   1              scratch.calibrate.xminusg = AVG(minx, maxx);
+  86   1      
+  87   1              HI(LED1);
+  88   1      
+  89   1              DELAY_MS(TEXTDELAY);
+  90   1              PRINTPC0( "Stand on right side.");
+  91   1      
+  92   1              Stabilize();
+  93   1              scratch.calibrate.yminusg = AVG(miny, maxy);
+  94   1      
+  95   1              HI(LED2);
+  96   1      
+  97   1              DELAY_MS(TEXTDELAY);
+  98   1              PRINTPC0( "Stand on left side.");
+  99   1      
+ 100   1              Stabilize();
+ 101   1              scratch.calibrate.yplusg = AVG(miny, maxy);
+ 102   1      
+ 103   1              HI(LED3);
+ 104   1      
+ 105   1              if (scratch.calibrate.xplusg < scratch.calibrate.xminusg) {
+ 106   2                      DELAY_MS(TEXTDELAY);
+ 107   2                      PRINTPC0("Inverting X Values");
+ 108   2                      temp = scratch.calibrate.xplusg;
+ 109   2                      scratch.calibrate.xplusg = scratch.calibrate.xminusg;
+ 110   2                      scratch.calibrate.xminusg = temp;
+ 111   2              }
+ 112   1              if (scratch.calibrate.yplusg < scratch.calibrate.yminusg) {
+ 113   2                      DELAY_MS(TEXTDELAY);
+ 114   2                      PRINTPC0("Inverting Y Values");
+ 115   2                      temp = scratch.calibrate.yplusg;
+ 116   2                      scratch.calibrate.yplusg = scratch.calibrate.yminusg;
+ 117   2                      scratch.calibrate.yminusg = temp;
+ 118   2              }
+C51 COMPILER V8.02   FACTORYTEST                                                           04/22/2007 00:08:15 PAGE 3   
+
+ 119   1      
+ 120   1              DELAY_MS(TEXTDELAY);
+ 121   1              PRINTPC0( " ");
+ 122   1              DELAY_MS(TEXTDELAY);
+ 123   1              PRINTPC2( "Calibration Values: %u, %u", scratch.calibrate.calx, scratch.calibrate.caly);
+ 124   1              DELAY_MS(TEXTDELAY);    // wait for message to go out
+ 125   1              PRINTPC2( "Actual Zero Points: X %u, Y %u", scratch.calibrate.xzero, scratch.calibrate.yzero);
+ 126   1              DELAY_MS(TEXTDELAY);    // wait for message to go out
+ 127   1              PRINTPC2( "X Range: %d, %d", scratch.calibrate.xminusg, scratch.calibrate.xplusg);
+ 128   1              DELAY_MS(TEXTDELAY);    // wait for message to go out
+ 129   1              PRINTPC2( "Y Range: %d, %d", scratch.calibrate.yminusg, scratch.calibrate.yplusg);
+ 130   1              DELAY_MS(TEXTDELAY);    // wait for message to go out
+ 131   1              PRINTPC0( "Storing Calibration Data in Flash.");
+ 132   1      
+ 133   1              EraseScratchpad();
+ 134   1      
+ 135   1              WriteScratchpad(scratch.scratchbuff, sizeof(caltype));
+ 136   1      
+ 137   1              DELAY_MS(TEXTDELAY);
+ 138   1              PRINTPC0( "Calibration Complete.");
+ 139   1      
+ 140   1              HI(LED0); LO(LED1); LO(LED2); LO(LED3);
+ 141   1      
+ 142   1              calibrating = FALSE;
+ 143   1      
+ 144   1              // get the configuration data
+ 145   1              InitSUScratchpad();
+ 146   1      
+ 147   1              SFRPAGE = SFRPAGE_SAVE;
+ 148   1      } // Calibrate
+ 149          
+ 150          void InputTest(void) {
+ 151   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 152   1              xdata u08 mask[] = { 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80 };
+ 153   1              xdata char textline[80];
+ 154   1      
+ 155   1              calibrating = TRUE;
+ 156   1      
+ 157   1              // initialize
+ 158   1              DELAY_MS(TEXTDELAY);
+ 159   1              PRINTPC0( "Traqmate Input Test");
+ 160   1      
+ 161   1              debounce = 0;
+ 162   1              while (1) {
+ 163   2                      u08 port5;
+ 164   2                      int i;
+ 165   2      
+ 166   2                      SFRPAGE = CONFIG_PAGE;
+ 167   2                      if (0 != SW1) {
+ 168   3                              // see if it has just been released
+ 169   3                              if (debounce >= DEBOUNCE_NORMAL) break;
+ 170   3      
+ 171   3                              debounce = 0;
+ 172   3                      } // if
+ 173   2      
+ 174   2                      if (adcresults) {
+ 175   3                              adcresults = FALSE;
+ 176   3      
+ 177   3                              port5 = P5;
+ 178   3      
+ 179   3                              DELAY_MS(1000);
+ 180   3                              PRINTPC0(" ");
+C51 COMPILER V8.02   FACTORYTEST                                                           04/22/2007 00:08:15 PAGE 4   
+
+ 181   3      
+ 182   3                              DELAY_MS(TEXTDELAY);
+ 183   3                              sprintf(textline, "DIGIN: ");
+ 184   3                              for (i = 6; i >= 0; i--)
+ 185   3                                      sprintf(textline+strlen(textline), (port5 & mask[i])? "1" : "0");
+ 186   3                              PRINTPC0(textline);
+ 187   3      
+ 188   3                              DELAY_MS(TEXTDELAY);
+ 189   3                              sprintf(textline, "X: %u, Y: %u", result[0], result[1]);
+ 190   3                              PRINTPC0(textline);
+ 191   3      
+ 192   3                              DELAY_MS(TEXTDELAY);
+ 193   3                              sprintf(textline, "5V: %u, T: %u", result[2], result[3]);
+ 194   3                              PRINTPC0(textline);
+ 195   3      
+ 196   3                              DELAY_MS(TEXTDELAY);
+ 197   3                              sprintf(textline, "A0: %u, A1: %u", result[4], result[5]);
+ 198   3                              PRINTPC0(textline);
+ 199   3      
+ 200   3                              DELAY_MS(TEXTDELAY);
+ 201   3                              sprintf(textline, "A2: %u, A3: %u", result[6], result[7]);
+ 202   3                              PRINTPC0(textline);
+ 203   3                      } // if
+ 204   2      
+ 205   2              } // while
+ 206   1              debounce = 0;
+ 207   1      
+ 208   1              DELAY_MS(TEXTDELAY);
+ 209   1              PRINTPC0( "InputTest Complete.");
+ 210   1      
+ 211   1              HI(LED0); LO(LED1); LO(LED2); LO(LED3);
+ 212   1      
+ 213   1              calibrating = FALSE;
+ 214   1      
+ 215   1              SFRPAGE = SFRPAGE_SAVE;
+ 216   1      } // InputTest
+ 217          
+ 218          void OutputTest(void) {
+ 219   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 220   1              u16 clocksave;                  // saves the clock for elapsed time calculations
+ 221   1              int bitnum = 0;
+ 222   1              xdata u08 mask[] = { 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80 };
+ 223   1      
+ 224   1      #define BIT_CHANGE_RATE 1       // once per second
+ 225   1      
+ 226   1              // initialize
+ 227   1              DELAY_MS(TEXTDELAY);
+ 228   1              PRINTPC0( "Traqmate Output Test");
+ 229   1              DELAY_MS(TEXTDELAY);
+ 230   1      
+ 231   1              debounce = 0;
+ 232   1              clocksave = clocktick + (SAMPLE_RATE*BIT_CHANGE_RATE);  // change bit every 1 seconds
+ 233   1      
+ 234   1              while (1) {
+ 235   2      
+ 236   2                      SFRPAGE = CONFIG_PAGE;
+ 237   2                      if (0 != SW1) {
+ 238   3                              // see if it has just been released
+ 239   3                              if (debounce >= DEBOUNCE_NORMAL) break;
+ 240   3      
+ 241   3                              debounce = 0;
+ 242   3                      } // if
+C51 COMPILER V8.02   FACTORYTEST                                                           04/22/2007 00:08:15 PAGE 5   
+
+ 243   2      
+ 244   2                      if (clocksave == clocktick) {
+ 245   3                              // get next tickover
+ 246   3                              clocksave = clocktick + (SAMPLE_RATE*BIT_CHANGE_RATE);  // change bit every 1 seconds
+ 247   3      
+ 248   3                              PRINTPC1("bit %d", bitnum);
+ 249   3      
+ 250   3                              P4 = mask[bitnum];
+ 251   3                              bitnum = ++bitnum % 7;
+ 252   3                      } // if
+ 253   2      
+ 254   2              } // while
+ 255   1              debounce = 0;
+ 256   1      
+ 257   1              DELAY_MS(TEXTDELAY);
+ 258   1              PRINTPC0( "OutputTest Complete.");
+ 259   1      
+ 260   1              HI(LED0); LO(LED1); LO(LED2); LO(LED3);
+ 261   1      
+ 262   1              SFRPAGE = SFRPAGE_SAVE;
+ 263   1      } // OutputTest
+ 264          
+ 265          void Stabilize( void ) {
+ 266   1      
+ 267   1              int counter = 0;
+ 268   1              xdata char textline[80];
+ 269   1      
+ 270   1              do {            // sit here until values stabilize
+ 271   2      
+ 272   2                      counter = 0;
+ 273   2      
+ 274   2                      // initialize
+ 275   2                      while (!adcresults) ;
+ 276   2      
+ 277   2                      minx = maxx = result[0];
+ 278   2                      miny = maxy = result[1];
+ 279   2      
+ 280   2                      adcresults = FALSE;
+ 281   2      
+ 282   2                      while (counter < SETTLING) { // collect several values to compare
+ 283   3      
+ 284   3                              if (adcresults) {
+ 285   4                                      if (!(counter % 10)) {
+ 286   5                                              DELAY_MS(TEXTDELAY);
+ 287   5                                              sprintf(textline, "%u,%u", result[0], result[1]);
+ 288   5                                              PRINTPC0(textline);
+ 289   5                                      }
+ 290   4                                      minx = MIN(minx, result[0]);
+ 291   4                                      miny = MIN(miny, result[1]);
+ 292   4      
+ 293   4                                      maxx = MAX(maxx, result[0]);
+ 294   4                                      maxy = MAX(maxy, result[1]);
+ 295   4      
+ 296   4                                      adcresults = FALSE;
+ 297   4                                      counter++;
+ 298   4                              } // if
+ 299   3                      } // while
+ 300   2              } while ((ABS(maxy - miny) > STABILITY) || (ABS(maxx - minx) > STABILITY));
+ 301   1      } // Stabilize
+ 302          
+ 303          void ZeroOutXY( void ) {
+ 304   1      
+C51 COMPILER V8.02   FACTORYTEST                                                           04/22/2007 00:08:15 PAGE 6   
+
+ 305   1              unsigned char xdone = FALSE;
+ 306   1              unsigned char ydone = FALSE;
+ 307   1              xdata char textline[80];
+ 308   1      
+ 309   1              SFRPAGE = PCA0_PAGE;
+ 310   1      
+ 311   1              // put initial values in PWM
+ 312   1              PCA0CPL1 =      scratch.calibrate.caly;
+ 313   1              PCA0CPH1 =      scratch.calibrate.caly;
+ 314   1              PCA0CPL0 =      scratch.calibrate.calx;
+ 315   1              PCA0CPH0 =      scratch.calibrate.calx;
+ 316   1      
+ 317   1              do {            // zero in on x,y
+ 318   2      
+ 319   2                      if (adcresults) {
+ 320   3                              adcresults = FALSE;
+ 321   3      
+ 322   3                              // record the actual zero points
+ 323   3                              if (!xdone) scratch.calibrate.xzero = result[0];
+ 324   3                              if (!ydone) scratch.calibrate.yzero = result[1];
+ 325   3      
+ 326   3                              DELAY_MS(TEXTDELAY);
+ 327   3                              PRINTPC2( "Cal: %d,%d", scratch.calibrate.calx, scratch.calibrate.caly);
+ 328   3                              sprintf(textline, "Val: %u,%u", scratch.calibrate.xzero, scratch.calibrate.yzero);
+ 329   3                              DELAY_MS(TEXTDELAY);
+ 330   3                              PRINTPC0(textline);
+ 331   3      
+ 332   3                              if (!xdone) xdone = (ABS(((s16) scratch.calibrate.xzero)-MIDPOINT) <= CALIBRATED);
+ 333   3                              if (!xdone) {
+ 334   4                                      if (scratch.calibrate.xzero < MIDPOINT)
+ 335   4                                              if (PWMLO == scratch.calibrate.calx)
+ 336   4                                                      // couldn't get to middle so go with what we got
+ 337   4                                                      xdone = TRUE;
+ 338   4                                              else
+ 339   4                                                      // drop the cal value and try again
+ 340   4                                                      scratch.calibrate.calx -= 1;
+ 341   4                                      else
+ 342   4                                              if (PWMHI == scratch.calibrate.calx)
+ 343   4                                                      // couldn't get to middle so go with what we got
+ 344   4                                                      xdone = TRUE;
+ 345   4                                              else
+ 346   4                                                      // raise the cal value and try again
+ 347   4                                                      scratch.calibrate.calx += 1;
+ 348   4      
+ 349   4                                      // reprogram the PWM
+ 350   4                                      PCA0CPL0 =      scratch.calibrate.calx;
+ 351   4                                      PCA0CPH0 =      scratch.calibrate.calx;
+ 352   4                              }
+ 353   3      
+ 354   3                              if (!ydone) ydone = (ABS(((s16) scratch.calibrate.yzero)-MIDPOINT) <= CALIBRATED);
+ 355   3                              if (!ydone) {
+ 356   4                                      if (scratch.calibrate.yzero < MIDPOINT)
+ 357   4                                              if (PWMLO == scratch.calibrate.caly)
+ 358   4                                                      // couldn't get to middle so go with what we got
+ 359   4                                                      ydone = TRUE;
+ 360   4                                              else
+ 361   4                                                      // drop the cal value and try again
+ 362   4                                                      scratch.calibrate.caly -= 1;
+ 363   4                                      else
+ 364   4                                              if (PWMHI == scratch.calibrate.caly)
+ 365   4                                                      // couldn't get to middle so go with what we got
+ 366   4                                                      ydone = TRUE;
+C51 COMPILER V8.02   FACTORYTEST                                                           04/22/2007 00:08:15 PAGE 7   
+
+ 367   4                                              else
+ 368   4                                                      // raise the cal value and try again
+ 369   4                                                      scratch.calibrate.caly += 1;
+ 370   4      
+ 371   4                                      // reprogram the PWM
+ 372   4                                      PCA0CPL1 =      scratch.calibrate.caly;
+ 373   4                                      PCA0CPH1 =      scratch.calibrate.caly;
+ 374   4                              }
+ 375   3                      } // if
+ 376   2              } while (!(xdone && ydone));
+ 377   1      
+ 378   1              DELAY_MS(TEXTDELAY);
+ 379   1              PRINTPC0( "X, Y Zeroed Out");
+ 380   1      
+ 381   1              while (!adcresults) ;
+ 382   1              adcresults = FALSE;
+ 383   1      
+ 384   1              // record the actual zero points
+ 385   1              scratch.calibrate.xzero = result[0];
+ 386   1              scratch.calibrate.yzero = result[1];
+ 387   1      
+ 388   1              DELAY_MS(TEXTDELAY);
+ 389   1              PRINTPC2( "Final Cal: %d,%d", scratch.calibrate.calx, scratch.calibrate.caly);
+ 390   1              sprintf(textline, "Final Val: %u,%u", scratch.calibrate.xzero, scratch.calibrate.yzero);
+ 391   1              DELAY_MS(TEXTDELAY);
+ 392   1              PRINTPC0(textline);
+ 393   1      
+ 394   1      } // ZeroOutXY
+ 395          #endif // SENSOR
+ 396          
+ 397          
+ 398          void DataflashTest(void) {
+ 399   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 400   1      
+ 401   1              int pagenum = 0;
+ 402   1              int i;
+ 403   1              BOOL flashfail = FALSE;
+ 404   1      
+ 405   1              // initialize
+ 406   1              PRINTPC0( "Dataflash Test");
+ 407   1      
+ 408   1      #ifdef SENSOR
+ 409   1              debounce = 0;
+ 410   1      #else
+ 413   1      
+ 414   1              // initialize page to write
+ 415   1              for (i=0; i<pagesize; i++) flashpage.bigbuff[i] = i % 256;
+ 416   1      
+ 417   1              while (1) {
+ 418   2      
+ 419   2                      SFRPAGE = CONFIG_PAGE;
+ 420   2      #ifdef SENSOR
+ 421   2                      if (0 != SW1) {
+ 422   3                              // see if it has just been released
+ 423   3                              if (debounce >= DEBOUNCE_NORMAL) break;
+ 424   3      
+ 425   3                              debounce = 0;
+ 426   3                      } // if
+ 427   2      #else
+ 435   2      
+ 436   2                      // write buffer to flash
+ 437   2                      DataFlash_Page_Write_Erase(0, pagesize, flashpage.bigbuff, pagenum);
+C51 COMPILER V8.02   FACTORYTEST                                                           04/22/2007 00:08:15 PAGE 8   
+
+ 438   2      
+ 439   2                      // read back and verify
+ 440   2                      DataFlash_Page_Read(pagesize, flashpage.bigbuff, pagenum);
+ 441   2      
+ 442   2                      // initialize page to write
+ 443   2                      for (i=0; i<pagesize; i++) {
+ 444   3                              if (flashpage.bigbuff[i] != (i % 256)) {
+ 445   4                                      flashfail = TRUE;
+ 446   4                                      break;
+ 447   4                              } // if
+ 448   3                      } // for
+ 449   2      
+ 450   2                      if (flashfail) {
+ 451   3                              PRINTPC2("****** Flash Write FAILED ******, page %d, byte%d", pagenum, i);
+ 452   3                              break;
+ 453   3                      } // if
+ 454   2      
+ 455   2                      DELAY_MS(TEXTDELAY);
+ 456   2                      PRINTPC1("Flash ok page %d", pagenum);
+ 457   2      
+ 458   2                      // erase the page
+ 459   2                      DataFlash_Erase_Page(pagenum);
+ 460   2      
+ 461   2                      // at the end yet?
+ 462   2                      if (pagenum >= numpages)
+ 463   2                              pagenum = 0;
+ 464   2                      else 
+ 465   2                              // go to next page
+ 466   2                              pagenum++;
+ 467   2      
+ 468   2              } // while
+ 469   1      #ifdef SENSOR
+ 470   1              debounce = 0;
+ 471   1      #else
+ 474   1      
+ 475   1              DELAY_MS(TEXTDELAY);
+ 476   1              PRINTPC0( "DataflashTest Complete.");
+ 477   1      
+ 478   1              SFRPAGE = SFRPAGE_SAVE;
+ 479   1      } // DataflashTest
+ 480          
+ 481          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   8284    ----
+   CONSTANT SIZE    =    697    ----
+   XDATA SIZE       =     12     384
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      22
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

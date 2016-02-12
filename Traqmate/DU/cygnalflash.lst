@@ -1,0 +1,362 @@
+C51 COMPILER V9.51   CYGNALFLASH                                                           11/30/2014 18:01:40 PAGE 1   
+
+
+C51 COMPILER V9.51, COMPILATION OF MODULE CYGNALFLASH
+OBJECT MODULE PLACED IN .\cygnalflash.obj
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE ..\CommonFiles\cygnalflash.c OPTIMIZE(SIZE) BROWSE MDU_F120 INCDIR(..\..\C5
+                    -1\INC\;..\CommonFiles\) DB DEFINE(DISPLAY,EXTCLK6,NODEBUG,PACKMEM) PRINT(.\cygnalflash.lst) OBJECT(.\cygnalflash.obj)
+
+line level    source
+
+   1          //-----------------------------------------------------------------------------
+   2          // Includes
+   3          //-----------------------------------------------------------------------------
+   4          
+   5          #include <ctype.h>
+   6          #ifdef DISPLAY
+   7          #include <display.h>
+   8          #else
+              #include <sensor.h>
+              #endif
+  11          
+  12          #ifdef DISPLAY
+  13          // initializes the scratchpad
+  14          // rewrite if:  SWREV or DATAREV not right
+  15          //                              config areas of DU != config areas of SU
+  16          //
+  17          // if su_present, assumes that global scratch contains SU scratchpad
+  18          //
+  19          // Returns FALSE if DU and SU have incompatible data revisions
+  20          //
+  21          BOOL InitDUScratchpad(BOOL su_present) {
+  22   1              xdata scratchpadtype duscratch;
+  23   1              xdata BOOL reprogram = FALSE;    // used to signal sw mismatch and data change
+  24   1      
+  25   1              // check for incompatible SU and DU data revisions
+  26   1              if (su_present && scratch.calibrate.datarev != DATAREV)
+  27   1                      // software mismatch condition
+  28   1                      reprogram = TRUE;
+  29   1              
+  30   1              ReadScratchpad(duscratch.scratchbuff);
+  31   1      
+  32   1              // if sw mismatch jump out
+  33   1              if (reprogram) return(FALSE);
+  34   1      
+  35   1              // if contrast never programmed or has bad value, fix it
+  36   1              if (0xFF == duscratch.calibrate.contrast ||
+  37   1                      duscratch.calibrate.contrast > CONTRAST_UPPER ||
+  38   1                      duscratch.calibrate.contrast < CONTRAST_LOWER
+  39   1              ) {
+  40   2                      duscratch.calibrate.contrast = CONTRAST_CENTER;
+  41   2                      reprogram = TRUE;
+  42   2              }
+  43   1      
+  44   1              // if laphold never programmed, fix it
+  45   1              if (0xFF == duscratch.calibrate.lapholdtime) {
+  46   2                      duscratch.calibrate.lapholdtime = LAPHOLD_DEFAULT;
+  47   2                      reprogram = TRUE;
+  48   2              }
+  49   1      
+  50   1              // initialize usersettings here, when necessary
+  51   1              if (0xFF == duscratch.calibrate.usersettings) {
+  52   2                      duscratch.calibrate.usersettings = USERSETTINGS_DEFAULT;
+  53   2                      reprogram = TRUE;
+  54   2              }
+C51 COMPILER V9.51   CYGNALFLASH                                                           11/30/2014 18:01:40 PAGE 2   
+
+  55   1      
+  56   1              // if username, phone, or note is unprintable, NULL it out
+  57   1              if (!isprint(duscratch.calibrate.owner[0]) && duscratch.calibrate.owner[0] != '\0') {
+  58   2                      duscratch.calibrate.owner[0] = '\0';
+  59   2                      reprogram = TRUE;
+  60   2              } // if
+  61   1              if (!isprint(duscratch.calibrate.phone[0]) && duscratch.calibrate.phone[0] != '\0') {
+  62   2                      duscratch.calibrate.phone[0] = '\0';
+  63   2                      reprogram = TRUE;
+  64   2              } // if
+  65   1              if (!isprint(duscratch.calibrate.note[0]) && duscratch.calibrate.note[0] != '\0') {
+  66   2                      duscratch.calibrate.note[0] = '\0';
+  67   2                      reprogram = TRUE;
+  68   2              } // if
+  69   1      
+  70   1              // check to see if software or data rev in scratchpad does not match current code
+  71   1              if (duscratch.calibrate.swrev != SWREV ||
+  72   1                      duscratch.calibrate.datarev != DATAREV) {
+  73   2      
+  74   2                      // update the values
+  75   2                      duscratch.calibrate.swrev = SWREV;
+  76   2                      duscratch.calibrate.datarev = DATAREV;
+  77   2                      reprogram = TRUE;
+  78   2              }
+  79   1      
+  80   1              if (duscratch.calibrate.hwrev != HWREV ||
+  81   1                      duscratch.calibrate.model != MODELNUM) {
+  82   2      
+  83   2                      // update the values
+  84   2                      duscratch.calibrate.hwrev = HWREV;
+  85   2                      duscratch.calibrate.model = MODELNUM;
+  86   2                      reprogram = TRUE;
+  87   2              }
+  88   1      
+  89   1              // set bit for type of dataflash one time only
+  90   1              if (numpages == NUM_PAGE_16MBIT && (scratch.calibrate.hwconfig & DATAFLASHMASK) != 0) {
+  91   2                      scratch.calibrate.hwconfig &= ~DATAFLASHMASK;
+  92   2                      reprogram = TRUE;
+  93   2              } // if
+  94   1              if (numpages == NUM_PAGE_32MBIT && (scratch.calibrate.hwconfig & DATAFLASHMASK) != DATAFLASHMASK) {
+  95   2                      scratch.calibrate.hwconfig |= DATAFLASHMASK;
+  96   2                      reprogram = TRUE;
+  97   2              } // if 
+  98   1      
+  99   1              // compare SU and DU config data
+ 100   1              if (su_present) {
+ 101   2                      if (duscratch.calibrate.xzero != scratch.calibrate.xzero) {
+ 102   3                              duscratch.calibrate.xzero = scratch.calibrate.xzero;
+ 103   3                              reprogram = TRUE;
+ 104   3                      }
+ 105   2                      if (duscratch.calibrate.yzero != scratch.calibrate.yzero) {
+ 106   3                              duscratch.calibrate.yzero = scratch.calibrate.yzero;
+ 107   3                              reprogram = TRUE;
+ 108   3                      }
+ 109   2                      if (duscratch.calibrate.zzero != scratch.calibrate.zzero) {
+ 110   3                              duscratch.calibrate.zzero = scratch.calibrate.zzero;
+ 111   3                              reprogram = TRUE;
+ 112   3                      }
+ 113   2                      if (duscratch.calibrate.xminusg != scratch.calibrate.xminusg) {
+ 114   3                              duscratch.calibrate.xminusg = scratch.calibrate.xminusg;
+ 115   3                              reprogram = TRUE;
+ 116   3                      }
+C51 COMPILER V9.51   CYGNALFLASH                                                           11/30/2014 18:01:40 PAGE 3   
+
+ 117   2                      if (duscratch.calibrate.xplusg != scratch.calibrate.xplusg) {
+ 118   3                              duscratch.calibrate.xplusg = scratch.calibrate.xplusg;
+ 119   3                              reprogram = TRUE;
+ 120   3                      }
+ 121   2                      if (duscratch.calibrate.yminusg != scratch.calibrate.yminusg) {
+ 122   3                              duscratch.calibrate.yminusg = scratch.calibrate.yminusg;
+ 123   3                              reprogram = TRUE;
+ 124   3                      }
+ 125   2                      if (duscratch.calibrate.yplusg != scratch.calibrate.yplusg) {
+ 126   3                              duscratch.calibrate.yplusg = scratch.calibrate.yplusg;
+ 127   3                              reprogram = TRUE;
+ 128   3                      }
+ 129   2                      if (duscratch.calibrate.zminusg != scratch.calibrate.zminusg) {
+ 130   3                              duscratch.calibrate.zminusg = scratch.calibrate.zminusg;
+ 131   3                              reprogram = TRUE;
+ 132   3                      }
+ 133   2                      if (duscratch.calibrate.zplusg != scratch.calibrate.zplusg) {
+ 134   3                              duscratch.calibrate.zplusg = scratch.calibrate.zplusg;
+ 135   3                              reprogram = TRUE;
+ 136   3                      }
+ 137   2                      if (duscratch.calibrate.calx != scratch.calibrate.calx) {
+ 138   3                              duscratch.calibrate.calx = scratch.calibrate.calx;
+ 139   3                              reprogram = TRUE;
+ 140   3                      }
+ 141   2                      if (duscratch.calibrate.caly != scratch.calibrate.caly) {
+ 142   3                              duscratch.calibrate.caly = scratch.calibrate.caly;
+ 143   3                              reprogram = TRUE;
+ 144   3                      }
+ 145   2              } // if
+ 146   1      
+ 147   1              if (reprogram) {
+ 148   2                      // write the software rev into the scratchpad
+ 149   2                      EraseScratchpad();
+ 150   2                      WriteScratchpad(duscratch.scratchbuff, SCRATCHLEN);
+ 151   2              } // if
+ 152   1      
+ 153   1              // leave with DU scratchpad contents in scratch
+ 154   1              ReadScratchpad(scratch.scratchbuff);
+ 155   1      
+ 156   1              return (TRUE);
+ 157   1      
+ 158   1      } // InitDUScratchpad
+ 159          #endif
+ 160          #ifdef SENSOR
+              // initializes the scratchpad
+              // rewrite if:  SWREV or DATAREV not right
+              //
+              void InitSUScratchpad(void) {
+                      xdata BOOL reprogram = FALSE;
+              
+                      ReadScratchpad(scratch.scratchbuff);
+              
+                      if (scratch.calibrate.swrev != SWREV || scratch.calibrate.datarev != DATAREV) {
+                              // update the values
+                              scratch.calibrate.swrev = SWREV;
+                              scratch.calibrate.datarev = DATAREV;
+                              reprogram = TRUE;
+                      } // if
+              
+                      if (scratch.calibrate.hwrev == 0xFF) {
+                              // update the values
+                              if (su2)
+C51 COMPILER V9.51   CYGNALFLASH                                                           11/30/2014 18:01:40 PAGE 4   
+
+                                      scratch.calibrate.hwrev = HWREVSU2;
+                              else
+                                      scratch.calibrate.hwrev = HWREVSU1;
+              
+                              reprogram = TRUE;
+                      } // if
+                      
+                      if (scratch.calibrate.model != MODELNUM) {
+                              // update the values
+                              scratch.calibrate.model = MODELNUM;
+                              reprogram = TRUE;
+                      } // if
+                      
+                      // set bit for type of dataflash one time only
+                      if (numpages == NUM_PAGE_16MBIT && (scratch.calibrate.hwconfig & DATAFLASHMASK) != 0) {
+                              scratch.calibrate.hwconfig &= ~DATAFLASHMASK;
+                              reprogram = TRUE;
+                      } // if
+                      if (numpages == NUM_PAGE_32MBIT && (scratch.calibrate.hwconfig & DATAFLASHMASK) != DATAFLASHMASK) {
+                              scratch.calibrate.hwconfig |= DATAFLASHMASK;
+                              reprogram = TRUE;
+                      } // if 
+              
+                      // if username, phone, or note is unprogrammed, NULL it out
+                      if (!isprint(scratch.calibrate.owner[0]) && scratch.calibrate.owner[0] != '\0') {
+                              scratch.calibrate.owner[0] = '\0';
+                              reprogram = TRUE;
+                      } // if
+                      if (!isprint(scratch.calibrate.phone[0]) && scratch.calibrate.phone[0] != '\0') {
+                              scratch.calibrate.phone[0] = '\0';
+                              reprogram = TRUE;
+                      } // if
+                      if (!isprint(scratch.calibrate.note[0]) && scratch.calibrate.note[0] != '\0') {
+                              scratch.calibrate.note[0] = '\0';
+                              reprogram = TRUE;
+                      } // if
+              
+                      // initialize turn on speeds for Traqmate Basic only
+                      if (scratch.calibrate.turnonspeed == 0xFF) {
+                              scratch.calibrate.turnonspeed = (u08) 0;                // mph
+                              reprogram = TRUE;
+                      } // if
+                      
+                      if (scratch.calibrate.turnofftime == 0xFFFF) {
+                              scratch.calibrate.turnofftime = (u16) (0);              // seconds
+                              reprogram = TRUE;
+                      } // if
+                              
+                      if (reprogram) {
+                              // write the software rev into the scratchpad
+                              EraseScratchpad();
+                              WriteScratchpad(scratch.scratchbuff, SCRATCHLEN);
+                      } // if
+              
+              #ifndef DISPLAYATTACHED // DU sends message to do this. Basic does it based on programming
+                      // check AutoOn bit and program digipot to appropriate rail
+                      if (su2)
+                              DigiPot(AUTOONENABLED);         // usersettings bit 4
+              #endif
+              
+              } // InitSUScratchpad
+              #endif
+C51 COMPILER V9.51   CYGNALFLASH                                                           11/30/2014 18:01:40 PAGE 5   
+
+ 241          
+ 242          // erase the scratchpad area of FLASH
+ 243          void EraseScratchpad() {
+ 244   1              unsigned char SFRPAGE_SAVE = SFRPAGE;                   // Save Current SFR page
+ 245   1              unsigned char xdata *idata pwrite;      // pointer to FLASH scratchpad, must be data or idata
+ 246   1              unsigned char EA_save;                          // saves the current state of the int enable bit
+ 247   1      
+ 248   1              SFRPAGE = LEGACY_PAGE;                          // set SFR page
+ 249   1      
+ 250   1              // initialize write/erase pointer to any location in the scratchpad
+ 251   1              pwrite = 0x0000;   
+ 252   1      
+ 253   1              EA_save = EA;                       // save interrupt status   
+ 254   1              EA = 0;                             // disable interrupts (precautionary)
+ 255   1         
+ 256   1              FLSCL |= 0x01;                      // enable FLASH writes/erases from user sw
+ 257   1      
+ 258   1              PSCTL = 0x07;                       // MOVX writes erase FLASH page
+ 259   1                                                                                      // (SFLE set directing FLASH 
+ 260   1                                                                                      // reads/writes/erases to scratchpad memory
+ 261   1      
+ 262   1              *pwrite = 0;                                            // initiate page erase
+ 263   1      
+ 264   1              PSCTL = 0;                                                      // MOVX writes target XRAM
+ 265   1                                                                                      // (SFLE is cleared)
+ 266   1              FLSCL &= ~0x01;                                         // disable FLASH writes/erases from user sw
+ 267   1      
+ 268   1              EA = EA_save;                       // re-enable interrupts
+ 269   1      
+ 270   1              SFRPAGE = SFRPAGE_SAVE;                         // Restore SFR page
+ 271   1      } // EraseScratchpad
+ 272          
+ 273          // Write a buffer to scratchpad area of FLASH
+ 274          void WriteScratchpad( unsigned char *buf, int buflen) {
+ 275   1              unsigned char SFRPAGE_SAVE = SFRPAGE;                   // Save Current SFR page
+ 276   1              unsigned char xdata *idata pwrite;      // pointer to FLASH scratchpad, must be data or idata
+ 277   1              unsigned char EA_save;                          // saves the current state of the int enable bit
+ 278   1              int i;
+ 279   1      
+ 280   1              SFRPAGE = LEGACY_PAGE;                          // set SFR page
+ 281   1      
+ 282   1              // initialize FLASH write pointer to the beginning of the scratchpad
+ 283   1              pwrite = 0x0000;                    
+ 284   1      
+ 285   1              EA_save = EA;                       // save interrupt status
+ 286   1              EA = 0;                             // disable interrupts (precautionary)
+ 287   1      
+ 288   1              FLSCL |= 0x01;                                          // enable FLASH writes/erases from user sw
+ 289   1      
+ 290   1              PSCTL = 0x05;                                           // turn on scratchpad and writes
+ 291   1              for (i=0; i<buflen; i++)                        // copy data into scratchpad
+ 292   1                      *pwrite++ = *buf++;
+ 293   1      
+ 294   1              PSCTL = 0x00;                                           // MOVX writes target XRAM
+ 295   1      
+ 296   1              FLSCL &= ~0x01;                                         // disable FLASH writes/erases from user sw
+ 297   1      
+ 298   1              EA = EA_save;                                           // re-enable interrupts
+ 299   1      
+ 300   1              SFRPAGE = SFRPAGE_SAVE;                         // Restore SFR page
+ 301   1      } // WriteScratchpad
+ 302          
+C51 COMPILER V9.51   CYGNALFLASH                                                           11/30/2014 18:01:40 PAGE 6   
+
+ 303          // Read a buffer from scratchpad area of FLASH
+ 304          void ReadScratchpad( unsigned char *buf) {
+ 305   1              unsigned char SFRPAGE_SAVE = SFRPAGE;   // Save Current SFR page
+ 306   1              unsigned char code *pread;                      // pointer to FLASH used for reads, must be code
+ 307   1              unsigned char EA_save;                          // saves the current state of the int enable bit
+ 308   1      
+ 309   1              int i;
+ 310   1      
+ 311   1              pread = 0x0000;                                         // point at scratchpad
+ 312   1      
+ 313   1              SFRPAGE = LEGACY_PAGE;                          // set SFR page
+ 314   1      
+ 315   1              EA_save = EA;                       // save interrupt status
+ 316   1              EA = 0;                             // disable interrupts (precautionary)
+ 317   1      
+ 318   1              PSCTL = 0x04;                                           // swap in scratchpad
+ 319   1      
+ 320   1              for (i=0; i<SCRATCHLEN; i++)            // copy data from scratchpad
+ 321   1                      *buf++ = *pread++;
+ 322   1      
+ 323   1              PSCTL = 0;                                                      // swap it out
+ 324   1      
+ 325   1              EA = EA_save;                                           // re-enable interrupts
+ 326   1      
+ 327   1              SFRPAGE = SFRPAGE_SAVE;                         // Restore SFR page
+ 328   1      } // ReadScratchpad
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1048    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----     129
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      16
+   IDATA SIZE       =   ----       4
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

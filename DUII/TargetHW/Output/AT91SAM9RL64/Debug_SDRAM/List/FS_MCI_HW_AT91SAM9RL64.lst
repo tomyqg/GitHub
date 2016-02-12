@@ -1,0 +1,775 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     02/Dec/2015  11:33:18 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\Setup\FS_MCI_HW_AT91SAM9RL64.c          #
+#    Command line =  C:\DUII\TargetHW\Setup\FS_MCI_HW_AT91SAM9RL64.c -D       #
+#                    DEBUG=1 -D SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D        #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\FS #
+#                    _MCI_HW_AT91SAM9RL64.lst                                 #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\FS_ #
+#                    MCI_HW_AT91SAM9RL64.o                                    #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\Setup\FS_MCI_HW_AT91SAM9RL64.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2007     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : FS_MCI_HW_AT91SAM9RL64.c
+     19          Purpose     : Generic MMC/SD card driver for Atmel generic MCI controller
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          #include "FS_Int.h"
+     24          #include "MMC_MCI_HW.h"
+     25          #include "RTOS.h"
+     26          #include "BSP.h"
+     27          
+     28          /*********************************************************************
+     29          *
+     30          *       defines configurable
+     31          *
+     32          **********************************************************************
+     33          */
+     34          #define MCLK                         (100454400uL)
+     35          
+     36          #define CARD_DETECT_PIN_AVAILABLE    1
+     37          #define CARD_DETECT_PIN              15
+     38          #define CARD_DETECT_PIN_PIO_BASE     PIOA_BASE
+     39          #define CARD_DETECT_PIN_PIO_ID       PIOA_ID
+     40          
+     41          #define WRITE_PROTECT_PIN_AVAILABLE  1					// write protect pin in rev 3.0 boards
+     42          #define WRITE_PROTECT_PIN            9					// PA 9
+     43          #define WRITE_PROTECT_PIN_PIO_BASE   PIOA_BASE
+     44          #define WRITE_PROTECT_PIN_PIO_ID     PIOA_ID
+     45          
+     46          #define PIOA_BASE                    ((PIO_HWREG *)0xFFFFF400) // (PIOA) Base Address
+     47          #define PIOB_BASE                    ((PIO_HWREG *)0xFFFFF600) // (PIOB) Base Address
+     48          #define PIOC_BASE                    ((PIO_HWREG *)0xFFFFF800) // (PIOC) Base Address
+     49          #define PMC_BASE                     ((PMC_HWREG *)0xFFFFFC00) // (PMC)  Base Address
+     50          #define MCI_BASE_ADDR                ((U32       *)0xFFFA4000) // (MCI)  Base Address
+     51          
+     52          #define PIOA_ID                      (2)                       // Parallel IO Controller A
+     53          #define PIOB_ID                      (3)                       // Parallel IO Controller B
+     54          #define PIOC_ID                      (4)                       // Parallel IO Controller C
+     55          #define MCI_ID                       (10)                      // Multimedia Card Interface 0
+     56          
+     57          /*********************************************************************
+     58          *
+     59          *       defines non-configurable
+     60          *
+     61          **********************************************************************
+     62          */
+     63          #define MCI_MMC_SLOTA                    0    // MCI configuration with 1-bit data bus on slot A (for MMC cards).
+     64          #define MCI_MMC_SLOTB                    1    // MCI configuration with 1-bit data bus on slot B (for MMC cards).
+     65          #define MCI_SD_SLOTA               (1 << 7)   // MCI configuration with 4-bit data bus on slot A (for SD cards).
+     66          #define MCI_SD_SLOTB          (1 | (1 << 7))  // MCI configuration with 4-bit data bus on slot B (for SD cards).
+     67          
+     68          // Pin types
+     69          #define PIO_PERIPH_A                0         // The pin is controlled by the associated signal of peripheral A.
+     70          #define PIO_PERIPH_B                1         // The pin is controlled by the associated signal of peripheral A.
+     71          #define PIO_INPUT                   2         // The pin is an input.
+     72          #define PIO_OUTPUT_0                3         // The pin is an output and has a default level of 0.
+     73          #define PIO_OUTPUT_1                4         // The pin is an output and has a default level of 1.
+     74          
+     75          // Pin types
+     76          #define PIO_DEFAULT                 (0 << 0)  // Default pin configuration (no attribute).
+     77          #define PIO_PULLUP                  (1 << 0)  // The internal pin pull-up is active.
+     78          #define PIO_DEGLITCH                (1 << 1)  // The internal pin pull-up is active.
+     79          #define PIO_OPENDRAIN               (1 << 2)  // The pin is open-drain.
+     80          
+     81          /*********************************************************************
+     82          *
+     83          *       Function replacement macros
+     84          *
+     85          **********************************************************************
+     86          */
+     87          // Used to write in to a SFR register.
+     88          #define WRITE_SFR_REG(pSFR, RegName, value)     pSFR->RegName = (value)
+     89          // Used to read from a SFR register.
+     90          #define READ_SFR_REG(pSFR, RegName)             (pSFR->RegName)
+     91          
+     92          /*********************************************************************
+     93          *
+     94          *       Data types
+     95          *
+     96          **********************************************************************
+     97          */
+     98          typedef struct {
+     99          	volatile U32 PIO_PER; 	    // PIO Enable Register
+    100          	volatile U32 PIO_PDR; 	    // PIO Disable Register
+    101          	volatile U32 PIO_PSR; 	    // PIO Status Register
+    102          	volatile U32 Reserved0[1]; 	//
+    103          	volatile U32 PIO_OER; 	    // Output Enable Register
+    104          	volatile U32 PIO_ODR; 	    // Output Disable Register
+    105          	volatile U32 PIO_OSR; 	    // Output Status Register
+    106          	volatile U32 Reserved1[1]; 	//
+    107          	volatile U32 PIO_IFER; 	    // Input Filter Enable Register
+    108          	volatile U32 PIO_IFDR; 	    // Input Filter Disable Register
+    109          	volatile U32 PIO_IFSR; 	    // Input Filter Status Register
+    110          	volatile U32 Reserved2[1]; 	//
+    111          	volatile U32 PIO_SODR; 	    // Set Output Data Register
+    112          	volatile U32 PIO_CODR; 	    // Clear Output Data Register
+    113          	volatile U32 PIO_ODSR; 	    // Output Data Status Register
+    114          	volatile U32 PIO_PDSR; 	    // Pin Data Status Register
+    115          	volatile U32 PIO_IER; 	    // Interrupt Enable Register
+    116          	volatile U32 PIO_IDR; 	    // Interrupt Disable Register
+    117          	volatile U32 PIO_IMR; 	    // Interrupt Mask Register
+    118          	volatile U32 PIO_ISR; 	    // Interrupt Status Register
+    119          	volatile U32 PIO_MDER; 	    // Multi-driver Enable Register
+    120          	volatile U32 PIO_MDDR; 	    // Multi-driver Disable Register
+    121          	volatile U32 PIO_MDSR; 	    // Multi-driver Status Register
+    122          	volatile U32 Reserved3[1]; 	//
+    123          	volatile U32 PIO_PPUDR; 	  // Pull-up Disable Register
+    124          	volatile U32 PIO_PPUER; 	  // Pull-up Enable Register
+    125          	volatile U32 PIO_PPUSR; 	  // Pull-up Status Register
+    126          	volatile U32 Reserved4[1]; 	//
+    127          	volatile U32 PIO_ASR; 	    // Select A Register
+    128          	volatile U32 PIO_BSR; 	    // Select B Register
+    129          	volatile U32 PIO_ABSR; 	    // AB Select Status Register
+    130          	volatile U32 Reserved5[9]; 	//
+    131          	volatile U32 PIO_OWER; 	    // Output Write Enable Register
+    132          	volatile U32 PIO_OWDR; 	    // Output Write Disable Register
+    133          	volatile U32 PIO_OWSR; 	    // Output Write Status Register
+    134          } PIO_HWREG;
+    135          
+    136          typedef struct {
+    137          	volatile U32 PMC_SCER; 	    // System Clock Enable Register
+    138          	volatile U32 PMC_SCDR; 	    // System Clock Disable Register
+    139          	volatile U32 PMC_SCSR; 	    // System Clock Status Register
+    140          	volatile U32 Reserved0[1]; 	//
+    141          	volatile U32 PMC_PCER; 	    // Peripheral Clock Enable Register
+    142          	volatile U32 PMC_PCDR; 	    // Peripheral Clock Disable Register
+    143          	volatile U32 PMC_PCSR; 	    // Peripheral Clock Status Register
+    144          	volatile U32 Reserved1[1]; 	//
+    145          	volatile U32 PMC_MOR; 	    // Main Oscillator Register
+    146          	volatile U32 PMC_MCFR; 	    // Main Clock  Frequency Register
+    147          	volatile U32 PMC_PLLAR; 	  // PLL A Register
+    148          	volatile U32 PMC_PLLBR; 	  // PLL B Register
+    149          	volatile U32 PMC_MCKR; 	    // Master Clock Register
+    150          	volatile U32 Reserved2[3]; 	//
+    151          	volatile U32 PMC_PCKR[8]; 	// Programmable Clock Register
+    152          	volatile U32 PMC_IER; 	    // Interrupt Enable Register
+    153          	volatile U32 PMC_IDR; 	    // Interrupt Disable Register
+    154          	volatile U32 PMC_SR; 	      // Status Register
+    155          	volatile U32 PMC_IMR; 	    // Interrupt Mask Register
+    156          } PMC_HWREG;
+    157          
+    158          
+    159          typedef struct {
+    160            unsigned int    Mask;       // Bit mask indicating which pin(s) to configure.
+    161            PIO_HWREG     * pPio;       // Pointer to the PIO controller which has the pin(s).
+    162            unsigned char   Id;         // Peripheral ID of the PIO controller which has the pin(s).
+    163            unsigned char   Type;       // Pin type (see "Pin types").
+    164            unsigned char   Attribute;  // Pin attribute (see "Pin attributes").
+    165          } PIN;
+    166          
+    167          /*********************************************************************
+    168          *
+    169          *       Static const
+    170          *
+    171          **********************************************************************
+    172          */
+
+   \                                 In section .text, align 4, keep-with-next
+    173          static const PIN _SDPins[] = {
+   \                     _SDPins:
+   \   00000000                      ; Initializer data, 36 bytes
+   \   00000000   3F00000000F4       DC32 63, 4294964224
+   \              FFFF        
+   \   00000008   02000100           DC8 2, 0, 1, 0
+   \   0000000C   0080000000F4       DC32 32768, 4294964224
+   \              FFFF        
+   \   00000014   02020100           DC8 2, 2, 1, 0
+   \   00000018   0002000000F4       DC32 512, 4294964224
+   \              FFFF        
+   \   00000020   02020100           DC8 2, 2, 1, 0
+    174            {0x0000003F, PIOA_BASE, PIOA_ID, PIO_PERIPH_A, PIO_PULLUP}
+    175          #if CARD_DETECT_PIN_AVAILABLE
+    176            ,{1 << CARD_DETECT_PIN, CARD_DETECT_PIN_PIO_BASE, CARD_DETECT_PIN_PIO_ID, PIO_INPUT, PIO_PULLUP}
+    177          #endif
+    178          #if WRITE_PROTECT_PIN_AVAILABLE
+    179            ,{1 << WRITE_PROTECT_PIN, CARD_DETECT_PIN_PIO_BASE, CARD_DETECT_PIN_PIO_ID, PIO_INPUT, PIO_PULLUP}
+    180          #endif
+    181          };
+    182          
+    183          /*********************************************************************
+    184          *
+    185          *       Static code
+    186          *
+    187          **********************************************************************
+    188          */
+    189          /*********************************************************************
+    190          *
+    191          *       _SetPIO2Input
+    192          *
+    193          *  Function description:
+    194          *    Configures one or more pin(s) or a PIO controller as inputs. Optionally,
+    195          *    the corresponding internal pull-up(s) and glitch filter(s) can be
+    196          *    enabled.
+    197          *
+    198          *  Parameters:
+    199          *    pPIO             - Pointer to a PIO controller.
+    200          *    Mask             - Bit mask of one or more pin(s) to configure
+    201          *    EnablePullUp     - Indicates if the internal pull-up(s) must be enabled.
+    202          *    EnableFilter     - Indicates if the glitch filter(s) must be enabled.
+    203          */
+    204          static void _SetPIO2Input(PIO_HWREG * pPIO, U32 Mask, U8 EnablePullUp, U8 EnableFilter) {
+    205            // Disable interrupts
+    206            WRITE_SFR_REG(pPIO, PIO_IDR, Mask);
+    207            // Enable pull-up(s) if necessary
+    208            if (EnablePullUp) {
+    209              WRITE_SFR_REG(pPIO, PIO_PPUER, Mask);
+    210            } else {
+    211              WRITE_SFR_REG(pPIO, PIO_PPUDR, Mask);
+    212            }
+    213            // Enable filter(s) if necessary
+    214            if (EnableFilter) {
+    215              WRITE_SFR_REG(pPIO, PIO_IFER, Mask);
+    216            } else {
+    217              WRITE_SFR_REG(pPIO, PIO_IFDR, Mask);
+    218            }
+    219            // Configure pin as input
+    220            WRITE_SFR_REG(pPIO, PIO_ODR, Mask);
+    221            WRITE_SFR_REG(pPIO, PIO_PER, Mask);
+    222          }
+    223          
+    224          /*********************************************************************
+    225          *
+    226          *       _SetPIO2Output
+    227          *
+    228          *  Function description:
+    229          *    Configures one or more pin(s) of a PIO controller as outputs, with the
+    230          *    given default value. Optionally, the multi-drive feature can be enabled
+    231          *    on the pin(s).
+    232          *
+    233          *  Parameters:
+    234          *    pPIO             - Pointer to a PIO controller.
+    235          *    Mask             - Bit mask of one or more pin(s) to configure
+    236          *    DefaultValue     - Default level on the pin(s).
+    237          *    EnableMultiDrive - Indicates if the pin(s) shall be configured as open-drain.
+    238          *    EnablePullUp     - Indicates if the pin shall have its pull-up activated.
+    239          */
+    240          static void _SetPIO2Output(PIO_HWREG * pPIO, U32 Mask, U8 DefaultValue, U8 EnableMultiDrive, U8 EnablePullUp) {
+    241            // Disable interrupts
+    242            WRITE_SFR_REG(pPIO, PIO_IDR, Mask);
+    243            // Enable pull-up(s) if necessary
+    244            if (EnablePullUp) {
+    245              WRITE_SFR_REG(pPIO, PIO_PPUER, Mask);
+    246            } else {
+    247              WRITE_SFR_REG(pPIO, PIO_PPUDR, Mask);
+    248            }
+    249            // Enable multi-drive if necessary
+    250            if (EnableMultiDrive) {
+    251              WRITE_SFR_REG(pPIO, PIO_MDER, Mask);
+    252            } else {
+    253              WRITE_SFR_REG(pPIO, PIO_MDDR, Mask);
+    254            }
+    255            // Set default value
+    256            if (DefaultValue) {
+    257              WRITE_SFR_REG(pPIO, PIO_SODR, Mask);
+    258            } else {
+    259              WRITE_SFR_REG(pPIO, PIO_CODR, Mask);
+    260            }
+    261            // Configure pin(s) as output(s)
+    262            WRITE_SFR_REG(pPIO, PIO_OER, Mask);
+    263            WRITE_SFR_REG(pPIO, PIO_PER, Mask);
+    264          }
+    265          
+    266          /*********************************************************************
+    267          *
+    268          *       _SetPIO2Peripheral
+    269          *
+    270          *  Function description:
+    271          *    Configures one or more pin(s) of a PIO controller as being controlled by
+    272          *    peripheral A/B. Optionally, the corresponding internal pull-up(s) can be
+    273          *    enabled.
+    274          *
+    275          *  Parameters:
+    276          *    pPIO            - Pointer to a PIO controller.
+    277          *    PeripheralType  - Specifies the peripheral Type (PIO_PERIPH_A or PIO_PERIPH_B)
+    278          *    Mask            - Bit mask of one or more pin(s) to configure
+    279          *    EnablePullUp    - Indicates if the pin(s) internal pull-up shall be configured.
+    280          *
+    281          */
+    282          static void _SetPIO2Peripheral(PIO_HWREG * pPIO, U8 PeripheralType, U32 Mask, U8 EnablePullUp) {
+    283            // Disable interrupts on the pin(s)
+    284            WRITE_SFR_REG(pPIO, PIO_IDR, Mask);
+    285            // Enable the pull-up(s) if necessary
+    286            if (EnablePullUp) {
+    287              WRITE_SFR_REG(pPIO, PIO_PPUER, Mask);
+    288            } else {
+    289              WRITE_SFR_REG(pPIO, PIO_PPUDR, Mask);
+    290            }
+    291            //
+    292            // Configure pin
+    293            //
+    294            if (PeripheralType == PIO_PERIPH_A) {
+    295              WRITE_SFR_REG(pPIO, PIO_ASR, Mask);
+    296            } else if (PeripheralType == PIO_PERIPH_B) {
+    297              WRITE_SFR_REG(pPIO, PIO_BSR, Mask);
+    298            }
+    299            WRITE_SFR_REG(pPIO, PIO_PDR, Mask);
+    300          }
+    301          
+    302          /*********************************************************************
+    303          *
+    304          *       _ConfigurePIO
+    305          *
+    306          *  Function description:
+    307          *    Configures a list of Pin instances, which can either hold a single pin or a
+    308          *    group of pins, depending on the mask value; all pins are configured by this
+    309          *    function.
+    310          *
+    311          *  Parameters:
+    312          *    pList      - Pointer to an array of PIO list instances.
+    313          *    NumItems   - Number of PIO list instances.
+    314          *
+    315          *  Return value:
+    316          *    0          - Success
+    317          *    1          - Error
+    318          *
+    319          */
+
+   \                                 In section .text, align 4, keep-with-next
+    320          static U8 _ConfigurePIO(const PIN *pList, unsigned NumItems) {
+   \                     _ConfigurePIO:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   000051E3           CMP      R1,#+0
+   \   00000008   1E00000A           BEQ      ??_ConfigurePIO_1
+   \   0000000C   EF20E0E3           MVN      R2,#+239
+   \   00000010   C02FC2E3           BIC      R2,R2,#0x300
+   \   00000014   0130A0E3           MOV      R3,#+1
+    321            // Configure pins
+    322            while (NumItems > 0) {
+    323              switch (pList->Type) {
+   \                     ??_ConfigurePIO_2:
+   \   00000018   09C0D0E5           LDRB     R12,[R0, #+9]
+   \   0000001C   0CE0A0E1           MOV      LR,R12
+   \   00000020   04005EE3           CMP      LR,#+4
+   \   00000024   0EF18F90           ADDLS    PC,PC,LR, LSL #+2
+   \                     ??_ConfigurePIO_0:
+   \   00000028   4300008A           BHI      ??_ConfigurePIO_3
+   \   0000002C   030000EA           B        ??_ConfigurePIO_4
+   \   00000030   020000EA           B        ??_ConfigurePIO_4
+   \   00000034   150000EA           B        ??_ConfigurePIO_5
+   \   00000038   260000EA           B        ??_ConfigurePIO_6
+   \   0000003C   250000EA           B        ??_ConfigurePIO_6
+    324              case PIO_PERIPH_A:
+    325              case PIO_PERIPH_B:
+    326                _SetPIO2Peripheral(pList->pPio, pList->Type, pList->Mask, (pList->Attribute & PIO_PULLUP) ? 1 : 0);
+   \                     ??_ConfigurePIO_4:
+   \   00000040   0AE0D0E5           LDRB     LR,[R0, #+10]
+   \   00000044   004090E5           LDR      R4,[R0, #+0]
+   \   00000048   045090E5           LDR      R5,[R0, #+4]
+   \   0000004C   01E01EE2           ANDS     LR,LR,#0x1
+   \   00000050   444085E5           STR      R4,[R5, #+68]
+   \   00000054   64408515           STRNE    R4,[R5, #+100]
+   \   00000058   60408505           STREQ    R4,[R5, #+96]
+   \   0000005C   00005CE3           CMP      R12,#+0
+   \   00000060   0300000A           BEQ      ??_ConfigurePIO_7
+   \   00000064   01005CE3           CMP      R12,#+1
+   \   00000068   0200001A           BNE      ??_ConfigurePIO_8
+   \   0000006C   744085E5           STR      R4,[R5, #+116]
+   \   00000070   000000EA           B        ??_ConfigurePIO_8
+   \                     ??_ConfigurePIO_7:
+   \   00000074   704085E5           STR      R4,[R5, #+112]
+   \                     ??_ConfigurePIO_8:
+   \   00000078   044085E5           STR      R4,[R5, #+4]
+    327                break;
+    328              case PIO_INPUT:
+    329                WRITE_SFR_REG(PMC_BASE, PMC_PCER, (1 << pList->Id));    // Enable the PIO clock
+    330                _SetPIO2Input(pList->pPio, pList->Mask, (pList->Attribute & PIO_PULLUP) ? 1 : 0, (pList->Attribute & PIO_DEGLITCH)? 1 : 0);
+    331                break;
+    332              case PIO_OUTPUT_0:
+    333              case PIO_OUTPUT_1:
+    334                WRITE_SFR_REG(PMC_BASE, PMC_PCER, (1 << pList->Id));    // Enable the PIO clock
+    335                _SetPIO2Output(pList->pPio, pList->Mask, (pList->Type == PIO_OUTPUT_1), (pList->Attribute & PIO_OPENDRAIN) ? 1 : 0, (pList->Attribute & PIO_PULLUP) ? 1 : 0);
+    336                break;
+    337              default:
+    338                return 0;
+    339              }
+    340              pList++;
+   \                     ??_ConfigurePIO_9:
+   \   0000007C   0C0080E2           ADD      R0,R0,#+12
+    341              NumItems--;
+   \   00000080   011051E2           SUBS     R1,R1,#+1
+   \   00000084   E3FFFF1A           BNE      ??_ConfigurePIO_2
+    342            }
+    343            return 1;
+   \                     ??_ConfigurePIO_1:
+   \   00000088   0100A0E3           MOV      R0,#+1
+   \   0000008C   7080BDE8           POP      {R4-R6,PC}       ;; return
+   \                     ??_ConfigurePIO_5:
+   \   00000090   D8C0D0E1           LDRSB    R12,[R0, #+8]
+   \   00000094   13CCA0E1           LSL      R12,R3,R12
+   \   00000098   00C082E5           STR      R12,[R2, #+0]
+   \   0000009C   0AC0D0E5           LDRB     R12,[R0, #+10]
+   \   000000A0   004090E5           LDR      R4,[R0, #+0]
+   \   000000A4   045090E5           LDR      R5,[R0, #+4]
+   \   000000A8   01E00CE2           AND      LR,R12,#0x1
+   \   000000AC   444085E5           STR      R4,[R5, #+68]
+   \   000000B0   00005EE3           CMP      LR,#+0
+   \   000000B4   64408515           STRNE    R4,[R5, #+100]
+   \   000000B8   ACC003E0           AND      R12,R3,R12, LSR #+1
+   \   000000BC   60408505           STREQ    R4,[R5, #+96]
+   \   000000C0   00005CE3           CMP      R12,#+0
+   \   000000C4   20408515           STRNE    R4,[R5, #+32]
+   \   000000C8   24408505           STREQ    R4,[R5, #+36]
+   \   000000CC   144085E5           STR      R4,[R5, #+20]
+   \   000000D0   004085E5           STR      R4,[R5, #+0]
+   \   000000D4   E8FFFFEA           B        ??_ConfigurePIO_9
+   \                     ??_ConfigurePIO_6:
+   \   000000D8   D8C0D0E1           LDRSB    R12,[R0, #+8]
+   \   000000DC   13CCA0E1           LSL      R12,R3,R12
+   \   000000E0   00C082E5           STR      R12,[R2, #+0]
+   \   000000E4   0940D0E5           LDRB     R4,[R0, #+9]
+   \   000000E8   0AC0D0E5           LDRB     R12,[R0, #+10]
+   \   000000EC   005090E5           LDR      R5,[R0, #+0]
+   \   000000F0   040054E3           CMP      R4,#+4
+   \   000000F4   046090E5           LDR      R6,[R0, #+4]
+   \   000000F8   01E00CE2           AND      LR,R12,#0x1
+   \   000000FC   0140A003           MOVEQ    R4,#+1
+   \   00000100   0040A013           MOVNE    R4,#+0
+   \   00000104   445086E5           STR      R5,[R6, #+68]
+   \   00000108   00005EE3           CMP      LR,#+0
+   \   0000010C   64508615           STRNE    R5,[R6, #+100]
+   \   00000110   2CC103E0           AND      R12,R3,R12, LSR #+2
+   \   00000114   60508605           STREQ    R5,[R6, #+96]
+   \   00000118   00005CE3           CMP      R12,#+0
+   \   0000011C   50508615           STRNE    R5,[R6, #+80]
+   \   00000120   54508605           STREQ    R5,[R6, #+84]
+   \   00000124   000054E3           CMP      R4,#+0
+   \   00000128   30508615           STRNE    R5,[R6, #+48]
+   \   0000012C   34508605           STREQ    R5,[R6, #+52]
+   \   00000130   105086E5           STR      R5,[R6, #+16]
+   \   00000134   005086E5           STR      R5,[R6, #+0]
+   \   00000138   CFFFFFEA           B        ??_ConfigurePIO_9
+   \                     ??_ConfigurePIO_3:
+   \   0000013C   0000A0E3           MOV      R0,#+0
+   \   00000140   7080BDE8           POP      {R4-R6,PC}
+    344          }
+    345          
+    346          /*********************************************************************
+    347          *
+    348          *       Public code
+    349          *
+    350          **********************************************************************
+    351          */
+    352          
+    353          /*********************************************************************
+    354          *
+    355          *       FS_MCI_HW_IsCardPresent
+    356          *
+    357          *  Function description:
+    358          *    Returns whether a card is inserted or not.
+    359          *    When a card detect pin is not available. The function shall return
+    360          *    FS_MEDIA_STATE_UNKNOWN. The driver above will check, whether there
+    361          *    a valid card
+    362          *
+    363          *  Parameters:
+    364          *    Unit    - MCI Card unit that shall be used
+    365          *
+    366          *  Return value:
+    367          *    FS_MEDIA_STATE_UNKNOWN  - Card state is unknown, since no card detect pin available
+    368          *    FS_MEDIA_NOT_PRESENT    - No Card is inserted in slot.
+    369          *    FS_MEDIA_IS_PRESENT     - Card is inserted in slot.
+    370          */
+
+   \                                 In section .text, align 4, keep-with-next
+    371          int FS_MCI_HW_IsCardPresent(U8 Unit) {
+    372            U8 r;
+    373            r = FS_MEDIA_STATE_UNKNOWN;
+    374            if (CARD_DETECT_PIN_AVAILABLE) {
+    375              r = READ_SFR_REG(CARD_DETECT_PIN_PIO_BASE, PIO_PDSR) & (1 << CARD_DETECT_PIN) ? FS_MEDIA_NOT_PRESENT : FS_MEDIA_IS_PRESENT;
+   \                     FS_MCI_HW_IsCardPresent:
+   \   00000000   C300E0E3           MVN      R0,#+195
+   \   00000004   B00EC0E3           BIC      R0,R0,#0xB00
+   \   00000008   000090E5           LDR      R0,[R0, #+0]
+    376            }
+    377            return r;
+   \   0000000C   0008A0E1           LSL      R0,R0,#+16
+   \   00000010   A00FA0E1           LSR      R0,R0,#+31
+   \   00000014   010020E2           EOR      R0,R0,#0x1
+   \   00000018   1EFF2FE1           BX       LR               ;; return
+    378          }
+    379          
+    380          /*********************************************************************
+    381          *
+    382          *       FS_MCI_HW_IsCardWriteProtected
+    383          *
+    384          *  Function description:
+    385          *
+    386          *
+    387          *  Parameters:
+    388          *    Unit    - MCI Card unit that shall be used
+    389          *
+    390          *  Return value:
+    391          *    0       - Card is not write protected.
+    392          *    1       - Card is     write protected.
+    393          *
+    394          */
+
+   \                                 In section .text, align 4, keep-with-next
+    395          U8 FS_MCI_HW_IsCardWriteProtected(U8 Unit) {
+    396            U8 r;
+    397            r = 0;
+    398            if (WRITE_PROTECT_PIN_AVAILABLE) {
+    399              r = READ_SFR_REG(WRITE_PROTECT_PIN_PIO_BASE, PIO_PDSR) & (1 << WRITE_PROTECT_PIN) ? 1 : 0;
+   \                     FS_MCI_HW_IsCardWriteProtected:
+   \   00000000   C300E0E3           MVN      R0,#+195
+   \   00000004   B00EC0E3           BIC      R0,R0,#0xB00
+   \   00000008   000090E5           LDR      R0,[R0, #+0]
+    400            }
+    401            return r;
+   \   0000000C   0008A0E1           LSL      R0,R0,#+16
+   \   00000010   A00CA0E1           LSR      R0,R0,#+25
+   \   00000014   010000E2           AND      R0,R0,#0x1
+   \   00000018   1EFF2FE1           BX       LR               ;; return
+    402          }
+    403          
+    404          /*********************************************************************
+    405          *
+    406          *       FS_MCI_HW_GetMClk
+    407          *
+    408          *  Function description:
+    409          *
+    410          *
+    411          *  Parameters:
+    412          *    Unit    - MCI Card unit that shall be used
+    413          *
+    414          *  Return value:
+    415          *    The AT91 master clock (MCLK) given in Hz.
+    416          *
+    417          */
+
+   \                                 In section .text, align 4, keep-with-next
+    418          U32 FS_MCI_HW_GetMClk(U8 Unit) {
+    419            return MCLK;
+   \                     FS_MCI_HW_GetMClk:
+   \   00000000   5F06A0E3           MOV      R0,#+99614720
+   \   00000004   CD0A80E3           ORR      R0,R0,#0xCD000
+   \   00000008   1EFF2FE1           BX       LR               ;; return
+    420          }
+    421          
+    422          /*********************************************************************
+    423          *
+    424          *       FS_MCI_HW_Init
+    425          *
+    426          *  Function description:
+    427          *
+    428          *
+    429          *  Parameters:
+    430          *    Unit    - MCI Card unit that shall be used
+    431          *
+    432          */
+
+   \                                 In section .text, align 4, keep-with-next
+    433          void FS_MCI_HW_Init(U8 Unit) {
+    434            // Configure SDcard pins
+    435            _ConfigurePIO(_SDPins, COUNTOF(_SDPins));
+   \                     FS_MCI_HW_Init:
+   \   00000000   0310A0E3           MOV      R1,#+3
+   \   00000004   ........           ADR      R0,_SDPins
+   \   00000008   ........           B        _ConfigurePIO    ;; tailcall
+    436          }
+    437          
+    438          /*********************************************************************
+    439          *
+    440          *       FS_MCI_HW_EnableClock
+    441          *
+    442          *  Function description:
+    443          *
+    444          *
+    445          *  Parameters:
+    446          *    Unit    - MCI Card unit that shall be used
+    447          *    OnOff   - 1 - Enable the clock
+    448          *              0 - Disable the clock
+    449          *
+    450          */
+
+   \                                 In section .text, align 4, keep-with-next
+    451          void FS_MCI_HW_EnableClock(U8 Unit, unsigned OnOff) {
+    452            if (OnOff) {
+   \                     FS_MCI_HW_EnableClock:
+   \   00000000   400EA0E3           MOV      R0,#+1024
+   \   00000004   000051E3           CMP      R1,#+0
+   \   00000008   0300000A           BEQ      ??FS_MCI_HW_EnableClock_0
+    453              WRITE_SFR_REG(PMC_BASE, PMC_PCER, (1 << MCI_ID)); // Enable the MCI peripheral clock.
+   \   0000000C   EF10E0E3           MVN      R1,#+239
+   \   00000010   C01FC1E3           BIC      R1,R1,#0x300
+   \   00000014   000081E5           STR      R0,[R1, #+0]
+   \   00000018   1EFF2FE1           BX       LR
+    454            } else {
+    455              WRITE_SFR_REG(PMC_BASE, PMC_PCDR, (1 << MCI_ID)); // Disable the MCI peripheral clock.
+   \                     ??FS_MCI_HW_EnableClock_0:
+   \   0000001C   0410A0E3           MOV      R1,#+4
+   \   00000020   F00301E5           STR      R0,[R1, #-1008]
+    456            }
+    457          }
+   \   00000024   1EFF2FE1           BX       LR               ;; return
+    458          
+    459          /*********************************************************************
+    460          *
+    461          *       FS_MCI_HW_GetMCIInfo
+    462          *
+    463          *  Function description:
+    464          *
+    465          *
+    466          *  Parameters:
+    467          *    Unit    - MCI Card unit that shall be used
+    468          *    pInfo   - Pointer a MCI_INFO structure that shall be filled
+    469          *              by this function.
+    470          *
+    471          */
+
+   \                                 In section .text, align 4, keep-with-next
+    472          void FS_MCI_HW_GetMCIInfo(U8 Unit, MCI_INFO * pInfo) {
+    473            if (pInfo) {
+   \                     FS_MCI_HW_GetMCIInfo:
+   \   00000000   000051E3           CMP      R1,#+0
+   \   00000004   0300000A           BEQ      ??FS_MCI_HW_GetMCIInfo_0
+    474              pInfo->BaseAddr = (U32)MCI_BASE_ADDR;
+   \   00000008   ........           LDR      R0,??DataTable1  ;; 0xfffa4000
+   \   0000000C   000081E5           STR      R0,[R1, #+0]
+    475              pInfo->Mode     = MCI_SD_SLOTA;
+   \   00000010   8000A0E3           MOV      R0,#+128
+   \   00000014   040081E5           STR      R0,[R1, #+4]
+    476            }
+    477          }
+   \                     ??FS_MCI_HW_GetMCIInfo_0:
+   \   00000018   1EFF2FE1           BX       LR               ;; return
+    478          
+    479          /*********************************************************************
+    480          *
+    481          *       FS_MCI_HW_EnableISR
+    482          *
+    483          *  Function description:
+    484          *
+    485          *
+    486          *  Parameters:
+    487          *    Unit         - MCI Card unit that shall be used
+    488          *    pISRHandler  - Pointer to the ISR handler that shall be installed.
+    489          *
+    490          */
+
+   \                                 In section .text, align 4, keep-with-next
+    491          void FS_MCI_HW_EnableISR(U8 Unit, ISR_FUNC * pISRHandler) {
+   \                     FS_MCI_HW_EnableISR:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+    492            //
+    493            // Install interrupt service routine
+    494            //
+    495            OS_ARM_InstallISRHandler(MCI_ID, pISRHandler);
+   \   00000008   0A00A0E3           MOV      R0,#+10
+   \   0000000C   ........           BL       OS_ARM_InstallISRHandler
+    496            OS_ARM_EnableISR(MCI_ID);
+   \   00000010   04D08DE2           ADD      SP,SP,#+4
+   \   00000014   0040BDE8           POP      {LR}
+   \   00000018   0A00A0E3           MOV      R0,#+10
+   \   0000001C   ........           B        OS_ARM_EnableISR  ;; tailcall
+    497          }
+    498          
+    499          /***************************************************
+    500          *
+    501          *       FS_MCI_HW_GetTransferMem
+    502          *
+    503          *  Function description
+    504          *     Delivers a memory area to be used by the SD-Card controller as transfer.
+    505          *     This function delivers the physical address and the virtual address of the tranfer memory.
+    506          *     The transfer area needs to be:
+    507          *     - Word aligned
+    508          *     - Uncached
+    509          *     - Have identical virtual and physical addresses
+    510          *     - The virtual address of the transfer area must be non-cacheable.
+    511          *     Additional requirements are that the memory used is fast enough to not block DMA transfers for too long.
+    512          *     In most systems, IRAM is used instead of external SDRAM, since the SDRAM can have relatively long latencies, primarily due to refresh cycles.
+    513          *     The size of the memory are is also returned (via pointer). It needs to be at least 512 bytes. In general, bigger values allow higher
+    514          *     performance since it allows transfer of multiple sectors without break.
+    515          */
+
+   \                                 In section .text, align 4, keep-with-next
+    516          U32 FS_MCI_HW_GetTransferMem(U32 * pPAddr, U32 * pVAddr) {
+    517            return BSP_SD_GetTransferMem(pPAddr, pVAddr);                // In order to have device dependend memory allocation at one place, we call a BSP function
+   \                     FS_MCI_HW_GetTransferMem:
+   \   00000000   ........           B        BSP_SD_GetTransferMem  ;; tailcall
+    518          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1:
+   \   00000000   0040FAFF           DC32     0xfffa4000
+    519          
+    520          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function                       .cstack
+     --------                       -------
+     FS_MCI_HW_EnableClock               0
+     FS_MCI_HW_EnableISR                 8
+     FS_MCI_HW_GetMCIInfo                0
+     FS_MCI_HW_GetMClk                   0
+     FS_MCI_HW_GetTransferMem            8
+     FS_MCI_HW_Init                      8
+     FS_MCI_HW_IsCardPresent             0
+     FS_MCI_HW_IsCardWriteProtected      0
+     _ConfigurePIO                      16
+
+
+   Section sizes:
+
+     Function/Label                 Bytes
+     --------------                 -----
+     _SDPins                          36
+     _ConfigurePIO                   324
+     FS_MCI_HW_IsCardPresent          28
+     FS_MCI_HW_IsCardWriteProtected   28
+     FS_MCI_HW_GetMClk                12
+     FS_MCI_HW_Init                   12
+     FS_MCI_HW_EnableClock            40
+     FS_MCI_HW_GetMCIInfo             28
+     FS_MCI_HW_EnableISR              32
+     FS_MCI_HW_GetTransferMem          4
+     ??DataTable1                      4
+
+ 
+ 548 bytes in section .text
+ 
+ 548 bytes of CODE memory
+
+Errors: none
+Warnings: none

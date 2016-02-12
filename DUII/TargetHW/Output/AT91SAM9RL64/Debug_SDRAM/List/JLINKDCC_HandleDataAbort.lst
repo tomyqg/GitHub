@@ -1,0 +1,243 @@
+###############################################################################
+#                                                                             #
+#     IAR Assembler V6.10.2.52244/W32 for ARM 26/Jun/2014  10:04:19           #
+#     Copyright 1999-2010 IAR Systems AB.                                     #
+#                                                                             #
+#           Source file   =  C:\DUII\TargetHW\Util\JLINKDCC_HandleDataAbort.s #
+#           List file     =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\JLINKDCC_HandleDataAbort.lst#
+#           Object file   =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\JLINKDCC_HandleDataAbort.o#
+#           Command line  =  C:\DUII\TargetHW\Util\JLINKDCC_HandleDataAbort.s #
+#                            -OC:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\ #
+#                            -s+ -M<> -w+ -r                                  #
+#                            -LC:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\ #
+#                            -t8 --cpu ARM926EJ-S --fpu None                  #
+#                            -IC:\DUII\TargetHW\INC\                          #
+#                                                                             #
+###############################################################################
+
+    1                          /**********************************************
+                               ***********************
+    2                          *              SEGGER MICROCONTROLLER SYSTEME
+                                GmbH                   *
+    3                          *        Solutions for real time microcontrolle
+                               r applications        *
+    4                          ***********************************************
+                               ***********************
+    5                          *                                              
+                                                     *
+    6                          *           (c) 2006 - 2008  SEGGER Microcontro
+                               ller Systeme GmbH     *
+    7                          *                                              
+                                                     *
+    8                          *      Internet: www.segger.com   Support:
+                                support@segger.com        *
+    9                          *                                              
+                                                     *
+   10                          ***********************************************
+                               ***********************
+   11                          -----------------------------------------------
+                               -----------------------
+   12                          File    : JLINKDCC_HandleDataAbort.s79
+   13                          Purpose : Data abort handler for ARM J-Link
+                                type communication via DCC
+   14                          Notes   : (1) How to use
+   15                                        In order to use the DCC abort
+                                handler, 3 things need to be done:
+   16                                        * Place a branch to DCC_Abort at
+                                address 0x10 ("vector" used for data aborts)
+   17                                        * Initialize the Abort-mode stack
+                                pointer to an area of at least 8 bytes of
+                                stack
+   18                                          memory required by the
+                                handler
+   19                                        * Add the DCC abort handler
+                                assembly file to the application
+   20                                    (2) Compatibility
+   21                                        The J-Link ARM DCC handler is
+                                compatible to the DCC communication
+   22                                        protocol used by IAR in the
+                                embedded workbench for ARM and allows
+   23                                        using the live data window in
+                                C-Spy
+   24                          ---------------------------END-OF-HEADER-------
+                               -----------------------
+   25                          */
+   26                          
+   27                          IRQ_MODE        DEFINE  0x12            ;
+                                Interrupt Request mode
+   28                          SVC_MODE        DEFINE  0x13            ;
+                                Supervisor mode
+   29                          ABT_MODE        DEFINE  0x17            ; Abort
+                                mode
+   30                          UND_MODE        DEFINE  0x1B            ;
+                                Undefined mode
+   31                          SYS_MODE        DEFINE  0x1F            ;
+                                System mode
+   32                          
+   33                          FLAG_I          DEFINE  0x80            ; IRQ
+                                disable flag
+   34                          FLAG_F          DEFINE  0x40            ; FIQ
+                                disable flag
+   35                          
+   36                          
+   37                                  EXTERN    JLINKDCC_IsInHandler
+   38                                  EXTERN    JLINKDCC_AbortOccurred
+   39                          
+   40                                  SECTION `.bss`:DATA:NOROOT(2)
+   41                          SaveArea:
+   42                                  DS8 8
+   43                          
+   44                                  SECTION .text:CODE:NOROOT(2)
+   45                                  CODE32
+   46                          
+   47                          /**********************************************
+                               ***********************
+   48                          *
+   49                          *       Public code
+   50                          *
+   51                          ***********************************************
+                               ***********************
+   52                          */
+   53                          
+   54                                  PUBLIC    JLINKDCC_HandleDataAbort
+   55                                  PUBLIC    Abort_Handler
+   56                          
+   57                          /**********************************************
+                               ***********************
+   58                          *
+   59                          *       JLINKDCC_HandleDataAbort
+   60                          *
+   61                          *  Function description
+   62                          *    Data abort handler for J-Link ARM type DCC
+                                communication.
+   63                          *
+   64                          *  Notes
+   65                          *    (1) Abort mode
+   66                          *        This handler is supposed to be
+                                executed in abort mode by simply placing
+                                a
+   67                          *        jump to the handler at address
+                                0x10.
+   68                          *        Just like an interrupt service
+                                routine, it needs to restore all registers
+   69                          *        for other modes and may only
+                                permanently modify registers of abort mode
+                                (SPSR_ABT, R14_ABT)
+   70                          *
+   71                          *    (2) Stack, mode switching
+   72                          *        In a lot of applications, SP_ABT is
+                                not loaded. We therefor switch to UND mode so
+                                we do not need an ABT stack.
+   73                          */
+   74                          Abort_Handler:
+   75                          JLINKDCC_HandleDataAbort:
+   76                          //
+   77                          // Switch to Undef mode so we have registers to
+                                "play" with
+   78                          //
+   79    00000000 DBF021E3             msr       CPSR_c, #(UND_MODE | FLAG_F |
+                                                          FLAG_I)            
+                                                          // Switch to UND mode
+                                                          & disable IRQ and
+                                                          FIQ
+   80    00000004 40E09FE5             LDR       R14, =SaveArea
+   81    00000008 00008EE5             STR       R0, [R14, #0]
+   82    0000000C 04108EE5             STR       R1, [R14, #4]
+   83                          //
+   84                          // Check if exception stemmed from JLINKARM DCC
+                                communication. Otherwise, user abort handler is
+                                called
+   85                          //
+   86    00000010 38009FE5             LDR       R0, =JLINKDCC_IsInHandler
+   87    00000014 0010D0E5             LDRB      R1, [R0, #0]
+   88    00000018 010011E1             TST       R1, R1                  //
+                                                      Check if abort occurred
+                                                      during execution of DCC
+                                                      handler
+   89    0000001C 0900000A             BEQ       UserAbortHandler
+   90                          
+   91                          //
+   92                          // Set JLINKDCC_AbortOccurred so PC (via
+                                J-Link) has a chance to find out that memory
+                                operation was aborted
+   93                          //
+   94    00000020 2CE09FE5             LDR       R14, =JLINKDCC_AbortOccurred
+   95    00000024 0010CEE5             STRB      R1, [R14, #0]            //
+                                                      Set abort occurred
+                                                      state
+   96                          //
+   97                          // Remember T-Flag in Z-Flag
+   98                          //
+   99    00000028 D7F021E3             msr       CPSR_c, #(ABT_MODE | FLAG_F |
+                                                          FLAG_I)            
+                                                          // Switch to ABT mode
+                                                          & disable IRQ and
+                                                          FIQ
+  100    0000002C 00004FE1             MRS       R0, SPSR
+  101    00000030 200010E3             TST       R0, #0x20               //
+                                                      Check thumb bit
+  102                          //
+  103                          // Restore modified registers
+  104                          //
+  105    00000034 10009FE5             LDR       R0, =SaveArea
+  106    00000038 041090E5             LDR       R1, [R0, #4]
+  107    0000003C 000090E5             LDR       R0, [R0, #0]
+  108                          //
+  109                          // Continue code execution right after the
+                                instruction which caused the abort.
+  110                          //
+  111    00000040 04F05E02             SUBEQS    PC, R14, #4             //
+                                                      Return after the aborted
+                                                      instruction (ARM
+                                                      mode)
+  112    00000044 06F05EE2             SUBS      PC, R14, #6             //
+                                                      Return after the aborted
+                                                      instruction (Thumb
+                                                      mode)
+  113                          
+  114                          /**********************************************
+                               ***********************
+  115                          *
+  116                          *       UserAbortHandler
+  117                          *
+  118                          *  Function description
+  119                          *    User defined abort handler.
+  120                          *    This function is called if a data abort
+                                occurs for other reasons than JLINK DCC
+                                comunication.
+  121                          *    Feel free to modify and jump to your own
+                                handler as required.
+  122                          */
+  123                          UserAbortHandler:
+  124    00000048 FEFFFFEA             B         UserAbortHandler        //
+                                                                          Modif
+                                                                         y this
+                                                                          line
+                                                                          to
+                                                                          jump
+                                                                          to
+                                                                          your
+                                                                          own
+                                                                          handl
+                                                                         er if
+                                                                          desir
+                                                                         ed
+  125                          
+  126                          
+  127                          
+  128                                  END
+  128.1                                 TABLE
+  128.2  0000004C ........             Reference on line 80,105 
+  128.3  00000050 ........             Reference on line 86 
+  128.4  00000054 ........             Reference on line 94 
+  128.5                                END (including table)
+##############################
+#           CRC:0            #
+#        Errors:   0         #
+#        Warnings: 0         #
+#         Bytes: 96          #
+##############################
+
+
+
+

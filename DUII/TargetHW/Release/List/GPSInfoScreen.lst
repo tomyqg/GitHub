@@ -1,0 +1,1468 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     02/Feb/2016  18:29:24 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\DUII\GPSInfoScreen.c                             #
+#    Command line =  C:\DUII\DUII\GPSInfoScreen.c -D DEBUG=1 -D               #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\GPSInfoScreen.lst          #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\GPSInfoScreen.o             #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\DUII\GPSInfoScreen.c
+      1          
+      2          #include <stdio.h>
+      3          #include <stdlib.h>
+      4          #include <string.h>
+      5          #include "DUII.h"
+      6          #include "GUI.h"
+      7          #include "GeneralConfig.h"
+      8          #include "commondefs.h"
+      9          #include "ConfigScreens.h"
+     10          #include "GPSInfoScreen.h"
+     11          #include "RunningGauges.h"
+     12          #include "DataHandler.h"
+     13          #ifndef _WINDOWS
+     14          #include "datadecode.h"
+     15          #include "adc.h"
+     16          #endif
+     17          #include "SFScreens.h"
+     18          #include "LEDHandler.h"
+     19          
+     20          /*********************************************************************
+     21          *
+     22          *       External data and code
+     23          *
+     24          **********************************************************************
+     25          */
+     26          extern GUI_CONST_STORAGE GUI_BITMAP bmthreewayarrow;
+     27          extern GUI_CONST_STORAGE GUI_BITMAP bmGPSInfoText;
+     28          extern GUI_CONST_STORAGE GUI_BITMAP bmDarkAsphalt;
+     29          extern char lockupSemaphore;
+     30          
+     31          #ifndef _WINDOWS
+     32          extern int warningLEDPWMSetting;
+     33          extern int tachLEDPWMSetting;
+     34          extern int backlightPWMSetting;
+     35          extern signed int lightCorrection, tempCorrection, totalCorrection;
+     36          #endif
+     37          
+     38          /*********************************************************************
+     39          *
+     40          *       Public code
+     41          *
+     42          **********************************************************************
+     43          */
+     44          
+     45          /*********************************************************************
+     46          *
+     47          *       Local Prototypes
+     48          *
+     49          **********************************************************************
+     50          */
+     51          
+     52          /*********************************************************************
+     53          *
+     54          *       Local Defines and Constants
+     55          *
+     56          **********************************************************************
+     57          */
+     58          
+     59          /*********************************************************************
+     60          *
+     61          *       Local Variables
+     62          *
+     63          **********************************************************************
+     64          */
+
+   \                                 In section .bss, align 4
+     65          static WM_HTIMER hScreenTimer;
+   \                     hScreenTimer:
+   \   00000000                      DS8 4
+   \   00000004                      DS8 4
+   \   00000008                      DS8 4
+   \   0000000C                      DS8 1
+     66          static WM_HWIN hGPSInfo;
+     67          static char firsttimethrough;
+
+   \                                 In section .bss, align 4
+     68          static WM_HTIMER hTestScreenTimer;
+   \                     hTestScreenTimer:
+   \   00000000                      DS8 4
+   \   00000004                      DS8 4
+   \   00000008                      DS8 4
+   \   0000000C                      DS8 1
+     69          static WM_HWIN hTestInfo;
+     70          static char testfirsttimethrough;
+     71          
+     72          #define	TOP_LINE			40
+     73          #define	LEFT_COLUMN		25
+     74          #define	RIGHT_COLUMN	275
+     75          #define	LINE_GAP			40
+     76          static GUI_MEMDEV_Handle memGPS;
+     77          static GUI_MEMDEV_Handle memTest;
+     78          
+     79          
+     80          /*********************************************************************
+     81          *
+     82          *       GPS Info Screen Callback
+     83          */
+
+   \                                 In section .text, align 4, keep-with-next
+     84          void GPSInfoCallback(WM_MESSAGE * pMsg)
+     85          {
+   \                     GPSInfoCallback:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+     86          	switch(pMsg->MsgId)
+   \   00000004   001090E5           LDR      R1,[R0, #+0]
+   \   00000008   44D04DE2           SUB      SP,SP,#+68
+   \   0000000C   0B1051E2           SUBS     R1,R1,#+11
+   \   00000010   0F01000A           BEQ      ??GPSInfoCallback_0
+   \   00000014   041051E2           SUBS     R1,R1,#+4
+   \   00000018   0C00000A           BEQ      ??GPSInfoCallback_1
+   \   0000001C   411F51E2           SUBS     R1,R1,#+260
+   \   00000020   0F01001A           BNE      ??GPSInfoCallback_2
+     87          	{
+     88          	case WM_TIMER:
+     89          		if (pMsg->Data.v == hScreenTimer)
+   \   00000024   ........           LDR      R4,??DataTable34_8
+   \   00000028   0C0090E5           LDR      R0,[R0, #+12]
+   \   0000002C   002094E5           LDR      R2,[R4, #+0]
+   \   00000030   020050E1           CMP      R0,R2
+   \   00000034   0B01001A           BNE      ??GPSInfoCallback_3
+     90          		{
+     91          			WM_RestartTimer(hScreenTimer, GAUGE_SCREEN_REFRESH_TIME);
+   \   00000038   1910A0E3           MOV      R1,#+25
+   \   0000003C   0200A0E1           MOV      R0,R2
+   \   00000040   ........           BL       WM_RestartTimer
+     92          			WM_InvalidateWindow(hGPSInfo);
+   \   00000044   040094E5           LDR      R0,[R4, #+4]
+   \   00000048   ........           BL       WM_InvalidateWindow
+   \   0000004C   050100EA           B        ??GPSInfoCallback_3
+     93          		}
+     94          		break;
+     95          
+     96          	case WM_PAINT:
+     97          		if (CS_IsVisible(GPS_INFO_SCREEN) || firsttimethrough)
+   \                     ??GPSInfoCallback_1:
+   \   00000050   0800A0E3           MOV      R0,#+8
+   \   00000054   ........           BL       CS_IsVisible
+   \   00000058   000050E3           CMP      R0,#+0
+   \   0000005C   0300001A           BNE      ??GPSInfoCallback_4
+   \   00000060   ........           LDR      R0,??DataTable34_8
+   \   00000064   0C00D0E5           LDRB     R0,[R0, #+12]
+   \   00000068   000050E3           CMP      R0,#+0
+   \   0000006C   F300000A           BEQ      ??GPSInfoCallback_5
+     98          		{
+     99          			char scratch[50];
+    100          			float speed;
+    101          
+    102          			if (lockupSemaphore)			// If main has not run since our last paint - exit!
+   \                     ??GPSInfoCallback_4:
+   \   00000070   ........           LDR      R0,??DataTable34
+   \   00000074   0010D0E5           LDRB     R1,[R0, #+0]
+   \   00000078   000051E3           CMP      R1,#+0
+   \   0000007C   F900001A           BNE      ??GPSInfoCallback_3
+    103          				break;
+    104          			else lockupSemaphore = true;
+   \   00000080   0110A0E3           MOV      R1,#+1
+   \   00000084   0010C0E5           STRB     R1,[R0, #+0]
+    105          			
+    106          			firsttimethrough = FALSE;
+   \   00000088   ........           LDR      R4,??DataTable34_8
+   \   0000008C   0000A0E3           MOV      R0,#+0
+   \   00000090   0C00C4E5           STRB     R0,[R4, #+12]
+    107          
+    108          			GUI_MEMDEV_Select(memGPS);
+   \   00000094   080094E5           LDR      R0,[R4, #+8]
+   \   00000098   ........           BL       GUI_MEMDEV_Select
+    109          			GUI_DrawBitmap(&bmDarkAsphalt, 0, 0);
+   \   0000009C   0020A0E3           MOV      R2,#+0
+   \   000000A0   0010A0E3           MOV      R1,#+0
+   \   000000A4   ........           LDR      R0,??DataTable34_1
+   \   000000A8   ........           BL       GUI_DrawBitmap
+    110          
+    111          			GUI_SetColor(GUI_WHITE);
+   \   000000AC   FF04E0E3           MVN      R0,#-16777216
+   \   000000B0   ........           BL       GUI_SetColor
+    112          			GUI_SetFont(&GUI_Font24_ASCII);
+   \   000000B4   ........           LDR      R0,??DataTable34_2
+   \   000000B8   ........           BL       GUI_SetFont
+    113          			GUI_SetTextMode(GUI_TM_TRANS);
+   \   000000BC   0200A0E3           MOV      R0,#+2
+   \   000000C0   ........           BL       GUI_SetTextMode
+    114          
+    115          			// Draw screen title
+    116          			GUI_DrawBitmap(&bmGPSInfoText, 0, 0);
+   \   000000C4   0020A0E3           MOV      R2,#+0
+   \   000000C8   0010A0E3           MOV      R1,#+0
+   \   000000CC   ........           LDR      R0,??DataTable34_3
+   \   000000D0   ........           BL       GUI_DrawBitmap
+    117          //			GUI_DispStringHCenterAt("GPS Satellite Information", XSIZE_PHYS/2, 5);
+    118          
+    119          			// Draw GPS LON
+    120          			sprintf(scratch, "GPS Lat: %0.6f   ", (float)GetValue(LATITUDE).dVal);
+   \   000000D4   0C10A0E3           MOV      R1,#+12
+   \   000000D8   38008DE2           ADD      R0,SP,#+56
+   \   000000DC   ........           BL       GetValue
+   \   000000E0   D803CDE1           LDRD     R0,R1,[SP, #+56]
+   \   000000E4   ........           BL       __aeabi_d2f
+   \   000000E8   ........           BL       __aeabi_f2d
+   \   000000EC   0020A0E1           MOV      R2,R0
+   \   000000F0   0130A0E1           MOV      R3,R1
+   \   000000F4   ............       ADRL     R1,`?<Constant "GPS Lat: %0.6f   ">`
+   \              ....        
+   \   000000FC   04008DE2           ADD      R0,SP,#+4
+   \   00000100   ........           BL       sprintf
+    121          			GUI_DispStringAt(scratch, LEFT_COLUMN, TOP_LINE);
+   \   00000104   2820A0E3           MOV      R2,#+40
+   \   00000108   1910A0E3           MOV      R1,#+25
+   \   0000010C   04008DE2           ADD      R0,SP,#+4
+   \   00000110   ........           BL       GUI_DispStringAt
+    122          
+    123          			// Draw GPS LON
+    124          			sprintf(scratch, "GPS Lon: %0.6f   ", (float)GetValue(LONGITUDE).dVal);
+   \   00000114   0D10A0E3           MOV      R1,#+13
+   \   00000118   38008DE2           ADD      R0,SP,#+56
+   \   0000011C   ........           BL       GetValue
+   \   00000120   D803CDE1           LDRD     R0,R1,[SP, #+56]
+   \   00000124   ........           BL       __aeabi_d2f
+   \   00000128   ........           BL       __aeabi_f2d
+   \   0000012C   0020A0E1           MOV      R2,R0
+   \   00000130   0130A0E1           MOV      R3,R1
+   \   00000134   ............       ADRL     R1,`?<Constant "GPS Lon: %0.6f   ">`
+   \              ....        
+   \   0000013C   04008DE2           ADD      R0,SP,#+4
+   \   00000140   ........           BL       sprintf
+    125          			GUI_DispStringAt(scratch, LEFT_COLUMN, TOP_LINE + (LINE_GAP * 1));
+   \   00000144   5020A0E3           MOV      R2,#+80
+   \   00000148   1910A0E3           MOV      R1,#+25
+   \   0000014C   04008DE2           ADD      R0,SP,#+4
+   \   00000150   ........           BL       GUI_DispStringAt
+    126          
+    127          			// Draw Altitude
+    128          			sprintf(scratch, "Altitude: %0.0f %s   ", GetValue(ALTITUDE).fVal, sysData.units == METRIC ? "meters" : "feet");
+   \   00000154   ........           LDR      R5,??DataTable34_4
+   \   00000158   1310A0E3           MOV      R1,#+19
+   \   0000015C   640095E5           LDR      R0,[R5, #+100]
+   \   00000160   010050E3           CMP      R0,#+1
+   \   00000164   ............       ADRLEQ   R6,`?<Constant "meters">`
+   \              ....        
+   \   0000016C   ............       ADRLNE   R6,`?<Constant "feet">`
+   \              ....        
+   \   00000174   38008DE2           ADD      R0,SP,#+56
+   \   00000178   ........           BL       GetValue
+   \   0000017C   00608DE5           STR      R6,[SP, #+0]
+   \   00000180   38009DE5           LDR      R0,[SP, #+56]
+   \   00000184   ........           BL       __aeabi_f2d
+   \   00000188   0020A0E1           MOV      R2,R0
+   \   0000018C   0130A0E1           MOV      R3,R1
+   \   00000190   ............       ADRL     R1,`?<Constant "Altitude: %0.0f %s   ">`
+   \              ....        
+   \   00000198   04008DE2           ADD      R0,SP,#+4
+   \   0000019C   ........           BL       sprintf
+    129          			GUI_DispStringAt(scratch, LEFT_COLUMN, TOP_LINE + (LINE_GAP * 2));
+   \   000001A0   7820A0E3           MOV      R2,#+120
+   \   000001A4   1910A0E3           MOV      R1,#+25
+   \   000001A8   04008DE2           ADD      R0,SP,#+4
+   \   000001AC   ........           BL       GUI_DispStringAt
+    130          
+    131          			// Draw GPS DOP
+    132          			sprintf(scratch, "GPS DOP: %0.2f   ", GetValue(GPS_DOP).fVal);
+   \   000001B0   1410A0E3           MOV      R1,#+20
+   \   000001B4   38008DE2           ADD      R0,SP,#+56
+   \   000001B8   ........           BL       GetValue
+   \   000001BC   38009DE5           LDR      R0,[SP, #+56]
+   \   000001C0   ........           BL       __aeabi_f2d
+   \   000001C4   0020A0E1           MOV      R2,R0
+   \   000001C8   0130A0E1           MOV      R3,R1
+   \   000001CC   ............       ADRL     R1,`?<Constant "GPS DOP: %0.2f   ">`
+   \              ....        
+   \   000001D4   04008DE2           ADD      R0,SP,#+4
+   \   000001D8   ........           BL       sprintf
+    133          			GUI_DispStringAt(scratch, LEFT_COLUMN, TOP_LINE + (LINE_GAP * 3));
+   \   000001DC   A020A0E3           MOV      R2,#+160
+   \   000001E0   1910A0E3           MOV      R1,#+25
+   \   000001E4   04008DE2           ADD      R0,SP,#+4
+   \   000001E8   ........           BL       GUI_DispStringAt
+    134          
+    135          			// Draw Number of satellites
+    136          			sprintf(scratch, "Num Sats: %d   ", GetValue(GPS_NUMSAT).uVal);
+   \   000001EC   1510A0E3           MOV      R1,#+21
+   \   000001F0   38008DE2           ADD      R0,SP,#+56
+   \   000001F4   ........           BL       GetValue
+   \   000001F8   38209DE5           LDR      R2,[SP, #+56]
+   \   000001FC   ............       ADRL     R1,`?<Constant "Num Sats: %d   ">`
+   \              ....        
+   \   00000204   04008DE2           ADD      R0,SP,#+4
+   \   00000208   ........           BL       sprintf
+    137          			GUI_DispStringAt(scratch, LEFT_COLUMN, TOP_LINE + (LINE_GAP * 4));
+   \   0000020C   C820A0E3           MOV      R2,#+200
+   \   00000210   1910A0E3           MOV      R1,#+25
+   \   00000214   04008DE2           ADD      R0,SP,#+4
+   \   00000218   ........           BL       GUI_DispStringAt
+    138          
+    139          			// Draw Number of satellites
+    140          			// Velocity always returned in current units
+    141          			speed = GetValue(SPEED).fVal;
+   \   0000021C   0E10A0E3           MOV      R1,#+14
+   \   00000220   38008DE2           ADD      R0,SP,#+56
+   \   00000224   ........           BL       GetValue
+    142          			sprintf(scratch, "Velocity: %0.1f %s   ", speed, sysData.units == METRIC ? "kph" : "mph");
+   \   00000228   640095E5           LDR      R0,[R5, #+100]
+   \   0000022C   38709DE5           LDR      R7,[SP, #+56]
+   \   00000230   010050E3           CMP      R0,#+1
+   \   00000234   ........           ADREQ    R0,??DataTable32  ;; "kph"
+   \   00000238   ........           ADRNE    R0,??DataTable32_1  ;; "mph"
+   \   0000023C   00008DE5           STR      R0,[SP, #+0]
+   \   00000240   0700A0E1           MOV      R0,R7
+   \   00000244   ........           BL       __aeabi_f2d
+   \   00000248   0020A0E1           MOV      R2,R0
+   \   0000024C   0130A0E1           MOV      R3,R1
+   \   00000250   ............       ADRL     R1,`?<Constant "Velocity: %0.1f %s   ">`
+   \              ....        
+   \   00000258   04008DE2           ADD      R0,SP,#+4
+   \   0000025C   ........           BL       sprintf
+    143          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE);
+   \   00000260   1360A0E3           MOV      R6,#+19
+   \   00000264   406F86E3           ORR      R6,R6,#0x100
+   \   00000268   2820A0E3           MOV      R2,#+40
+   \   0000026C   0610A0E1           MOV      R1,R6
+   \   00000270   04008DE2           ADD      R0,SP,#+4
+   \   00000274   ........           BL       GUI_DispStringAt
+    144          
+    145          			// Draw GPS Heading
+    146          			if (speed < 0.1)
+   \   00000278   0700A0E1           MOV      R0,R7
+   \   0000027C   ........           LDR      R1,??DataTable34_5  ;; 0x3dcccccd
+   \   00000280   ........           BL       __aeabi_cfcmple
+   \   00000284   0400002A           BCS      ??GPSInfoCallback_6
+    147          				sprintf(scratch, "Heading: ---   ");
+   \   00000288   ............       ADRL     R1,`?<Constant "Heading: ---   ">`
+   \              ....        
+   \   00000290   04008DE2           ADD      R0,SP,#+4
+   \   00000294   ........           BL       sprintf
+   \   00000298   0A0000EA           B        ??GPSInfoCallback_7
+    148          			else
+    149          				sprintf(scratch, "Heading: %0.0f   ", GetValue(HEADING).fVal);
+   \                     ??GPSInfoCallback_6:
+   \   0000029C   0F10A0E3           MOV      R1,#+15
+   \   000002A0   38008DE2           ADD      R0,SP,#+56
+   \   000002A4   ........           BL       GetValue
+   \   000002A8   38009DE5           LDR      R0,[SP, #+56]
+   \   000002AC   ........           BL       __aeabi_f2d
+   \   000002B0   0020A0E1           MOV      R2,R0
+   \   000002B4   0130A0E1           MOV      R3,R1
+   \   000002B8   ............       ADRL     R1,`?<Constant "Heading: %0.0f   ">`
+   \              ....        
+   \   000002C0   04008DE2           ADD      R0,SP,#+4
+   \   000002C4   ........           BL       sprintf
+    150          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 1));
+   \                     ??GPSInfoCallback_7:
+   \   000002C8   5020A0E3           MOV      R2,#+80
+   \   000002CC   0610A0E1           MOV      R1,R6
+   \   000002D0   04008DE2           ADD      R0,SP,#+4
+   \   000002D4   ........           BL       GUI_DispStringAt
+    151          
+    152          			// Draw X-G
+    153          			sprintf(scratch, "Xg: %+0.2f   ", GetValue(X_G_DAMPED).fVal);
+   \   000002D8   0910A0E3           MOV      R1,#+9
+   \   000002DC   38008DE2           ADD      R0,SP,#+56
+   \   000002E0   ........           BL       GetValue
+   \   000002E4   38009DE5           LDR      R0,[SP, #+56]
+   \   000002E8   ........           BL       __aeabi_f2d
+   \   000002EC   0020A0E1           MOV      R2,R0
+   \   000002F0   0130A0E1           MOV      R3,R1
+   \   000002F4   ............       ADRL     R1,`?<Constant "Xg: %+0.2f   ">`
+   \              ....        
+   \   000002FC   04008DE2           ADD      R0,SP,#+4
+   \   00000300   ........           BL       sprintf
+    154          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 2));
+   \   00000304   7820A0E3           MOV      R2,#+120
+   \   00000308   0610A0E1           MOV      R1,R6
+   \   0000030C   04008DE2           ADD      R0,SP,#+4
+   \   00000310   ........           BL       GUI_DispStringAt
+    155          
+    156          			// Draw Y-G
+    157          			sprintf(scratch, "Yg: %+0.2f   ", GetValue(Y_G_DAMPED).fVal);
+   \   00000314   0A10A0E3           MOV      R1,#+10
+   \   00000318   38008DE2           ADD      R0,SP,#+56
+   \   0000031C   ........           BL       GetValue
+   \   00000320   38009DE5           LDR      R0,[SP, #+56]
+   \   00000324   ........           BL       __aeabi_f2d
+   \   00000328   0020A0E1           MOV      R2,R0
+   \   0000032C   0130A0E1           MOV      R3,R1
+   \   00000330   ............       ADRL     R1,`?<Constant "Yg: %+0.2f   ">`
+   \              ....        
+   \   00000338   04008DE2           ADD      R0,SP,#+4
+   \   0000033C   ........           BL       sprintf
+    158          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 3));
+   \   00000340   A020A0E3           MOV      R2,#+160
+   \   00000344   0610A0E1           MOV      R1,R6
+   \   00000348   04008DE2           ADD      R0,SP,#+4
+   \   0000034C   ........           BL       GUI_DispStringAt
+    159          
+    160          			// Draw Z-G
+    161          			// If SU HW Rev < 200 display temp else display Z
+    162          			if (suData.suHwRev < 200)
+   \   00000350   ........           LDR      R0,??DataTable34_6
+   \   00000354   1400D0E5           LDRB     R0,[R0, #+20]
+   \   00000358   C80050E3           CMP      R0,#+200
+   \   0000035C   1000002A           BCS      ??GPSInfoCallback_8
+    163          				sprintf(scratch, "Temp: %0.1f %s   ", GetValue(SU_TEMPERATURE).fVal, sysData.units == METRIC ? "C" : "F");
+   \   00000360   640095E5           LDR      R0,[R5, #+100]
+   \   00000364   4D10A0E3           MOV      R1,#+77
+   \   00000368   010050E3           CMP      R0,#+1
+   \   0000036C   ........           ADREQ    R5,??DataTable32_2  ;; "C"
+   \   00000370   ........           ADRNE    R5,??DataTable32_3  ;; "F"
+   \   00000374   38008DE2           ADD      R0,SP,#+56
+   \   00000378   ........           BL       GetValue
+   \   0000037C   00508DE5           STR      R5,[SP, #+0]
+   \   00000380   38009DE5           LDR      R0,[SP, #+56]
+   \   00000384   ........           BL       __aeabi_f2d
+   \   00000388   0020A0E1           MOV      R2,R0
+   \   0000038C   0130A0E1           MOV      R3,R1
+   \   00000390   ............       ADRL     R1,`?<Constant "Temp: %0.1f %s   ">`
+   \              ....        
+   \   00000398   04008DE2           ADD      R0,SP,#+4
+   \   0000039C   ........           BL       sprintf
+   \   000003A0   0A0000EA           B        ??GPSInfoCallback_9
+    164          			else sprintf(scratch, "Zg: %+0.2f   ", GetValue(Z_G).fVal);
+   \                     ??GPSInfoCallback_8:
+   \   000003A4   0210A0E3           MOV      R1,#+2
+   \   000003A8   38008DE2           ADD      R0,SP,#+56
+   \   000003AC   ........           BL       GetValue
+   \   000003B0   38009DE5           LDR      R0,[SP, #+56]
+   \   000003B4   ........           BL       __aeabi_f2d
+   \   000003B8   0020A0E1           MOV      R2,R0
+   \   000003BC   0130A0E1           MOV      R3,R1
+   \   000003C0   ............       ADRL     R1,`?<Constant "Zg: %+0.2f   ">`
+   \              ....        
+   \   000003C8   04008DE2           ADD      R0,SP,#+4
+   \   000003CC   ........           BL       sprintf
+    165          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 4));
+   \                     ??GPSInfoCallback_9:
+   \   000003D0   C820A0E3           MOV      R2,#+200
+   \   000003D4   0610A0E1           MOV      R1,R6
+   \   000003D8   04008DE2           ADD      R0,SP,#+4
+   \   000003DC   ........           BL       GUI_DispStringAt
+    166          
+    167          			// Draw time of day if we have satellite lock
+    168          			if (HaveSatelliteReception())
+   \   000003E0   ........           BL       HaveSatelliteReception
+   \   000003E4   000050E3           CMP      R0,#+0
+   \   000003E8   0300000A           BEQ      ??GPSInfoCallback_10
+    169          			{
+    170          #ifdef _WINDOWS
+    171          				GetTimeString(LONGDANDT, scratch);
+    172          #else
+    173          				formattime(LONGDANDT, scratch);
+   \   000003EC   04108DE2           ADD      R1,SP,#+4
+   \   000003F0   0100A0E3           MOV      R0,#+1
+   \   000003F4   ........           BL       formattime
+   \   000003F8   040000EA           B        ??GPSInfoCallback_11
+    174          #endif
+    175          			}
+    176          			else strcpy(scratch, "                                       ");
+   \                     ??GPSInfoCallback_10:
+   \   000003FC   2820A0E3           MOV      R2,#+40
+   \   00000400   ............       ADRL     R1,`?<Constant "                     ...">`
+   \              ....        
+   \   00000408   04008DE2           ADD      R0,SP,#+4
+   \   0000040C   ........           BL       __aeabi_memcpy4
+    177          
+    178          			GUI_DispStringHCenterAt(scratch, XSIZE_PHYS/2, TOP_LINE + (LINE_GAP * 5));
+   \                     ??GPSInfoCallback_11:
+   \   00000410   F020A0E3           MOV      R2,#+240
+   \   00000414   F010A0E3           MOV      R1,#+240
+   \   00000418   04008DE2           ADD      R0,SP,#+4
+   \   0000041C   ........           BL       GUI_DispStringHCenterAt
+    179          
+    180          			// Draw navigation arrow
+    181          			GUI_DrawBitmap(&bmthreewayarrow, 0, 229);
+   \   00000420   E520A0E3           MOV      R2,#+229
+   \   00000424   0010A0E3           MOV      R1,#+0
+   \   00000428   ........           LDR      R0,??DataTable34_7
+   \   0000042C   ........           BL       GUI_DrawBitmap
+    182          
+    183          #ifdef	INCLUDE_RACE_HELP
+    184          			// If the help screen is still being displayed then show the appropriate help screen
+    185          			if (raceTimerActive)
+    186          				CheckRaceHelpScreen(GPS_INFO_SCREEN);
+    187          #endif
+    188          
+    189          			CheckWarningPopups();
+   \   00000430   ........           BL       CheckWarningPopups
+    190          			GUI_MEMDEV_CopyToLCD(memGPS);
+   \   00000434   080094E5           LDR      R0,[R4, #+8]
+   \   00000438   ........           BL       GUI_MEMDEV_CopyToLCD
+    191          			GUI_SelectLCD();
+   \   0000043C   ........           BL       GUI_SelectLCD
+    192          		}
+    193          		if (SlideOutVisible())
+   \                     ??GPSInfoCallback_5:
+   \   00000440   ........           BL       SlideOutVisible
+   \   00000444   000050E3           CMP      R0,#+0
+   \   00000448   0600000A           BEQ      ??GPSInfoCallback_3
+    194          			DrawSignalStrength();
+   \   0000044C   ........           BL       DrawSignalStrength
+   \   00000450   040000EA           B        ??GPSInfoCallback_3
+    195          		break;
+    196          
+    197          	case WM_DELETE:
+    198          		GUI_MEMDEV_Delete(memGPS);
+   \                     ??GPSInfoCallback_0:
+   \   00000454   ........           LDR      R0,??DataTable34_8
+   \   00000458   080090E5           LDR      R0,[R0, #+8]
+   \   0000045C   ........           BL       GUI_MEMDEV_Delete
+    199          		break;
+   \   00000460   000000EA           B        ??GPSInfoCallback_3
+    200          
+    201          	default:
+    202          		  WM_DefaultProc(pMsg);
+   \                     ??GPSInfoCallback_2:
+   \   00000464   ........           BL       WM_DefaultProc
+    203          	};
+    204          }
+   \                     ??GPSInfoCallback_3:
+   \   00000468   44D08DE2           ADD      SP,SP,#+68       ;; stack cleaning
+   \   0000046C   F080BDE8           POP      {R4-R7,PC}       ;; return
+    205          
+    206          /*********************************************************************
+    207          *
+    208          *       GPS Info Screen Create
+    209          */
+
+   \                                 In section .text, align 4, keep-with-next
+    210          WM_HWIN DisplayGPSInfo(WM_HWIN hParent)
+    211          {
+   \                     DisplayGPSInfo:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    212          	firsttimethrough = true;
+   \   00000008   ........           LDR      R5,??DataTable34_8
+   \   0000000C   0100A0E3           MOV      R0,#+1
+   \   00000010   0C00C5E5           STRB     R0,[R5, #+12]
+   \   00000014   14D04DE2           SUB      SP,SP,#+20
+    213          
+    214          	// create a memory area to reduce flicker on paint.
+    215          	memGPS = GUI_MEMDEV_Create(0, 0, XSIZE_PHYS, YSIZE_PHYS);
+   \   00000018   443FA0E3           MOV      R3,#+272
+   \   0000001C   782FA0E3           MOV      R2,#+480
+   \   00000020   0010A0E3           MOV      R1,#+0
+   \   00000024   0000A0E3           MOV      R0,#+0
+   \   00000028   ........           BL       GUI_MEMDEV_Create
+   \   0000002C   080085E5           STR      R0,[R5, #+8]
+    216          
+    217          	if ((hGPSInfo = WM_CreateWindowAsChild(0, 0, XSIZE_PHYS, YSIZE_PHYS, hParent, WM_CF_SHOW, GPSInfoCallback, 0)) <= 0)
+   \   00000030   0000A0E3           MOV      R0,#+0
+   \   00000034   0C008DE5           STR      R0,[SP, #+12]
+   \   00000038   ........           LDR      R0,??DataTable34_16
+   \   0000003C   00408DE5           STR      R4,[SP, #+0]
+   \   00000040   08008DE5           STR      R0,[SP, #+8]
+   \   00000044   0200A0E3           MOV      R0,#+2
+   \   00000048   04008DE5           STR      R0,[SP, #+4]
+   \   0000004C   443FA0E3           MOV      R3,#+272
+   \   00000050   782FA0E3           MOV      R2,#+480
+   \   00000054   0010A0E3           MOV      R1,#+0
+   \   00000058   0000A0E3           MOV      R0,#+0
+   \   0000005C   ........           BL       WM_CreateWindowAsChild
+   \   00000060   040085E5           STR      R0,[R5, #+4]
+   \   00000064   010050E3           CMP      R0,#+1
+   \   00000068   000000AA           BGE      ??DisplayGPSInfo_0
+    218          		SystemError();
+   \   0000006C   ........           BL       SystemError
+    219          
+    220          	WM_InvalidateWindow(hGPSInfo);
+   \                     ??DisplayGPSInfo_0:
+   \   00000070   040095E5           LDR      R0,[R5, #+4]
+   \   00000074   ........           BL       WM_InvalidateWindow
+    221          
+    222          	hScreenTimer = WM_CreateTimer(hGPSInfo, 0, GAUGE_SCREEN_REFRESH_TIME, 0);
+   \   00000078   0030A0E3           MOV      R3,#+0
+   \   0000007C   1920A0E3           MOV      R2,#+25
+   \   00000080   0010A0E3           MOV      R1,#+0
+   \   00000084   040095E5           LDR      R0,[R5, #+4]
+   \   00000088   ........           BL       WM_CreateTimer
+   \   0000008C   000085E5           STR      R0,[R5, #+0]
+    223          
+    224          	return hGPSInfo;
+   \   00000090   040095E5           LDR      R0,[R5, #+4]
+   \   00000094   14D08DE2           ADD      SP,SP,#+20
+   \   00000098   3080BDE8           POP      {R4,R5,PC}       ;; return
+    225          }
+    226          
+    227          /*********************************************************************
+    228          *
+    229          *       GPS Info Screen Callback
+    230          */
+
+   \                                 In section .text, align 4, keep-with-next
+    231          void TestInfoCallback(WM_MESSAGE * pMsg)
+    232          {
+   \                     TestInfoCallback:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+    233          	switch(pMsg->MsgId)
+   \   00000004   001090E5           LDR      R1,[R0, #+0]
+   \   00000008   30D04DE2           SUB      SP,SP,#+48
+   \   0000000C   0B1051E2           SUBS     R1,R1,#+11
+   \   00000010   D300000A           BEQ      ??TestInfoCallback_0
+   \   00000014   041051E2           SUBS     R1,R1,#+4
+   \   00000018   0C00000A           BEQ      ??TestInfoCallback_1
+   \   0000001C   411F51E2           SUBS     R1,R1,#+260
+   \   00000020   D300001A           BNE      ??TestInfoCallback_2
+    234          	{
+    235          	case WM_TIMER:
+    236          		if (pMsg->Data.v == hTestScreenTimer)
+   \   00000024   ........           LDR      R4,??DataTable34_15
+   \   00000028   0C0090E5           LDR      R0,[R0, #+12]
+   \   0000002C   002094E5           LDR      R2,[R4, #+0]
+   \   00000030   020050E1           CMP      R0,R2
+   \   00000034   CF00001A           BNE      ??TestInfoCallback_3
+    237          		{
+    238          			WM_RestartTimer(hTestScreenTimer, GAUGE_SCREEN_REFRESH_TIME);
+   \   00000038   1910A0E3           MOV      R1,#+25
+   \   0000003C   0200A0E1           MOV      R0,R2
+   \   00000040   ........           BL       WM_RestartTimer
+    239          			WM_InvalidateWindow(hTestInfo);
+   \   00000044   040094E5           LDR      R0,[R4, #+4]
+   \   00000048   ........           BL       WM_InvalidateWindow
+   \   0000004C   C90000EA           B        ??TestInfoCallback_3
+    240          		}
+    241          		break;
+    242          
+    243          	case WM_PAINT:
+    244          		if (CS_IsVisible(TEST_INFO_SCREEN) || testfirsttimethrough)
+   \                     ??TestInfoCallback_1:
+   \   00000050   0900A0E3           MOV      R0,#+9
+   \   00000054   ........           BL       CS_IsVisible
+   \   00000058   000050E3           CMP      R0,#+0
+   \   0000005C   0300001A           BNE      ??TestInfoCallback_4
+   \   00000060   ........           LDR      R0,??DataTable34_15
+   \   00000064   0C00D0E5           LDRB     R0,[R0, #+12]
+   \   00000068   000050E3           CMP      R0,#+0
+   \   0000006C   C100000A           BEQ      ??TestInfoCallback_3
+    245          		{
+    246          			char scratch[40];
+    247          
+    248          			if (lockupSemaphore)			// If main has not run since our last paint - exit!
+   \                     ??TestInfoCallback_4:
+   \   00000070   ........           LDR      R0,??DataTable34
+   \   00000074   0010D0E5           LDRB     R1,[R0, #+0]
+   \   00000078   000051E3           CMP      R1,#+0
+   \   0000007C   BD00001A           BNE      ??TestInfoCallback_3
+    249          				break;
+    250          			else lockupSemaphore = true;
+   \   00000080   0110A0E3           MOV      R1,#+1
+   \   00000084   0010C0E5           STRB     R1,[R0, #+0]
+    251          			
+    252          			testfirsttimethrough = FALSE;
+   \   00000088   ........           LDR      R4,??DataTable34_15
+   \   0000008C   0000A0E3           MOV      R0,#+0
+   \   00000090   0C00C4E5           STRB     R0,[R4, #+12]
+    253          
+    254          			GUI_MEMDEV_Select(memTest);
+   \   00000094   080094E5           LDR      R0,[R4, #+8]
+   \   00000098   ........           BL       GUI_MEMDEV_Select
+    255          			GUI_Clear();
+   \   0000009C   ........           BL       GUI_Clear
+    256          			GUI_SetColor(GUI_WHITE);
+   \   000000A0   FF04E0E3           MVN      R0,#-16777216
+   \   000000A4   ........           BL       GUI_SetColor
+    257          			GUI_SetFont(&GUI_Font24_ASCII);
+   \   000000A8   ........           LDR      R0,??DataTable34_2
+   \   000000AC   ........           BL       GUI_SetFont
+    258          
+    259          			// Draw screen title
+    260          			GUI_DispStringHCenterAt("Test Information", XSIZE_PHYS/2, 5);
+   \   000000B0   0520A0E3           MOV      R2,#+5
+   \   000000B4   F010A0E3           MOV      R1,#+240
+   \   000000B8   ............       ADRL     R0,`?<Constant "Test Information">`
+   \              ....        
+   \   000000C0   ........           BL       GUI_DispStringHCenterAt
+    261          
+    262          			// Draw Light Level
+    263          #ifdef _WINDOWS
+    264          			strcpy(scratch, "Light Level: N/A");
+    265          #else
+    266          			sprintf(scratch, "Raw Light Level: %d       ", GetADC(ADC_LIGHT_LEVEL));
+   \   000000C4   0400A0E3           MOV      R0,#+4
+   \   000000C8   ........           BL       GetADC
+   \   000000CC   0020A0E1           MOV      R2,R0
+   \   000000D0   ............       ADRL     R1,`?<Constant "Raw Light Level: %d  ...">`
+   \              ....        
+   \   000000D8   08008DE2           ADD      R0,SP,#+8
+   \   000000DC   ........           BL       sprintf
+    267          #endif
+    268          			GUI_DispStringAt(scratch, LEFT_COLUMN, TOP_LINE);
+   \   000000E0   2820A0E3           MOV      R2,#+40
+   \   000000E4   1910A0E3           MOV      R1,#+25
+   \   000000E8   08008DE2           ADD      R0,SP,#+8
+   \   000000EC   ........           BL       GUI_DispStringAt
+    269          
+    270          			// Draw LED Board Temperature
+    271          #ifdef _WINDOWS
+    272          			strcpy(scratch, "LED Temp: N/A");
+    273          #else
+    274          			sprintf(scratch, "LED Temp: %d   ", GetADC(ADC_LED_BOARD_TEMP));
+   \   000000F0   0500A0E3           MOV      R0,#+5
+   \   000000F4   ........           BL       GetADC
+   \   000000F8   0020A0E1           MOV      R2,R0
+   \   000000FC   ............       ADRL     R1,`?<Constant "LED Temp: %d   ">`
+   \              ....        
+   \   00000104   08008DE2           ADD      R0,SP,#+8
+   \   00000108   ........           BL       sprintf
+    275          #endif
+    276          			GUI_DispStringAt(scratch, LEFT_COLUMN, TOP_LINE + (LINE_GAP * 1));
+   \   0000010C   5020A0E3           MOV      R2,#+80
+   \   00000110   1910A0E3           MOV      R1,#+25
+   \   00000114   08008DE2           ADD      R0,SP,#+8
+   \   00000118   ........           BL       GUI_DispStringAt
+    277          
+    278          #ifndef _WINDOWS
+    279          	//		// Draw Side LED
+    280          	//		sprintf(scratch, "Side LED intensity: %d   ", warningLEDPWMSetting);
+    281          			// Draw raw light reading
+    282          			sprintf(scratch, "Normalized Light: %d       ", GetNormalizedLightIntensity());
+   \   0000011C   ........           BL       GetNormalizedLightIntensity
+   \   00000120   0020A0E1           MOV      R2,R0
+   \   00000124   ............       ADRL     R1,`?<Constant "Normalized Light: %d ...">`
+   \              ....        
+   \   0000012C   08008DE2           ADD      R0,SP,#+8
+   \   00000130   ........           BL       sprintf
+    283          			GUI_DispStringAt(scratch, LEFT_COLUMN, TOP_LINE + (LINE_GAP * 2));
+   \   00000134   7820A0E3           MOV      R2,#+120
+   \   00000138   1910A0E3           MOV      R1,#+25
+   \   0000013C   08008DE2           ADD      R0,SP,#+8
+   \   00000140   ........           BL       GUI_DispStringAt
+    284          
+    285          			// Draw Tach LED
+    286          			sprintf(scratch, "Tach LED intensity: %d   ", tachLEDPWMSetting);
+   \   00000144   ........           LDR      R0,??DataTable34_9
+   \   00000148   ............       ADRL     R1,`?<Constant "Tach LED intensity: %...">`
+   \              ....        
+   \   00000150   002090E5           LDR      R2,[R0, #+0]
+   \   00000154   08008DE2           ADD      R0,SP,#+8
+   \   00000158   ........           BL       sprintf
+    287          			GUI_DispStringAt(scratch, LEFT_COLUMN, TOP_LINE + (LINE_GAP * 3));
+   \   0000015C   A020A0E3           MOV      R2,#+160
+   \   00000160   1910A0E3           MOV      R1,#+25
+   \   00000164   08008DE2           ADD      R0,SP,#+8
+   \   00000168   ........           BL       GUI_DispStringAt
+    288          
+    289          			// Draw Backlight
+    290          			sprintf(scratch, "Backlight intensity: %d   ", backlightPWMSetting);
+   \   0000016C   ........           LDR      R0,??DataTable34_10
+   \   00000170   ............       ADRL     R1,`?<Constant "Backlight intensity: ...">`
+   \              ....        
+   \   00000178   002090E5           LDR      R2,[R0, #+0]
+   \   0000017C   08008DE2           ADD      R0,SP,#+8
+   \   00000180   ........           BL       sprintf
+    291          			GUI_DispStringAt(scratch, LEFT_COLUMN, TOP_LINE + (LINE_GAP * 4));
+   \   00000184   C820A0E3           MOV      R2,#+200
+   \   00000188   1910A0E3           MOV      R1,#+25
+   \   0000018C   08008DE2           ADD      R0,SP,#+8
+   \   00000190   ........           BL       GUI_DispStringAt
+    292          
+    293          			// Draw Vehicle Power
+    294          			sprintf(scratch, "Battery voltage: %2.1f   ", GetValue(VEHICLE_12V).fVal);
+   \   00000194   4710A0E3           MOV      R1,#+71
+   \   00000198   0D00A0E1           MOV      R0,SP
+   \   0000019C   ........           BL       GetValue
+   \   000001A0   00009DE5           LDR      R0,[SP, #+0]
+   \   000001A4   ........           BL       __aeabi_f2d
+   \   000001A8   0020A0E1           MOV      R2,R0
+   \   000001AC   0130A0E1           MOV      R3,R1
+   \   000001B0   ............       ADRL     R1,`?<Constant "Battery voltage: %2.1...">`
+   \              ....        
+   \   000001B8   08008DE2           ADD      R0,SP,#+8
+   \   000001BC   ........           BL       sprintf
+    295          			GUI_DispStringAt(scratch, LEFT_COLUMN, TOP_LINE + (LINE_GAP * 5));
+   \   000001C0   F020A0E3           MOV      R2,#+240
+   \   000001C4   1910A0E3           MOV      R1,#+25
+   \   000001C8   08008DE2           ADD      R0,SP,#+8
+   \   000001CC   ........           BL       GUI_DispStringAt
+    296          			
+    297          			
+    298          #if LIGHTTEST			
+    299          			// Draw Light level when adjustments made
+    300          			sprintf(scratch, "Light set at: %d   ", sysData.lightLevelWhenIntensitySet);
+    301          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE);
+    302          
+    303          			// Draw light correction
+    304          			sprintf(scratch, "Light Correction: %d   ", lightCorrection);
+    305          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 1));
+    306          
+    307          			// Draw temp correction
+    308          			sprintf(scratch, "Temp Correction: %d   ", tempCorrection);
+    309          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 2));
+    310          
+    311          			// Draw total correction
+    312          			sprintf(scratch, "Total Correction: %d   ", totalCorrection);
+    313          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 3));
+    314          #else
+    315          			// Show total distance
+    316          			sprintf(scratch, "Distance Mi: %1.1f   ", (float) sysData.totalDistanceEver * (39.0 / 12.0 / 5280.0));
+   \   000001D0   ........           LDR      R5,??DataTable34_4
+   \   000001D4   C00095E5           LDR      R0,[R5, #+192]
+   \   000001D8   ........           BL       __aeabi_f2d
+   \   000001DC   0020A0E1           MOV      R2,R0
+   \   000001E0   0130A0E1           MOV      R3,R1
+   \   000001E4   ........           ADR      R0,??DataTable34_11
+   \   000001E8   030090E8           LDM      R0,{R0,R1}
+   \   000001EC   ........           BL       __aeabi_dmul
+   \   000001F0   0020A0E1           MOV      R2,R0
+   \   000001F4   0130A0E1           MOV      R3,R1
+   \   000001F8   ............       ADRL     R1,`?<Constant "Distance Mi: %1.1f   ">`
+   \              ....        
+   \   00000200   08008DE2           ADD      R0,SP,#+8
+   \   00000204   ........           BL       sprintf
+    317          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE);
+   \   00000208   1360A0E3           MOV      R6,#+19
+   \   0000020C   406F86E3           ORR      R6,R6,#0x100
+   \   00000210   2820A0E3           MOV      R2,#+40
+   \   00000214   0610A0E1           MOV      R1,R6
+   \   00000218   08008DE2           ADD      R0,SP,#+8
+   \   0000021C   ........           BL       GUI_DispStringAt
+    318          
+    319          			// Draw total operating time
+    320          			sprintf(scratch, "Operating Hrs: %1.1f   ", sysData.totalTimeEver / 3600.0);
+   \   00000220   C40095E5           LDR      R0,[R5, #+196]
+   \   00000224   ........           BL       __aeabi_f2d
+   \   00000228   0020A0E3           MOV      R2,#+0
+   \   0000022C   ........           LDR      R3,??DataTable34_12  ;; 0x40ac2000
+   \   00000230   ........           BL       __aeabi_ddiv
+   \   00000234   0020A0E1           MOV      R2,R0
+   \   00000238   0130A0E1           MOV      R3,R1
+   \   0000023C   ............       ADRL     R1,`?<Constant "Operating Hrs: %1.1f   ">`
+   \              ....        
+   \   00000244   08008DE2           ADD      R0,SP,#+8
+   \   00000248   ........           BL       sprintf
+    321          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 1));
+   \   0000024C   5020A0E3           MOV      R2,#+80
+   \   00000250   0610A0E1           MOV      R1,R6
+   \   00000254   08008DE2           ADD      R0,SP,#+8
+   \   00000258   ........           BL       GUI_DispStringAt
+    322          
+    323          			// Draw Highest RPM
+    324          			sprintf(scratch, "Highest Rev: %d   ", sysData.maxRpmEver);
+   \   0000025C   BC2095E5           LDR      R2,[R5, #+188]
+   \   00000260   ............       ADRL     R1,`?<Constant "Highest Rev: %d   ">`
+   \              ....        
+   \   00000268   08008DE2           ADD      R0,SP,#+8
+   \   0000026C   ........           BL       sprintf
+    325          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 2));
+   \   00000270   7820A0E3           MOV      R2,#+120
+   \   00000274   0610A0E1           MOV      R1,R6
+   \   00000278   08008DE2           ADD      R0,SP,#+8
+   \   0000027C   ........           BL       GUI_DispStringAt
+    326          #endif
+    327          			// Draw SU, DU info
+    328          			sprintf(scratch, "DF: %d, %d   ", unsavedSysData.dataflash[0].bytesPerPage, unsavedSysData.dataflash[1].bytesPerPage);
+   \   00000280   ........           LDR      R5,??DataTable34_13
+   \   00000284   ............       ADRL     R1,`?<Constant "DF: %d, %d   ">`
+   \              ....        
+   \   0000028C   B638D5E1           LDRH     R3,[R5, #+134]
+   \   00000290   B228D5E1           LDRH     R2,[R5, #+130]
+   \   00000294   08008DE2           ADD      R0,SP,#+8
+   \   00000298   ........           BL       sprintf
+    329          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 4));
+   \   0000029C   C820A0E3           MOV      R2,#+200
+   \   000002A0   0610A0E1           MOV      R1,R6
+   \   000002A4   08008DE2           ADD      R0,SP,#+8
+   \   000002A8   ........           BL       GUI_DispStringAt
+    330          			
+    331          			// Draw SU, DU info
+    332          			sprintf(scratch, "SU %d.%02d, DU %d.%02d  ", suData.suSwRev / 100, suData.suSwRev % 100, unsavedSysData.duSwRev / 100,  unsavedSysData.duSwRev % 100);
+   \   000002AC   B030D5E1           LDRH     R3,[R5, #+0]
+   \   000002B0   ........           LDR      LR,??DataTable34_14  ;; 0x51eb851f
+   \   000002B4   6420A0E3           MOV      R2,#+100
+   \   000002B8   03C0A0E1           MOV      R12,R3
+   \   000002BC   9C5ECEE0           SMULL    R5,LR,R12,LR
+   \   000002C0   ........           LDR      R0,??DataTable34_6
+   \   000002C4   CEE2B0E1           ASRS     LR,LR,#+5
+   \   000002C8   01E08E42           ADDMI    LR,LR,#+1
+   \   000002CC   920E0EE0           MUL      LR,R2,LR
+   \   000002D0   B001D0E1           LDRH     R0,[R0, #+16]
+   \   000002D4   0EC04CE0           SUB      R12,R12,LR
+   \   000002D8   04C08DE5           STR      R12,[SP, #+4]
+   \   000002DC   D7C0A0E3           MOV      R12,#+215
+   \   000002E0   A3CC8CE3           ORR      R12,R12,#0xA300
+   \   000002E4   9C0303E0           MUL      R3,R12,R3
+   \   000002E8   0010A0E1           MOV      R1,R0
+   \   000002EC   03C08CE0           ADD      R12,R12,R3
+   \   000002F0   2C3BA0E1           LSR      R3,R12,#+22
+   \   000002F4   00308DE5           STR      R3,[SP, #+0]
+   \   000002F8   ........           LDR      R3,??DataTable34_14  ;; 0x51eb851f
+   \   000002FC   91C3C3E0           SMULL    R12,R3,R1,R3
+   \   00000300   C332B0E1           ASRS     R3,R3,#+5
+   \   00000304   01308342           ADDMI    R3,R3,#+1
+   \   00000308   920303E0           MUL      R3,R2,R3
+   \   0000030C   033041E0           SUB      R3,R1,R3
+   \   00000310   D710A0E3           MOV      R1,#+215
+   \   00000314   A31C81E3           ORR      R1,R1,#0xA300
+   \   00000318   910000E0           MUL      R0,R1,R0
+   \   0000031C   001081E0           ADD      R1,R1,R0
+   \   00000320   212BA0E1           LSR      R2,R1,#+22
+   \   00000324   ........           ADR      R1,`?<Constant "SU %d.%02d, DU %d.%02d  ">`
+   \   00000328   08008DE2           ADD      R0,SP,#+8
+   \   0000032C   ........           BL       sprintf
+    333          			GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 5));
+   \   00000330   F020A0E3           MOV      R2,#+240
+   \   00000334   0610A0E1           MOV      R1,R6
+   \   00000338   08008DE2           ADD      R0,SP,#+8
+   \   0000033C   ........           BL       GUI_DispStringAt
+    334          #endif
+    335          
+    336          			//// Draw X-G
+    337          			//// If SU HW Rev < 200 display temp else display Z
+    338          			//if (suData.su_hw_rev < 200)
+    339          			//	sprintf(scratch, "Temp: %.1f %s   ", GetValue(SU_TEMPERATURE).fVal, sysData.units == METRIC ? "C" : "F");
+    340          			//else sprintf(scratch, "Z - G: %.2f   ", GetValue(Z_G).fVal);
+    341          			//GUI_DispStringAt(scratch, RIGHT_COLUMN, TOP_LINE + (LINE_GAP * 4));
+    342          
+    343          			// Draw navigation arrow
+    344          			GUI_DrawBitmap(&bmthreewayarrow, 0, 229);
+   \   00000340   E520A0E3           MOV      R2,#+229
+   \   00000344   0010A0E3           MOV      R1,#+0
+   \   00000348   ........           LDR      R0,??DataTable34_7
+   \   0000034C   ........           BL       GUI_DrawBitmap
+    345          			CheckWarningPopups();
+   \   00000350   ........           BL       CheckWarningPopups
+    346          			GUI_MEMDEV_CopyToLCD(memTest);
+   \   00000354   080094E5           LDR      R0,[R4, #+8]
+   \   00000358   ........           BL       GUI_MEMDEV_CopyToLCD
+    347          			GUI_SelectLCD();
+   \   0000035C   ........           BL       GUI_SelectLCD
+   \   00000360   040000EA           B        ??TestInfoCallback_3
+    348          		}
+    349          		break;
+    350          
+    351          	case WM_DELETE:
+    352          		GUI_MEMDEV_Delete(memTest);
+   \                     ??TestInfoCallback_0:
+   \   00000364   ........           LDR      R0,??DataTable34_15
+   \   00000368   080090E5           LDR      R0,[R0, #+8]
+   \   0000036C   ........           BL       GUI_MEMDEV_Delete
+    353          		break;
+   \   00000370   000000EA           B        ??TestInfoCallback_3
+    354          
+    355          	default:
+    356          		  WM_DefaultProc(pMsg);
+   \                     ??TestInfoCallback_2:
+   \   00000374   ........           BL       WM_DefaultProc
+    357          	};
+    358          }
+   \                     ??TestInfoCallback_3:
+   \   00000378   30D08DE2           ADD      SP,SP,#+48       ;; stack cleaning
+   \   0000037C   7080BDE8           POP      {R4-R6,PC}       ;; return
+    359          
+    360          /*********************************************************************
+    361          *
+    362          *       GPS Info Screen Create
+    363          */
+
+   \                                 In section .text, align 4, keep-with-next
+    364          WM_HWIN DisplayTestInfo(WM_HWIN hParent)
+    365          {
+   \                     DisplayTestInfo:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    366          	testfirsttimethrough = true;
+   \   00000008   ........           LDR      R5,??DataTable34_15
+   \   0000000C   0100A0E3           MOV      R0,#+1
+   \   00000010   0C00C5E5           STRB     R0,[R5, #+12]
+   \   00000014   14D04DE2           SUB      SP,SP,#+20
+    367          
+    368          	// create a memory area to reduce flicker on paint.
+    369          	memTest = GUI_MEMDEV_Create(0, 0, XSIZE_PHYS, YSIZE_PHYS);
+   \   00000018   443FA0E3           MOV      R3,#+272
+   \   0000001C   782FA0E3           MOV      R2,#+480
+   \   00000020   0010A0E3           MOV      R1,#+0
+   \   00000024   0000A0E3           MOV      R0,#+0
+   \   00000028   ........           BL       GUI_MEMDEV_Create
+   \   0000002C   080085E5           STR      R0,[R5, #+8]
+    370          
+    371          	if ((hTestInfo = WM_CreateWindowAsChild(0, 0, XSIZE_PHYS, YSIZE_PHYS, hParent, WM_CF_SHOW, TestInfoCallback, 0)) <= 0)
+   \   00000030   0000A0E3           MOV      R0,#+0
+   \   00000034   0C008DE5           STR      R0,[SP, #+12]
+   \   00000038   ........           LDR      R0,??DataTable34_17
+   \   0000003C   00408DE5           STR      R4,[SP, #+0]
+   \   00000040   08008DE5           STR      R0,[SP, #+8]
+   \   00000044   0200A0E3           MOV      R0,#+2
+   \   00000048   04008DE5           STR      R0,[SP, #+4]
+   \   0000004C   443FA0E3           MOV      R3,#+272
+   \   00000050   782FA0E3           MOV      R2,#+480
+   \   00000054   0010A0E3           MOV      R1,#+0
+   \   00000058   0000A0E3           MOV      R0,#+0
+   \   0000005C   ........           BL       WM_CreateWindowAsChild
+   \   00000060   040085E5           STR      R0,[R5, #+4]
+   \   00000064   010050E3           CMP      R0,#+1
+   \   00000068   000000AA           BGE      ??DisplayTestInfo_0
+    372          		SystemError();
+   \   0000006C   ........           BL       SystemError
+    373          
+    374          	WM_InvalidateWindow(hTestInfo);
+   \                     ??DisplayTestInfo_0:
+   \   00000070   040095E5           LDR      R0,[R5, #+4]
+   \   00000074   ........           BL       WM_InvalidateWindow
+    375          
+    376          	hTestScreenTimer = WM_CreateTimer(hTestInfo, 0, GAUGE_SCREEN_REFRESH_TIME, 0);
+   \   00000078   0030A0E3           MOV      R3,#+0
+   \   0000007C   1920A0E3           MOV      R2,#+25
+   \   00000080   0010A0E3           MOV      R1,#+0
+   \   00000084   040095E5           LDR      R0,[R5, #+4]
+   \   00000088   ........           BL       WM_CreateTimer
+   \   0000008C   000085E5           STR      R0,[R5, #+0]
+    377          
+    378          	return hTestInfo;
+   \   00000090   040095E5           LDR      R0,[R5, #+4]
+   \   00000094   14D08DE2           ADD      SP,SP,#+20
+   \   00000098   3080BDE8           POP      {R4,R5,PC}       ;; return
+    379          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable32:
+   \   00000000   6B706800           DC8      "kph"
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable32_1:
+   \   00000000   6D706800           DC8      "mph"
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable32_2:
+   \   00000000   43000000           DC8      "C",0x0,0x0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable32_3:
+   \   00000000   46000000           DC8      "F",0x0,0x0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34:
+   \   00000000   ........           DC32     lockupSemaphore
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34_1:
+   \   00000000   ........           DC32     bmDarkAsphalt
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34_2:
+   \   00000000   ........           DC32     GUI_Font24_ASCII
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34_3:
+   \   00000000   ........           DC32     bmGPSInfoText
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34_4:
+   \   00000000   ........           DC32     sysData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34_5:
+   \   00000000   CDCCCC3D           DC32     0x3dcccccd
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34_6:
+   \   00000000   ........           DC32     suData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34_7:
+   \   00000000   ........           DC32     bmthreewayarrow
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34_8:
+   \   00000000   ........           DC32     hScreenTimer
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34_9:
+   \   00000000   ........           DC32     tachLEDPWMSetting
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34_10:
+   \   00000000   ........           DC32     backlightPWMSetting
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34_11:
+   \   00000000   2B14B742712B       DC32     0x42B7142B,0x3F442B71
+   \              443F        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34_12:
+   \   00000000   0020AC40           DC32     0x40ac2000
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34_13:
+   \   00000000   ........           DC32     unsavedSysData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34_14:
+   \   00000000   1F85EB51           DC32     0x51eb851f
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34_15:
+   \   00000000   ........           DC32     hTestScreenTimer
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34_16:
+   \   00000000   ........           DC32     GPSInfoCallback
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable34_17:
+   \   00000000   ........           DC32     TestInfoCallback
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "GPS Lat: %0.6f   ">`:
+   \   00000000                      ; Initializer data, 20 bytes
+   \   00000000   475053204C61       DC8 71, 80, 83, 32, 76, 97, 116, 58, 32, 37
+   \              743A2025    
+   \   0000000A   302E36662020       DC8 48, 46, 54, 102, 32, 32, 32, 0, 0, 0
+   \              20000000    
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "GPS Lon: %0.6f   ">`:
+   \   00000000                      ; Initializer data, 20 bytes
+   \   00000000   475053204C6F       DC8 71, 80, 83, 32, 76, 111, 110, 58, 32, 37
+   \              6E3A2025    
+   \   0000000A   302E36662020       DC8 48, 46, 54, 102, 32, 32, 32, 0, 0, 0
+   \              20000000    
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Altitude: %0.0f %s   ">`:
+   \   00000000                      ; Initializer data, 24 bytes
+   \   00000000   416C74697475       DC8 65, 108, 116, 105, 116, 117, 100, 101, 58, 32
+   \              64653A20    
+   \   0000000A   25302E306620       DC8 37, 48, 46, 48, 102, 32, 37, 115, 32, 32
+   \              25732020    
+   \   00000014   20000000           DC8 32, 0, 0, 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "kph">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   6B706800           DC8 107, 112, 104, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "meters">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   6D6574657273       DC8 109, 101, 116, 101, 114, 115, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "feet">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   666565740000       DC8 102, 101, 101, 116, 0, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "GPS DOP: %0.2f   ">`:
+   \   00000000                      ; Initializer data, 20 bytes
+   \   00000000   47505320444F       DC8 71, 80, 83, 32, 68, 79, 80, 58, 32, 37
+   \              503A2025    
+   \   0000000A   302E32662020       DC8 48, 46, 50, 102, 32, 32, 32, 0, 0, 0
+   \              20000000    
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Num Sats: %d   ">`:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   4E756D205361       DC8 78, 117, 109, 32, 83, 97, 116, 115, 58, 32
+   \              74733A20    
+   \   0000000A   256420202000       DC8 37, 100, 32, 32, 32, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Velocity: %0.1f %s   ">`:
+   \   00000000                      ; Initializer data, 24 bytes
+   \   00000000   56656C6F6369       DC8 86, 101, 108, 111, 99, 105, 116, 121, 58, 32
+   \              74793A20    
+   \   0000000A   25302E316620       DC8 37, 48, 46, 49, 102, 32, 37, 115, 32, 32
+   \              25732020    
+   \   00000014   20000000           DC8 32, 0, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Heading: ---   ">`:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   48656164696E       DC8 72, 101, 97, 100, 105, 110, 103, 58, 32, 45
+   \              673A202D    
+   \   0000000A   2D2D20202000       DC8 45, 45, 32, 32, 32, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Heading: %0.0f   ">`:
+   \   00000000                      ; Initializer data, 20 bytes
+   \   00000000   48656164696E       DC8 72, 101, 97, 100, 105, 110, 103, 58, 32, 37
+   \              673A2025    
+   \   0000000A   302E30662020       DC8 48, 46, 48, 102, 32, 32, 32, 0, 0, 0
+   \              20000000    
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Xg: %+0.2f   ">`:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   58673A20252B       DC8 88, 103, 58, 32, 37, 43, 48, 46, 50, 102
+   \              302E3266    
+   \   0000000A   202020000000       DC8 32, 32, 32, 0, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Yg: %+0.2f   ">`:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   59673A20252B       DC8 89, 103, 58, 32, 37, 43, 48, 46, 50, 102
+   \              302E3266    
+   \   0000000A   202020000000       DC8 32, 32, 32, 0, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Temp: %0.1f %s   ">`:
+   \   00000000                      ; Initializer data, 20 bytes
+   \   00000000   54656D703A20       DC8 84, 101, 109, 112, 58, 32, 37, 48, 46, 49
+   \              25302E31    
+   \   0000000A   662025732020       DC8 102, 32, 37, 115, 32, 32, 32, 0, 0, 0
+   \              20000000    
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Zg: %+0.2f   ">`:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   5A673A20252B       DC8 90, 103, 58, 32, 37, 43, 48, 46, 50, 102
+   \              302E3266    
+   \   0000000A   202020000000       DC8 32, 32, 32, 0, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "                     ...">`:
+   \   00000000                      ; Initializer data, 40 bytes
+   \   00000000   202020202020       DC8 32, 32, 32, 32, 32, 32, 32, 32, 32, 32
+   \              20202020    
+   \   0000000A   202020202020       DC8 32, 32, 32, 32, 32, 32, 32, 32, 32, 32
+   \              20202020    
+   \   00000014   202020202020       DC8 32, 32, 32, 32, 32, 32, 32, 32, 32, 32
+   \              20202020    
+   \   0000001E   202020202020       DC8 32, 32, 32, 32, 32, 32, 32, 32, 32, 0
+   \              20202000    
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Test Information">`:
+   \   00000000                      ; Initializer data, 20 bytes
+   \   00000000   546573742049       DC8 84, 101, 115, 116, 32, 73, 110, 102, 111, 114
+   \              6E666F72    
+   \   0000000A   6D6174696F6E       DC8 109, 97, 116, 105, 111, 110, 0, 0, 0, 0
+   \              00000000    
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Raw Light Level: %d  ...">`:
+   \   00000000                      ; Initializer data, 28 bytes
+   \   00000000   526177204C69       DC8 82, 97, 119, 32, 76, 105, 103, 104, 116, 32
+   \              67687420    
+   \   0000000A   4C6576656C3A       DC8 76, 101, 118, 101, 108, 58, 32, 37, 100, 32
+   \              20256420    
+   \   00000014   202020202020       DC8 32, 32, 32, 32, 32, 32, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "LED Temp: %d   ">`:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   4C4544205465       DC8 76, 69, 68, 32, 84, 101, 109, 112, 58, 32
+   \              6D703A20    
+   \   0000000A   256420202000       DC8 37, 100, 32, 32, 32, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Normalized Light: %d ...">`:
+   \   00000000                      ; Initializer data, 28 bytes
+   \   00000000   4E6F726D616C       DC8 78, 111, 114, 109, 97, 108, 105, 122, 101, 100
+   \              697A6564    
+   \   0000000A   204C69676874       DC8 32, 76, 105, 103, 104, 116, 58, 32, 37, 100
+   \              3A202564    
+   \   00000014   202020202020       DC8 32, 32, 32, 32, 32, 32, 32, 0
+   \              2000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Tach LED intensity: %...">`:
+   \   00000000                      ; Initializer data, 28 bytes
+   \   00000000   54616368204C       DC8 84, 97, 99, 104, 32, 76, 69, 68, 32, 105
+   \              45442069    
+   \   0000000A   6E74656E7369       DC8 110, 116, 101, 110, 115, 105, 116, 121, 58, 32
+   \              74793A20    
+   \   00000014   256420202000       DC8 37, 100, 32, 32, 32, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Backlight intensity: ...">`:
+   \   00000000                      ; Initializer data, 28 bytes
+   \   00000000   4261636B6C69       DC8 66, 97, 99, 107, 108, 105, 103, 104, 116, 32
+   \              67687420    
+   \   0000000A   696E74656E73       DC8 105, 110, 116, 101, 110, 115, 105, 116, 121, 58
+   \              6974793A    
+   \   00000014   202564202020       DC8 32, 37, 100, 32, 32, 32, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Battery voltage: %2.1...">`:
+   \   00000000                      ; Initializer data, 28 bytes
+   \   00000000   426174746572       DC8 66, 97, 116, 116, 101, 114, 121, 32, 118, 111
+   \              7920766F    
+   \   0000000A   6C746167653A       DC8 108, 116, 97, 103, 101, 58, 32, 37, 50, 46
+   \              2025322E    
+   \   00000014   316620202000       DC8 49, 102, 32, 32, 32, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Distance Mi: %1.1f   ">`:
+   \   00000000                      ; Initializer data, 24 bytes
+   \   00000000   44697374616E       DC8 68, 105, 115, 116, 97, 110, 99, 101, 32, 77
+   \              6365204D    
+   \   0000000A   693A2025312E       DC8 105, 58, 32, 37, 49, 46, 49, 102, 32, 32
+   \              31662020    
+   \   00000014   20000000           DC8 32, 0, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Operating Hrs: %1.1f   ">`:
+   \   00000000                      ; Initializer data, 24 bytes
+   \   00000000   4F7065726174       DC8 79, 112, 101, 114, 97, 116, 105, 110, 103, 32
+   \              696E6720    
+   \   0000000A   4872733A2025       DC8 72, 114, 115, 58, 32, 37, 49, 46, 49, 102
+   \              312E3166    
+   \   00000014   20202000           DC8 32, 32, 32, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Highest Rev: %d   ">`:
+   \   00000000                      ; Initializer data, 20 bytes
+   \   00000000   486967686573       DC8 72, 105, 103, 104, 101, 115, 116, 32, 82, 101
+   \              74205265    
+   \   0000000A   763A20256420       DC8 118, 58, 32, 37, 100, 32, 32, 32, 0, 0
+   \              20200000    
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "DF: %d, %d   ">`:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   44463A202564       DC8 68, 70, 58, 32, 37, 100, 44, 32, 37, 100
+   \              2C202564    
+   \   0000000A   202020000000       DC8 32, 32, 32, 0, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "SU %d.%02d, DU %d.%02d  ">`:
+   \   00000000                      ; Initializer data, 28 bytes
+   \   00000000   53552025642E       DC8 83, 85, 32, 37, 100, 46, 37, 48, 50, 100
+   \              25303264    
+   \   0000000A   2C2044552025       DC8 44, 32, 68, 85, 32, 37, 100, 46, 37, 48
+   \              642E2530    
+   \   00000014   326420200000       DC8 50, 100, 32, 32, 0, 0, 0, 0
+   \              0000        
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "mph">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   6D706800           DC8 109, 112, 104, 0
+
+   \                                 In section .rodata, align 2, keep-with-next
+   \                     `?<Constant "C">`:
+   \   00000000                      ; Initializer data, 2 bytes
+   \   00000000   4300               DC8 67, 0
+
+   \                                 In section .rodata, align 2, keep-with-next
+   \                     `?<Constant "F">`:
+   \   00000000                      ; Initializer data, 2 bytes
+   \   00000000   4600               DC8 70, 0
+    380          
+    381          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function         .cstack
+     --------         -------
+     DisplayGPSInfo       32
+     DisplayTestInfo      32
+     GPSInfoCallback      88
+     TestInfoCallback     64
+
+
+   Section sizes:
+
+     Function/Label                         Bytes
+     --------------                         -----
+     hScreenTimer                             13
+     hGPSInfo
+     memGPS
+     firsttimethrough
+     hTestScreenTimer                         13
+     hTestInfo
+     memTest
+     testfirsttimethrough
+     GPSInfoCallback                        1136
+     DisplayGPSInfo                          156
+     TestInfoCallback                        896
+     DisplayTestInfo                         156
+     ??DataTable32                             4
+     ??DataTable32_1                           4
+     ??DataTable32_2                           4
+     ??DataTable32_3                           4
+     ??DataTable34                             4
+     ??DataTable34_1                           4
+     ??DataTable34_2                           4
+     ??DataTable34_3                           4
+     ??DataTable34_4                           4
+     ??DataTable34_5                           4
+     ??DataTable34_6                           4
+     ??DataTable34_7                           4
+     ??DataTable34_8                           4
+     ??DataTable34_9                           4
+     ??DataTable34_10                          4
+     ??DataTable34_11                          8
+     ??DataTable34_12                          4
+     ??DataTable34_13                          4
+     ??DataTable34_14                          4
+     ??DataTable34_15                          4
+     ??DataTable34_16                          4
+     ??DataTable34_17                          4
+     ?<Constant "GPS Lat: %0.6f   ">          20
+     ?<Constant "GPS Lon: %0.6f   ">          20
+     ?<Constant "Altitude: %0.0f %s   ">      24
+     ?<Constant "kph">                         4
+     ?<Constant "meters">                      8
+     ?<Constant "feet">                        8
+     ?<Constant "GPS DOP: %0.2f   ">          20
+     ?<Constant "Num Sats: %d   ">            16
+     ?<Constant "Velocity: %0.1f %s   ">      24
+     ?<Constant "Heading: ---   ">            16
+     ?<Constant "Heading: %0.0f   ">          20
+     ?<Constant "Xg: %+0.2f   ">              16
+     ?<Constant "Yg: %+0.2f   ">              16
+     ?<Constant "Temp: %0.1f %s   ">          20
+     ?<Constant "Zg: %+0.2f   ">              16
+     ?<Constant "                     ...">   40
+     ?<Constant "Test Information">           20
+     ?<Constant "Raw Light Level: %d  ...">   28
+     ?<Constant "LED Temp: %d   ">            16
+     ?<Constant "Normalized Light: %d ...">   28
+     ?<Constant "Tach LED intensity: %...">   28
+     ?<Constant "Backlight intensity: ...">   28
+     ?<Constant "Battery voltage: %2.1...">   28
+     ?<Constant "Distance Mi: %1.1f   ">      24
+     ?<Constant "Operating Hrs: %1.1f   ">    24
+     ?<Constant "Highest Rev: %d   ">         20
+     ?<Constant "DF: %d, %d   ">              16
+     ?<Constant "SU %d.%02d, DU %d.%02d  ">   28
+     ?<Constant "mph">                         4
+     ?<Constant "C">                           2
+     ?<Constant "F">                           2
+
+ 
+    26 bytes in section .bss
+    12 bytes in section .rodata
+ 3 008 bytes in section .text
+ 
+ 3 008 bytes of CODE  memory
+    12 bytes of CONST memory
+    26 bytes of DATA  memory
+
+Errors: none
+Warnings: none

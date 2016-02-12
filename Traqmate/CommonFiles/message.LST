@@ -1,0 +1,457 @@
+C51 COMPILER V8.02   MESSAGE                                                               04/22/2007 00:08:13 PAGE 1   
+
+
+C51 COMPILER V8.02, COMPILATION OF MODULE MESSAGE
+OBJECT MODULE PLACED IN message.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE message.c DB DF(SENSOR) DF(EXTCLK6) DF(NODEBUG) INCDIR(C:\Keil\C51\INC;C:\K
+                    -eil\Traqmate\132micro\CommonFiles;C:\Keil\Traqmate\132micro\SU) OT(8,SIZE) NOCO
+
+line level    source
+
+   1          // Part of traqmate.c
+   2          // 3/10/2004
+   3          // Author: BLBoyer
+   4          // Modified for traqmate: GAStephens, 3/24/2004
+   5          // added opcode return to ParseMessage 7/29/04
+   6          // added sw download: JPaulos, GAStephens 4/28/05
+   7          //
+   8          // This file contains the routines to format and send coded messages
+   9          // between the Traqmate and Traqview software.
+  10          //
+  11          
+  12          #ifdef SENSOR
+  13          #include <sensor.h>
+  14          #endif
+  15          #ifdef DISPLAY
+  18          
+  19          void Calibrate( void );
+  20          void InputTest( void );
+  21          void OutputTest( void );
+  22          void DataflashTest( void );
+  23          
+  24          #define SendACK_Data(DEST, LEN) SendMessage(msgrouting[0], (u08) DEST, (u08) ACK,(LEN))
+  25          #define SendACK(DEST) SendACK_Data(DEST, 0)
+  26          // #define Verify_CRC(DAT, COUNT) (((((u16)*(DAT))<<8) + *(DAT+1)) == crc16((DAT), (COUNT)))
+  27          #define MSG_SEG (pagesize + MSG_WRAPPER)
+  28          
+  29          // The following function gets passed all the input data
+  30          // necessary to build a complete message. For efficiency it does not
+  31          // get passed the data buffer itself.
+  32          // In addition to being passed the data, the function will also
+  33          // call supporting functions to calculate checksums for the header
+  34          // and if appropriate, crc's for the data portion of the message
+  35          
+  36          s16 SendMessage(        u08 source,             // unit id of source
+  37                                                  u08 dest,               // unit id of destination
+  38                                                  u08 opcode,             // message opcode
+  39                                                  u16 bytes)      {       // number of bytes to transmit
+  40   1              u08 chk = 0xFF;                                 // used to start the header checksum calculation
+  41   1              u16 i = 0;                                              // general index
+  42   1              u16 crc = 0;                                    // used to hold the calculated CRC
+  43   1              u08 port = msgrouting[dest];
+  44   1      
+  45   1              // grab the unit
+  46   1              CTS[dest-1] = CTS_COUNTDOWN;
+  47   1      
+  48   1              // record this message as outstanding if from this device
+  49   1              if (source == msgrouting[0] && opcode != ACK && opcode != NAK)
+  50   1                      outstanding_msg[dest-1] = opcode;
+  51   1      
+  52   1              com[port].txbuff[START] = SOH ;  // start of header
+  53   1              com[port].txbuff[SOURCE] = source; // source of the message
+  54   1              com[port].txbuff[DESTINATION] = dest; // destination of the message (same as above)
+  55   1      
+  56   1              bytes += 2;                                     // add two bytes to the total for the CRC
+C51 COMPILER V8.02   MESSAGE                                                               04/22/2007 00:08:13 PAGE 2   
+
+  57   1      
+  58   1              com[port].txbuff[UPPER_BYTE_COUNT] = (bytes & 0xff00)>>8 ;  // format byte count to
+  59   1              com[port].txbuff[LOWER_BYTE_COUNT] = bytes & 0xff;          // two byte field
+  60   1      
+  61   1              com[port].txbuff[OPCODE]=opcode ;       // store the message op code
+  62   1              
+  63   1              for (i=0; i<CHECKSUM;i++)       // calculate the message header checksum
+  64   1                      chk ^= com[port].txbuff[i] ;            // over all bytes from SOH through op code
+  65   1              
+  66   1              com[port].txbuff[CHECKSUM] = chk ;      // store the checksum in final header byte
+  67   1      
+  68   1              bytes -= 2;                                     // remove crc from total
+  69   1      
+  70   1              crc = crc16(&(com[port].txbuff[DATA_START]),bytes);     // calculate the crc
+  71   1      
+  72   1              com[port].txbuff[++bytes+CHECKSUM] = (crc & 0xff00)>>8 ;                // store the high crc byte
+  73   1              com[port].txbuff[++bytes+CHECKSUM] = (crc & 0xff) ;                     // store the low crc byte
+  74   1      
+  75   1              XmitUART(&(com[port]), DATA_START+bytes);                                               // send it
+  76   1              return(DATA_START+bytes) ;  // return total number of bytes processed in message
+  77   1      
+  78   1      } // SendMessage
+  79          
+  80          // the following routine will parse a message based on the op code
+  81          // it is up to the opcode to determine any additional processing, such as
+  82          // CRC calculations, or the meaning of the data
+  83          s16 Parse_Message(u08 port, u08 *msgptr) 
+  84          {
+  85   1              xdata int retval = 0 ;
+  86   1              xdata u16 msgdatalen;
+  87   1      
+  88   1              msgdatalen = (msgptr[UPPER_BYTE_COUNT] << 8) + msgptr[LOWER_BYTE_COUNT] - 2;
+  89   1      
+  90   1              retval = Verify_CRC(msgptr+DATA_START, msgdatalen);
+  91   1      
+  92   1              if (retval) {           // bad data
+  93   2      
+  94   2                      if (NAK != msgptr[OPCODE] && ACK != msgptr[OPCODE])     { // don't NAK an ACK or NAK
+  95   3                              // grab the port
+  96   3                              CTS[msgptr[SOURCE]-1] = CTS_COUNTDOWN;
+  97   3      
+  98   3                              retval = SendNAK(msgptr[SOURCE], (u08) BAD_CRC);                // no data is returned and no crc
+  99   3                      } // if
+ 100   2      #if defined DISPLAY && defined DEBUG
+ 103   2              } // if
+ 104   1              else {          // message is good so parse it
+ 105   2                      int i;
+ 106   2                      u08 *tmpfrom;
+ 107   2                      u08 *tmpto;
+ 108   2      
+ 109   2                      // if message not for me, then route it
+ 110   2                      if (msgptr[DESTINATION] != msgrouting[0] && msgptr[DESTINATION] != ANY_UNIT) {
+ 111   3                              // copy message into appropriate outbound buffer
+ 112   3      
+ 113   3                      // copy into output buffer
+ 114   3                      tmpto = com[msgrouting[msgptr[DESTINATION]]].txbuff+DATA_START;
+ 115   3                      tmpfrom = msgptr+DATA_START;
+ 116   3                      for (i=0; i<msgdatalen; i++)
+ 117   3                              *tmpto++ = *tmpfrom++;
+ 118   3      
+ 119   3                              SendMessage(msgptr[SOURCE], msgptr[DESTINATION], msgptr[OPCODE], msgdatalen);
+ 120   3                      } // if
+C51 COMPILER V8.02   MESSAGE                                                               04/22/2007 00:08:13 PAGE 3   
+
+ 121   2                      else {  // message for me so process it
+ 122   3      
+ 123   3                              switch (msgptr[OPCODE]) {
+ 124   4                              case ACK:
+ 125   4      
+ 126   4                                      // if ACK with data then parse the results
+ 127   4                                      switch (outstanding_msg[msgptr[SOURCE]-1]) {
+ 128   5      #ifdef DISPLAY
+ 134   5                                              default:
+ 135   5                                                      break;
+ 136   5                                      } // switch
+ 137   4      
+ 138   4                                      // clear the message as outstanding from this device
+ 139   4                                      outstanding_msg[msgptr[SOURCE]-1] = 0;
+ 140   4      
+ 141   4                                      // free up unit for more communications
+ 142   4                                      CTS[msgptr[SOURCE]-1] = 0;
+ 143   4                                      break;
+ 144   4      
+ 145   4                              case NAK:
+ 146   4                                      // fall back and retry PUT CODE HERE
+ 147   4      
+ 148   4                                      // clear the message as outstanding from this device
+ 149   4                                      outstanding_msg[msgptr[SOURCE-1]] = 0;
+ 150   4      
+ 151   4                                      // free up unit for more communications
+ 152   4                                      CTS[msgptr[SOURCE]-1] = 0;
+ 153   4                                      break;
+ 154   4      
+ 155   4                      // the SendACK function should be called within each
+ 156   4                      // case to ensure the appropriate data is returned for
+ 157   4                      // the corresponding op code
+ 158   4                              case WHO_ARE_YOU:
+ 159   4                                      if (OCCUPIED(tm_state))
+ 160   4                                              retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+ 161   4                                      else
+ 162   4                                              retval = SendACK(msgptr[SOURCE]);
+ 163   4                                      // free up unit for more communications
+ 164   4                                      CTS[msgptr[SOURCE]-1] = 0;
+ 165   4                                      break;
+ 166   4                              case READ_SEGMENT: {                    // get specified segment data
+ 167   5                                      int segnum;                             // segment number to get
+ 168   5      
+ 169   5                                      if (OCCUPIED(tm_state))
+ 170   5                                              retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+ 171   5                                      else {
+ 172   6                                              segnum = (msgptr[DATA_START]<<8) + msgptr[DATA_START+1];
+ 173   6      
+ 174   6                                              DataFlash_Page_Read(pagesize, com[port].txbuff+DATA_START, segnum);
+ 175   6                                              retval = SendACK_Data(msgptr[SOURCE], pagesize);  // send the segment data
+ 176   6                                      } // else
+ 177   5                                      // free up unit for more communications
+ 178   5                                      CTS[msgptr[SOURCE]-1] = 0;
+ 179   5                                      break;
+ 180   5                              } // READ_SEGMENT
+ 181   4                              case WRITE_SEGMENT: {                   // write data to specified segment
+ 182   5                                      int segnum;
+ 183   5      
+ 184   5                                      if (OCCUPIED(tm_state))
+ 185   5                                              retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+ 186   5                                      else {
+ 187   6                                              segnum = (msgptr[DATA_START]<<8) + msgptr[DATA_START+1];
+C51 COMPILER V8.02   MESSAGE                                                               04/22/2007 00:08:13 PAGE 4   
+
+ 188   6      
+ 189   6                                              DataFlash_Page_Write_Erase(GENBUFFER, pagesize, msgptr+DATA_START+2, segnum);
+ 190   6      
+ 191   6                                              retval = SendACK(msgptr[SOURCE]);
+ 192   6                                      } // else
+ 193   5                                      // free up unit for more communications
+ 194   5                                      CTS[msgptr[SOURCE]-1] = 0;
+ 195   5                                      break;
+ 196   5                              } // WRITE_SEGMENT
+ 197   4                              case READ_UNIT_INFO: {          // gets the factory calibration data
+ 198   5                                      if (OCCUPIED(tm_state))
+ 199   5                                              retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+ 200   5                                      else {
+ 201   6                                              ReadScratchpad(com[port].txbuff+DATA_START);
+ 202   6                                              retval = SendACK_Data(msgptr[SOURCE], SCRATCHLEN);  // send the segment data
+ 203   6                                      } // else
+ 204   5      
+ 205   5                                      // free up unit for more communications
+ 206   5                                      CTS[msgptr[SOURCE]-1] = 0;
+ 207   5                                      break;
+ 208   5                              } // READ_UNIT_INFO
+ 209   4                              case WRITE_UNIT_INFO: {         // writes the factory calibration data
+ 210   5                                      if (OCCUPIED(tm_state))
+ 211   5                                              retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+ 212   5                                      else {
+ 213   6                                              EraseScratchpad();
+ 214   6                                              WriteScratchpad( msgptr+DATA_START, MIN(msgdatalen, SCRATCHLEN));
+ 215   6      
+ 216   6                                              // replenish local copy
+ 217   6                                              ReadScratchpad(scratch.scratchbuff);
+ 218   6                                              retval = SendACK(msgptr[SOURCE]);
+ 219   6                                      } // else
+ 220   5      
+ 221   5                                      // free up unit for more communications
+ 222   5                                      CTS[msgptr[SOURCE]-1] = 0;
+ 223   5                                      break;
+ 224   5                              } // WRITE_UNIT_INFO
+ 225   4      
+ 226   4      #ifndef DISPLAYATTACHED
+ 244   4                              case ERASE_ALL:
+ 245   4                              case ERASE_ALL_SESS: {
+ 246   5                                      tmstatetype save_state = tm_state;
+ 247   5                                      // if erase all then start at page 0, else first data page
+ 248   5                                      u16 starterase = ((ERASE_ALL == msgptr[OPCODE])? 0 : FIRSTDATAPAGE);
+ 249   5      
+ 250   5                                      // free up unit for more communications
+ 251   5                                      CTS[msgptr[SOURCE]-1] = 0;
+ 252   5      
+ 253   5                                      if (OCCUPIED(tm_state))
+ 254   5                                              retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+ 255   5                                      else {
+ 256   6                                              tm_state = ERASING;
+ 257   6                                              retval = SendACK(msgptr[SOURCE]);
+ 258   6      
+ 259   6                                              // wipe out the indexes
+ 260   6                                              DataFlash_Erase_Page(INDEXPAGE);
+ 261   6      #ifdef DISPLAY
+ 265   6      #ifdef SENSOR
+ 266   6                                              // wipe out all data and show progress
+ 267   6                                              DataFlash_Erase_Range(starterase, LASTLAPPAGE, TRUE);
+ 268   6      #endif
+ 269   6                                              tm_state = save_state;
+C51 COMPILER V8.02   MESSAGE                                                               04/22/2007 00:08:13 PAGE 5   
+
+ 270   6                                      } // else
+ 271   5                                      break;
+ 272   5                              } // ERASE_ALL_SESS
+ 273   4                              case RESET_UNIT: {
+ 274   5                                      u08 status;
+ 275   5                                      // free up unit for more communications
+ 276   5                                      CTS[msgptr[SOURCE]-1] = 0;
+ 277   5      
+ 278   5                                      // wait for Serial Flash to be finished
+ 279   5                                      do {
+ 280   6                                              status = DataFlash_Read_Status();
+ 281   6                                      } while (!(status & STATUS_READY_MASK));
+ 282   5      
+ 283   5                                      SFRPAGE = LEGACY_PAGE;
+ 284   5      
+ 285   5                                      // pull the reset line to restart everything
+ 286   5                                      RSTSRC = RSTSRC | 0x01;
+ 287   5      
+ 288   5                                      break;
+ 289   5                              } // RESET_UNIT
+ 290   4      #if 0   // idea whose time has not yet come. tested -- not working
+ 333   4      #ifdef SENSOR
+ 334   4                              case CALIBRATE:
+ 335   4                                      Calibrate();
+ 336   4                                      break;
+ 337   4                              case INPUTTEST:
+ 338   4                                      InputTest();
+ 339   4                                      break;
+ 340   4                              case OUTPUTTEST:
+ 341   4                                      OutputTest();
+ 342   4                                      break;
+ 343   4      #endif
+ 344   4                              case DATAFLASHTEST:
+ 345   4                                      DataflashTest();
+ 346   4                                      break;
+ 347   4                              case POWER_DOWN: {
+ 348   5      #if defined DISPLAY || !defined DISPLAYATTACHED
+ 351   5      #ifdef SENSOR
+ 352   5                                      // DU ON/OFF button has been pressed or
+ 353   5                                      // DU notified of power failure, shut down, and telling SU to shut down
+ 354   5                                      LO(LED0);
+ 355   5                                      LO(LED1);
+ 356   5                                      LO(LED2);
+ 357   5                                      LO(LED3);
+ 358   5      
+ 359   5      #ifndef DISPLAYATTACHED
+ 369   5                                      LO(5VEN);
+ 370   5                                      // loop until dead
+ 371   5                                      while (1) ;
+ 372   5      #else // DISPLAY
+ 403   5      
+ 404   5                                      break;
+ 405   5                              } // POWER_DOWN
+ 406   4                              // uses global variable session to keep cksum total
+ 407   4                              case SW_DOWNLOAD:{
+ 408   5                                      if (START_DOWNLOAD == tm_state) {
+ 409   6                                              SaveDownload(msgptr, &session);         // save in dataflash
+ 410   6                                              retval = SendACK(msgptr[SOURCE]);
+ 411   6                                              pagecnt++;
+ 412   6                                      }
+ 413   5                                      else {
+ 414   6                                              retval = SendNAK(msgptr[SOURCE], (u08) FUNCTION_FAILED);
+C51 COMPILER V8.02   MESSAGE                                                               04/22/2007 00:08:13 PAGE 6   
+
+ 415   6                                      }
+ 416   5                                      // free up unit for more communications
+ 417   5                                      CTS[msgptr[SOURCE]-1] = 0;
+ 418   5      
+ 419   5                                      break;
+ 420   5                              } // SW_DOWNLOAD
+ 421   4      
+ 422   4                              case SW_REPROGRAM:{
+ 423   5                                      // make sure we are in the right mode and cksum of image is good
+ 424   5                                      if (DOWNLOAD_COMPLETE != tm_state || session != msgptr[DATA_START]) {
+ 425   6                                              retval = SendNAK(msgptr[SOURCE], (u08) FUNCTION_FAILED);
+ 426   6                                              // free up unit for more communications
+ 427   6                                              CTS[msgptr[SOURCE]-1] = 0;
+ 428   6      
+ 429   6                                              DELAY_MS(100);                          // give NAK chance to arrive
+ 430   6      
+ 431   6                                              // abort download, clear flash and reset
+ 432   6                                              new_mode = CANCEL_DOWNLOAD;
+ 433   6                                              mode_change = TRUE;
+ 434   6                                      }
+ 435   5                                      else {
+ 436   6                                              retval = SendACK(msgptr[SOURCE]);
+ 437   6                                              CTS[msgptr[SOURCE]-1] = 0;
+ 438   6      
+ 439   6                                              DELAY_MS(100);                          // give ACK chance to arrive
+ 440   6      
+ 441   6                                              CopytoCodeSpace(pagecnt);       // copy into code space
+ 442   6                                      }
+ 443   5                                      break;
+ 444   5                              } // SW_REPROGRAM
+ 445   4      
+ 446   4                              case MODE_CHANGE: {
+ 447   5                                      mode_change = TRUE;
+ 448   5                                      new_mode = (tmstatetype) msgptr[DATA_START];
+ 449   5      #if defined SENSOR && defined DISPLAYATTACHED
+ 450   5                                      // set up sampling rate
+ 451   5                                      new_samp = msgptr[DATA_START+1] & 0x0F;
+ 452   5                                      // set up the I/O collection
+ 453   5                                      new_iocollect = msgptr[DATA_START+2];
+ 454   5                                      // set up input scaling
+ 455   5                                      for (i=0; i<NUMANALOGS; i++)
+ 456   5                                              ioscaling[i] = msgptr[DATA_START+3+i];
+ 457   5                                      // frequency alarm data for currently selected car
+ 458   5                                      cyl = msgptr[DATA_START+7];
+ 459   5                                      revs = * (u16*) (msgptr+DATA_START+8);
+ 460   5      #endif
+ 461   5                                      retval = SendACK(msgptr[SOURCE]);
+ 462   5                                      // free up unit for more communications
+ 463   5                                      CTS[msgptr[SOURCE]-1] = 0;
+ 464   5                                      break;
+ 465   5                              } // MODE_CHANGE
+ 466   4      
+ 467   4      #ifdef DISPLAY
+ 791   4                              default:
+ 792   4                                      // grab the port
+ 793   4                                      CTS[msgptr[SOURCE]-1] = CTS_COUNTDOWN;
+ 794   4      
+ 795   4                                      // say what?
+ 796   4                                      retval = SendNAK(*(msgptr+SOURCE), UNKNOWN_FUNCTION);
+ 797   4                                      retval = -1; // no valid opcode found - normally send NAK
+ 798   4      #if defined DISPLAY && defined DEBUG
+ 801   4                                      break;          
+C51 COMPILER V8.02   MESSAGE                                                               04/22/2007 00:08:13 PAGE 7   
+
+ 802   4                              } // switch
+ 803   3                      } // else
+ 804   2              } // else
+ 805   1      
+ 806   1              return(retval);  // this should be the return value of sending ACK or ACK with
+ 807   1                               // data, assuming the opcode processes successfully
+ 808   1      }
+ 809          
+ 810          // The following function calculates the crc16 result and verifies it against*/
+ 811          // the received value in the data.  The function returns:    
+ 812          // 0 if the crc compares
+ 813          // -1 if the crc does not match
+ 814          
+ 815          s16 Verify_CRC(u08 * dat, u16 bytecount) {
+ 816   1              u16 retval, data_crc ;
+ 817   1      
+ 818   1              retval = crc16(dat, bytecount); // calculate the crc on the received data
+ 819   1      
+ 820   1              data_crc = (dat[bytecount])<<8 ;  // get the crc from the message
+ 821   1              data_crc += (dat[bytecount+1]);
+ 822   1      
+ 823   1              if (retval == data_crc)  // check calculated against received
+ 824   1                      return(0) ;  // if the crc's match
+ 825   1              else
+ 826   1                      return(-1); // -1 otherwise
+ 827   1      }
+ 828          
+ 829          s16 SendNAK(u08 dest,           // unit id of destination
+ 830                                  u08 reason) {
+ 831   1              com[msgrouting[dest]].txbuff[DATA_START] = reason ;
+ 832   1              SendMessage(msgrouting[0], dest,NAK,1);
+ 833   1      
+ 834   1              return(0) ;
+ 835   1      
+ 836   1      }
+ 837          
+ 838          // this function will write the downloaded code to data flash in 512 byte segments
+ 839          // for storage until the complete image is sent
+ 840          // it also calculates the checksum for later verification
+ 841          
+ 842          void SaveDownload(u08 *msgptr, u08 *cksum) {
+ 843   1              int i= 0;
+ 844   1              int len;
+ 845   1      
+ 846   1              len = (msgptr[UPPER_BYTE_COUNT]<<8) | (msgptr[LOWER_BYTE_COUNT]);
+ 847   1              // copy into flash buffer
+ 848   1              for (i=0; i < MIN(len-2, CODE_DOWNLOAD_SIZE); i++) {
+ 849   2                      *cksum ^= (flashpage.bigbuff[i] = msgptr[DATA_START + i]);
+ 850   2              }
+ 851   1      
+ 852   1              // write using alternate flash buffers
+ 853   1              DataFlash_Page_Write_Erase((pagecnt % 2), pagesize, flashpage.bigbuff, pagecnt);
+ 854   1      
+ 855   1      } // SaveDownload
+ 856          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   2543    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----      12
+   PDATA SIZE       =   ----    ----
+C51 COMPILER V8.02   MESSAGE                                                               04/22/2007 00:08:13 PAGE 8   
+
+   DATA SIZE        =   ----      41
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

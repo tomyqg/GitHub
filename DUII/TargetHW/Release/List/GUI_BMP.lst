@@ -1,0 +1,2969 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:09:56 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\GUI\GUI_BMP.c                           #
+#    Command line =  C:\DUII\TargetHW\GUI\GUI_BMP.c -D DEBUG=1 -D             #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\GUI_BMP.lst                #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\GUI_BMP.o                   #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\GUI\GUI_BMP.c
+      1          /*********************************************************************
+      2          *                SEGGER Microcontroller GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 1996 - 2010  SEGGER Microcontroller GmbH & Co. KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          ** emWin V5.06 - Graphical user interface for embedded applications **
+     13          emWin is protected by international copyright laws.   Knowledge of the
+     14          source code may not be used to write a similar product.  This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : GUI_BMP.c
+     19          Purpose     : Implementation of GUI_BMP... functions
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          #include <stdlib.h>
+     24          
+     25          #include "GUI_BMP_Private.h"
+     26          
+     27          #define USE_NEXT_PIXEL 1
+     28          
+     29          /*********************************************************************
+     30          *
+     31          *       Static functions
+     32          *
+     33          **********************************************************************
+     34          */
+     35          #if USE_NEXT_PIXEL
+     36          /*********************************************************************
+     37          *
+     38          *       Types
+     39          *
+     40          **********************************************************************
+     41          */
+     42          typedef struct {
+     43            int x0, xPos, yPos, xSize;
+     44            GUI_HMEM hMem;            /* Handle of buffer */
+     45            U8 * pBuffer; /* Pointer to allocated buffer */
+     46            U8 * pDst;    /* Pointer for storing next pixel */
+     47            int BytesPerPixel;
+     48            int BitsPerPixel;
+     49            int BufferSizeInPixels;
+     50            int NumPixelsInBuffer;
+     51            int Bit;
+     52          } NEXT_PIXEL_CONTEXT;
+     53          
+     54          typedef struct {
+     55            int DataOff;
+     56            int BytesPerLine;
+     57            int ClipRight;
+     58            int ClipLeft;
+     59            int ClipTop;
+     60            int ClipBottom;
+     61          } CLIP_PARAM_BMP;
+     62          
+     63          /*********************************************************************
+     64          *
+     65          *       Static data
+     66          *
+     67          **********************************************************************
+     68          */
+
+   \                                 In section .bss, align 4
+     69          static NEXT_PIXEL_CONTEXT _Context;
+   \                     _Context:
+   \   00000000                      DS8 48
+     70          
+     71          /*********************************************************************
+     72          *
+     73          *       Static code
+     74          *
+     75          **********************************************************************
+     76          */
+     77          /*********************************************************************
+     78          *
+     79          *       _NextPixel_FlushBuffer
+     80          */
+     81          static void _NextPixel_FlushBuffer(void) {
+     82            const LCD_PIXELINDEX aTrans[] = {0, 1};
+     83            const LCD_PIXELINDEX * pTrans;
+     84            pTrans = (_Context.BitsPerPixel == 1) ? aTrans : NULL;
+     85            LCD_DrawBitmap(_Context.xPos, _Context.yPos, _Context.xSize, 1, 1, 1, _Context.BitsPerPixel, 0, (const U8 *)_Context.pBuffer, pTrans);
+     86            _Context.xPos += _Context.NumPixelsInBuffer;
+     87            _Context.NumPixelsInBuffer = 0;
+     88            _Context.pDst = _Context.pBuffer;
+     89          }
+     90          
+     91          /*********************************************************************
+     92          *
+     93          *       _NextPixel_Start
+     94          */
+
+   \                                 In section .text, align 4, keep-with-next
+     95          static void _NextPixel_Start(int x0, int y0, int x1, int y1) {
+   \                     _NextPixel_Start:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0050A0E1           MOV      R5,R0
+     96            U32 BufferSizeAvailable; /* Number of available bytes */
+     97            int BufferSize;          /* Buffer size in bytes */
+     98            int BytesPerPixel;       /* Size of LCD_PIXELINDEX */
+     99            int BitsPerPixel;
+    100            int BytesPerLineDest;
+    101            GUI_USE_PARA(y0);
+    102            _Context.xSize = x1 - x0 + 1;
+   \   00000008   ........           LDR      R4,??DataTable11
+   \   0000000C   050042E0           SUB      R0,R2,R5
+   \   00000010   010080E2           ADD      R0,R0,#+1
+   \   00000014   0C0084E5           STR      R0,[R4, #+12]
+    103            /*
+    104             * Calculate buffer size
+    105             */
+    106            //BitsPerPixel          = LCD_GetBitsPerPixelEx(GUI_Context.SelLayer);
+    107            BitsPerPixel          = GUI_GetBitsPerPixelEx(GUI_Context.SelLayer);
+   \   00000018   ........           LDR      R0,??DataTable11_1
+   \   0000001C   0360A0E1           MOV      R6,R3
+   \   00000020   1100D0E5           LDRB     R0,[R0, #+17]
+   \   00000024   ........           BL       GUI_GetBitsPerPixelEx
+    108            _Context.BitsPerPixel = (BitsPerPixel < 24) ? BitsPerPixel : 32;
+   \   00000028   180050E3           CMP      R0,#+24
+   \   0000002C   2000A0A3           MOVGE    R0,#+32
+    109            BytesPerPixel         = (_Context.BitsPerPixel <= 8) ? 1 : (_Context.BitsPerPixel <= 16) ? 2 : 4;
+   \   00000030   090050E3           CMP      R0,#+9
+   \   00000034   200084E5           STR      R0,[R4, #+32]
+   \   00000038   0170A0B3           MOVLT    R7,#+1
+   \   0000003C   020000BA           BLT      ??_NextPixel_Start_0
+   \   00000040   110050E3           CMP      R0,#+17
+   \   00000044   0270A0B3           MOVLT    R7,#+2
+   \   00000048   0470A0A3           MOVGE    R7,#+4
+    110            BytesPerLineDest      = BytesPerPixel * _Context.xSize;
+   \                     ??_NextPixel_Start_0:
+   \   0000004C   0C0094E5           LDR      R0,[R4, #+12]
+   \   00000050   900708E0           MUL      R8,R0,R7
+    111            BufferSizeAvailable   = GUI_ALLOC_GetMaxSize();
+   \   00000054   ........           BL       GUI_ALLOC_GetMaxSize
+    112            if (BufferSizeAvailable < (U32)BytesPerLineDest) {
+   \   00000058   080050E1           CMP      R0,R8
+   \   0000005C   0300002A           BCS      ??_NextPixel_Start_1
+    113              BufferSize = (BufferSizeAvailable / BytesPerPixel) * BytesPerPixel;
+   \   00000060   0710A0E1           MOV      R1,R7
+   \   00000064   ........           BL       __aeabi_uidiv
+   \   00000068   970000E0           MUL      R0,R7,R0
+   \   0000006C   000000EA           B        ??_NextPixel_Start_2
+    114            } else {
+    115              BufferSize = BytesPerLineDest;
+   \                     ??_NextPixel_Start_1:
+   \   00000070   0800A0E1           MOV      R0,R8
+    116            }
+    117            _Context.BufferSizeInPixels = BufferSize / BytesPerPixel;
+   \                     ??_NextPixel_Start_2:
+   \   00000074   0710A0E1           MOV      R1,R7
+   \   00000078   ........           BL       __aeabi_idiv
+   \   0000007C   240084E5           STR      R0,[R4, #+36]
+    118            _Context.NumPixelsInBuffer  = 0;
+   \   00000080   0000A0E3           MOV      R0,#+0
+   \   00000084   280084E5           STR      R0,[R4, #+40]
+    119            _Context.xPos = _Context.x0 = x0;
+    120            _Context.yPos = y1;
+    121            _Context.BytesPerPixel = BytesPerPixel;
+    122            _Context.Bit = 0;
+   \   00000088   2C0084E5           STR      R0,[R4, #+44]
+   \   0000008C   005084E5           STR      R5,[R4, #+0]
+   \   00000090   045084E5           STR      R5,[R4, #+4]
+   \   00000094   086084E5           STR      R6,[R4, #+8]
+   \   00000098   1C7084E5           STR      R7,[R4, #+28]
+    123            /*
+    124             * Allocate buffer
+    125             */
+    126            _Context.hMem    = GUI_ALLOC_AllocNoInit(BytesPerLineDest);
+   \   0000009C   0800A0E1           MOV      R0,R8
+   \   000000A0   ........           BL       GUI_ALLOC_AllocNoInit
+   \   000000A4   100084E5           STR      R0,[R4, #+16]
+    127            _Context.pBuffer = (U8 *)GUI_ALLOC_h2p(_Context.hMem);
+   \   000000A8   ........           BL       GUI_ALLOC_h2p
+   \   000000AC   140084E5           STR      R0,[R4, #+20]
+    128            _Context.pDst    = _Context.pBuffer;
+   \   000000B0   180084E5           STR      R0,[R4, #+24]
+    129          }
+   \   000000B4   F081BDE8           POP      {R4-R8,PC}       ;; return
+    130          
+    131          /*********************************************************************
+    132          *
+    133          *       _NextPixel_SetPixel
+    134          */
+
+   \                                 In section .text, align 4, keep-with-next
+    135          static void _NextPixel_SetPixel(int PixelIndex) {
+   \                     _NextPixel_SetPixel:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+    136            switch (_Context.BytesPerPixel) {
+   \   00000004   ........           LDR      R4,??DataTable11
+   \   00000008   24D04DE2           SUB      SP,SP,#+36
+   \   0000000C   1C3094E5           LDR      R3,[R4, #+28]
+   \   00000010   181094E5           LDR      R1,[R4, #+24]
+   \   00000014   2C2094E5           LDR      R2,[R4, #+44]
+   \   00000018   013053E2           SUBS     R3,R3,#+1
+   \   0000001C   0400000A           BEQ      ??_NextPixel_SetPixel_1
+   \   00000020   013053E2           SUBS     R3,R3,#+1
+   \   00000024   2F00000A           BEQ      ??_NextPixel_SetPixel_2
+   \   00000028   023053E2           SUBS     R3,R3,#+2
+   \   0000002C   04008104           STREQ    R0,[R1], #+4
+   \   00000030   2D0000EA           B        ??_NextPixel_SetPixel_3
+    137            case 1: {
+    138                int Shift;
+    139                U8 * pData;
+    140                pData = (U8 *)_Context.pDst;
+    141                switch (_Context.BitsPerPixel) {
+   \                     ??_NextPixel_SetPixel_1:
+   \   00000034   20C094E5           LDR      R12,[R4, #+32]
+   \   00000038   01C04CE2           SUB      R12,R12,#+1
+   \   0000003C   07005CE3           CMP      R12,#+7
+   \   00000040   0CF18F90           ADDLS    PC,PC,R12, LSL #+2
+   \                     ??_NextPixel_SetPixel_0:
+   \   00000044   2800008A           BHI      ??_NextPixel_SetPixel_3
+   \   00000048   060000EA           B        ??_NextPixel_SetPixel_4
+   \   0000004C   110000EA           B        ??_NextPixel_SetPixel_5
+   \   00000050   250000EA           B        ??_NextPixel_SetPixel_3
+   \   00000054   190000EA           B        ??_NextPixel_SetPixel_6
+   \   00000058   230000EA           B        ??_NextPixel_SetPixel_3
+   \   0000005C   220000EA           B        ??_NextPixel_SetPixel_3
+   \   00000060   210000EA           B        ??_NextPixel_SetPixel_3
+   \   00000064   1D0000EA           B        ??_NextPixel_SetPixel_7
+    142                case 1:
+    143                  Shift = 7 - _Context.Bit;
+    144                  *pData &= ~(1          << Shift);
+    145                  *pData |=  (PixelIndex << Shift);
+   \                     ??_NextPixel_SetPixel_4:
+   \   00000068   00E0D1E5           LDRB     LR,[R1, #+0]
+   \   0000006C   07C062E2           RSB      R12,R2,#+7
+   \   00000070   0150A0E3           MOV      R5,#+1
+   \   00000074   15ECCEE1           BIC      LR,LR,R5, LSL R12
+   \   00000078   100C8EE1           ORR      R0,LR,R0, LSL R12
+    146                  _Context.Bit += 1;
+   \   0000007C   012082E2           ADD      R2,R2,#+1
+   \   00000080   0000C1E5           STRB     R0,[R1, #+0]
+    147                  if (_Context.Bit == 8) {
+   \   00000084   080052E3           CMP      R2,#+8
+   \   00000088   1700001A           BNE      ??_NextPixel_SetPixel_3
+    148                    _Context.Bit   = 0;
+   \                     ??_NextPixel_SetPixel_8:
+   \   0000008C   0020A0E3           MOV      R2,#+0
+    149                    _Context.pDst += 1;
+   \                     ??_NextPixel_SetPixel_9:
+   \   00000090   011081E2           ADD      R1,R1,#+1
+   \   00000094   140000EA           B        ??_NextPixel_SetPixel_3
+    150                  }
+    151                  break;
+    152                case 2:
+    153                  Shift = 6 - _Context.Bit;
+    154                  *pData &= ~(3          << Shift);
+    155                  *pData |=  (PixelIndex << Shift);
+   \                     ??_NextPixel_SetPixel_5:
+   \   00000098   00E0D1E5           LDRB     LR,[R1, #+0]
+   \   0000009C   06C062E2           RSB      R12,R2,#+6
+   \   000000A0   0350A0E3           MOV      R5,#+3
+   \   000000A4   15ECCEE1           BIC      LR,LR,R5, LSL R12
+   \   000000A8   100C8EE1           ORR      R0,LR,R0, LSL R12
+   \   000000AC   0000C1E5           STRB     R0,[R1, #+0]
+    156                  _Context.Bit += 2;
+   \   000000B0   022082E2           ADD      R2,R2,#+2
+    157                  if (_Context.Bit == 8) {
+   \                     ??_NextPixel_SetPixel_10:
+   \   000000B4   080052E3           CMP      R2,#+8
+   \   000000B8   0B00001A           BNE      ??_NextPixel_SetPixel_3
+   \   000000BC   F2FFFFEA           B        ??_NextPixel_SetPixel_8
+    158                    _Context.Bit   = 0;
+    159                    _Context.pDst += 1;
+    160                  }
+    161                  break;
+    162                case 4:
+    163                  Shift = 4 - _Context.Bit;
+    164                  *pData &= ~(0xf        << Shift);
+    165                  *pData |=  (PixelIndex << Shift);
+   \                     ??_NextPixel_SetPixel_6:
+   \   000000C0   00E0D1E5           LDRB     LR,[R1, #+0]
+   \   000000C4   04C062E2           RSB      R12,R2,#+4
+   \   000000C8   0F50A0E3           MOV      R5,#+15
+   \   000000CC   15ECCEE1           BIC      LR,LR,R5, LSL R12
+   \   000000D0   100C8EE1           ORR      R0,LR,R0, LSL R12
+   \   000000D4   0000C1E5           STRB     R0,[R1, #+0]
+    166                  _Context.Bit += 4;
+   \   000000D8   042082E2           ADD      R2,R2,#+4
+    167                  if (_Context.Bit == 8) {
+   \   000000DC   F4FFFFEA           B        ??_NextPixel_SetPixel_10
+    168                    _Context.Bit   = 0;
+    169                    _Context.pDst += 1;
+    170                  }
+    171                  break;
+    172                case 8:
+    173                  *pData = PixelIndex;
+   \                     ??_NextPixel_SetPixel_7:
+   \   000000E0   0000C1E5           STRB     R0,[R1, #+0]
+    174                  _Context.pDst += 1;
+   \   000000E4   E9FFFFEA           B        ??_NextPixel_SetPixel_9
+    175                  break;
+    176                }
+    177              }
+    178              break;
+    179            case 2: {
+    180                U16 * pData;
+    181                pData = (U16 *)_Context.pDst;
+    182                *pData = PixelIndex;
+   \                     ??_NextPixel_SetPixel_2:
+   \   000000E8   B200C1E0           STRH     R0,[R1], #+2
+    183                _Context.pDst += 2;
+    184              }
+    185              break;
+    186            case 4: {
+    187                U32 * pData;
+    188                pData = (U32 *)_Context.pDst;
+    189                *pData = PixelIndex;
+    190                _Context.pDst += 4;
+    191              }
+    192              break;
+   \                     ??_NextPixel_SetPixel_3:
+   \   000000EC   181084E5           STR      R1,[R4, #+24]
+    193            }
+    194            if (++_Context.NumPixelsInBuffer == _Context.BufferSizeInPixels) {
+   \   000000F0   280094E5           LDR      R0,[R4, #+40]
+   \   000000F4   241094E5           LDR      R1,[R4, #+36]
+   \   000000F8   010080E2           ADD      R0,R0,#+1
+   \   000000FC   2C2084E5           STR      R2,[R4, #+44]
+   \   00000100   280084E5           STR      R0,[R4, #+40]
+   \   00000104   010050E1           CMP      R0,R1
+   \   00000108   1D00001A           BNE      ??_NextPixel_SetPixel_11
+    195              _NextPixel_FlushBuffer();
+   \   0000010C   ............       ADRL     R1,`?<Constant {0L, 1L}>`
+   \              ....        
+   \   00000114   18008DE2           ADD      R0,SP,#+24
+   \   00000118   0C00B1E8           LDM      R1!,{R2,R3}
+   \   0000011C   0050A0E3           MOV      R5,#+0
+   \   00000120   0C00A0E8           STM      R0!,{R2,R3}
+   \   00000124   200094E5           LDR      R0,[R4, #+32]
+   \   00000128   0C508DE5           STR      R5,[SP, #+12]
+   \   0000012C   010050E3           CMP      R0,#+1
+   \   00000130   0010A013           MOVNE    R1,#+0
+   \   00000134   18108D02           ADDEQ    R1,SP,#+24
+   \   00000138   14108DE5           STR      R1,[SP, #+20]
+   \   0000013C   141094E5           LDR      R1,[R4, #+20]
+   \   00000140   08008DE5           STR      R0,[SP, #+8]
+   \   00000144   0100A0E3           MOV      R0,#+1
+   \   00000148   10108DE5           STR      R1,[SP, #+16]
+   \   0000014C   04008DE5           STR      R0,[SP, #+4]
+   \   00000150   00008DE5           STR      R0,[SP, #+0]
+   \   00000154   0130A0E3           MOV      R3,#+1
+   \   00000158   0C2094E5           LDR      R2,[R4, #+12]
+   \   0000015C   081094E5           LDR      R1,[R4, #+8]
+   \   00000160   040094E5           LDR      R0,[R4, #+4]
+   \   00000164   ........           BL       LCD_DrawBitmap
+   \   00000168   040094E5           LDR      R0,[R4, #+4]
+   \   0000016C   281094E5           LDR      R1,[R4, #+40]
+   \   00000170   285084E5           STR      R5,[R4, #+40]
+   \   00000174   000081E0           ADD      R0,R1,R0
+   \   00000178   040084E5           STR      R0,[R4, #+4]
+   \   0000017C   140094E5           LDR      R0,[R4, #+20]
+   \   00000180   180084E5           STR      R0,[R4, #+24]
+    196            }
+    197          }
+   \                     ??_NextPixel_SetPixel_11:
+   \   00000184   24D08DE2           ADD      SP,SP,#+36       ;; stack cleaning
+   \   00000188   3080BDE8           POP      {R4,R5,PC}       ;; return
+    198          
+    199          /*********************************************************************
+    200          *
+    201          *       _NextPixel_NextLine
+    202          */
+
+   \                                 In section .text, align 4, keep-with-next
+    203          static void _NextPixel_NextLine(void) {
+   \                     _NextPixel_NextLine:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+    204            if (_Context.NumPixelsInBuffer) {
+   \   00000004   ........           LDR      R5,??DataTable11
+   \   00000008   24D04DE2           SUB      SP,SP,#+36
+   \   0000000C   280095E5           LDR      R0,[R5, #+40]
+   \   00000010   0040A0E3           MOV      R4,#+0
+   \   00000014   000050E3           CMP      R0,#+0
+   \   00000018   1C00000A           BEQ      ??_NextPixel_NextLine_0
+    205              _NextPixel_FlushBuffer();
+   \   0000001C   ............       ADRL     R1,`?<Constant {0L, 1L}>`
+   \              ....        
+   \   00000024   18008DE2           ADD      R0,SP,#+24
+   \   00000028   0C00B1E8           LDM      R1!,{R2,R3}
+   \   0000002C   0C00A0E8           STM      R0!,{R2,R3}
+   \   00000030   200095E5           LDR      R0,[R5, #+32]
+   \   00000034   0C408DE5           STR      R4,[SP, #+12]
+   \   00000038   010050E3           CMP      R0,#+1
+   \   0000003C   0010A013           MOVNE    R1,#+0
+   \   00000040   18108D02           ADDEQ    R1,SP,#+24
+   \   00000044   14108DE5           STR      R1,[SP, #+20]
+   \   00000048   141095E5           LDR      R1,[R5, #+20]
+   \   0000004C   08008DE5           STR      R0,[SP, #+8]
+   \   00000050   0100A0E3           MOV      R0,#+1
+   \   00000054   10108DE5           STR      R1,[SP, #+16]
+   \   00000058   04008DE5           STR      R0,[SP, #+4]
+   \   0000005C   00008DE5           STR      R0,[SP, #+0]
+   \   00000060   0130A0E3           MOV      R3,#+1
+   \   00000064   0C2095E5           LDR      R2,[R5, #+12]
+   \   00000068   081095E5           LDR      R1,[R5, #+8]
+   \   0000006C   040095E5           LDR      R0,[R5, #+4]
+   \   00000070   ........           BL       LCD_DrawBitmap
+   \   00000074   040095E5           LDR      R0,[R5, #+4]
+   \   00000078   281095E5           LDR      R1,[R5, #+40]
+   \   0000007C   284085E5           STR      R4,[R5, #+40]
+   \   00000080   000081E0           ADD      R0,R1,R0
+   \   00000084   040085E5           STR      R0,[R5, #+4]
+   \   00000088   140095E5           LDR      R0,[R5, #+20]
+   \   0000008C   180085E5           STR      R0,[R5, #+24]
+    206            }
+    207            _Context.xPos = _Context.x0;
+   \                     ??_NextPixel_NextLine_0:
+   \   00000090   000095E5           LDR      R0,[R5, #+0]
+    208            _Context.yPos--;
+    209            _Context.Bit = 0;
+   \   00000094   2C4085E5           STR      R4,[R5, #+44]
+   \   00000098   040085E5           STR      R0,[R5, #+4]
+   \   0000009C   080095E5           LDR      R0,[R5, #+8]
+    210          }
+   \   000000A0   24D08DE2           ADD      SP,SP,#+36
+   \   000000A4   010040E2           SUB      R0,R0,#+1
+   \   000000A8   080085E5           STR      R0,[R5, #+8]
+   \   000000AC   3080BDE8           POP      {R4,R5,PC}       ;; return
+    211          
+    212          /*********************************************************************
+    213          *
+    214          *       _NextPixel_End
+    215          */
+
+   \                                 In section .text, align 4, keep-with-next
+    216          static void _NextPixel_End(void) {
+   \                     _NextPixel_End:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+    217            if (_Context.NumPixelsInBuffer) {
+   \   00000004   ........           LDR      R4,??DataTable11
+   \   00000008   24D04DE2           SUB      SP,SP,#+36
+   \   0000000C   280094E5           LDR      R0,[R4, #+40]
+   \   00000010   000050E3           CMP      R0,#+0
+   \   00000014   1D00000A           BEQ      ??_NextPixel_End_0
+    218              _NextPixel_FlushBuffer();
+   \   00000018   ............       ADRL     R1,`?<Constant {0L, 1L}>`
+   \              ....        
+   \   00000020   18008DE2           ADD      R0,SP,#+24
+   \   00000024   0C00B1E8           LDM      R1!,{R2,R3}
+   \   00000028   0050A0E3           MOV      R5,#+0
+   \   0000002C   0C00A0E8           STM      R0!,{R2,R3}
+   \   00000030   200094E5           LDR      R0,[R4, #+32]
+   \   00000034   0C508DE5           STR      R5,[SP, #+12]
+   \   00000038   010050E3           CMP      R0,#+1
+   \   0000003C   0010A013           MOVNE    R1,#+0
+   \   00000040   18108D02           ADDEQ    R1,SP,#+24
+   \   00000044   14108DE5           STR      R1,[SP, #+20]
+   \   00000048   141094E5           LDR      R1,[R4, #+20]
+   \   0000004C   08008DE5           STR      R0,[SP, #+8]
+   \   00000050   0100A0E3           MOV      R0,#+1
+   \   00000054   10108DE5           STR      R1,[SP, #+16]
+   \   00000058   04008DE5           STR      R0,[SP, #+4]
+   \   0000005C   00008DE5           STR      R0,[SP, #+0]
+   \   00000060   0130A0E3           MOV      R3,#+1
+   \   00000064   0C2094E5           LDR      R2,[R4, #+12]
+   \   00000068   081094E5           LDR      R1,[R4, #+8]
+   \   0000006C   040094E5           LDR      R0,[R4, #+4]
+   \   00000070   ........           BL       LCD_DrawBitmap
+   \   00000074   040094E5           LDR      R0,[R4, #+4]
+   \   00000078   281094E5           LDR      R1,[R4, #+40]
+   \   0000007C   285084E5           STR      R5,[R4, #+40]
+   \   00000080   000081E0           ADD      R0,R1,R0
+   \   00000084   040084E5           STR      R0,[R4, #+4]
+   \   00000088   140094E5           LDR      R0,[R4, #+20]
+   \   0000008C   180084E5           STR      R0,[R4, #+24]
+    219            }
+    220            GUI_ALLOC_Free(_Context.hMem);
+   \                     ??_NextPixel_End_0:
+   \   00000090   100094E5           LDR      R0,[R4, #+16]
+   \   00000094   ........           BL       GUI_ALLOC_Free
+    221          }
+   \   00000098   24D08DE2           ADD      SP,SP,#+36       ;; stack cleaning
+   \   0000009C   3080BDE8           POP      {R4,R5,PC}       ;; return
+    222          
+    223          /*********************************************************************
+    224          *
+    225          *       _NextPixel_API
+    226          */
+
+   \                                 In section .data, align 4
+   \   00000000   ............       DC32 _NextPixel_Start, _NextPixel_SetPixel, _NextPixel_NextLine
+   \              ............
+   \   0000000C   ........           DC32 _NextPixel_End
+    227          static LCD_API_NEXT_PIXEL _NextPixel_API = {
+    228            _NextPixel_Start,
+    229            _NextPixel_SetPixel,
+    230            _NextPixel_NextLine,
+    231            _NextPixel_End
+    232          };
+    233          
+    234          #endif
+    235          
+    236          /*********************************************************************
+    237          *
+    238          *       _GetStep
+    239          */
+    240          static int _GetStep(int * pYSize, int * pY) {
+    241            if (*pYSize > 0) {
+    242              *pY = *pYSize - 1;
+    243              return -1;
+    244            } else if (*pYSize < 0) {
+    245              *pYSize = -*pYSize;
+    246              *pY = 0;
+    247              return 1;
+    248            } else {
+    249              return 0;
+    250            }
+    251          }
+    252          
+    253          /*********************************************************************
+    254          *
+    255          *       _DrawBitmap_RLE
+    256          */
+
+   \                                 In section .text, align 4, keep-with-next
+    257          static int _DrawBitmap_RLE(GUI_BMP_CONTEXT * pContext, int x0, int y0, int XSize, int YSize, int NumColors, int Compression) {
+   \                     _DrawBitmap_RLE:
+   \   00000000   F64F2DE9           PUSH     {R1,R2,R4-R11,LR}
+    258            int x, y, EOI, Dx, Dy;
+    259            const U8 * pData;
+    260            int ColorIndex;
+    261            EOI = 0;
+    262            ColorIndex = LCD__GetColorIndex();
+   \   00000004   ........           LDR      R6,??DataTable12
+   \   00000008   2CD04DE2           SUB      SP,SP,#+44
+   \   0000000C   001096E5           LDR      R1,[R6, #+0]
+   \   00000010   5C709DE5           LDR      R7,[SP, #+92]
+   \   00000014   001091E5           LDR      R1,[R1, #+0]
+   \   00000018   0050A0E1           MOV      R5,R0
+   \   0000001C   0340A0E1           MOV      R4,R3
+   \   00000020   58809DE5           LDR      R8,[SP, #+88]
+   \   00000024   24108DE5           STR      R1,[SP, #+36]
+    263            /* Read palette */
+    264            if (GUI_BMP__ReadPalette(pContext, NumColors)) {
+   \   00000028   010057E3           CMP      R7,#+1
+   \   0000002C   480000BA           BLT      ??_DrawBitmap_RLE_0
+   \   00000030   ........           LDR      R9,??DataTable12_1
+   \   00000034   010017E3           TST      R7,#0x1
+   \   00000038   1500000A           BEQ      ??_DrawBitmap_RLE_1
+   \   0000003C   043095E5           LDR      R3,[R5, #+4]
+   \   00000040   0420A0E3           MOV      R2,#+4
+   \   00000044   0D10A0E1           MOV      R1,SP
+   \   00000048   080095E5           LDR      R0,[R5, #+8]
+   \   0000004C   00C095E5           LDR      R12,[R5, #+0]
+   \   00000050   3CFF2FE1           BLX      R12
+   \   00000054   040050E3           CMP      R0,#+4
+   \   00000058   8800001A           BNE      ??_DrawBitmap_RLE_2
+   \   0000005C   040095E5           LDR      R0,[R5, #+4]
+   \   00000060   040080E2           ADD      R0,R0,#+4
+   \   00000064   040085E5           STR      R0,[R5, #+4]
+   \   00000068   00109DE5           LDR      R1,[SP, #+0]
+   \   0000006C   00009DE5           LDR      R0,[SP, #+0]
+   \   00000070   0110D1E5           LDRB     R1,[R1, #+1]
+   \   00000074   0000D0E5           LDRB     R0,[R0, #+0]
+   \   00000078   0114A0E1           LSL      R1,R1,#+8
+   \   0000007C   000881E1           ORR      R0,R1,R0, LSL #+16
+   \   00000080   00109DE5           LDR      R1,[SP, #+0]
+   \   00000084   0210D1E5           LDRB     R1,[R1, #+2]
+   \   00000088   000081E1           ORR      R0,R1,R0
+   \   0000008C   ........           BL       LCD_Color2Index
+   \   00000090   040089E4           STR      R0,[R9], #+4
+   \                     ??_DrawBitmap_RLE_1:
+   \   00000094   A770B0E1           LSRS     R7,R7,#+1
+   \   00000098   2D00000A           BEQ      ??_DrawBitmap_RLE_0
+   \                     ??_DrawBitmap_RLE_3:
+   \   0000009C   043095E5           LDR      R3,[R5, #+4]
+   \   000000A0   0420A0E3           MOV      R2,#+4
+   \   000000A4   0D10A0E1           MOV      R1,SP
+   \   000000A8   080095E5           LDR      R0,[R5, #+8]
+   \   000000AC   00C095E5           LDR      R12,[R5, #+0]
+   \   000000B0   3CFF2FE1           BLX      R12
+   \   000000B4   040050E3           CMP      R0,#+4
+   \   000000B8   7000001A           BNE      ??_DrawBitmap_RLE_2
+   \   000000BC   040095E5           LDR      R0,[R5, #+4]
+   \   000000C0   040080E2           ADD      R0,R0,#+4
+   \   000000C4   040085E5           STR      R0,[R5, #+4]
+   \   000000C8   00109DE5           LDR      R1,[SP, #+0]
+   \   000000CC   00009DE5           LDR      R0,[SP, #+0]
+   \   000000D0   0110D1E5           LDRB     R1,[R1, #+1]
+   \   000000D4   0000D0E5           LDRB     R0,[R0, #+0]
+   \   000000D8   0114A0E1           LSL      R1,R1,#+8
+   \   000000DC   000881E1           ORR      R0,R1,R0, LSL #+16
+   \   000000E0   00109DE5           LDR      R1,[SP, #+0]
+   \   000000E4   0210D1E5           LDRB     R1,[R1, #+2]
+   \   000000E8   000081E1           ORR      R0,R1,R0
+   \   000000EC   ........           BL       LCD_Color2Index
+   \   000000F0   040089E4           STR      R0,[R9], #+4
+   \   000000F4   043095E5           LDR      R3,[R5, #+4]
+   \   000000F8   0420A0E3           MOV      R2,#+4
+   \   000000FC   0D10A0E1           MOV      R1,SP
+   \   00000100   080095E5           LDR      R0,[R5, #+8]
+   \   00000104   00C095E5           LDR      R12,[R5, #+0]
+   \   00000108   3CFF2FE1           BLX      R12
+   \   0000010C   040050E3           CMP      R0,#+4
+   \   00000110   5A00001A           BNE      ??_DrawBitmap_RLE_2
+   \   00000114   040095E5           LDR      R0,[R5, #+4]
+   \   00000118   040080E2           ADD      R0,R0,#+4
+   \   0000011C   040085E5           STR      R0,[R5, #+4]
+   \   00000120   00109DE5           LDR      R1,[SP, #+0]
+   \   00000124   00009DE5           LDR      R0,[SP, #+0]
+   \   00000128   0110D1E5           LDRB     R1,[R1, #+1]
+   \   0000012C   0000D0E5           LDRB     R0,[R0, #+0]
+   \   00000130   0114A0E1           LSL      R1,R1,#+8
+   \   00000134   000881E1           ORR      R0,R1,R0, LSL #+16
+   \   00000138   00109DE5           LDR      R1,[SP, #+0]
+   \   0000013C   0210D1E5           LDRB     R1,[R1, #+2]
+   \   00000140   000081E1           ORR      R0,R1,R0
+   \   00000144   ........           BL       LCD_Color2Index
+   \   00000148   040089E4           STR      R0,[R9], #+4
+   \   0000014C   017057E2           SUBS     R7,R7,#+1
+   \   00000150   D1FFFF1A           BNE      ??_DrawBitmap_RLE_3
+    265              return 1;
+    266            }
+    267            /* Decompress pixel data */
+    268            x = x0;
+   \                     ??_DrawBitmap_RLE_0:
+   \   00000154   2C709DE5           LDR      R7,[SP, #+44]
+    269            y = y0 + YSize - 1;
+   \   00000158   30009DE5           LDR      R0,[SP, #+48]
+   \   0000015C   071084E0           ADD      R1,R4,R7
+   \   00000160   000088E0           ADD      R0,R8,R0
+   \   00000164   011041E2           SUB      R1,R1,#+1
+   \   00000168   018040E2           SUB      R8,R0,#+1
+   \   0000016C   1C108DE5           STR      R1,[SP, #+28]
+   \   00000170   ........           LDR      R9,??DataTable12_1
+   \   00000174   1B0000EA           B        ??_DrawBitmap_RLE_4
+    270            do {
+    271              U8 Cmd;
+    272              U8 Data;
+    273              if (GUI_BMP__ReadData(pContext, 2, &pData, 0)) {
+    274                return 1;
+    275              }
+    276              Cmd  = *pData++;
+    277              Data = *pData;
+    278              if (Cmd == 0) {
+    279                switch (Data) {
+    280                case 0:   /* End of line */
+    281                  if (x < x0 + XSize - 1) {
+    282                    LCD__SetColorIndex(LCD__aConvTable[0]);
+    283                    LCD_DrawHLine(x, y, x0 + XSize - 1 );
+    284                  }
+    285                  x = x0;
+    286                  y--;
+    287                  if (y < y0) {
+    288                    return 1; /* Error: Data after end of image */
+    289                  }
+    290                  break;
+    291                case 1:   /* End of image */
+    292                  if (x < x0 + XSize - 1) {
+    293                    LCD__SetColorIndex(LCD__aConvTable[0]);
+    294                    LCD_DrawHLine(x, y, x0 + XSize - 1 );
+    295                  }
+    296                  if (y > y0) {
+    297                    LCD__SetColorIndex(LCD__aConvTable[0]);
+    298                    LCD_FillRect(x0, y0, x0 + XSize - 1, y - 1);
+    299                  }
+    300                  EOI = 1;
+    301                  break;
+    302                case 2:   /* Delta */
+    303                  if (GUI_BMP__ReadData(pContext, 2, &pData, 0)) {
+   \                     ??_DrawBitmap_RLE_5:
+   \   00000178   0220A0E3           MOV      R2,#+2
+   \   0000017C   18108DE2           ADD      R1,SP,#+24
+   \   00000180   080095E5           LDR      R0,[R5, #+8]
+   \   00000184   00C095E5           LDR      R12,[R5, #+0]
+   \   00000188   3CFF2FE1           BLX      R12
+   \   0000018C   020050E3           CMP      R0,#+2
+   \   00000190   3A00001A           BNE      ??_DrawBitmap_RLE_2
+   \   00000194   040095E5           LDR      R0,[R5, #+4]
+   \   00000198   020080E2           ADD      R0,R0,#+2
+   \   0000019C   040085E5           STR      R0,[R5, #+4]
+    304                    return 1;
+    305                  }
+    306                  Dx = *pData++;
+   \   000001A0   18009DE5           LDR      R0,[SP, #+24]
+   \   000001A4   18109DE5           LDR      R1,[SP, #+24]
+   \   000001A8   0000D0E5           LDRB     R0,[R0, #+0]
+   \   000001AC   011081E2           ADD      R1,R1,#+1
+   \   000001B0   18108DE5           STR      R1,[SP, #+24]
+    307                  Dy = *pData;
+   \   000001B4   0010D1E5           LDRB     R1,[R1, #+0]
+    308                  LCD__SetColorIndex(LCD__aConvTable[0]);
+   \   000001B8   002096E5           LDR      R2,[R6, #+0]
+   \   000001BC   003099E5           LDR      R3,[R9, #+0]
+    309                  LCD_FillRect(x, y - Dy, x + Dx, y);
+   \   000001C0   014048E0           SUB      R4,R8,R1
+   \   000001C4   003082E5           STR      R3,[R2, #+0]
+   \   000001C8   07A080E0           ADD      R10,R0,R7
+   \   000001CC   0830A0E1           MOV      R3,R8
+   \   000001D0   0A20A0E1           MOV      R2,R10
+   \   000001D4   0410A0E1           MOV      R1,R4
+   \   000001D8   0700A0E1           MOV      R0,R7
+   \   000001DC   ........           BL       LCD_FillRect
+    310                  x += Dx;
+   \   000001E0   0A70A0E1           MOV      R7,R10
+    311                  y -= Dy;
+   \   000001E4   0480A0E1           MOV      R8,R4
+    312                  break;
+   \                     ??_DrawBitmap_RLE_4:
+   \   000001E8   043095E5           LDR      R3,[R5, #+4]
+   \   000001EC   0220A0E3           MOV      R2,#+2
+   \   000001F0   18108DE2           ADD      R1,SP,#+24
+   \   000001F4   080095E5           LDR      R0,[R5, #+8]
+   \   000001F8   00C095E5           LDR      R12,[R5, #+0]
+   \   000001FC   3CFF2FE1           BLX      R12
+   \   00000200   020050E3           CMP      R0,#+2
+   \   00000204   1D00001A           BNE      ??_DrawBitmap_RLE_2
+   \   00000208   040095E5           LDR      R0,[R5, #+4]
+   \   0000020C   023080E2           ADD      R3,R0,#+2
+   \   00000210   043085E5           STR      R3,[R5, #+4]
+   \   00000214   18009DE5           LDR      R0,[SP, #+24]
+   \   00000218   0140D0E4           LDRB     R4,[R0], #+1
+   \   0000021C   18008DE5           STR      R0,[SP, #+24]
+   \   00000220   00A0D0E5           LDRB     R10,[R0, #+0]
+   \   00000224   000054E3           CMP      R4,#+0
+   \   00000228   8800001A           BNE      ??_DrawBitmap_RLE_6
+   \   0000022C   00005AE3           CMP      R10,#+0
+   \   00000230   0300000A           BEQ      ??_DrawBitmap_RLE_7
+   \   00000234   02005AE3           CMP      R10,#+2
+   \   00000238   CEFFFF0A           BEQ      ??_DrawBitmap_RLE_5
+   \   0000023C   1100003A           BCC      ??_DrawBitmap_RLE_8
+   \   00000240   2B0000EA           B        ??_DrawBitmap_RLE_9
+   \                     ??_DrawBitmap_RLE_7:
+   \   00000244   1C009DE5           LDR      R0,[SP, #+28]
+   \   00000248   000057E1           CMP      R7,R0
+   \   0000024C   060000AA           BGE      ??_DrawBitmap_RLE_10
+   \   00000250   000096E5           LDR      R0,[R6, #+0]
+   \   00000254   001099E5           LDR      R1,[R9, #+0]
+   \   00000258   001080E5           STR      R1,[R0, #+0]
+   \   0000025C   1C209DE5           LDR      R2,[SP, #+28]
+   \   00000260   0810A0E1           MOV      R1,R8
+   \   00000264   0700A0E1           MOV      R0,R7
+   \   00000268   ........           BL       LCD_DrawHLine
+   \                     ??_DrawBitmap_RLE_10:
+   \   0000026C   30009DE5           LDR      R0,[SP, #+48]
+   \   00000270   018048E2           SUB      R8,R8,#+1
+   \   00000274   2C709DE5           LDR      R7,[SP, #+44]
+   \   00000278   000058E1           CMP      R8,R0
+   \   0000027C   D9FFFFAA           BGE      ??_DrawBitmap_RLE_4
+   \                     ??_DrawBitmap_RLE_2:
+   \   00000280   0100A0E3           MOV      R0,#+1
+   \   00000284   180000EA           B        ??_DrawBitmap_RLE_11
+   \                     ??_DrawBitmap_RLE_8:
+   \   00000288   1C009DE5           LDR      R0,[SP, #+28]
+   \   0000028C   000057E1           CMP      R7,R0
+   \   00000290   060000AA           BGE      ??_DrawBitmap_RLE_12
+   \   00000294   000096E5           LDR      R0,[R6, #+0]
+   \   00000298   001099E5           LDR      R1,[R9, #+0]
+   \   0000029C   001080E5           STR      R1,[R0, #+0]
+   \   000002A0   1C209DE5           LDR      R2,[SP, #+28]
+   \   000002A4   0810A0E1           MOV      R1,R8
+   \   000002A8   0700A0E1           MOV      R0,R7
+   \   000002AC   ........           BL       LCD_DrawHLine
+   \                     ??_DrawBitmap_RLE_12:
+   \   000002B0   30009DE5           LDR      R0,[SP, #+48]
+   \   000002B4   080050E1           CMP      R0,R8
+   \   000002B8   070000AA           BGE      ??_DrawBitmap_RLE_13
+   \   000002BC   000096E5           LDR      R0,[R6, #+0]
+   \   000002C0   001099E5           LDR      R1,[R9, #+0]
+   \   000002C4   013048E2           SUB      R3,R8,#+1
+   \   000002C8   001080E5           STR      R1,[R0, #+0]
+   \   000002CC   1C209DE5           LDR      R2,[SP, #+28]
+   \   000002D0   30109DE5           LDR      R1,[SP, #+48]
+   \   000002D4   2C009DE5           LDR      R0,[SP, #+44]
+   \   000002D8   ........           BL       LCD_FillRect
+    313                default:  /* Absolute mode */
+    314                  switch (Compression) {
+    315                  case BI_RLE4:
+    316                    if (GUI_BMP__ReadData(pContext, (Data + 1) / 2, &pData, 0)) {
+    317                      return 1;
+    318                    }
+    319                    LCD_DrawBitmap(x, y, Data, 1, 1, 1, 4, (Data + 1) / 2, pData, LCD__aConvTable);
+    320                    x += Data;
+    321                    /* Make sure we are on an even 16bit-adr */
+    322                    if (((Data + 1) >> 1) & 1) {
+    323                      if (GUI_BMP__ReadData(pContext, 1, &pData, 0)) {
+    324                        return 1;
+    325                      }
+    326                    }
+    327                    break;
+    328                  case BI_RLE8:
+    329                    if (GUI_BMP__ReadData(pContext, Data, &pData, 0)) {
+    330                      return 1;
+    331                    }
+    332                    LCD_DrawBitmap(x, y, Data, 1, 1, 1, 8, Data, pData, LCD__aConvTable);
+    333                    x += Data;
+    334                    /* Make sure we are on an even 16bit-adr */
+    335                    if (Data & 1) {
+    336                      if (GUI_BMP__ReadData(pContext, 1, &pData, 0)) {
+    337                        return 1;
+    338                      }
+    339                    }
+    340                    break;
+    341                  }
+    342                  break;
+    343                }
+    344              } else {
+    345                switch (Compression) {
+    346                case BI_RLE4:
+    347                  if ((Data & 0xf) == (Data >> 4)) {
+    348                    LCD__SetColorIndex(LCD__aConvTable[Data & 0xf]);
+    349                    LCD_DrawHLine(x, y, x + Cmd - 1);
+    350                    x += Cmd;
+    351                  } else {
+    352                    int i;
+    353                    for (i = 0; i < Cmd; i++) {
+    354                      if ((i & 1) ==0) {
+    355                        LCD__SetColorIndex(LCD__aConvTable[Data >> 4]);
+    356                      } else {
+    357                        LCD__SetColorIndex(LCD__aConvTable[Data & 15]);
+    358                      }
+    359                      LCD_DrawPixel(x++, y);
+    360                    }
+    361                  }
+    362                  break;
+    363                case BI_RLE8:
+    364                  LCD__SetColorIndex(LCD__aConvTable[Data]);
+    365                  LCD_DrawHLine(x, y, x + Cmd - 1);
+    366                  x += Cmd;
+    367                  break;
+    368                }
+    369              }
+    370            } while (!EOI);
+    371            LCD__SetColorIndex(ColorIndex);
+   \                     ??_DrawBitmap_RLE_13:
+   \   000002DC   000096E5           LDR      R0,[R6, #+0]
+   \   000002E0   24109DE5           LDR      R1,[SP, #+36]
+   \   000002E4   001080E5           STR      R1,[R0, #+0]
+    372            return 0;
+   \   000002E8   0000A0E3           MOV      R0,#+0
+   \                     ??_DrawBitmap_RLE_11:
+   \   000002EC   34D08DE2           ADD      SP,SP,#+52       ;; stack cleaning
+   \   000002F0   F08FBDE8           POP      {R4-R11,PC}      ;; return
+   \                     ??_DrawBitmap_RLE_9:
+   \   000002F4   60009DE5           LDR      R0,[SP, #+96]
+   \   000002F8   010050E3           CMP      R0,#+1
+   \   000002FC   2C00000A           BEQ      ??_DrawBitmap_RLE_14
+   \   00000300   B8FFFF3A           BCC      ??_DrawBitmap_RLE_4
+   \   00000304   020050E3           CMP      R0,#+2
+   \   00000308   B6FFFF1A           BNE      ??_DrawBitmap_RLE_4
+   \   0000030C   01408AE2           ADD      R4,R10,#+1
+   \   00000310   A41F84E0           ADD      R1,R4,R4, LSR #+31
+   \   00000314   C110A0E1           ASR      R1,R1,#+1
+   \   00000318   20108DE5           STR      R1,[SP, #+32]
+   \   0000031C   01B0A0E1           MOV      R11,R1
+   \   00000320   0B20A0E1           MOV      R2,R11
+   \   00000324   18108DE2           ADD      R1,SP,#+24
+   \   00000328   080095E5           LDR      R0,[R5, #+8]
+   \   0000032C   00C095E5           LDR      R12,[R5, #+0]
+   \   00000330   3CFF2FE1           BLX      R12
+   \   00000334   0B0050E1           CMP      R0,R11
+   \   00000338   D0FFFF1A           BNE      ??_DrawBitmap_RLE_2
+   \   0000033C   040095E5           LDR      R0,[R5, #+4]
+   \   00000340   0130A0E3           MOV      R3,#+1
+   \   00000344   00008BE0           ADD      R0,R11,R0
+   \   00000348   040085E5           STR      R0,[R5, #+4]
+   \   0000034C   18009DE5           LDR      R0,[SP, #+24]
+   \   00000350   14908DE5           STR      R9,[SP, #+20]
+   \   00000354   10008DE5           STR      R0,[SP, #+16]
+   \   00000358   20009DE5           LDR      R0,[SP, #+32]
+   \   0000035C   0A20A0E1           MOV      R2,R10
+   \   00000360   0C008DE5           STR      R0,[SP, #+12]
+   \   00000364   0400A0E3           MOV      R0,#+4
+   \   00000368   08008DE5           STR      R0,[SP, #+8]
+   \   0000036C   0100A0E3           MOV      R0,#+1
+   \   00000370   04008DE5           STR      R0,[SP, #+4]
+   \   00000374   00008DE5           STR      R0,[SP, #+0]
+   \   00000378   0810A0E1           MOV      R1,R8
+   \   0000037C   0700A0E1           MOV      R0,R7
+   \   00000380   ........           BL       LCD_DrawBitmap
+   \   00000384   07708AE0           ADD      R7,R10,R7
+   \   00000388   020014E3           TST      R4,#0x2
+   \   0000038C   95FFFF0A           BEQ      ??_DrawBitmap_RLE_4
+   \   00000390   043095E5           LDR      R3,[R5, #+4]
+   \   00000394   0120A0E3           MOV      R2,#+1
+   \   00000398   18108DE2           ADD      R1,SP,#+24
+   \   0000039C   080095E5           LDR      R0,[R5, #+8]
+   \   000003A0   00C095E5           LDR      R12,[R5, #+0]
+   \   000003A4   3CFF2FE1           BLX      R12
+   \   000003A8   010050E3           CMP      R0,#+1
+   \   000003AC   2300000A           BEQ      ??_DrawBitmap_RLE_15
+   \   000003B0   B2FFFFEA           B        ??_DrawBitmap_RLE_2
+   \                     ??_DrawBitmap_RLE_14:
+   \   000003B4   0A20A0E1           MOV      R2,R10
+   \   000003B8   18108DE2           ADD      R1,SP,#+24
+   \   000003BC   080095E5           LDR      R0,[R5, #+8]
+   \   000003C0   00C095E5           LDR      R12,[R5, #+0]
+   \   000003C4   3CFF2FE1           BLX      R12
+   \   000003C8   0A0050E1           CMP      R0,R10
+   \   000003CC   ABFFFF1A           BNE      ??_DrawBitmap_RLE_2
+   \   000003D0   040095E5           LDR      R0,[R5, #+4]
+   \   000003D4   0130A0E3           MOV      R3,#+1
+   \   000003D8   00008AE0           ADD      R0,R10,R0
+   \   000003DC   040085E5           STR      R0,[R5, #+4]
+   \   000003E0   18009DE5           LDR      R0,[SP, #+24]
+   \   000003E4   14908DE5           STR      R9,[SP, #+20]
+   \   000003E8   10008DE5           STR      R0,[SP, #+16]
+   \   000003EC   0800A0E3           MOV      R0,#+8
+   \   000003F0   08008DE5           STR      R0,[SP, #+8]
+   \   000003F4   0100A0E3           MOV      R0,#+1
+   \   000003F8   04008DE5           STR      R0,[SP, #+4]
+   \   000003FC   00008DE5           STR      R0,[SP, #+0]
+   \   00000400   0CA08DE5           STR      R10,[SP, #+12]
+   \   00000404   0A20A0E1           MOV      R2,R10
+   \   00000408   0810A0E1           MOV      R1,R8
+   \   0000040C   0700A0E1           MOV      R0,R7
+   \   00000410   ........           BL       LCD_DrawBitmap
+   \   00000414   07708AE0           ADD      R7,R10,R7
+   \   00000418   01001AE3           TST      R10,#0x1
+   \   0000041C   71FFFF0A           BEQ      ??_DrawBitmap_RLE_4
+   \   00000420   043095E5           LDR      R3,[R5, #+4]
+   \   00000424   0120A0E3           MOV      R2,#+1
+   \   00000428   18108DE2           ADD      R1,SP,#+24
+   \   0000042C   080095E5           LDR      R0,[R5, #+8]
+   \   00000430   00C095E5           LDR      R12,[R5, #+0]
+   \   00000434   3CFF2FE1           BLX      R12
+   \   00000438   010050E3           CMP      R0,#+1
+   \   0000043C   8FFFFF1A           BNE      ??_DrawBitmap_RLE_2
+   \                     ??_DrawBitmap_RLE_15:
+   \   00000440   040095E5           LDR      R0,[R5, #+4]
+   \   00000444   010080E2           ADD      R0,R0,#+1
+   \   00000448   040085E5           STR      R0,[R5, #+4]
+   \   0000044C   65FFFFEA           B        ??_DrawBitmap_RLE_4
+   \                     ??_DrawBitmap_RLE_6:
+   \   00000450   60009DE5           LDR      R0,[SP, #+96]
+   \   00000454   010050E3           CMP      R0,#+1
+   \   00000458   2500000A           BEQ      ??_DrawBitmap_RLE_16
+   \   0000045C   61FFFF3A           BCC      ??_DrawBitmap_RLE_4
+   \   00000460   020050E3           CMP      R0,#+2
+   \   00000464   5FFFFF1A           BNE      ??_DrawBitmap_RLE_4
+   \   00000468   4A12A0E1           ASR      R1,R10,#+4
+   \   0000046C   0F000AE2           AND      R0,R10,#0xF
+   \   00000470   00108DE5           STR      R1,[SP, #+0]
+   \   00000474   010050E1           CMP      R0,R1
+   \   00000478   0900001A           BNE      ??_DrawBitmap_RLE_17
+   \   0000047C   000199E7           LDR      R0,[R9, +R0, LSL #+2]
+   \                     ??_DrawBitmap_RLE_18:
+   \   00000480   001096E5           LDR      R1,[R6, #+0]
+   \   00000484   044087E0           ADD      R4,R7,R4
+   \   00000488   000081E5           STR      R0,[R1, #+0]
+   \   0000048C   012044E2           SUB      R2,R4,#+1
+   \   00000490   0810A0E1           MOV      R1,R8
+   \   00000494   0700A0E1           MOV      R0,R7
+   \   00000498   ........           BL       LCD_DrawHLine
+   \   0000049C   0470A0E1           MOV      R7,R4
+   \   000004A0   50FFFFEA           B        ??_DrawBitmap_RLE_4
+   \                     ??_DrawBitmap_RLE_17:
+   \   000004A4   00B0A0E3           MOV      R11,#+0
+   \   000004A8   010054E3           CMP      R4,#+1
+   \   000004AC   4DFFFFBA           BLT      ??_DrawBitmap_RLE_4
+   \   000004B0   0FA00AE2           AND      R10,R10,#0xF
+   \   000004B4   0B0000EA           B        ??_DrawBitmap_RLE_19
+   \                     ??_DrawBitmap_RLE_20:
+   \   000004B8   0A0199E7           LDR      R0,[R9, +R10, LSL #+2]
+   \                     ??_DrawBitmap_RLE_21:
+   \   000004BC   001096E5           LDR      R1,[R6, #+0]
+   \   000004C0   000081E5           STR      R0,[R1, #+0]
+   \   000004C4   0810A0E1           MOV      R1,R8
+   \   000004C8   0700A0E1           MOV      R0,R7
+   \   000004CC   ........           BL       LCD_DrawPixel
+   \   000004D0   01B08BE2           ADD      R11,R11,#+1
+   \   000004D4   017087E2           ADD      R7,R7,#+1
+   \   000004D8   04005BE1           CMP      R11,R4
+   \   000004DC   41FFFFAA           BGE      ??_DrawBitmap_RLE_4
+   \   000004E0   01001BE3           TST      R11,#0x1
+   \   000004E4   F3FFFF1A           BNE      ??_DrawBitmap_RLE_20
+   \                     ??_DrawBitmap_RLE_19:
+   \   000004E8   00009DE5           LDR      R0,[SP, #+0]
+   \   000004EC   000199E7           LDR      R0,[R9, +R0, LSL #+2]
+   \   000004F0   F1FFFFEA           B        ??_DrawBitmap_RLE_21
+   \                     ??_DrawBitmap_RLE_16:
+   \   000004F4   0A0199E7           LDR      R0,[R9, +R10, LSL #+2]
+   \   000004F8   E0FFFFEA           B        ??_DrawBitmap_RLE_18
+    373          }
+    374          
+    375          /*********************************************************************
+    376          *
+    377          *       _GetClipParam
+    378          */
+
+   \                                 In section .text, align 4, keep-with-next
+    379          static void _GetClipParam(int x0, int y0, int XSize, int YSize, int BitsPerPixel, int BytesPerLine, CLIP_PARAM_BMP * pParam) {
+   \                     _GetClipParam:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+    380            int Diff;
+    381            /*
+    382            * Left
+    383            */
+    384            Diff = GUI_Context.ClipRect.x0 - x0;
+   \   00000004   ........           LDR      R5,??DataTable11_1
+   \   00000008   18E09DE5           LDR      LR,[SP, #+24]
+   \   0000000C   F860D5E1           LDRSH    R6,[R5, #+8]
+   \   00000010   10409DE5           LDR      R4,[SP, #+16]
+   \   00000014   14C09DE5           LDR      R12,[SP, #+20]
+   \   00000018   006046E0           SUB      R6,R6,R0
+    385            if (Diff > 0) {
+   \   0000001C   010056E3           CMP      R6,#+1
+    386              pParam->ClipLeft = Diff;
+   \   00000020   0C608EA5           STRGE    R6,[LR, #+12]
+    387            }
+    388            /*
+    389            * Top
+    390            */
+    391            Diff = GUI_Context.ClipRect.y0 - y0;
+   \   00000024   FA60D5E1           LDRSH    R6,[R5, #+10]
+    392            if (Diff > 0) {
+    393              pParam->ClipTop = Diff;
+    394            }
+    395            /*
+    396            * Right
+    397            */
+    398            Diff = x0 + XSize - 1 - GUI_Context.ClipRect.x1;
+   \   00000028   000082E0           ADD      R0,R2,R0
+   \   0000002C   010040E2           SUB      R0,R0,#+1
+   \   00000030   016046E0           SUB      R6,R6,R1
+   \   00000034   010056E3           CMP      R6,#+1
+   \   00000038   10608EA5           STRGE    R6,[LR, #+16]
+   \   0000003C   FC20D5E1           LDRSH    R2,[R5, #+12]
+    399            if (Diff > 0) {
+    400              pParam->ClipRight = Diff;
+    401            }
+    402            /*
+    403            * Bottom
+    404            */
+    405            Diff = y0 + YSize - 1 - GUI_Context.ClipRect.y1;
+    406            if (Diff > 0) {
+    407              pParam->ClipBottom = Diff;
+    408            }
+    409            /*
+    410            * Data offset
+    411            */
+    412            switch (BitsPerPixel) {
+   \   00000040   014044E2           SUB      R4,R4,#+1
+   \   00000044   020040E0           SUB      R0,R0,R2
+   \   00000048   010050E3           CMP      R0,#+1
+   \   0000004C   08008EA5           STRGE    R0,[LR, #+8]
+   \   00000050   010083E0           ADD      R0,R3,R1
+   \   00000054   FE10D5E1           LDRSH    R1,[R5, #+14]
+   \   00000058   010040E2           SUB      R0,R0,#+1
+   \   0000005C   010040E0           SUB      R0,R0,R1
+   \   00000060   010050E3           CMP      R0,#+1
+   \   00000064   14008EA5           STRGE    R0,[LR, #+20]
+   \   00000068   1F0054E3           CMP      R4,#+31
+   \   0000006C   04F18F90           ADDLS    PC,PC,R4, LSL #+2
+   \                     ??_GetClipParam_0:
+   \   00000070   4700008A           BHI      ??_GetClipParam_1
+   \   00000074   1E0000EA           B        ??_GetClipParam_2
+   \   00000078   450000EA           B        ??_GetClipParam_1
+   \   0000007C   440000EA           B        ??_GetClipParam_1
+   \   00000080   230000EA           B        ??_GetClipParam_3
+   \   00000084   420000EA           B        ??_GetClipParam_1
+   \   00000088   410000EA           B        ??_GetClipParam_1
+   \   0000008C   400000EA           B        ??_GetClipParam_1
+   \   00000090   270000EA           B        ??_GetClipParam_4
+   \   00000094   3E0000EA           B        ??_GetClipParam_1
+   \   00000098   3D0000EA           B        ??_GetClipParam_1
+   \   0000009C   3C0000EA           B        ??_GetClipParam_1
+   \   000000A0   3B0000EA           B        ??_GetClipParam_1
+   \   000000A4   3A0000EA           B        ??_GetClipParam_1
+   \   000000A8   390000EA           B        ??_GetClipParam_1
+   \   000000AC   380000EA           B        ??_GetClipParam_1
+   \   000000B0   240000EA           B        ??_GetClipParam_5
+   \   000000B4   360000EA           B        ??_GetClipParam_1
+   \   000000B8   350000EA           B        ??_GetClipParam_1
+   \   000000BC   340000EA           B        ??_GetClipParam_1
+   \   000000C0   330000EA           B        ??_GetClipParam_1
+   \   000000C4   320000EA           B        ??_GetClipParam_1
+   \   000000C8   310000EA           B        ??_GetClipParam_1
+   \   000000CC   300000EA           B        ??_GetClipParam_1
+   \   000000D0   220000EA           B        ??_GetClipParam_6
+   \   000000D4   2E0000EA           B        ??_GetClipParam_1
+   \   000000D8   2D0000EA           B        ??_GetClipParam_1
+   \   000000DC   2C0000EA           B        ??_GetClipParam_1
+   \   000000E0   2B0000EA           B        ??_GetClipParam_1
+   \   000000E4   2A0000EA           B        ??_GetClipParam_1
+   \   000000E8   290000EA           B        ??_GetClipParam_1
+   \   000000EC   280000EA           B        ??_GetClipParam_1
+   \   000000F0   200000EA           B        ??_GetClipParam_7
+    413            case 1:
+    414              pParam->DataOff      = pParam->ClipLeft >> 3;
+   \                     ??_GetClipParam_2:
+   \   000000F4   0C009EE5           LDR      R0,[LR, #+12]
+   \   000000F8   C001A0E1           ASR      R0,R0,#+3
+   \   000000FC   00008EE5           STR      R0,[LR, #+0]
+    415              pParam->ClipLeft     = pParam->DataOff << 3;
+   \   00000100   8011A0E1           LSL      R1,R0,#+3
+   \   00000104   0C108EE5           STR      R1,[LR, #+12]
+    416              pParam->BytesPerLine = BytesPerLine - (pParam->ClipRight >> 3) - pParam->DataOff;
+   \   00000108   08109EE5           LDR      R1,[LR, #+8]
+   \   0000010C   C1114CE0           SUB      R1,R12,R1, ASR #+3
+   \   00000110   1D0000EA           B        ??_GetClipParam_8
+    417              break;
+    418            case 4:
+    419              pParam->DataOff      = pParam->ClipLeft >> 1;
+   \                     ??_GetClipParam_3:
+   \   00000114   0C009EE5           LDR      R0,[LR, #+12]
+   \   00000118   C000A0E1           ASR      R0,R0,#+1
+   \   0000011C   00008EE5           STR      R0,[LR, #+0]
+    420              pParam->ClipLeft     = pParam->DataOff << 1;
+   \   00000120   8010A0E1           LSL      R1,R0,#+1
+   \   00000124   0C108EE5           STR      R1,[LR, #+12]
+    421              pParam->BytesPerLine = BytesPerLine - (pParam->ClipRight >> 1) - pParam->DataOff;
+   \   00000128   08109EE5           LDR      R1,[LR, #+8]
+   \   0000012C   C1104CE0           SUB      R1,R12,R1, ASR #+1
+   \   00000130   150000EA           B        ??_GetClipParam_8
+    422              break;
+    423            case 8:
+    424              pParam->DataOff      = pParam->ClipLeft;
+   \                     ??_GetClipParam_4:
+   \   00000134   0C009EE5           LDR      R0,[LR, #+12]
+   \   00000138   00008EE5           STR      R0,[LR, #+0]
+    425              pParam->BytesPerLine = BytesPerLine - pParam->ClipRight        - pParam->DataOff;
+   \   0000013C   08109EE5           LDR      R1,[LR, #+8]
+   \                     ??_GetClipParam_9:
+   \   00000140   01104CE0           SUB      R1,R12,R1
+   \   00000144   100000EA           B        ??_GetClipParam_8
+    426              break;
+    427            case 16:
+    428              pParam->DataOff      = pParam->ClipLeft << 1;
+   \                     ??_GetClipParam_5:
+   \   00000148   0C009EE5           LDR      R0,[LR, #+12]
+   \   0000014C   8000A0E1           LSL      R0,R0,#+1
+   \   00000150   00008EE5           STR      R0,[LR, #+0]
+    429              pParam->BytesPerLine = BytesPerLine - (pParam->ClipRight << 1) - pParam->DataOff;
+   \   00000154   08109EE5           LDR      R1,[LR, #+8]
+   \   00000158   81104CE0           SUB      R1,R12,R1, LSL #+1
+   \   0000015C   0A0000EA           B        ??_GetClipParam_8
+    430              break;
+    431            case 24:
+    432              pParam->DataOff      = pParam->ClipLeft * 3;
+   \                     ??_GetClipParam_6:
+   \   00000160   0C009EE5           LDR      R0,[LR, #+12]
+   \   00000164   800080E0           ADD      R0,R0,R0, LSL #+1
+   \   00000168   00008EE5           STR      R0,[LR, #+0]
+    433              pParam->BytesPerLine = BytesPerLine - (pParam->ClipRight  * 3) - pParam->DataOff;
+   \   0000016C   08109EE5           LDR      R1,[LR, #+8]
+   \   00000170   811081E0           ADD      R1,R1,R1, LSL #+1
+   \   00000174   F1FFFFEA           B        ??_GetClipParam_9
+    434              break;
+    435            case 32:
+    436              pParam->DataOff      = pParam->ClipLeft << 2;
+   \                     ??_GetClipParam_7:
+   \   00000178   0C009EE5           LDR      R0,[LR, #+12]
+   \   0000017C   0001A0E1           LSL      R0,R0,#+2
+   \   00000180   00008EE5           STR      R0,[LR, #+0]
+    437              pParam->BytesPerLine = BytesPerLine - (pParam->ClipRight << 2) - pParam->DataOff;
+   \   00000184   08109EE5           LDR      R1,[LR, #+8]
+   \   00000188   01114CE0           SUB      R1,R12,R1, LSL #+2
+   \                     ??_GetClipParam_8:
+   \   0000018C   000041E0           SUB      R0,R1,R0
+   \   00000190   04008EE5           STR      R0,[LR, #+4]
+    438              break;
+    439            }
+    440          }
+   \                     ??_GetClipParam_1:
+   \   00000194   7080BDE8           POP      {R4-R6,PC}       ;; return
+    441          
+    442          /*********************************************************************
+    443          *
+    444          *       _DrawBitmap_Pal
+    445          */
+
+   \                                 In section .text, align 4, keep-with-next
+    446          static int _DrawBitmap_Pal(GUI_BMP_CONTEXT * pContext, int x0, int y0, int XSize, int YSize, int Bpp, int NumColors) {
+   \                     _DrawBitmap_Pal:
+   \   00000000   F44F2DE9           PUSH     {R2,R4-R11,LR}
+   \   00000004   38D04DE2           SUB      SP,SP,#+56
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0190A0E1           MOV      R9,R1
+   \   00000010   03A0A0E1           MOV      R10,R3
+   \   00000014   60809DE5           LDR      R8,[SP, #+96]
+   \   00000018   64509DE5           LDR      R5,[SP, #+100]
+   \   0000001C   68609DE5           LDR      R6,[SP, #+104]
+    447            int y, Step, SkipBytes;
+    448            int BytesPerLine = 0;
+    449            const U8 * pData;
+    450            CLIP_PARAM_BMP Param = {0};
+   \   00000020   20008DE2           ADD      R0,SP,#+32
+   \   00000024   0010A0E3           MOV      R1,#+0
+   \   00000028   0020A0E3           MOV      R2,#+0
+   \   0000002C   0030A0E3           MOV      R3,#+0
+   \   00000030   0E00A0E8           STM      R0!,{R1-R3}
+   \   00000034   0E00A0E8           STM      R0!,{R1-R3}
+   \   00000038   00B0A0E3           MOV      R11,#+0
+    451          
+    452            if (GUI_BMP__ReadPalette(pContext, NumColors)) {
+   \   0000003C   010056E3           CMP      R6,#+1
+   \   00000040   480000BA           BLT      ??_DrawBitmap_Pal_0
+   \   00000044   ........           LDR      R7,??DataTable12_1
+   \   00000048   010016E3           TST      R6,#0x1
+   \   0000004C   1500000A           BEQ      ??_DrawBitmap_Pal_1
+   \   00000050   043094E5           LDR      R3,[R4, #+4]
+   \   00000054   0420A0E3           MOV      R2,#+4
+   \   00000058   0D10A0E1           MOV      R1,SP
+   \   0000005C   080094E5           LDR      R0,[R4, #+8]
+   \   00000060   00C094E5           LDR      R12,[R4, #+0]
+   \   00000064   3CFF2FE1           BLX      R12
+   \   00000068   040050E3           CMP      R0,#+4
+   \   0000006C   4700001A           BNE      ??_DrawBitmap_Pal_2
+   \   00000070   040094E5           LDR      R0,[R4, #+4]
+   \   00000074   040080E2           ADD      R0,R0,#+4
+   \   00000078   040084E5           STR      R0,[R4, #+4]
+   \   0000007C   00109DE5           LDR      R1,[SP, #+0]
+   \   00000080   00009DE5           LDR      R0,[SP, #+0]
+   \   00000084   0110D1E5           LDRB     R1,[R1, #+1]
+   \   00000088   0000D0E5           LDRB     R0,[R0, #+0]
+   \   0000008C   0114A0E1           LSL      R1,R1,#+8
+   \   00000090   000881E1           ORR      R0,R1,R0, LSL #+16
+   \   00000094   00109DE5           LDR      R1,[SP, #+0]
+   \   00000098   0210D1E5           LDRB     R1,[R1, #+2]
+   \   0000009C   000081E1           ORR      R0,R1,R0
+   \   000000A0   ........           BL       LCD_Color2Index
+   \   000000A4   040087E4           STR      R0,[R7], #+4
+   \                     ??_DrawBitmap_Pal_1:
+   \   000000A8   A660B0E1           LSRS     R6,R6,#+1
+   \   000000AC   2D00000A           BEQ      ??_DrawBitmap_Pal_0
+   \                     ??_DrawBitmap_Pal_3:
+   \   000000B0   043094E5           LDR      R3,[R4, #+4]
+   \   000000B4   0420A0E3           MOV      R2,#+4
+   \   000000B8   0D10A0E1           MOV      R1,SP
+   \   000000BC   080094E5           LDR      R0,[R4, #+8]
+   \   000000C0   00C094E5           LDR      R12,[R4, #+0]
+   \   000000C4   3CFF2FE1           BLX      R12
+   \   000000C8   040050E3           CMP      R0,#+4
+   \   000000CC   2F00001A           BNE      ??_DrawBitmap_Pal_2
+   \   000000D0   040094E5           LDR      R0,[R4, #+4]
+   \   000000D4   040080E2           ADD      R0,R0,#+4
+   \   000000D8   040084E5           STR      R0,[R4, #+4]
+   \   000000DC   00109DE5           LDR      R1,[SP, #+0]
+   \   000000E0   00009DE5           LDR      R0,[SP, #+0]
+   \   000000E4   0110D1E5           LDRB     R1,[R1, #+1]
+   \   000000E8   0000D0E5           LDRB     R0,[R0, #+0]
+   \   000000EC   0114A0E1           LSL      R1,R1,#+8
+   \   000000F0   000881E1           ORR      R0,R1,R0, LSL #+16
+   \   000000F4   00109DE5           LDR      R1,[SP, #+0]
+   \   000000F8   0210D1E5           LDRB     R1,[R1, #+2]
+   \   000000FC   000081E1           ORR      R0,R1,R0
+   \   00000100   ........           BL       LCD_Color2Index
+   \   00000104   040087E4           STR      R0,[R7], #+4
+   \   00000108   043094E5           LDR      R3,[R4, #+4]
+   \   0000010C   0420A0E3           MOV      R2,#+4
+   \   00000110   0D10A0E1           MOV      R1,SP
+   \   00000114   080094E5           LDR      R0,[R4, #+8]
+   \   00000118   00C094E5           LDR      R12,[R4, #+0]
+   \   0000011C   3CFF2FE1           BLX      R12
+   \   00000120   040050E3           CMP      R0,#+4
+   \   00000124   1900001A           BNE      ??_DrawBitmap_Pal_2
+   \   00000128   040094E5           LDR      R0,[R4, #+4]
+   \   0000012C   040080E2           ADD      R0,R0,#+4
+   \   00000130   040084E5           STR      R0,[R4, #+4]
+   \   00000134   00109DE5           LDR      R1,[SP, #+0]
+   \   00000138   00009DE5           LDR      R0,[SP, #+0]
+   \   0000013C   0110D1E5           LDRB     R1,[R1, #+1]
+   \   00000140   0000D0E5           LDRB     R0,[R0, #+0]
+   \   00000144   0114A0E1           LSL      R1,R1,#+8
+   \   00000148   000881E1           ORR      R0,R1,R0, LSL #+16
+   \   0000014C   00109DE5           LDR      R1,[SP, #+0]
+   \   00000150   0210D1E5           LDRB     R1,[R1, #+2]
+   \   00000154   000081E1           ORR      R0,R1,R0
+   \   00000158   ........           BL       LCD_Color2Index
+   \   0000015C   040087E4           STR      R0,[R7], #+4
+   \   00000160   016056E2           SUBS     R6,R6,#+1
+   \   00000164   D1FFFF1A           BNE      ??_DrawBitmap_Pal_3
+    453              return 1;
+    454            }
+    455            switch (Bpp) {
+   \                     ??_DrawBitmap_Pal_0:
+   \   00000168   010055E2           SUBS     R0,R5,#+1
+   \   0000016C   0400000A           BEQ      ??_DrawBitmap_Pal_4
+   \   00000170   030050E2           SUBS     R0,R0,#+3
+   \   00000174   0700000A           BEQ      ??_DrawBitmap_Pal_5
+   \   00000178   040050E2           SUBS     R0,R0,#+4
+   \   0000017C   0800000A           BEQ      ??_DrawBitmap_Pal_6
+   \   00000180   0A0000EA           B        ??_DrawBitmap_Pal_7
+    456            case 1:
+    457              BytesPerLine = ((XSize + 31) >> 5) << 2;
+   \                     ??_DrawBitmap_Pal_4:
+   \   00000184   1F008AE2           ADD      R0,R10,#+31
+   \                     ??_DrawBitmap_Pal_8:
+   \   00000188   C002A0E1           ASR      R0,R0,#+5
+   \   0000018C   060000EA           B        ??_DrawBitmap_Pal_9
+   \                     ??_DrawBitmap_Pal_2:
+   \   00000190   0100A0E3           MOV      R0,#+1
+   \   00000194   4D0000EA           B        ??_DrawBitmap_Pal_10
+    458              break;
+    459            case 4:
+    460              BytesPerLine = (((XSize << 2) + 31) >> 5) << 2;
+   \                     ??_DrawBitmap_Pal_5:
+   \   00000198   1F00A0E3           MOV      R0,#+31
+   \   0000019C   0A0180E0           ADD      R0,R0,R10, LSL #+2
+   \   000001A0   F8FFFFEA           B        ??_DrawBitmap_Pal_8
+    461              break;
+    462            case 8:
+    463              BytesPerLine = ((XSize +  3) >> 2) << 2;
+   \                     ??_DrawBitmap_Pal_6:
+   \   000001A4   03008AE2           ADD      R0,R10,#+3
+   \   000001A8   4001A0E1           ASR      R0,R0,#+2
+   \                     ??_DrawBitmap_Pal_9:
+   \   000001AC   00B1A0E1           LSL      R11,R0,#+2
+    464              break;
+    465            }
+    466            /*
+    467            * Get clipping data
+    468            */
+    469            _GetClipParam(x0, y0, XSize, YSize, Bpp, BytesPerLine, &Param);
+   \                     ??_DrawBitmap_Pal_7:
+   \   000001B0   20008DE2           ADD      R0,SP,#+32
+   \   000001B4   08008DE5           STR      R0,[SP, #+8]
+   \   000001B8   04B08DE5           STR      R11,[SP, #+4]
+   \   000001BC   00508DE5           STR      R5,[SP, #+0]
+   \   000001C0   0830A0E1           MOV      R3,R8
+   \   000001C4   0A20A0E1           MOV      R2,R10
+   \   000001C8   38109DE5           LDR      R1,[SP, #+56]
+   \   000001CC   0900A0E1           MOV      R0,R9
+   \   000001D0   ........           BL       _GetClipParam
+    470            pContext->Off += Param.DataOff;
+   \   000001D4   040094E5           LDR      R0,[R4, #+4]
+   \   000001D8   20109DE5           LDR      R1,[SP, #+32]
+    471            /*
+    472            * Calculate step (+1 or -1)
+    473            */
+    474            Step = _GetStep(&YSize, &y);
+   \   000001DC   010058E3           CMP      R8,#+1
+   \   000001E0   000081E0           ADD      R0,R1,R0
+   \   000001E4   040084E5           STR      R0,[R4, #+4]
+   \   000001E8   3A0000AA           BGE      ??_DrawBitmap_Pal_11
+   \   000001EC   000058E3           CMP      R8,#+0
+   \   000001F0   E6FFFF5A           BPL      ??_DrawBitmap_Pal_2
+    475            if (!Step) {
+    476              return 1;
+    477            }
+    478            /*
+    479            * Clip Y and move data pointer to the beginning
+    480            */
+    481            if (Step < 0) {
+    482              if (Param.ClipBottom > 0) {
+    483                pContext->Off += BytesPerLine * Param.ClipBottom;
+    484                y -= Param.ClipBottom;
+    485              }
+    486            } else {
+    487              if (Param.ClipTop > 0) {
+   \   000001F4   30109DE5           LDR      R1,[SP, #+48]
+   \   000001F8   0070A0E3           MOV      R7,#+0
+   \   000001FC   010051E3           CMP      R1,#+1
+    488                pContext->Off += BytesPerLine * Param.ClipTop;
+   \   00000200   910B20A0           MLAGE    R0,R1,R11,R0
+   \   00000204   008068E2           RSB      R8,R8,#+0
+   \   00000208   0160A0E3           MOV      R6,#+1
+    489                y += Param.ClipTop;
+   \   0000020C   0170A0A1           MOVGE    R7,R1
+   \                     ??_DrawBitmap_Pal_12:
+   \   00000210   040084E5           STR      R0,[R4, #+4]
+    490              }
+    491            }
+    492            YSize -= Param.ClipTop + Param.ClipBottom;
+   \   00000214   30009DE5           LDR      R0,[SP, #+48]
+   \   00000218   34109DE5           LDR      R1,[SP, #+52]
+   \   0000021C   000048E0           SUB      R0,R8,R0
+   \   00000220   018040E0           SUB      R8,R0,R1
+    493            /*
+    494            * Clip X
+    495            */
+    496            x0       += Param.ClipLeft;
+    497            XSize    -= Param.ClipRight + Param.ClipLeft;
+   \   00000224   28109DE5           LDR      R1,[SP, #+40]
+   \   00000228   2C009DE5           LDR      R0,[SP, #+44]
+   \   0000022C   01104AE0           SUB      R1,R10,R1
+   \   00000230   099080E0           ADD      R9,R0,R9
+   \   00000234   00A041E0           SUB      R10,R1,R0
+    498            SkipBytes = BytesPerLine - Param.BytesPerLine;
+   \   00000238   24009DE5           LDR      R0,[SP, #+36]
+   \   0000023C   00004BE0           SUB      R0,R11,R0
+   \   00000240   1C008DE5           STR      R0,[SP, #+28]
+    499            do {
+    500              /*
+    501              * Draw line of pixel data
+    502              */
+    503              if (GUI_BMP__ReadData(pContext, Param.BytesPerLine, &pData, 0)) {
+   \                     ??_DrawBitmap_Pal_13:
+   \   00000244   24B09DE5           LDR      R11,[SP, #+36]
+   \   00000248   043094E5           LDR      R3,[R4, #+4]
+   \   0000024C   0B20A0E1           MOV      R2,R11
+   \   00000250   18108DE2           ADD      R1,SP,#+24
+   \   00000254   080094E5           LDR      R0,[R4, #+8]
+   \   00000258   00C094E5           LDR      R12,[R4, #+0]
+   \   0000025C   3CFF2FE1           BLX      R12
+   \   00000260   0B0050E1           CMP      R0,R11
+   \   00000264   C9FFFF1A           BNE      ??_DrawBitmap_Pal_2
+   \   00000268   040094E5           LDR      R0,[R4, #+4]
+    504                return 1; /* Error */
+    505              }
+    506              LCD_DrawBitmap(x0, y0 + y, XSize, 1, 1, 1, Bpp, 1, pData, LCD__aConvTable);
+   \   0000026C   0130A0E3           MOV      R3,#+1
+   \   00000270   00008BE0           ADD      R0,R11,R0
+   \   00000274   040084E5           STR      R0,[R4, #+4]
+   \   00000278   ........           LDR      R0,??DataTable12_1
+   \   0000027C   08508DE5           STR      R5,[SP, #+8]
+   \   00000280   14008DE5           STR      R0,[SP, #+20]
+   \   00000284   18009DE5           LDR      R0,[SP, #+24]
+   \   00000288   0A20A0E1           MOV      R2,R10
+   \   0000028C   10008DE5           STR      R0,[SP, #+16]
+   \   00000290   0100A0E3           MOV      R0,#+1
+   \   00000294   0C008DE5           STR      R0,[SP, #+12]
+   \   00000298   04008DE5           STR      R0,[SP, #+4]
+   \   0000029C   00008DE5           STR      R0,[SP, #+0]
+   \   000002A0   38009DE5           LDR      R0,[SP, #+56]
+   \   000002A4   001087E0           ADD      R1,R7,R0
+   \   000002A8   0900A0E1           MOV      R0,R9
+   \   000002AC   ........           BL       LCD_DrawBitmap
+    507              /*
+    508              * Skip data
+    509              */
+    510              pContext->Off += SkipBytes;
+   \   000002B0   040094E5           LDR      R0,[R4, #+4]
+   \   000002B4   1C109DE5           LDR      R1,[SP, #+28]
+    511              y += Step;
+   \   000002B8   077086E0           ADD      R7,R6,R7
+   \   000002BC   000081E0           ADD      R0,R1,R0
+   \   000002C0   040084E5           STR      R0,[R4, #+4]
+    512            } while (--YSize);
+   \   000002C4   018058E2           SUBS     R8,R8,#+1
+   \   000002C8   DDFFFF1A           BNE      ??_DrawBitmap_Pal_13
+    513            return 0;
+   \   000002CC   0000A0E3           MOV      R0,#+0
+   \                     ??_DrawBitmap_Pal_10:
+   \   000002D0   3CD08DE2           ADD      SP,SP,#+60       ;; stack cleaning
+   \   000002D4   F08FBDE8           POP      {R4-R11,PC}      ;; return
+   \                     ??_DrawBitmap_Pal_11:
+   \   000002D8   34109DE5           LDR      R1,[SP, #+52]
+   \   000002DC   017048E2           SUB      R7,R8,#+1
+   \   000002E0   0060E0E3           MVN      R6,#+0
+   \   000002E4   010051E3           CMP      R1,#+1
+   \   000002E8   C8FFFFBA           BLT      ??_DrawBitmap_Pal_12
+   \   000002EC   910B20E0           MLA      R0,R1,R11,R0
+   \   000002F0   017047E0           SUB      R7,R7,R1
+   \   000002F4   C5FFFFEA           B        ??_DrawBitmap_Pal_12
+    514          }
+    515          
+    516          /*********************************************************************
+    517          *
+    518          *       _DrawBitmap_16bpp
+    519          */
+
+   \                                 In section .text, align 4, keep-with-next
+    520          static int _DrawBitmap_16bpp(GUI_BMP_CONTEXT * pContext, int x0, int y0, int XSize, int YSize) {
+   \                     _DrawBitmap_16bpp:
+   \   00000000   F44F2DE9           PUSH     {R2,R4-R11,LR}
+   \   00000004   28D04DE2           SUB      SP,SP,#+40
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   01B0A0E1           MOV      R11,R1
+   \   00000010   0380A0E1           MOV      R8,R3
+   \   00000014   50709DE5           LDR      R7,[SP, #+80]
+    521            #if USE_NEXT_PIXEL
+    522          
+    523            LCD_PIXELINDEX Index;
+    524            LCD_API_NEXT_PIXEL * pNextPixel_API;
+    525            tLCDDEV_Color2Index * pfColor2Index;
+    526            unsigned BytesPerLine;
+    527            int x, y, Step, SkipBytes;
+    528            const U8 * pData;
+    529            CLIP_PARAM_BMP Param = {0};
+   \   00000018   10008DE2           ADD      R0,SP,#+16
+   \   0000001C   0010A0E3           MOV      R1,#+0
+   \   00000020   0020A0E3           MOV      R2,#+0
+   \   00000024   0030A0E3           MOV      R3,#+0
+   \   00000028   0E00A0E8           STM      R0!,{R1-R3}
+   \   0000002C   0E00A0E8           STM      R0!,{R1-R3}
+    530          
+    531            BytesPerLine = ((16 * XSize + 31) >> 5) << 2;
+   \   00000030   1F00A0E3           MOV      R0,#+31
+   \   00000034   080280E0           ADD      R0,R0,R8, LSL #+4
+   \   00000038   C002A0E1           ASR      R0,R0,#+5
+   \   0000003C   0091A0E1           LSL      R9,R0,#+2
+    532            /*
+    533            * Get clipping data
+    534            */
+    535            _GetClipParam(x0, y0, XSize, YSize, 16, BytesPerLine, &Param);
+   \   00000040   10008DE2           ADD      R0,SP,#+16
+   \   00000044   08008DE5           STR      R0,[SP, #+8]
+   \   00000048   1000A0E3           MOV      R0,#+16
+   \   0000004C   00008DE5           STR      R0,[SP, #+0]
+   \   00000050   04908DE5           STR      R9,[SP, #+4]
+   \   00000054   0730A0E1           MOV      R3,R7
+   \   00000058   0820A0E1           MOV      R2,R8
+   \   0000005C   28109DE5           LDR      R1,[SP, #+40]
+   \   00000060   0B00A0E1           MOV      R0,R11
+   \   00000064   ........           BL       _GetClipParam
+    536            pContext->Off += Param.DataOff;
+   \   00000068   040094E5           LDR      R0,[R4, #+4]
+   \   0000006C   10109DE5           LDR      R1,[SP, #+16]
+    537            /*
+    538            * Calculate step (+1 or -1)
+    539            */
+    540            Step = _GetStep(&YSize, &y);
+   \   00000070   010057E3           CMP      R7,#+1
+   \   00000074   000081E0           ADD      R0,R1,R0
+   \   00000078   040084E5           STR      R0,[R4, #+4]
+   \   0000007C   510000AA           BGE      ??_DrawBitmap_16bpp_0
+   \   00000080   000057E3           CMP      R7,#+0
+   \   00000084   5700005A           BPL      ??_DrawBitmap_16bpp_1
+    541            if (!Step) {
+    542              return 1;
+    543            }
+    544            /*
+    545            * Clip Y and move data pointer to the beginning
+    546            */
+    547            if (Step < 0) {
+    548              if (Param.ClipBottom > 0) {
+    549                pContext->Off += BytesPerLine * Param.ClipBottom;
+    550                y -= Param.ClipBottom;
+    551              }
+    552            } else {
+    553              if (Param.ClipTop > 0) {
+   \   00000088   20109DE5           LDR      R1,[SP, #+32]
+   \   0000008C   0060A0E3           MOV      R6,#+0
+   \   00000090   010051E3           CMP      R1,#+1
+    554                pContext->Off += BytesPerLine * Param.ClipTop;
+   \   00000094   910920A0           MLAGE    R0,R1,R9,R0
+   \   00000098   007067E2           RSB      R7,R7,#+0
+   \   0000009C   0150A0E3           MOV      R5,#+1
+    555                y += Param.ClipTop;
+   \   000000A0   0160A0A1           MOVGE    R6,R1
+   \                     ??_DrawBitmap_16bpp_2:
+   \   000000A4   040084E5           STR      R0,[R4, #+4]
+    556              }
+    557            }
+    558            YSize -= Param.ClipTop + Param.ClipBottom;
+   \   000000A8   20009DE5           LDR      R0,[SP, #+32]
+   \   000000AC   24109DE5           LDR      R1,[SP, #+36]
+   \   000000B0   000047E0           SUB      R0,R7,R0
+   \   000000B4   017040E0           SUB      R7,R0,R1
+    559            /*
+    560            * Clip X
+    561            */
+    562            x0       += Param.ClipLeft;
+    563            XSize    -= Param.ClipRight + Param.ClipLeft;
+   \   000000B8   18109DE5           LDR      R1,[SP, #+24]
+   \   000000BC   1C009DE5           LDR      R0,[SP, #+28]
+   \   000000C0   011048E0           SUB      R1,R8,R1
+   \   000000C4   0BB080E0           ADD      R11,R0,R11
+   \   000000C8   008041E0           SUB      R8,R1,R0
+    564            SkipBytes = BytesPerLine - Param.BytesPerLine;
+   \   000000CC   14009DE5           LDR      R0,[SP, #+20]
+   \   000000D0   009049E0           SUB      R9,R9,R0
+    565            /*
+    566            * Initialize drawing
+    567            */
+    568            pfColor2Index = LCD_GetpfColor2IndexEx(GUI_Context.SelLayer);
+   \   000000D4   ........           LDR      R0,??DataTable11_1
+   \   000000D8   1100D0E5           LDRB     R0,[R0, #+17]
+   \   000000DC   ........           BL       LCD_GetpfColor2IndexEx
+   \   000000E0   00A0A0E1           MOV      R10,R0
+    569            pNextPixel_API = &_NextPixel_API;
+    570            pNextPixel_API->pfStart(x0, y0 + Param.ClipTop, x0 + XSize - 1, y0 + Param.ClipTop + YSize - 1); /* Initialize drawing routine of the driver */
+   \   000000E4   28009DE5           LDR      R0,[SP, #+40]
+   \   000000E8   20109DE5           LDR      R1,[SP, #+32]
+   \   000000EC   001081E0           ADD      R1,R1,R0
+   \   000000F0   010087E0           ADD      R0,R7,R1
+   \   000000F4   013040E2           SUB      R3,R0,#+1
+   \   000000F8   0B0088E0           ADD      R0,R8,R11
+   \   000000FC   012040E2           SUB      R2,R0,#+1
+   \   00000100   0B00A0E1           MOV      R0,R11
+   \   00000104   ........           BL       _NextPixel_Start
+    571            do {
+    572              /*
+    573              * Read one line of pixel data
+    574              */
+    575              if (GUI_BMP__ReadData(pContext, Param.BytesPerLine, &pData, 0)) {
+   \                     ??_DrawBitmap_16bpp_3:
+   \   00000108   14B09DE5           LDR      R11,[SP, #+20]
+   \   0000010C   043094E5           LDR      R3,[R4, #+4]
+   \   00000110   0B20A0E1           MOV      R2,R11
+   \   00000114   0C108DE2           ADD      R1,SP,#+12
+   \   00000118   080094E5           LDR      R0,[R4, #+8]
+   \   0000011C   00C094E5           LDR      R12,[R4, #+0]
+   \   00000120   3CFF2FE1           BLX      R12
+   \   00000124   0B0050E1           CMP      R0,R11
+   \   00000128   2E00001A           BNE      ??_DrawBitmap_16bpp_1
+   \   0000012C   040094E5           LDR      R0,[R4, #+4]
+    576                return 1; /* Error */
+    577              }
+    578              for (x = 0; x < XSize; x++) {
+   \   00000130   010058E3           CMP      R8,#+1
+   \   00000134   00008BE0           ADD      R0,R11,R0
+   \   00000138   040084E5           STR      R0,[R4, #+4]
+   \   0000013C   140000BA           BLT      ??_DrawBitmap_16bpp_4
+   \   00000140   010018E3           TST      R8,#0x1
+   \   00000144   0400000A           BEQ      ??_DrawBitmap_16bpp_5
+    579                U16 Value;
+    580                GUI_COLOR Color;
+    581                Value = GUI__Read16(&pData);
+   \   00000148   0C008DE2           ADD      R0,SP,#+12
+   \   0000014C   ........           BL       GUI__Read16
+    582                Color = LCD_Index2Color_M555(Value);
+   \   00000150   ........           BL       LCD_Index2Color_M555
+    583                Index = pfColor2Index(Color);
+   \   00000154   3AFF2FE1           BLX      R10
+    584                pNextPixel_API->pfSetPixel(Index); /* Send index value to the driver */
+   \   00000158   ........           BL       _NextPixel_SetPixel
+   \                     ??_DrawBitmap_16bpp_5:
+   \   0000015C   A8B0B0E1           LSRS     R11,R8,#+1
+   \   00000160   0B00000A           BEQ      ??_DrawBitmap_16bpp_4
+   \                     ??_DrawBitmap_16bpp_6:
+   \   00000164   0C008DE2           ADD      R0,SP,#+12
+   \   00000168   ........           BL       GUI__Read16
+   \   0000016C   ........           BL       LCD_Index2Color_M555
+   \   00000170   3AFF2FE1           BLX      R10
+   \   00000174   ........           BL       _NextPixel_SetPixel
+   \   00000178   0C008DE2           ADD      R0,SP,#+12
+   \   0000017C   ........           BL       GUI__Read16
+   \   00000180   ........           BL       LCD_Index2Color_M555
+   \   00000184   3AFF2FE1           BLX      R10
+   \   00000188   ........           BL       _NextPixel_SetPixel
+    585              }
+   \   0000018C   01B05BE2           SUBS     R11,R11,#+1
+   \   00000190   F3FFFF1A           BNE      ??_DrawBitmap_16bpp_6
+    586              if (y) {
+   \                     ??_DrawBitmap_16bpp_4:
+   \   00000194   000056E3           CMP      R6,#+0
+   \   00000198   0000000A           BEQ      ??_DrawBitmap_16bpp_7
+    587                pNextPixel_API->pfNextLine(); /* Increment line */
+   \   0000019C   ........           BL       _NextPixel_NextLine
+    588              }
+    589              /*
+    590              * Skip data
+    591              */
+    592              pContext->Off += SkipBytes;
+   \                     ??_DrawBitmap_16bpp_7:
+   \   000001A0   040094E5           LDR      R0,[R4, #+4]
+    593              y += Step;
+   \   000001A4   066085E0           ADD      R6,R5,R6
+   \   000001A8   000089E0           ADD      R0,R9,R0
+   \   000001AC   040084E5           STR      R0,[R4, #+4]
+    594            } while (--YSize);
+   \   000001B0   017057E2           SUBS     R7,R7,#+1
+   \   000001B4   D3FFFF1A           BNE      ??_DrawBitmap_16bpp_3
+    595            pNextPixel_API->pfEnd(); /* Done */
+   \   000001B8   ........           BL       _NextPixel_End
+    596            return 0;
+   \   000001BC   0000A0E3           MOV      R0,#+0
+   \                     ??_DrawBitmap_16bpp_8:
+   \   000001C0   2CD08DE2           ADD      SP,SP,#+44       ;; stack cleaning
+   \   000001C4   F08FBDE8           POP      {R4-R11,PC}      ;; return
+   \                     ??_DrawBitmap_16bpp_0:
+   \   000001C8   24109DE5           LDR      R1,[SP, #+36]
+   \   000001CC   016047E2           SUB      R6,R7,#+1
+   \   000001D0   0050E0E3           MVN      R5,#+0
+   \   000001D4   010051E3           CMP      R1,#+1
+   \   000001D8   B1FFFFBA           BLT      ??_DrawBitmap_16bpp_2
+   \   000001DC   910920E0           MLA      R0,R1,R9,R0
+   \   000001E0   016046E0           SUB      R6,R6,R1
+   \   000001E4   AEFFFFEA           B        ??_DrawBitmap_16bpp_2
+   \                     ??_DrawBitmap_16bpp_1:
+   \   000001E8   0100A0E3           MOV      R0,#+1
+   \   000001EC   F3FFFFEA           B        ??_DrawBitmap_16bpp_8
+    597          
+    598            #else
+    599          
+    600            unsigned BytesPerLine;
+    601            int x, y, Step;
+    602            const U8 * pData;
+    603            BytesPerLine = ((16 * XSize + 31) >> 5) << 2;
+    604            Step = _GetStep(&YSize, &y);
+    605            if (!Step) {
+    606              return 1;
+    607            }
+    608            for (; (y < YSize) && (y >= 0); y += Step) {
+    609              /* Read one line of pixel data */
+    610              if (GUI_BMP__ReadData(pContext, BytesPerLine, &pData, 0)) {
+    611                return 1; /* Error */
+    612              }
+    613              for (x = 0; x < XSize; x++) {
+    614                U16 Index;
+    615                GUI_COLOR Color;
+    616                Index = GUI__Read16(&pData);
+    617                Color = LCD_Index2Color_M555(Index);
+    618                LCD_SetPixelIndex(x0 + x, y0 + y, LCD_Color2Index(Color));
+    619              }
+    620            }
+    621            return 0;
+    622          
+    623            #endif
+    624          }
+    625          
+    626          /*********************************************************************
+    627          *
+    628          *       _DrawBitmap_RGB
+    629          */
+
+   \                                 In section .text, align 4, keep-with-next
+    630          static int _DrawBitmap_RGB(GUI_BMP_CONTEXT * pContext, int x0, int y0, int XSize, int YSize, unsigned BytesPerLine, unsigned BytesPerPixel) {
+   \                     _DrawBitmap_RGB:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   2CD04DE2           SUB      SP,SP,#+44
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   01A0A0E1           MOV      R10,R1
+   \   00000010   02B0A0E1           MOV      R11,R2
+   \   00000014   0380A0E1           MOV      R8,R3
+   \   00000018   50709DE5           LDR      R7,[SP, #+80]
+   \   0000001C   54909DE5           LDR      R9,[SP, #+84]
+   \   00000020   58509DE5           LDR      R5,[SP, #+88]
+    631            #if USE_NEXT_PIXEL
+    632          
+    633            LCD_PIXELINDEX Index;
+    634            LCD_API_NEXT_PIXEL * pNextPixel_API;
+    635            tLCDDEV_Color2Index * pfColor2Index;
+    636            int x, y, Step, SkipBytes;
+    637            const U8 * pData;
+    638            CLIP_PARAM_BMP Param = {0};
+   \   00000024   10008DE2           ADD      R0,SP,#+16
+   \   00000028   0010A0E3           MOV      R1,#+0
+   \   0000002C   0020A0E3           MOV      R2,#+0
+   \   00000030   0030A0E3           MOV      R3,#+0
+   \   00000034   0E00A0E8           STM      R0!,{R1-R3}
+   \   00000038   0E00A0E8           STM      R0!,{R1-R3}
+    639          
+    640            /*
+    641            * Get clipping data
+    642            */
+    643            _GetClipParam(x0, y0, XSize, YSize, BytesPerPixel * 8, BytesPerLine, &Param);
+   \   0000003C   10008DE2           ADD      R0,SP,#+16
+   \   00000040   08008DE5           STR      R0,[SP, #+8]
+   \   00000044   8501A0E1           LSL      R0,R5,#+3
+   \   00000048   00008DE5           STR      R0,[SP, #+0]
+   \   0000004C   04908DE5           STR      R9,[SP, #+4]
+   \   00000050   0730A0E1           MOV      R3,R7
+   \   00000054   0820A0E1           MOV      R2,R8
+   \   00000058   0B10A0E1           MOV      R1,R11
+   \   0000005C   0A00A0E1           MOV      R0,R10
+   \   00000060   ........           BL       _GetClipParam
+    644            pContext->Off += Param.DataOff;
+   \   00000064   040094E5           LDR      R0,[R4, #+4]
+   \   00000068   10109DE5           LDR      R1,[SP, #+16]
+    645            /*
+    646            * Calculate step (+1 or -1)
+    647            */
+    648            Step = _GetStep(&YSize, &y);
+   \   0000006C   010057E3           CMP      R7,#+1
+   \   00000070   000081E0           ADD      R0,R1,R0
+   \   00000074   040084E5           STR      R0,[R4, #+4]
+   \   00000078   660000AA           BGE      ??_DrawBitmap_RGB_0
+   \   0000007C   000057E3           CMP      R7,#+0
+   \   00000080   6D00005A           BPL      ??_DrawBitmap_RGB_1
+    649            if (!Step) {
+    650              return 1;
+    651            }
+    652            /*
+    653            * Clip Y and move data pointer to the beginning
+    654            */
+    655            if (Step < 0) {
+    656              if (Param.ClipBottom > 0) {
+    657                pContext->Off += BytesPerLine * Param.ClipBottom;
+    658                y -= Param.ClipBottom;
+    659              }
+    660            } else {
+    661              if (Param.ClipTop > 0) {
+   \   00000084   20109DE5           LDR      R1,[SP, #+32]
+   \   00000088   0060A0E3           MOV      R6,#+0
+   \   0000008C   010051E3           CMP      R1,#+1
+   \   00000090   0120A0E3           MOV      R2,#+1
+    662                pContext->Off += BytesPerLine * Param.ClipTop;
+   \   00000094   910920A0           MLAGE    R0,R1,R9,R0
+   \   00000098   007067E2           RSB      R7,R7,#+0
+   \   0000009C   00208DE5           STR      R2,[SP, #+0]
+    663                y += Param.ClipTop;
+   \   000000A0   0160A0A1           MOVGE    R6,R1
+   \                     ??_DrawBitmap_RGB_2:
+   \   000000A4   040084E5           STR      R0,[R4, #+4]
+    664              }
+    665            }
+    666            YSize -= Param.ClipTop + Param.ClipBottom;
+   \   000000A8   20009DE5           LDR      R0,[SP, #+32]
+   \   000000AC   24109DE5           LDR      R1,[SP, #+36]
+   \   000000B0   000047E0           SUB      R0,R7,R0
+   \   000000B4   017040E0           SUB      R7,R0,R1
+    667            /*
+    668            * Clip X
+    669            */
+    670            x0       += Param.ClipLeft;
+    671            XSize    -= Param.ClipRight + Param.ClipLeft;
+   \   000000B8   18109DE5           LDR      R1,[SP, #+24]
+   \   000000BC   1C009DE5           LDR      R0,[SP, #+28]
+   \   000000C0   011048E0           SUB      R1,R8,R1
+   \   000000C4   008041E0           SUB      R8,R1,R0
+   \   000000C8   0AA080E0           ADD      R10,R0,R10
+    672            SkipBytes = BytesPerLine - Param.BytesPerLine;
+   \   000000CC   14109DE5           LDR      R1,[SP, #+20]
+    673            /*
+    674            * Initialize drawing
+    675            */
+    676            pfColor2Index = GUI_GetpfColor2IndexEx(GUI_Context.SelLayer);
+   \   000000D0   ........           LDR      R0,??DataTable15
+   \   000000D4   011049E0           SUB      R1,R9,R1
+   \   000000D8   04108DE5           STR      R1,[SP, #+4]
+   \   000000DC   1100D0E5           LDRB     R0,[R0, #+17]
+   \   000000E0   ........           BL       GUI_GetpfColor2IndexEx
+   \   000000E4   0090A0E1           MOV      R9,R0
+    677            pNextPixel_API = &_NextPixel_API;
+    678            pNextPixel_API->pfStart(x0, y0 + Param.ClipTop, x0 + XSize - 1, y0 + Param.ClipTop + YSize - 1); /* Initialize drawing routine of the driver */
+   \   000000E8   20009DE5           LDR      R0,[SP, #+32]
+   \   000000EC   0B1080E0           ADD      R1,R0,R11
+   \   000000F0   010087E0           ADD      R0,R7,R1
+   \   000000F4   013040E2           SUB      R3,R0,#+1
+   \   000000F8   0A0088E0           ADD      R0,R8,R10
+   \   000000FC   012040E2           SUB      R2,R0,#+1
+   \   00000100   0A00A0E1           MOV      R0,R10
+   \   00000104   ........           BL       _NextPixel_Start
+    679            do {
+    680              /*
+    681              * Read one line of pixel data
+    682              */
+    683              if (GUI_BMP__ReadData(pContext, Param.BytesPerLine, &pData, 0)) {
+   \                     ??_DrawBitmap_RGB_3:
+   \   00000108   14A09DE5           LDR      R10,[SP, #+20]
+   \   0000010C   043094E5           LDR      R3,[R4, #+4]
+   \   00000110   0A20A0E1           MOV      R2,R10
+   \   00000114   0C108DE2           ADD      R1,SP,#+12
+   \   00000118   080094E5           LDR      R0,[R4, #+8]
+   \   0000011C   00C094E5           LDR      R12,[R4, #+0]
+   \   00000120   3CFF2FE1           BLX      R12
+   \   00000124   0A0050E1           CMP      R0,R10
+   \   00000128   4300001A           BNE      ??_DrawBitmap_RGB_1
+   \   0000012C   040094E5           LDR      R0,[R4, #+4]
+    684                return 1; /* Error */
+    685              }
+    686              for (x = 0; x < XSize; x++) {
+   \   00000130   010058E3           CMP      R8,#+1
+   \   00000134   00008AE0           ADD      R0,R10,R0
+   \   00000138   040084E5           STR      R0,[R4, #+4]
+   \   0000013C   00A0A0E3           MOV      R10,#+0
+   \   00000140   250000BA           BLT      ??_DrawBitmap_RGB_4
+   \   00000144   010018E3           TST      R8,#0x1
+   \   00000148   0900000A           BEQ      ??_DrawBitmap_RGB_5
+    687                const U8 * pColor = pData + x * BytesPerPixel;
+   \   0000014C   0C009DE5           LDR      R0,[SP, #+12]
+    688                U8 r, g, b;
+    689                U32 Color;
+    690                b = *(pColor);
+    691                g = *(pColor + 1);
+    692                r = *(pColor + 2);
+    693                Color = ((U32)b << 16) | ((unsigned)g << 8) | r;
+    694                Index = pfColor2Index(Color);
+   \   00000150   0120D0E5           LDRB     R2,[R0, #+1]
+   \   00000154   0010D0E5           LDRB     R1,[R0, #+0]
+   \   00000158   0200D0E5           LDRB     R0,[R0, #+2]
+   \   0000015C   0224A0E1           LSL      R2,R2,#+8
+   \   00000160   011882E1           ORR      R1,R2,R1, LSL #+16
+   \   00000164   010080E1           ORR      R0,R0,R1
+   \   00000168   39FF2FE1           BLX      R9
+    695                pNextPixel_API->pfSetPixel(Index); /* Send index value to the driver */
+   \   0000016C   ........           BL       _NextPixel_SetPixel
+   \   00000170   01A0A0E3           MOV      R10,#+1
+   \                     ??_DrawBitmap_RGB_5:
+   \   00000174   A8B0B0E1           LSRS     R11,R8,#+1
+   \   00000178   1700000A           BEQ      ??_DrawBitmap_RGB_4
+   \                     ??_DrawBitmap_RGB_6:
+   \   0000017C   0C009DE5           LDR      R0,[SP, #+12]
+   \   00000180   950A20E0           MLA      R0,R5,R10,R0
+   \   00000184   0120D0E5           LDRB     R2,[R0, #+1]
+   \   00000188   0010D0E5           LDRB     R1,[R0, #+0]
+   \   0000018C   0200D0E5           LDRB     R0,[R0, #+2]
+   \   00000190   0224A0E1           LSL      R2,R2,#+8
+   \   00000194   011882E1           ORR      R1,R2,R1, LSL #+16
+   \   00000198   010080E1           ORR      R0,R0,R1
+   \   0000019C   39FF2FE1           BLX      R9
+   \   000001A0   ........           BL       _NextPixel_SetPixel
+   \   000001A4   01A08AE2           ADD      R10,R10,#+1
+   \   000001A8   0C009DE5           LDR      R0,[SP, #+12]
+   \   000001AC   950A20E0           MLA      R0,R5,R10,R0
+   \   000001B0   0120D0E5           LDRB     R2,[R0, #+1]
+   \   000001B4   0010D0E5           LDRB     R1,[R0, #+0]
+   \   000001B8   0200D0E5           LDRB     R0,[R0, #+2]
+   \   000001BC   0224A0E1           LSL      R2,R2,#+8
+   \   000001C0   011882E1           ORR      R1,R2,R1, LSL #+16
+   \   000001C4   010080E1           ORR      R0,R0,R1
+   \   000001C8   39FF2FE1           BLX      R9
+   \   000001CC   ........           BL       _NextPixel_SetPixel
+    696              }
+   \   000001D0   01A08AE2           ADD      R10,R10,#+1
+   \   000001D4   01B05BE2           SUBS     R11,R11,#+1
+   \   000001D8   E7FFFF1A           BNE      ??_DrawBitmap_RGB_6
+    697              if (y) {
+   \                     ??_DrawBitmap_RGB_4:
+   \   000001DC   000056E3           CMP      R6,#+0
+   \   000001E0   0000000A           BEQ      ??_DrawBitmap_RGB_7
+    698                pNextPixel_API->pfNextLine(); /* Increment line */
+   \   000001E4   ........           BL       _NextPixel_NextLine
+    699              }
+    700              /*
+    701              * Skip data
+    702              */
+    703              pContext->Off += SkipBytes;
+   \                     ??_DrawBitmap_RGB_7:
+   \   000001E8   040094E5           LDR      R0,[R4, #+4]
+   \   000001EC   04109DE5           LDR      R1,[SP, #+4]
+    704              y += Step;
+    705            } while (--YSize);
+   \   000001F0   017057E2           SUBS     R7,R7,#+1
+   \   000001F4   000081E0           ADD      R0,R1,R0
+   \   000001F8   040084E5           STR      R0,[R4, #+4]
+   \   000001FC   00009DE5           LDR      R0,[SP, #+0]
+   \   00000200   066080E0           ADD      R6,R0,R6
+   \   00000204   BFFFFF1A           BNE      ??_DrawBitmap_RGB_3
+    706            pNextPixel_API->pfEnd(); /* Done */
+   \   00000208   ........           BL       _NextPixel_End
+    707            return 0;
+   \   0000020C   0000A0E3           MOV      R0,#+0
+   \                     ??_DrawBitmap_RGB_8:
+   \   00000210   2CD08DE2           ADD      SP,SP,#+44       ;; stack cleaning
+   \   00000214   F08FBDE8           POP      {R4-R11,PC}      ;; return
+   \                     ??_DrawBitmap_RGB_0:
+   \   00000218   24109DE5           LDR      R1,[SP, #+36]
+   \   0000021C   0020E0E3           MVN      R2,#+0
+   \   00000220   016047E2           SUB      R6,R7,#+1
+   \   00000224   00208DE5           STR      R2,[SP, #+0]
+   \   00000228   010051E3           CMP      R1,#+1
+   \   0000022C   9CFFFFBA           BLT      ??_DrawBitmap_RGB_2
+   \   00000230   910920E0           MLA      R0,R1,R9,R0
+   \   00000234   016046E0           SUB      R6,R6,R1
+   \   00000238   99FFFFEA           B        ??_DrawBitmap_RGB_2
+   \                     ??_DrawBitmap_RGB_1:
+   \   0000023C   0100A0E3           MOV      R0,#+1
+   \   00000240   F2FFFFEA           B        ??_DrawBitmap_RGB_8
+    708          
+    709            #else
+    710          
+    711            int x, y, Step;
+    712            const U8 * pData;
+    713            Step = _GetStep(&YSize, &y);
+    714            if (!Step) {
+    715              return 1;
+    716            }
+    717            for (; (y < YSize) && (y >= 0); y += Step) {
+    718              /* Read one line of pixel data */
+    719              if (GUI_BMP__ReadData(pContext, BytesPerLine, &pData, 0)) {
+    720                return 1; /* Error */
+    721              }
+    722              for (x = 0; x < XSize; x++) {
+    723                const U8 * pColor = pData + x * BytesPerPixel;
+    724                U8 r, g, b;
+    725                b = *(pColor);
+    726                g = *(pColor + 1);
+    727                r = *(pColor + 2);
+    728                LCD_SetPixelIndex(x0 + x, y0 + y, LCD_Color2Index(((U32)b << 16) | ((unsigned)g << 8) | r));
+    729              }
+    730            }
+    731            return 0;
+    732          
+    733            #endif
+    734          }
+    735          
+    736          /*********************************************************************
+    737          *
+    738          *       _DrawBitmap_24bpp
+    739          */
+    740          static int _DrawBitmap_24bpp(GUI_BMP_CONTEXT * pContext, int x0, int y0, int XSize, int YSize) {
+    741            unsigned BytesPerLine;
+    742            BytesPerLine = ((24 * XSize + 31) >> 5) << 2;
+    743            return _DrawBitmap_RGB(pContext, x0, y0, XSize, YSize, BytesPerLine, 3);
+    744          }
+    745          
+    746          /*********************************************************************
+    747          *
+    748          *       _DrawBitmap_32bpp
+    749          */
+    750          static int _DrawBitmap_32bpp(GUI_BMP_CONTEXT * pContext, int x0, int y0, int XSize, int YSize) {
+    751            unsigned BytesPerLine;
+    752            BytesPerLine = XSize << 2;
+    753            return _DrawBitmap_RGB(pContext, x0, y0, XSize, YSize, BytesPerLine, 4);
+    754          }
+    755          
+    756          /*********************************************************************
+    757          *
+    758          *       _Draw
+    759          */
+
+   \                                 In section .text, align 4, keep-with-next
+    760          static int _Draw(int x0, int y0, GUI_BMP_CONTEXT * pContext) {
+   \                     _Draw:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   28D04DE2           SUB      SP,SP,#+40
+   \   00000008   0040A0E1           MOV      R4,R0
+    761            #if (GUI_WINSUPPORT)
+    762              GUI_RECT r;
+    763            #endif
+    764            int Ret = 0;
+    765            int Cnt = 0;
+    766            I32 Width, Height;
+    767            U16 BitCount;
+    768            int NumColors;
+    769            int Compression;
+    770            /* Initialize */
+    771            if (GUI_BMP__Init(pContext, &Width, &Height, &BitCount, &NumColors, &Compression)) {
+   \   0000000C   18008DE2           ADD      R0,SP,#+24
+   \   00000010   04008DE5           STR      R0,[SP, #+4]
+   \   00000014   1C008DE2           ADD      R0,SP,#+28
+   \   00000018   0150A0E1           MOV      R5,R1
+   \   0000001C   0260A0E1           MOV      R6,R2
+   \   00000020   00008DE5           STR      R0,[SP, #+0]
+   \   00000024   0070A0E3           MOV      R7,#+0
+   \   00000028   0080A0E3           MOV      R8,#+0
+   \   0000002C   10308DE2           ADD      R3,SP,#+16
+   \   00000030   14208DE2           ADD      R2,SP,#+20
+   \   00000034   0C108DE2           ADD      R1,SP,#+12
+   \   00000038   0600A0E1           MOV      R0,R6
+   \   0000003C   ........           BL       GUI_BMP__Init
+   \   00000040   000050E3           CMP      R0,#+0
+    772              return 1;
+   \   00000044   0100A013           MOVNE    R0,#+1
+   \   00000048   8D00001A           BNE      ??_Draw_1
+    773            }
+    774            /* Start output */
+    775            GUI_LOCK();
+   \   0000004C   ........           BL       GUI_Lock
+    776            #if (GUI_WINSUPPORT)
+    777              WM_ADDORG(x0,y0);
+   \   00000050   ........           LDR      R0,??DataTable15
+   \   00000054   401090E5           LDR      R1,[R0, #+64]
+   \   00000058   440090E5           LDR      R0,[R0, #+68]
+   \   0000005C   044081E0           ADD      R4,R1,R4
+   \   00000060   055080E0           ADD      R5,R0,R5
+    778              r.x1 = (r.x0 = x0) + Width - 1;
+   \   00000064   B042CDE1           STRH     R4,[SP, #+32]
+   \   00000068   F002DDE1           LDRSH    R0,[SP, #+32]
+   \   0000006C   0C109DE5           LDR      R1,[SP, #+12]
+    779              r.y1 = (r.y0 = y0) + Height - 1;
+   \   00000070   B252CDE1           STRH     R5,[SP, #+34]
+   \   00000074   000081E0           ADD      R0,R1,R0
+   \   00000078   010040E2           SUB      R0,R0,#+1
+   \   0000007C   B402CDE1           STRH     R0,[SP, #+36]
+   \   00000080   F202DDE1           LDRSH    R0,[SP, #+34]
+   \   00000084   14109DE5           LDR      R1,[SP, #+20]
+   \   00000088   000081E0           ADD      R0,R1,R0
+   \   0000008C   010040E2           SUB      R0,R0,#+1
+   \   00000090   B602CDE1           STRH     R0,[SP, #+38]
+    780              WM_ITERATE_START(&r) {
+   \   00000094   20008DE2           ADD      R0,SP,#+32
+   \   00000098   ........           BL       WM__InitIVRSearch
+   \   0000009C   000050E3           CMP      R0,#+0
+   \   000000A0   7500000A           BEQ      ??_Draw_2
+    781            #endif
+    782            if (Cnt++) {
+   \                     ??_Draw_3:
+   \   000000A4   0800A0E1           MOV      R0,R8
+   \   000000A8   018080E2           ADD      R8,R0,#+1
+   \   000000AC   000050E3           CMP      R0,#+0
+   \   000000B0   0900000A           BEQ      ??_Draw_4
+    783              Ret = GUI_BMP__Init(pContext, &Width, &Height, &BitCount, &NumColors, &Compression);
+   \   000000B4   18008DE2           ADD      R0,SP,#+24
+   \   000000B8   04008DE5           STR      R0,[SP, #+4]
+   \   000000BC   1C008DE2           ADD      R0,SP,#+28
+   \   000000C0   00008DE5           STR      R0,[SP, #+0]
+   \   000000C4   10308DE2           ADD      R3,SP,#+16
+   \   000000C8   14208DE2           ADD      R2,SP,#+20
+   \   000000CC   0C108DE2           ADD      R1,SP,#+12
+   \   000000D0   0600A0E1           MOV      R0,R6
+   \   000000D4   ........           BL       GUI_BMP__Init
+   \   000000D8   0070A0E1           MOV      R7,R0
+    784            }
+    785            if (Ret == 0) {
+   \                     ??_Draw_4:
+   \   000000DC   000057E3           CMP      R7,#+0
+   \   000000E0   6200001A           BNE      ??_Draw_5
+    786              /* Show bitmap */
+    787              switch (Compression) {
+   \   000000E4   18009DE5           LDR      R0,[SP, #+24]
+   \   000000E8   000050E3           CMP      R0,#+0
+   \   000000EC   0300000A           BEQ      ??_Draw_6
+   \   000000F0   020050E3           CMP      R0,#+2
+   \   000000F4   5200000A           BEQ      ??_Draw_7
+   \   000000F8   5100003A           BCC      ??_Draw_7
+   \   000000FC   5B0000EA           B        ??_Draw_5
+    788              case BI_RGB:
+    789                switch (BitCount) {
+   \                     ??_Draw_6:
+   \   00000100   B001DDE1           LDRH     R0,[SP, #+16]
+   \   00000104   010040E2           SUB      R0,R0,#+1
+   \   00000108   1F0050E3           CMP      R0,#+31
+   \   0000010C   00F18F90           ADDLS    PC,PC,R0, LSL #+2
+   \                     ??_Draw_0:
+   \   00000110   4900008A           BHI      ??_Draw_8
+   \   00000114   1E0000EA           B        ??_Draw_9
+   \   00000118   470000EA           B        ??_Draw_8
+   \   0000011C   460000EA           B        ??_Draw_8
+   \   00000120   1B0000EA           B        ??_Draw_9
+   \   00000124   440000EA           B        ??_Draw_8
+   \   00000128   430000EA           B        ??_Draw_8
+   \   0000012C   420000EA           B        ??_Draw_8
+   \   00000130   170000EA           B        ??_Draw_9
+   \   00000134   400000EA           B        ??_Draw_8
+   \   00000138   3F0000EA           B        ??_Draw_8
+   \   0000013C   3E0000EA           B        ??_Draw_8
+   \   00000140   3D0000EA           B        ??_Draw_8
+   \   00000144   3C0000EA           B        ??_Draw_8
+   \   00000148   3B0000EA           B        ??_Draw_8
+   \   0000014C   3A0000EA           B        ??_Draw_8
+   \   00000150   1B0000EA           B        ??_Draw_10
+   \   00000154   380000EA           B        ??_Draw_8
+   \   00000158   370000EA           B        ??_Draw_8
+   \   0000015C   360000EA           B        ??_Draw_8
+   \   00000160   350000EA           B        ??_Draw_8
+   \   00000164   340000EA           B        ??_Draw_8
+   \   00000168   330000EA           B        ??_Draw_8
+   \   0000016C   320000EA           B        ??_Draw_8
+   \   00000170   1B0000EA           B        ??_Draw_11
+   \   00000174   300000EA           B        ??_Draw_8
+   \   00000178   2F0000EA           B        ??_Draw_8
+   \   0000017C   2E0000EA           B        ??_Draw_8
+   \   00000180   2D0000EA           B        ??_Draw_8
+   \   00000184   2C0000EA           B        ??_Draw_8
+   \   00000188   2B0000EA           B        ??_Draw_8
+   \   0000018C   2A0000EA           B        ??_Draw_8
+   \   00000190   240000EA           B        ??_Draw_12
+    790                case 1:
+    791                case 4:
+    792                case 8:
+    793                  Ret = _DrawBitmap_Pal(pContext, x0, y0, Width, Height, BitCount, NumColors);
+   \                     ??_Draw_9:
+   \   00000194   1C009DE5           LDR      R0,[SP, #+28]
+   \   00000198   0C309DE5           LDR      R3,[SP, #+12]
+   \   0000019C   08008DE5           STR      R0,[SP, #+8]
+   \   000001A0   B001DDE1           LDRH     R0,[SP, #+16]
+   \   000001A4   0520A0E1           MOV      R2,R5
+   \   000001A8   0410A0E1           MOV      R1,R4
+   \   000001AC   04008DE5           STR      R0,[SP, #+4]
+   \   000001B0   14009DE5           LDR      R0,[SP, #+20]
+   \   000001B4   00008DE5           STR      R0,[SP, #+0]
+   \   000001B8   0600A0E1           MOV      R0,R6
+   \   000001BC   ........           BL       _DrawBitmap_Pal
+   \   000001C0   290000EA           B        ??_Draw_13
+    794                  break;
+    795                case 16:
+    796                  Ret = _DrawBitmap_16bpp(pContext, x0, y0, Width, Height);
+   \                     ??_Draw_10:
+   \   000001C4   14009DE5           LDR      R0,[SP, #+20]
+   \   000001C8   0C309DE5           LDR      R3,[SP, #+12]
+   \   000001CC   00008DE5           STR      R0,[SP, #+0]
+   \   000001D0   0520A0E1           MOV      R2,R5
+   \   000001D4   0410A0E1           MOV      R1,R4
+   \   000001D8   0600A0E1           MOV      R0,R6
+   \   000001DC   ........           BL       _DrawBitmap_16bpp
+   \   000001E0   210000EA           B        ??_Draw_13
+    797                  break;
+    798                case 24:
+    799                  Ret = _DrawBitmap_24bpp(pContext, x0, y0, Width, Height);
+   \                     ??_Draw_11:
+   \   000001E4   0300A0E3           MOV      R0,#+3
+   \   000001E8   08008DE5           STR      R0,[SP, #+8]
+   \   000001EC   0C009DE5           LDR      R0,[SP, #+12]
+   \   000001F0   1810A0E3           MOV      R1,#+24
+   \   000001F4   910000E0           MUL      R0,R1,R0
+   \   000001F8   0C309DE5           LDR      R3,[SP, #+12]
+   \   000001FC   1F0080E2           ADD      R0,R0,#+31
+   \   00000200   C002A0E1           ASR      R0,R0,#+5
+   \                     ??_Draw_14:
+   \   00000204   0001A0E1           LSL      R0,R0,#+2
+   \   00000208   04008DE5           STR      R0,[SP, #+4]
+   \   0000020C   14009DE5           LDR      R0,[SP, #+20]
+   \   00000210   0520A0E1           MOV      R2,R5
+   \   00000214   00008DE5           STR      R0,[SP, #+0]
+   \   00000218   0410A0E1           MOV      R1,R4
+   \   0000021C   0600A0E1           MOV      R0,R6
+   \   00000220   ........           BL       _DrawBitmap_RGB
+   \   00000224   100000EA           B        ??_Draw_13
+    800                  break;
+    801                case 32:
+    802                  Ret = _DrawBitmap_32bpp(pContext, x0, y0, Width, Height);
+   \                     ??_Draw_12:
+   \   00000228   0400A0E3           MOV      R0,#+4
+   \   0000022C   08008DE5           STR      R0,[SP, #+8]
+   \   00000230   0C009DE5           LDR      R0,[SP, #+12]
+   \   00000234   0C309DE5           LDR      R3,[SP, #+12]
+   \   00000238   F1FFFFEA           B        ??_Draw_14
+    803                  break;
+    804                default:
+    805                  Ret = 1;
+   \                     ??_Draw_8:
+   \   0000023C   0170A0E3           MOV      R7,#+1
+   \   00000240   0A0000EA           B        ??_Draw_5
+    806                }
+    807                break;
+    808              case BI_RLE4:
+    809              case BI_RLE8:
+    810                Ret = _DrawBitmap_RLE(pContext, x0, y0, Width, Height, NumColors, Compression);
+   \                     ??_Draw_7:
+   \   00000244   08008DE5           STR      R0,[SP, #+8]
+   \   00000248   1C009DE5           LDR      R0,[SP, #+28]
+   \   0000024C   0C309DE5           LDR      R3,[SP, #+12]
+   \   00000250   04008DE5           STR      R0,[SP, #+4]
+   \   00000254   14009DE5           LDR      R0,[SP, #+20]
+   \   00000258   0520A0E1           MOV      R2,R5
+   \   0000025C   00008DE5           STR      R0,[SP, #+0]
+   \   00000260   0410A0E1           MOV      R1,R4
+   \   00000264   0600A0E1           MOV      R0,R6
+   \   00000268   ........           BL       _DrawBitmap_RLE
+   \                     ??_Draw_13:
+   \   0000026C   0070A0E1           MOV      R7,R0
+    811                break;
+    812              }
+    813            }
+    814            #if (GUI_WINSUPPORT)
+    815              } WM_ITERATE_END();
+   \                     ??_Draw_5:
+   \   00000270   ........           BL       WM__GetNextIVR
+   \   00000274   000050E3           CMP      R0,#+0
+   \   00000278   89FFFF1A           BNE      ??_Draw_3
+    816            #endif
+    817            GUI_UNLOCK();
+   \                     ??_Draw_2:
+   \   0000027C   ........           BL       GUI_Unlock
+    818            return Ret;
+   \   00000280   0700A0E1           MOV      R0,R7
+   \                     ??_Draw_1:
+   \   00000284   28D08DE2           ADD      SP,SP,#+40       ;; stack cleaning
+   \   00000288   F081BDE8           POP      {R4-R8,PC}       ;; return
+    819          }
+    820          
+    821          /*********************************************************************
+    822          *
+    823          *       Private code
+    824          *
+    825          **********************************************************************
+    826          */
+    827          /*********************************************************************
+    828          *
+    829          *       GUI_BMP__ReadPalette
+    830          */
+
+   \                                 In section .text, align 4, keep-with-next
+    831          int GUI_BMP__ReadPalette(GUI_BMP_CONTEXT * pContext, int NumColors) {
+   \                     GUI_BMP__ReadPalette:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0160A0E1           MOV      R6,R1
+   \   00000008   08D04DE2           SUB      SP,SP,#+8
+   \   0000000C   0040A0E1           MOV      R4,R0
+    832            int i;
+    833            const U8 * pData;
+    834            for (i = 0; i < NumColors; i++) {
+   \   00000010   010056E3           CMP      R6,#+1
+   \   00000014   4A0000BA           BLT      ??GUI_BMP__ReadPalette_0
+   \   00000018   ........           LDR      R5,??DataTable15_1
+   \   0000001C   010016E3           TST      R6,#0x1
+   \   00000020   1500000A           BEQ      ??GUI_BMP__ReadPalette_1
+    835              U8 r, g, b;
+    836              /* Read data of one color */
+    837              if (GUI_BMP__ReadData(pContext, 4, &pData, 0)) {
+   \   00000024   043094E5           LDR      R3,[R4, #+4]
+   \   00000028   0420A0E3           MOV      R2,#+4
+   \   0000002C   0D10A0E1           MOV      R1,SP
+   \   00000030   080094E5           LDR      R0,[R4, #+8]
+   \   00000034   00C094E5           LDR      R12,[R4, #+0]
+   \   00000038   3CFF2FE1           BLX      R12
+   \   0000003C   040050E3           CMP      R0,#+4
+   \   00000040   2D00001A           BNE      ??GUI_BMP__ReadPalette_2
+   \   00000044   040094E5           LDR      R0,[R4, #+4]
+   \   00000048   040080E2           ADD      R0,R0,#+4
+   \   0000004C   040084E5           STR      R0,[R4, #+4]
+    838                return 1; /* Error */
+    839              }
+    840              b = *(pData);
+    841              g = *(pData + 1);
+    842              r = *(pData + 2);
+    843              LCD__aConvTable[i] = LCD_Color2Index(((U32)b << 16) | ((unsigned)g << 8) | r);
+   \   00000050   00109DE5           LDR      R1,[SP, #+0]
+   \   00000054   00009DE5           LDR      R0,[SP, #+0]
+   \   00000058   0110D1E5           LDRB     R1,[R1, #+1]
+   \   0000005C   0000D0E5           LDRB     R0,[R0, #+0]
+   \   00000060   0114A0E1           LSL      R1,R1,#+8
+   \   00000064   000881E1           ORR      R0,R1,R0, LSL #+16
+   \   00000068   00109DE5           LDR      R1,[SP, #+0]
+   \   0000006C   0210D1E5           LDRB     R1,[R1, #+2]
+   \   00000070   000081E1           ORR      R0,R1,R0
+   \   00000074   ........           BL       LCD_Color2Index
+   \   00000078   040085E4           STR      R0,[R5], #+4
+   \                     ??GUI_BMP__ReadPalette_1:
+   \   0000007C   A660B0E1           LSRS     R6,R6,#+1
+   \   00000080   2F00000A           BEQ      ??GUI_BMP__ReadPalette_0
+   \                     ??GUI_BMP__ReadPalette_3:
+   \   00000084   043094E5           LDR      R3,[R4, #+4]
+   \   00000088   0420A0E3           MOV      R2,#+4
+   \   0000008C   0D10A0E1           MOV      R1,SP
+   \   00000090   080094E5           LDR      R0,[R4, #+8]
+   \   00000094   00C094E5           LDR      R12,[R4, #+0]
+   \   00000098   3CFF2FE1           BLX      R12
+   \   0000009C   040050E3           CMP      R0,#+4
+   \   000000A0   1500001A           BNE      ??GUI_BMP__ReadPalette_2
+   \   000000A4   040094E5           LDR      R0,[R4, #+4]
+   \   000000A8   040080E2           ADD      R0,R0,#+4
+   \   000000AC   040084E5           STR      R0,[R4, #+4]
+   \   000000B0   00109DE5           LDR      R1,[SP, #+0]
+   \   000000B4   00009DE5           LDR      R0,[SP, #+0]
+   \   000000B8   0110D1E5           LDRB     R1,[R1, #+1]
+   \   000000BC   0000D0E5           LDRB     R0,[R0, #+0]
+   \   000000C0   0114A0E1           LSL      R1,R1,#+8
+   \   000000C4   000881E1           ORR      R0,R1,R0, LSL #+16
+   \   000000C8   00109DE5           LDR      R1,[SP, #+0]
+   \   000000CC   0210D1E5           LDRB     R1,[R1, #+2]
+   \   000000D0   000081E1           ORR      R0,R1,R0
+   \   000000D4   ........           BL       LCD_Color2Index
+   \   000000D8   040085E4           STR      R0,[R5], #+4
+   \   000000DC   043094E5           LDR      R3,[R4, #+4]
+   \   000000E0   0420A0E3           MOV      R2,#+4
+   \   000000E4   0D10A0E1           MOV      R1,SP
+   \   000000E8   080094E5           LDR      R0,[R4, #+8]
+   \   000000EC   00C094E5           LDR      R12,[R4, #+0]
+   \   000000F0   3CFF2FE1           BLX      R12
+   \   000000F4   040050E3           CMP      R0,#+4
+   \   000000F8   0100000A           BEQ      ??GUI_BMP__ReadPalette_4
+   \                     ??GUI_BMP__ReadPalette_2:
+   \   000000FC   0100A0E3           MOV      R0,#+1
+   \   00000100   100000EA           B        ??GUI_BMP__ReadPalette_5
+   \                     ??GUI_BMP__ReadPalette_4:
+   \   00000104   040094E5           LDR      R0,[R4, #+4]
+   \   00000108   040080E2           ADD      R0,R0,#+4
+   \   0000010C   040084E5           STR      R0,[R4, #+4]
+   \   00000110   00109DE5           LDR      R1,[SP, #+0]
+   \   00000114   00009DE5           LDR      R0,[SP, #+0]
+   \   00000118   0110D1E5           LDRB     R1,[R1, #+1]
+   \   0000011C   0000D0E5           LDRB     R0,[R0, #+0]
+   \   00000120   0114A0E1           LSL      R1,R1,#+8
+   \   00000124   000881E1           ORR      R0,R1,R0, LSL #+16
+   \   00000128   00109DE5           LDR      R1,[SP, #+0]
+   \   0000012C   0210D1E5           LDRB     R1,[R1, #+2]
+   \   00000130   000081E1           ORR      R0,R1,R0
+   \   00000134   ........           BL       LCD_Color2Index
+   \   00000138   040085E4           STR      R0,[R5], #+4
+    844            }
+   \   0000013C   016056E2           SUBS     R6,R6,#+1
+   \   00000140   CFFFFF1A           BNE      ??GUI_BMP__ReadPalette_3
+    845            return 0;
+   \                     ??GUI_BMP__ReadPalette_0:
+   \   00000144   0000A0E3           MOV      R0,#+0
+   \                     ??GUI_BMP__ReadPalette_5:
+   \   00000148   08D08DE2           ADD      SP,SP,#+8        ;; stack cleaning
+   \   0000014C   7080BDE8           POP      {R4-R6,PC}       ;; return
+    846          }
+    847          
+    848          /*********************************************************************
+    849          *
+    850          *       GUI_BMP__ReadData
+    851          */
+
+   \                                 In section .text, align 4, keep-with-next
+    852          int GUI_BMP__ReadData(GUI_BMP_CONTEXT * pContext, int NumBytes, const U8 ** ppData, unsigned StartOfFile) {
+   \                     GUI_BMP__ReadData:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    853            if (StartOfFile) {
+   \   00000008   000053E3           CMP      R3,#+0
+   \   0000000C   0150A0E1           MOV      R5,R1
+    854              pContext->Off = 0;
+   \   00000010   0000A013           MOVNE    R0,#+0
+   \   00000014   0210A0E1           MOV      R1,R2
+   \   00000018   04008415           STRNE    R0,[R4, #+4]
+   \   0000001C   04D04DE2           SUB      SP,SP,#+4
+    855            }
+    856            if (pContext->pfGetData(pContext->pParam, ppData, NumBytes, pContext->Off) != NumBytes) {
+   \   00000020   043094E5           LDR      R3,[R4, #+4]
+   \   00000024   0520A0E1           MOV      R2,R5
+   \   00000028   080094E5           LDR      R0,[R4, #+8]
+   \   0000002C   00C094E5           LDR      R12,[R4, #+0]
+   \   00000030   3CFF2FE1           BLX      R12
+   \   00000034   050050E1           CMP      R0,R5
+    857              return 1;
+   \   00000038   0100A013           MOVNE    R0,#+1
+   \   0000003C   0300001A           BNE      ??GUI_BMP__ReadData_0
+    858            }
+    859            pContext->Off += NumBytes;
+   \   00000040   040094E5           LDR      R0,[R4, #+4]
+   \   00000044   000085E0           ADD      R0,R5,R0
+   \   00000048   040084E5           STR      R0,[R4, #+4]
+    860            return 0;
+   \   0000004C   0000A0E3           MOV      R0,#+0
+   \                     ??GUI_BMP__ReadData_0:
+   \   00000050   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000054   3080BDE8           POP      {R4,R5,PC}       ;; return
+    861          }
+    862          
+    863          /*********************************************************************
+    864          *
+    865          *       GUI_BMP__GetData
+    866          *
+    867          * Parameters:
+    868          *   p           - Pointer to application defined data.
+    869          *   NumBytesReq - Number of bytes requested.
+    870          *   ppData      - Pointer to data pointer. This pointer should be set to
+    871          *                 a valid location.
+    872          *
+    873          * Return value:
+    874          *   Number of data bytes available.
+    875          */
+
+   \                                 In section .text, align 4, keep-with-next
+    876          int GUI_BMP__GetData(void * p, const U8 ** ppData, unsigned NumBytesReq, U32 Off) {
+    877            GUI_BMP_PARAM * pParam;
+    878            pParam = (GUI_BMP_PARAM *)p;
+    879            *ppData = pParam->pFileData + Off;
+   \                     GUI_BMP__GetData:
+   \   00000000   000090E5           LDR      R0,[R0, #+0]
+   \   00000004   000083E0           ADD      R0,R3,R0
+   \   00000008   000081E5           STR      R0,[R1, #+0]
+    880            return NumBytesReq;
+   \   0000000C   0200A0E1           MOV      R0,R2
+   \   00000010   1EFF2FE1           BX       LR               ;; return
+    881          }
+    882          
+    883          /*********************************************************************
+    884          *
+    885          *       GUI_BMP__Init
+    886          */
+
+   \                                 In section .text, align 4, keep-with-next
+    887          int GUI_BMP__Init(GUI_BMP_CONTEXT * pContext, I32 * pWidth, I32 * pHeight, U16 * pBitCount, int * pNumColors, int * pCompression) {
+   \                     GUI_BMP__Init:
+   \   00000000   F0432DE9           PUSH     {R4-R9,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0080A0E1           MOV      R8,R0
+   \   0000000C   20709DE5           LDR      R7,[SP, #+32]
+   \   00000010   24909DE5           LDR      R9,[SP, #+36]
+    888            U16 Type;
+    889            U32 ClrUsed;
+    890            const U8 * pSrc;
+    891            /* Read BITMAPFILEHEADER and BITMAPINFOHEADER */
+    892            if (GUI_BMP__ReadData(pContext, 54, &pSrc, 1)) {
+   \   00000014   0000A0E3           MOV      R0,#+0
+   \   00000018   0140A0E1           MOV      R4,R1
+   \   0000001C   0250A0E1           MOV      R5,R2
+   \   00000020   0360A0E1           MOV      R6,R3
+   \   00000024   040088E5           STR      R0,[R8, #+4]
+   \   00000028   0030A0E3           MOV      R3,#+0
+   \   0000002C   3620A0E3           MOV      R2,#+54
+   \   00000030   0D10A0E1           MOV      R1,SP
+   \   00000034   080098E5           LDR      R0,[R8, #+8]
+   \   00000038   00C098E5           LDR      R12,[R8, #+0]
+   \   0000003C   3CFF2FE1           BLX      R12
+   \   00000040   360050E3           CMP      R0,#+54
+   \   00000044   4100001A           BNE      ??GUI_BMP__Init_1
+   \   00000048   040098E5           LDR      R0,[R8, #+4]
+   \   0000004C   360080E2           ADD      R0,R0,#+54
+   \   00000050   040088E5           STR      R0,[R8, #+4]
+    893              return 1; /* Error */
+    894            }
+    895            /* Get values from BITMAPFILEHEADER */
+    896            Type          = GUI__Read16(&pSrc);  /* Get type from BITMAPFILEHEADER */
+   \   00000054   0D00A0E1           MOV      R0,SP
+   \   00000058   ........           BL       GUI__Read16
+   \   0000005C   0080A0E1           MOV      R8,R0
+    897            pSrc += 12;                          /* Skip rest of BITMAPFILEHEADER */
+    898            /* Get values from BITMAPINFOHEADER */
+    899            pSrc += 4;
+   \   00000060   00009DE5           LDR      R0,[SP, #+0]
+   \   00000064   100080E2           ADD      R0,R0,#+16
+   \   00000068   00008DE5           STR      R0,[SP, #+0]
+    900            *pWidth       = GUI__Read32(&pSrc);
+   \   0000006C   0D00A0E1           MOV      R0,SP
+   \   00000070   ........           BL       GUI__Read32
+   \   00000074   000084E5           STR      R0,[R4, #+0]
+    901            *pHeight      = GUI__Read32(&pSrc);
+   \   00000078   0D00A0E1           MOV      R0,SP
+   \   0000007C   ........           BL       GUI__Read32
+   \   00000080   000085E5           STR      R0,[R5, #+0]
+    902            pSrc += 2;
+   \   00000084   00009DE5           LDR      R0,[SP, #+0]
+   \   00000088   020080E2           ADD      R0,R0,#+2
+   \   0000008C   00008DE5           STR      R0,[SP, #+0]
+    903            *pBitCount    = GUI__Read16(&pSrc);
+   \   00000090   0D00A0E1           MOV      R0,SP
+   \   00000094   ........           BL       GUI__Read16
+   \   00000098   B000C6E1           STRH     R0,[R6, #+0]
+    904            *pCompression = GUI__Read32(&pSrc);
+   \   0000009C   0D00A0E1           MOV      R0,SP
+   \   000000A0   ........           BL       GUI__Read32
+   \   000000A4   000089E5           STR      R0,[R9, #+0]
+    905            pSrc += 12;
+   \   000000A8   00009DE5           LDR      R0,[SP, #+0]
+   \   000000AC   0C0080E2           ADD      R0,R0,#+12
+   \   000000B0   00008DE5           STR      R0,[SP, #+0]
+    906            ClrUsed       = GUI__Read32(&pSrc);
+   \   000000B4   0D00A0E1           MOV      R0,SP
+   \   000000B8   ........           BL       GUI__Read32
+    907            /* Calculate number of colors */
+    908            switch (*pBitCount) {
+   \   000000BC   B010D6E1           LDRH     R1,[R6, #+0]
+   \   000000C0   011041E2           SUB      R1,R1,#+1
+   \   000000C4   1F0051E3           CMP      R1,#+31
+   \   000000C8   01F18F90           ADDLS    PC,PC,R1, LSL #+2
+   \                     ??GUI_BMP__Init_0:
+   \   000000CC   1F00008A           BHI      ??GUI_BMP__Init_1
+   \   000000D0   200000EA           B        ??GUI_BMP__Init_2
+   \   000000D4   1D0000EA           B        ??GUI_BMP__Init_1
+   \   000000D8   1C0000EA           B        ??GUI_BMP__Init_1
+   \   000000DC   330000EA           B        ??GUI_BMP__Init_3
+   \   000000E0   1A0000EA           B        ??GUI_BMP__Init_1
+   \   000000E4   190000EA           B        ??GUI_BMP__Init_1
+   \   000000E8   180000EA           B        ??GUI_BMP__Init_1
+   \   000000EC   310000EA           B        ??GUI_BMP__Init_4
+   \   000000F0   160000EA           B        ??GUI_BMP__Init_1
+   \   000000F4   150000EA           B        ??GUI_BMP__Init_1
+   \   000000F8   140000EA           B        ??GUI_BMP__Init_1
+   \   000000FC   130000EA           B        ??GUI_BMP__Init_1
+   \   00000100   120000EA           B        ??GUI_BMP__Init_1
+   \   00000104   110000EA           B        ??GUI_BMP__Init_1
+   \   00000108   100000EA           B        ??GUI_BMP__Init_1
+   \   0000010C   2B0000EA           B        ??GUI_BMP__Init_5
+   \   00000110   0E0000EA           B        ??GUI_BMP__Init_1
+   \   00000114   0D0000EA           B        ??GUI_BMP__Init_1
+   \   00000118   0C0000EA           B        ??GUI_BMP__Init_1
+   \   0000011C   0B0000EA           B        ??GUI_BMP__Init_1
+   \   00000120   0A0000EA           B        ??GUI_BMP__Init_1
+   \   00000124   090000EA           B        ??GUI_BMP__Init_1
+   \   00000128   080000EA           B        ??GUI_BMP__Init_1
+   \   0000012C   230000EA           B        ??GUI_BMP__Init_5
+   \   00000130   060000EA           B        ??GUI_BMP__Init_1
+   \   00000134   050000EA           B        ??GUI_BMP__Init_1
+   \   00000138   040000EA           B        ??GUI_BMP__Init_1
+   \   0000013C   030000EA           B        ??GUI_BMP__Init_1
+   \   00000140   020000EA           B        ??GUI_BMP__Init_1
+   \   00000144   010000EA           B        ??GUI_BMP__Init_1
+   \   00000148   000000EA           B        ??GUI_BMP__Init_1
+   \   0000014C   1B0000EA           B        ??GUI_BMP__Init_5
+   \                     ??GUI_BMP__Init_1:
+   \   00000150   0100A0E3           MOV      R0,#+1
+   \   00000154   130000EA           B        ??GUI_BMP__Init_6
+    909              case 0:   return 1; /* biBitCount = 0 (JPEG format) not supported. Please convert image ! */
+    910              case 1:   *pNumColors = 2;   break;
+   \                     ??GUI_BMP__Init_2:
+   \   00000158   0210A0E3           MOV      R1,#+2
+   \                     ??GUI_BMP__Init_7:
+   \   0000015C   000050E3           CMP      R0,#+0
+    911              case 4:   *pNumColors = 16;  break;
+    912              case 8:   *pNumColors = 256; break;
+    913              case 16:
+    914              case 24:
+    915              case 32:  *pNumColors = 0;   break;
+    916              default:
+    917                return 1; /* biBitCount should be 1, 4, 8, 16, 24 or 32 */
+    918            }
+    919            if (*pNumColors && ClrUsed) {
+    920              *pNumColors = ClrUsed;
+   \   00000160   0010A011           MOVNE    R1,R0
+   \                     ??GUI_BMP__Init_8:
+   \   00000164   001087E5           STR      R1,[R7, #+0]
+    921            }
+    922            /* Check validity of bmp */
+    923            if ((*pNumColors > LCD_MAX_LOG_COLORS) ||
+    924                (Type != 0x4d42) || /* 'BM' */
+    925                ((*pCompression != BI_RGB) && (*pCompression != BI_RLE8) && (*pCompression != BI_RLE4))) {
+   \   00000168   0100A0E1           MOV      R0,R1
+   \   0000016C   0110A0E3           MOV      R1,#+1
+   \   00000170   401F81E3           ORR      R1,R1,#0x100
+   \   00000174   010050E1           CMP      R0,R1
+   \   00000178   F4FFFFAA           BGE      ??GUI_BMP__Init_1
+   \   0000017C   4200A0E3           MOV      R0,#+66
+   \   00000180   4D0C80E3           ORR      R0,R0,#0x4D00
+   \   00000184   000058E1           CMP      R8,R0
+   \   00000188   F0FFFF1A           BNE      ??GUI_BMP__Init_1
+   \   0000018C   000099E5           LDR      R0,[R9, #+0]
+   \   00000190   000050E3           CMP      R0,#+0
+   \   00000194   0300000A           BEQ      ??GUI_BMP__Init_6
+   \   00000198   010050E3           CMP      R0,#+1
+   \   0000019C   02005013           CMPNE    R0,#+2
+   \   000001A0   EAFFFF1A           BNE      ??GUI_BMP__Init_1
+    926              return 1;
+    927            }
+    928            return 0;
+   \   000001A4   0000A0E3           MOV      R0,#+0
+   \                     ??GUI_BMP__Init_6:
+   \   000001A8   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   000001AC   F083BDE8           POP      {R4-R9,PC}       ;; return
+   \                     ??GUI_BMP__Init_3:
+   \   000001B0   1010A0E3           MOV      R1,#+16
+   \   000001B4   E8FFFFEA           B        ??GUI_BMP__Init_7
+   \                     ??GUI_BMP__Init_4:
+   \   000001B8   401FA0E3           MOV      R1,#+256
+   \   000001BC   E6FFFFEA           B        ??GUI_BMP__Init_7
+   \                     ??GUI_BMP__Init_5:
+   \   000001C0   0010A0E3           MOV      R1,#+0
+   \   000001C4   E6FFFFEA           B        ??GUI_BMP__Init_8
+    929          }
+    930          
+    931          /*********************************************************************
+    932          *
+    933          *       Public code
+    934          *
+    935          **********************************************************************
+    936          */
+    937          /*********************************************************************
+    938          *
+    939          *       GUI_BMP_GetXSizeEx
+    940          */
+
+   \                                 In section .text, align 4, keep-with-next
+    941          int GUI_BMP_GetXSizeEx(GUI_GET_DATA_FUNC * pfGetData, void * p) {
+   \                     GUI_BMP_GetXSizeEx:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   00C0A0E1           MOV      R12,R0
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0100A0E1           MOV      R0,R1
+    942            GUI_BMP_CONTEXT Context;
+    943            const U8 * pSrc;
+    944            Context.pfGetData = pfGetData;
+    945            Context.pParam    = p;
+    946            if (GUI_BMP__ReadData(&Context, 26, &pSrc, 1)) {
+   \   00000010   0030A0E3           MOV      R3,#+0
+   \   00000014   1A20A0E3           MOV      R2,#+26
+   \   00000018   0D10A0E1           MOV      R1,SP
+   \   0000001C   3CFF2FE1           BLX      R12
+   \   00000020   1A0050E3           CMP      R0,#+26
+   \   00000024   0500001A           BNE      ??GUI_BMP_GetXSizeEx_0
+    947              return 1; /* Error */
+    948            }
+    949            pSrc += 18;
+   \   00000028   00009DE5           LDR      R0,[SP, #+0]
+   \   0000002C   120080E2           ADD      R0,R0,#+18
+   \   00000030   00008DE5           STR      R0,[SP, #+0]
+    950            return GUI__Read32(&pSrc);
+   \   00000034   0D00A0E1           MOV      R0,SP
+   \   00000038   ........           BL       GUI__Read32
+   \   0000003C   000000EA           B        ??GUI_BMP_GetXSizeEx_1
+   \                     ??GUI_BMP_GetXSizeEx_0:
+   \   00000040   0100A0E3           MOV      R0,#+1
+   \                     ??GUI_BMP_GetXSizeEx_1:
+   \   00000044   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000048   0080BDE8           POP      {PC}             ;; return
+    951          }
+    952          /*********************************************************************
+    953          *
+    954          *       GUI_BMP_GetXSize
+    955          */
+
+   \                                 In section .text, align 4, keep-with-next
+    956          int GUI_BMP_GetXSize(const void * pBMP) {
+   \                     GUI_BMP_GetXSize:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   0CD04DE2           SUB      SP,SP,#+12
+    957            GUI_BMP_PARAM Param = {0};
+    958            Param.pFileData = (const U8 *)pBMP;
+   \   00000008   04008DE5           STR      R0,[SP, #+4]
+    959            return GUI_BMP_GetXSizeEx(GUI_BMP__GetData, &Param);
+   \   0000000C   0030A0E3           MOV      R3,#+0
+   \   00000010   1A20A0E3           MOV      R2,#+26
+   \   00000014   0D10A0E1           MOV      R1,SP
+   \   00000018   04008DE2           ADD      R0,SP,#+4
+   \   0000001C   ........           BL       GUI_BMP__GetData
+   \   00000020   1A0050E3           CMP      R0,#+26
+   \   00000024   0500001A           BNE      ??GUI_BMP_GetXSize_0
+   \   00000028   00009DE5           LDR      R0,[SP, #+0]
+   \   0000002C   120080E2           ADD      R0,R0,#+18
+   \   00000030   00008DE5           STR      R0,[SP, #+0]
+   \   00000034   0D00A0E1           MOV      R0,SP
+   \   00000038   ........           BL       GUI__Read32
+   \   0000003C   000000EA           B        ??GUI_BMP_GetXSize_1
+   \                     ??GUI_BMP_GetXSize_0:
+   \   00000040   0100A0E3           MOV      R0,#+1
+   \                     ??GUI_BMP_GetXSize_1:
+   \   00000044   0CD08DE2           ADD      SP,SP,#+12       ;; stack cleaning
+   \   00000048   0080BDE8           POP      {PC}             ;; return
+    960          }
+    961          
+    962          /*********************************************************************
+    963          *
+    964          *       GUI_BMP_GetYSizeEx
+    965          */
+
+   \                                 In section .text, align 4, keep-with-next
+    966          int GUI_BMP_GetYSizeEx(GUI_GET_DATA_FUNC * pfGetData, void * p) {
+   \                     GUI_BMP_GetYSizeEx:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   00C0A0E1           MOV      R12,R0
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0100A0E1           MOV      R0,R1
+    967            GUI_BMP_CONTEXT Context;
+    968            const U8 * pSrc;
+    969            Context.pfGetData = pfGetData;
+    970            Context.pParam    = p;
+    971            if (GUI_BMP__ReadData(&Context, 26, &pSrc, 1)) {
+   \   00000010   0030A0E3           MOV      R3,#+0
+   \   00000014   1A20A0E3           MOV      R2,#+26
+   \   00000018   0D10A0E1           MOV      R1,SP
+   \   0000001C   3CFF2FE1           BLX      R12
+   \   00000020   1A0050E3           CMP      R0,#+26
+   \   00000024   0800001A           BNE      ??GUI_BMP_GetYSizeEx_0
+    972              return 1; /* Error */
+    973            }
+    974            pSrc += 22;
+   \   00000028   00009DE5           LDR      R0,[SP, #+0]
+   \   0000002C   160080E2           ADD      R0,R0,#+22
+   \   00000030   00008DE5           STR      R0,[SP, #+0]
+    975            return labs((int)GUI__Read32(&pSrc));
+   \   00000034   0D00A0E1           MOV      R0,SP
+   \   00000038   ........           BL       GUI__Read32
+   \   0000003C   000050E3           CMP      R0,#+0
+   \   00000040   0200005A           BPL      ??GUI_BMP_GetYSizeEx_1
+   \   00000044   000060E2           RSB      R0,R0,#+0
+   \   00000048   000000EA           B        ??GUI_BMP_GetYSizeEx_1
+   \                     ??GUI_BMP_GetYSizeEx_0:
+   \   0000004C   0100A0E3           MOV      R0,#+1
+   \                     ??GUI_BMP_GetYSizeEx_1:
+   \   00000050   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000054   0080BDE8           POP      {PC}             ;; return
+    976          }
+    977          
+    978          /*********************************************************************
+    979          *
+    980          *       GUI_BMP_GetYSize
+    981          */
+
+   \                                 In section .text, align 4, keep-with-next
+    982          int GUI_BMP_GetYSize(const void * pBMP) {
+   \                     GUI_BMP_GetYSize:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   0CD04DE2           SUB      SP,SP,#+12
+    983            GUI_BMP_PARAM Param = {0};
+    984            Param.pFileData = (const U8 *)pBMP;
+   \   00000008   04008DE5           STR      R0,[SP, #+4]
+    985            return GUI_BMP_GetYSizeEx(GUI_BMP__GetData, &Param);
+   \   0000000C   0030A0E3           MOV      R3,#+0
+   \   00000010   1A20A0E3           MOV      R2,#+26
+   \   00000014   0D10A0E1           MOV      R1,SP
+   \   00000018   04008DE2           ADD      R0,SP,#+4
+   \   0000001C   ........           BL       GUI_BMP__GetData
+   \   00000020   1A0050E3           CMP      R0,#+26
+   \   00000024   0800001A           BNE      ??GUI_BMP_GetYSize_0
+   \   00000028   00009DE5           LDR      R0,[SP, #+0]
+   \   0000002C   160080E2           ADD      R0,R0,#+22
+   \   00000030   00008DE5           STR      R0,[SP, #+0]
+   \   00000034   0D00A0E1           MOV      R0,SP
+   \   00000038   ........           BL       GUI__Read32
+   \   0000003C   000050E3           CMP      R0,#+0
+   \   00000040   0200005A           BPL      ??GUI_BMP_GetYSize_1
+   \   00000044   000060E2           RSB      R0,R0,#+0
+   \   00000048   000000EA           B        ??GUI_BMP_GetYSize_1
+   \                     ??GUI_BMP_GetYSize_0:
+   \   0000004C   0100A0E3           MOV      R0,#+1
+   \                     ??GUI_BMP_GetYSize_1:
+   \   00000050   0CD08DE2           ADD      SP,SP,#+12       ;; stack cleaning
+   \   00000054   0080BDE8           POP      {PC}             ;; return
+    986          }
+    987          
+    988          /*********************************************************************
+    989          *
+    990          *       GUI_BMP_DrawEx
+    991          */
+
+   \                                 In section .text, align 4, keep-with-next
+    992          int  GUI_BMP_DrawEx(GUI_GET_DATA_FUNC * pfGetData, void * p, int x0, int y0) {
+   \                     GUI_BMP_DrawEx:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   0CD04DE2           SUB      SP,SP,#+12
+   \   00000008   02C0A0E1           MOV      R12,R2
+    993            GUI_BMP_CONTEXT Context;
+    994            Context.pfGetData = pfGetData;
+   \   0000000C   00008DE5           STR      R0,[SP, #+0]
+    995            Context.pParam    = p;
+   \   00000010   08108DE5           STR      R1,[SP, #+8]
+    996            return _Draw(x0, y0, &Context);
+   \   00000014   0D20A0E1           MOV      R2,SP
+   \   00000018   0310A0E1           MOV      R1,R3
+   \   0000001C   0C00A0E1           MOV      R0,R12
+   \   00000020   ........           BL       _Draw
+   \   00000024   0CD08DE2           ADD      SP,SP,#+12       ;; stack cleaning
+   \   00000028   0080BDE8           POP      {PC}             ;; return
+    997          }
+    998          
+    999          /*********************************************************************
+   1000          *
+   1001          *       GUI_BMP_Draw
+   1002          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1003          int GUI_BMP_Draw(const void * pBMP, int x0, int y0) {
+   \                     GUI_BMP_Draw:
+   \   00000000   0130A0E1           MOV      R3,R1
+   \   00000004   00402DE9           PUSH     {LR}
+   \   00000008   0210A0E1           MOV      R1,R2
+   1004            GUI_BMP_PARAM Param = {0};
+   1005            Param.pFileData = (const U8 *)pBMP;
+   1006            return GUI_BMP_DrawEx(GUI_BMP__GetData, &Param, x0, y0);
+   \   0000000C   ........           LDR      R2,??DataTable15_2
+   \   00000010   14D04DE2           SUB      SP,SP,#+20
+   \   00000014   00008DE5           STR      R0,[SP, #+0]
+   \   00000018   04208DE5           STR      R2,[SP, #+4]
+   \   0000001C   0CD08DE5           STR      SP,[SP, #+12]
+   \   00000020   04208DE2           ADD      R2,SP,#+4
+   \   00000024   0300A0E1           MOV      R0,R3
+   \   00000028   ........           BL       _Draw
+   \   0000002C   14D08DE2           ADD      SP,SP,#+20       ;; stack cleaning
+   \   00000030   0080BDE8           POP      {PC}             ;; return
+   1007          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable11:
+   \   00000000   ........           DC32     _Context
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable11_1:
+   \   00000000   ........           DC32     GUI_Context
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12:
+   \   00000000   ........           DC32     LCD_pColorIndex
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_1:
+   \   00000000   ........           DC32     LCD__aConvTable
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable15:
+   \   00000000   ........           DC32     GUI_Context
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable15_1:
+   \   00000000   ........           DC32     LCD__aConvTable
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable15_2:
+   \   00000000   ........           DC32     GUI_BMP__GetData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant {0L, 1L}>`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   000000000100       DC32 0, 1
+   \              0000        
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant {0}>`:
+   \   00000000                      ; Initializer data, 24 bytes
+   \   00000000   00000000           DC32 0
+   \   00000004   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              00000000    
+   \   0000000E   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              00000000    
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant {0}>_1`:
+   \   00000000                      ; Initializer data, 24 bytes
+   \   00000000   00000000           DC32 0
+   \   00000004   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              00000000    
+   \   0000000E   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              00000000    
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant {0}>_2`:
+   \   00000000                      ; Initializer data, 24 bytes
+   \   00000000   00000000           DC32 0
+   \   00000004   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              00000000    
+   \   0000000E   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              00000000    
+   1008          
+   1009          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function             .cstack
+     --------             -------
+     GUI_BMP_Draw             24
+     GUI_BMP_DrawEx           16
+     GUI_BMP_GetXSize         16
+     GUI_BMP_GetXSizeEx        8
+     GUI_BMP_GetYSize         16
+     GUI_BMP_GetYSizeEx        8
+     GUI_BMP__GetData          0
+     GUI_BMP__Init            32
+     GUI_BMP__ReadData        16
+     GUI_BMP__ReadPalette     24
+     _Draw                    64
+     _DrawBitmap_16bpp        80
+     _DrawBitmap_Pal          96
+     _DrawBitmap_RGB          80
+     _DrawBitmap_RLE          88
+     _GetClipParam            16
+     _NextPixel_End           48
+     _NextPixel_NextLine      48
+     _NextPixel_SetPixel      48
+     _NextPixel_Start         24
+
+
+   Section sizes:
+
+     Function/Label       Bytes
+     --------------       -----
+     _Context               48
+     _NextPixel_Start      184
+     _NextPixel_SetPixel   396
+     _NextPixel_NextLine   176
+     _NextPixel_End        160
+     _NextPixel_API         16
+     _DrawBitmap_RLE      1276
+     _GetClipParam         408
+     _DrawBitmap_Pal       760
+     _DrawBitmap_16bpp     496
+     _DrawBitmap_RGB       580
+     _Draw                 652
+     GUI_BMP__ReadPalette  336
+     GUI_BMP__ReadData      88
+     GUI_BMP__GetData       20
+     GUI_BMP__Init         456
+     GUI_BMP_GetXSizeEx     76
+     GUI_BMP_GetXSize       76
+     GUI_BMP_GetYSizeEx     88
+     GUI_BMP_GetYSize       88
+     GUI_BMP_DrawEx         44
+     GUI_BMP_Draw           52
+     ??DataTable11           4
+     ??DataTable11_1         4
+     ??DataTable12           4
+     ??DataTable12_1         4
+     ??DataTable15           4
+     ??DataTable15_1         4
+     ??DataTable15_2         4
+     ?<Constant {0L, 1L}>    8
+     ?<Constant {0}>        24
+     ?<Constant {0}>_1      24
+     ?<Constant {0}>_2      24
+
+ 
+    48 bytes in section .bss
+    16 bytes in section .data
+    72 bytes in section .rodata
+ 6 448 bytes in section .text
+ 
+ 6 448 bytes of CODE  memory
+    72 bytes of CONST memory
+    64 bytes of DATA  memory
+
+Errors: none
+Warnings: none

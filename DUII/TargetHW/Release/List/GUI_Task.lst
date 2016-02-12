@@ -1,0 +1,508 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:12:48 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\GUI\GUI_Task.c                          #
+#    Command line =  C:\DUII\TargetHW\GUI\GUI_Task.c -D DEBUG=1 -D            #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\GUI_Task.lst               #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\GUI_Task.o                  #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\GUI\GUI_Task.c
+      1          /*********************************************************************
+      2          *                SEGGER Microcontroller GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 1996 - 2010  SEGGER Microcontroller GmbH & Co. KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          ** emWin V5.06 - Graphical user interface for embedded applications **
+     13          emWin is protected by international copyright laws.   Knowledge of the
+     14          source code may not be used to write a similar product.  This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : GUITASK.C
+     19          Purpose     : Saves/Restores task context with supported OSs.
+     20                        It also uses a resource semaphore.
+     21          
+     22            The following externals are used and should typically be defined
+     23            in GUI_X.c:
+     24            
+     25              U32  GUI_X_GetTaskId();
+     26              void GUI_X_Unlock();
+     27              void GUI_X_Lock();
+     28          
+     29          ---------------------------END-OF-HEADER------------------------------
+     30          */
+     31          
+     32          #include <stddef.h>           /* needed for definition of NULL */
+     33          
+     34          #include "GUI_Private.h"
+     35          
+     36          /*********************************************************************
+     37          *
+     38          *       Configuration defaults
+     39          *
+     40          **********************************************************************
+     41          */
+     42          
+     43          #ifndef GUI_MAXTASK
+     44            #define GUI_MAXTASK (4)
+     45          #endif
+     46          
+     47          #ifndef GUI_MAX_LOCK_NESTING
+     48            #define GUI_MAX_LOCK_NESTING 48   /* If a lot of nested dialogs are used, this may not be sufficient. */
+     49          #endif
+     50          
+     51          #if GUI_OS
+     52          
+     53          /*********************************************************************
+     54          *
+     55          *       Static data
+     56          *
+     57          **********************************************************************
+     58          */
+     59          
+     60          typedef struct {
+     61            U32  TaskID;
+     62            GUI_CONTEXT Context;
+     63          } SAVE_CONTEXT;
+     64          
+
+   \                                 In section .data, align 4
+     65          static SAVE_CONTEXT * _aSave;
+   \                     _aSave:
+   \   00000000   00000000           DC8 0, 0, 0, 0
+   \   00000004   FFFFFFFF           DC32 -1
+   \   00000008   00000000           DC32 0
+   \   0000000C   04000000           DC32 4
+     66          
+     67          static int _CurrentTaskNo = -1;
+     68          static U32 _TaskIDLock    =  0;
+     69          
+     70          static int _MaxTask       = GUI_MAXTASK;
+     71          
+     72          /*********************************************************************
+     73          *
+     74          *       Public data
+     75          *
+     76          **********************************************************************
+     77          */
+     78          int GUITASK__EntranceCnt = 0;
+   \                     GUITASK__EntranceCnt:
+   \   00000010   00000000           DC32 0
+     79          
+     80          /*********************************************************************
+     81          *
+     82          *       Static code
+     83          *
+     84          **********************************************************************
+     85          */
+     86          /*********************************************************************
+     87          *
+     88          *       _GetTaskNo
+     89          */
+     90          static int _GetTaskNo(void) {
+     91            int i;
+     92            U32 TaskId;
+     93          
+     94            for (i = 0; i < _MaxTask; i++) {
+     95              TaskId = GUI_X_GetTaskId();
+     96              if (_aSave[i].TaskID == TaskId) {
+     97                return i;
+     98              }
+     99              if (_aSave[i].TaskID == 0) {
+    100                _aSave[i].TaskID = TaskId;
+    101                return i;
+    102              }
+    103            }
+    104            GUI_DEBUG_ERROROUT("No Context available for task. Increase number of maximum tasks!");
+    105            return 0;
+    106          }
+    107          
+    108          /*********************************************************************
+    109          *
+    110          *       Public code
+    111          *
+    112          **********************************************************************
+    113          */
+    114          /*********************************************************************
+    115          *
+    116          *       GUI_Unlock
+    117          */
+
+   \                                 In section .text, align 4, keep-with-next
+    118          void GUI_Unlock(void) {
+    119            if (--GUITASK__EntranceCnt == 0) {
+   \                     GUI_Unlock:
+   \   00000000   ........           LDR      R0,??DataTable5
+   \   00000004   101090E5           LDR      R1,[R0, #+16]
+   \   00000008   011051E2           SUBS     R1,R1,#+1
+   \   0000000C   101080E5           STR      R1,[R0, #+16]
+   \   00000010   0000000A           BEQ      ??GUI_Unlock_0
+    120              GUI_X_Unlock();
+   \   00000014   1EFF2FE1           BX       LR
+    121            }
+   \                     ??GUI_Unlock_0:
+   \   00000018   00402DE9           PUSH     {LR}
+   \   0000001C   04D04DE2           SUB      SP,SP,#+4
+   \   00000020   ........           BL       GUI_X_Unlock
+    122            /* Test if GUITASK__EntranceCnt is in reasonable range ... Not required in release builds */
+    123            GUI_DEBUG_ERROROUT_IF((GUITASK__EntranceCnt < 0), "GUITASK.c: GUI_Unlock() GUITASK__EntranceCnt underflow ");
+    124          }
+   \   00000024   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000028   0080BDE8           POP      {PC}             ;; return
+    125          
+    126          /*********************************************************************
+    127          *
+    128          *       GUI_Lock
+    129          */
+
+   \                                 In section .text, align 4, keep-with-next
+    130          void GUI_Lock(void) {
+   \                     GUI_Lock:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+    131            if (GUITASK__EntranceCnt == 0) {
+   \   00000004   ........           LDR      R4,??DataTable5
+   \   00000008   100094E5           LDR      R0,[R4, #+16]
+   \   0000000C   000050E3           CMP      R0,#+0
+   \   00000010   0300000A           BEQ      ??GUI_Lock_0
+    132              GUI_X_Lock();
+    133              _TaskIDLock = GUI_X_GetTaskId();         /* Save task ID */
+    134            } else {
+    135              if (_TaskIDLock != GUI_X_GetTaskId()) {
+   \   00000014   ........           BL       GUI_X_GetTaskId
+   \   00000018   081094E5           LDR      R1,[R4, #+8]
+   \   0000001C   000051E1           CMP      R1,R0
+   \   00000020   0200000A           BEQ      ??GUI_Lock_1
+    136                GUI_X_Lock();
+   \                     ??GUI_Lock_0:
+   \   00000024   ........           BL       GUI_X_Lock
+    137                _TaskIDLock = GUI_X_GetTaskId();         /* Save task ID */
+   \   00000028   ........           BL       GUI_X_GetTaskId
+   \   0000002C   080084E5           STR      R0,[R4, #+8]
+    138              }
+    139            }
+    140            if (++GUITASK__EntranceCnt == 1) {
+   \                     ??GUI_Lock_1:
+   \   00000030   100094E5           LDR      R0,[R4, #+16]
+   \   00000034   010080E2           ADD      R0,R0,#+1
+   \   00000038   100084E5           STR      R0,[R4, #+16]
+   \   0000003C   010050E3           CMP      R0,#+1
+   \   00000040   2200001A           BNE      ??GUI_Lock_2
+    141              int TaskNo = _GetTaskNo();
+   \   00000044   0060A0E3           MOV      R6,#+0
+   \   00000048   A050A0E3           MOV      R5,#+160
+   \   0000004C   000000EA           B        ??GUI_Lock_3
+   \                     ??GUI_Lock_4:
+   \   00000050   016086E2           ADD      R6,R6,#+1
+   \                     ??GUI_Lock_3:
+   \   00000054   0C0094E5           LDR      R0,[R4, #+12]
+   \   00000058   000056E1           CMP      R6,R0
+   \   0000005C   0060A0A3           MOVGE    R6,#+0
+   \   00000060   080000AA           BGE      ??GUI_Lock_5
+   \   00000064   ........           BL       GUI_X_GetTaskId
+   \   00000068   950601E0           MUL      R1,R5,R6
+   \   0000006C   002094E5           LDR      R2,[R4, #+0]
+   \   00000070   023091E7           LDR      R3,[R1, +R2]
+   \   00000074   000053E1           CMP      R3,R0
+   \   00000078   0200000A           BEQ      ??GUI_Lock_5
+   \   0000007C   000053E3           CMP      R3,#+0
+   \   00000080   F2FFFF1A           BNE      ??GUI_Lock_4
+   \   00000084   020081E7           STR      R0,[R1, +R2]
+    142              if (TaskNo != _CurrentTaskNo) {
+   \                     ??GUI_Lock_5:
+   \   00000088   040094E5           LDR      R0,[R4, #+4]
+   \   0000008C   000056E1           CMP      R6,R0
+   \   00000090   0E00000A           BEQ      ??GUI_Lock_2
+    143                /* Save data of current task */
+    144                if (_CurrentTaskNo>=0) {  /* Make sure _CurrentTaskNo is valid */
+   \   00000094   000050E3           CMP      R0,#+0
+   \   00000098   0B00004A           BMI      ??GUI_Lock_6
+    145                  _aSave[_CurrentTaskNo].Context = GUI_Context;
+   \   0000009C   007094E5           LDR      R7,[R4, #+0]
+   \   000000A0   957020E0           MLA      R0,R5,R0,R7
+   \   000000A4   ........           LDR      R8,??DataTable5_1
+   \   000000A8   040080E2           ADD      R0,R0,#+4
+   \   000000AC   0810A0E1           MOV      R1,R8
+   \   000000B0   9C20A0E3           MOV      R2,#+156
+   \   000000B4   ........           BL       __aeabi_memcpy4
+    146                  /* Load data of this task */
+    147                  GUI_Context = _aSave[TaskNo].Context;
+   \   000000B8   957621E0           MLA      R1,R5,R6,R7
+   \   000000BC   0800A0E1           MOV      R0,R8
+   \   000000C0   041081E2           ADD      R1,R1,#+4
+   \   000000C4   9C20A0E3           MOV      R2,#+156
+   \   000000C8   ........           BL       __aeabi_memcpy4
+    148                }
+    149                _CurrentTaskNo = TaskNo;
+   \                     ??GUI_Lock_6:
+   \   000000CC   046084E5           STR      R6,[R4, #+4]
+    150              }
+    151            }
+    152            /* Test if GUITASK__EntranceCnt is in reasonable range ... Not required in release builds */
+    153            GUI_DEBUG_ERROROUT_IF((GUITASK__EntranceCnt > GUI_MAX_LOCK_NESTING), "GUITASK.c: GUI_Lock() GUITASK__EntranceCnt overflow ");
+    154          }
+   \                     ??GUI_Lock_2:
+   \   000000D0   F081BDE8           POP      {R4-R8,PC}       ;; return
+    155          
+    156          /*********************************************************************
+    157          *
+    158          *       GUITASK_Init
+    159          */
+
+   \                                 In section .text, align 4, keep-with-next
+    160          void GUITASK_Init(void) {
+   \                     GUITASK_Init:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+    161            _aSave = (SAVE_CONTEXT *)GUI_ALLOC_GetFixedBlock(sizeof(SAVE_CONTEXT) * _MaxTask);
+   \   00000004   ........           LDR      R4,??DataTable5
+   \   00000008   A010A0E3           MOV      R1,#+160
+   \   0000000C   0C0094E5           LDR      R0,[R4, #+12]
+   \   00000010   910000E0           MUL      R0,R1,R0
+   \   00000014   ........           BL       GUI_ALLOC_GetFixedBlock
+   \   00000018   000084E5           STR      R0,[R4, #+0]
+    162            while (_aSave == NULL); // Error: Not enough memory. Stop execution here.
+   \                     ??GUITASK_Init_0:
+   \   0000001C   000050E3           CMP      R0,#+0
+   \   00000020   FDFFFF0A           BEQ      ??GUITASK_Init_0
+    163            _CurrentTaskNo =-1;   /* Invalidate */
+   \   00000024   0000E0E3           MVN      R0,#+0
+   \   00000028   040084E5           STR      R0,[R4, #+4]
+    164            GUI_X_InitOS();
+   \   0000002C   1040BDE8           POP      {R4,LR}
+   \   00000030   ........           B        GUI_X_InitOS     ;; tailcall
+    165          }
+    166          
+    167          
+    168          /*********************************************************************
+    169          *
+    170          *       GUITASK_CopyContext
+    171          */
+
+   \                                 In section .text, align 4, keep-with-next
+    172          void GUITASK_CopyContext(void) {
+   \                     GUITASK_CopyContext:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+    173            int i;
+    174            for (i = 0; i < _MaxTask; i++) {
+   \   00000004   ........           LDR      R0,??DataTable5
+   \   00000008   0C4090E5           LDR      R4,[R0, #+12]
+   \   0000000C   010054E3           CMP      R4,#+1
+   \   00000010   190000BA           BLT      ??GUITASK_CopyContext_0
+   \   00000014   005090E5           LDR      R5,[R0, #+0]
+   \   00000018   0060A0E3           MOV      R6,#+0
+   \   0000001C   ........           LDR      R7,??DataTable5_1
+   \   00000020   010014E3           TST      R4,#0x1
+   \   00000024   0400000A           BEQ      ??GUITASK_CopyContext_1
+    175              _aSave[i].Context = GUI_Context;
+   \   00000028   040085E2           ADD      R0,R5,#+4
+   \   0000002C   0710A0E1           MOV      R1,R7
+   \   00000030   9C20A0E3           MOV      R2,#+156
+   \   00000034   ........           BL       __aeabi_memcpy4
+    176              _aSave[i].TaskID  = 0;
+   \   00000038   A06085E4           STR      R6,[R5], #+160
+   \                     ??GUITASK_CopyContext_1:
+   \   0000003C   A440B0E1           LSRS     R4,R4,#+1
+   \   00000040   0D00000A           BEQ      ??GUITASK_CopyContext_0
+   \                     ??GUITASK_CopyContext_2:
+   \   00000044   040085E2           ADD      R0,R5,#+4
+   \   00000048   0710A0E1           MOV      R1,R7
+   \   0000004C   9C20A0E3           MOV      R2,#+156
+   \   00000050   ........           BL       __aeabi_memcpy4
+   \   00000054   006085E5           STR      R6,[R5, #+0]
+   \   00000058   A40085E2           ADD      R0,R5,#+164
+   \   0000005C   0710A0E1           MOV      R1,R7
+   \   00000060   9C20A0E3           MOV      R2,#+156
+   \   00000064   ........           BL       __aeabi_memcpy4
+   \   00000068   A06085E5           STR      R6,[R5, #+160]
+    177            }
+   \   0000006C   014044E2           SUB      R4,R4,#+1
+   \   00000070   505F85E2           ADD      R5,R5,#+320
+   \   00000074   000054E3           CMP      R4,#+0
+   \   00000078   F1FFFF1A           BNE      ??GUITASK_CopyContext_2
+    178          }
+   \                     ??GUITASK_CopyContext_0:
+   \   0000007C   F080BDE8           POP      {R4-R7,PC}       ;; return
+    179          
+    180          /*********************************************************************
+    181          *
+    182          *       GUITASK_GetpContext
+    183          */
+
+   \                                 In section .text, align 4, keep-with-next
+    184          GUI_CONTEXT * GUITASK_GetpContext(int Index) {
+   \                     GUITASK_GetpContext:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0040A0E1           MOV      R4,R0
+    185            GUI_CONTEXT * pContext;
+    186            pContext = NULL;
+   \   0000000C   0050A0E3           MOV      R5,#+0
+    187            GUI_Lock();
+   \   00000010   ........           BL       GUI_Lock
+    188            if (Index < _MaxTask) {
+   \   00000014   ........           LDR      R0,??DataTable5
+   \   00000018   0C1090E5           LDR      R1,[R0, #+12]
+   \   0000001C   010054E1           CMP      R4,R1
+   \   00000020   030000AA           BGE      ??GUITASK_GetpContext_0
+    189              pContext = &_aSave[Index].Context;
+   \   00000024   A010A0E3           MOV      R1,#+160
+   \   00000028   002090E5           LDR      R2,[R0, #+0]
+   \   0000002C   912422E0           MLA      R2,R1,R4,R2
+   \   00000030   045082E2           ADD      R5,R2,#+4
+    190            }
+    191            GUI_Unlock();
+   \                     ??GUITASK_GetpContext_0:
+   \   00000034   101090E5           LDR      R1,[R0, #+16]
+   \   00000038   011051E2           SUBS     R1,R1,#+1
+   \   0000003C   101080E5           STR      R1,[R0, #+16]
+   \   00000040   0000001A           BNE      ??GUITASK_GetpContext_1
+   \   00000044   ........           BL       GUI_X_Unlock
+    192            return pContext;
+   \                     ??GUITASK_GetpContext_1:
+   \   00000048   0500A0E1           MOV      R0,R5
+   \   0000004C   04D08DE2           ADD      SP,SP,#+4
+   \   00000050   3080BDE8           POP      {R4,R5,PC}       ;; return
+    193          }
+    194          
+    195          /*********************************************************************
+    196          *
+    197          *       GUITASK_SetMaxTask
+    198          */
+
+   \                                 In section .text, align 4, keep-with-next
+    199          void GUITASK_SetMaxTask(int MaxTask) {
+   \                     GUITASK_SetMaxTask:
+   \   00000000   ........           LDR      R1,??DataTable5
+   \   00000004   002091E5           LDR      R2,[R1, #+0]
+    200            while (_aSave); // Error: This function needs to be called from GUI_X_Config()!
+   \                     ??GUITASK_SetMaxTask_0:
+   \   00000008   000052E3           CMP      R2,#+0
+   \   0000000C   FDFFFF1A           BNE      ??GUITASK_SetMaxTask_0
+    201            _MaxTask = MaxTask;
+   \   00000010   0C0081E5           STR      R0,[R1, #+12]
+    202          }
+   \   00000014   1EFF2FE1           BX       LR               ;; return
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5:
+   \   00000000   ........           DC32     _aSave
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5_1:
+   \   00000000   ........           DC32     GUI_Context
+    203          
+    204          #if defined(WIN32) && defined(_DEBUG)
+    205          
+    206          /*********************************************************************
+    207          *
+    208          *       GUITASK_AssertLock
+    209          */
+    210          void GUITASK_AssertLock(void) {  
+    211            if (!GUITASK__EntranceCnt) {
+    212              GUI_DEBUG_ERROROUT("GUITASK.c: GUITASK_AssertLock failed!");
+    213            }
+    214          }
+    215          
+    216          /*********************************************************************
+    217          *
+    218          *       GUITASK_AssertNoLock
+    219          */
+    220          void GUITASK_AssertNoLock(void) {  
+    221            GUI_Lock();
+    222            if (GUITASK__EntranceCnt > 1) {
+    223              GUI_DEBUG_ERROROUT("GUITASK.c: GUITASK_AssertNoLock failed!");
+    224            }
+    225            GUI_Unlock();
+    226          }
+    227          
+    228          #endif
+    229          
+    230          #else
+    231          
+    232          /*********************************************************************
+    233          *
+    234          *       Dummy Kernel routines
+    235          *
+    236          * The routines below are dummies in case configuration tells us not
+    237          * to use any kernel. In this case the routines below should
+    238          * not be required, but it can not hurt to have them. The linker
+    239          * will eliminate them anyhow.
+    240          */
+    241          void GUI_Unlock(void);
+    242          void GUI_Unlock(void) {}
+    243          void GUI_Lock(void);
+    244          void GUI_Lock(void) {}
+    245          void GUITASK_Init(void);
+    246          void GUITASK_Init(void) {}
+    247          void GUITASK_StoreDefaultContext(void);
+    248          void GUITASK_StoreDefaultContext(void) {}
+    249          
+    250          #endif
+    251          
+    252          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function            .cstack
+     --------            -------
+     GUITASK_CopyContext     20
+     GUITASK_GetpContext     16
+     GUITASK_Init             8
+     GUITASK_SetMaxTask       0
+     GUI_Lock                24
+     GUI_Unlock               8
+
+
+   Section sizes:
+
+     Function/Label       Bytes
+     --------------       -----
+     _aSave                 20
+     _CurrentTaskNo
+     _TaskIDLock
+     _MaxTask
+     GUITASK__EntranceCnt
+     GUI_Unlock             44
+     GUI_Lock              212
+     GUITASK_Init           52
+     GUITASK_CopyContext   128
+     GUITASK_GetpContext    84
+     GUITASK_SetMaxTask     24
+     ??DataTable5            4
+     ??DataTable5_1          4
+
+ 
+  20 bytes in section .data
+ 552 bytes in section .text
+ 
+ 552 bytes of CODE memory
+  20 bytes of DATA memory
+
+Errors: none
+Warnings: none

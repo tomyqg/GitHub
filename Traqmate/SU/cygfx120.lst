@@ -1,0 +1,616 @@
+C51 COMPILER V9.51   CYGFX120                                                              01/05/2016 18:47:25 PAGE 1   
+
+
+C51 COMPILER V9.51, COMPILATION OF MODULE CYGFX120
+OBJECT MODULE PLACED IN .\cygfx120.obj
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE ..\CommonFiles\cygfx120.c OPTIMIZE(SIZE) BROWSE MDU_F120 INCDIR(..\..\C51\I
+                    -NC\;..\CommonFiles\;..\SU\) DB OE DEFINE(SENSOR,EXTCLK6,NODEBUG,UBLOX,DISPLAYATTACHED) DEBUG OBJECTEXTEND PRINT(.\cygfx1
+                    -20.lst) OBJECT(.\cygfx120.obj)
+
+line level    source
+
+   1          // Part of traqmate.c
+   2          // 11/10/2003
+   3          // Author: GAStephens
+   4          //
+   5          // This file contains all the common functions to setup the Cygnal 8051 for use in the 
+   6          // traqmate program including the system clock, SPI port, UARTs, timers, and
+   7          // crossbar switch. 
+   8          
+   9          #ifdef SENSOR
+  10          #include <sensor.h>
+  11          #ifdef TSIP
+              #include <tsip.h>
+              #else
+  14          #include <ubx.h>
+  15          #endif
+  16          #endif
+  17          #ifdef DISPLAY
+              #include <display.h>
+              #endif
+  20          #include <stdlib.h>
+  21          
+  22          // This function starts an interrupt-driven transmit of the trasmit buffer 
+  23          // on designated UART. Blocks only if previous transmission is in progress.
+  24          void XmitUART(comporthandle *handle, u16 numbytes) {
+  25   1      
+  26   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+  27   1      
+  28   1      // ***** don't think we need to check CTS here but maybe
+  29   1              while (0 != handle->txbytes) ;          // wait for previous transmission to finish
+  30   1      //      while (0 != CTS[handle->port]);
+  31   1              handle->txptr = handle->txbuff;
+  32   1              handle->txbytes = numbytes;
+  33   1              if (0 == handle->port) {
+  34   2                      SFRPAGE = UART0_PAGE;
+  35   2                      TI0 = 1;                                                // generate an interrupt to get started
+  36   2              }
+  37   1              else {
+  38   2                      SFRPAGE = UART1_PAGE;
+  39   2                      TI1 = 1;                                                // generate an interrupt to get started
+  40   2              } // else
+  41   1              SFRPAGE = SFRPAGE_SAVE;
+  42   1      }
+  43          
+  44          // simultaneously write and read one unsigned char to SPI (mode 3). Blocking.
+  45          unsigned char xferSPI (unsigned char ch) {
+  46   1      
+  47   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+  48   1              SFRPAGE = SPI0_PAGE;
+  49   1      
+  50   1              SPI0DAT = ch;
+  51   1      
+  52   1              // wait for shifting
+  53   1              while (!SPIF) ;
+C51 COMPILER V9.51   CYGFX120                                                              01/05/2016 18:47:25 PAGE 2   
+
+  54   1      
+  55   1              SPIF = 0;                       // clear the xfer complete flag
+  56   1      
+  57   1              ch = SPI0DAT;
+  58   1              
+  59   1              SFRPAGE = SFRPAGE_SAVE;
+  60   1      
+  61   1              return (ch);
+  62   1      }
+  63          
+  64          //-----------------------------------------------------------------------------
+  65          // Initialization Subroutines
+  66          //-----------------------------------------------------------------------------
+  67          
+  68          //-----------------------------------------------------------------------------
+  69          // SYSCLK_Init
+  70          //-----------------------------------------------------------------------------
+  71          //
+  72          // This routine initializes the system clock.
+  73          //
+  74          void SYSCLK_Init (void)
+  75          {
+  76   1      #ifdef INTCLK
+                      int i;                                                                  // software timer
+                      u08 SFRPAGE_SAVE = SFRPAGE;                             // Save Current SFR page
+              
+                      SFRPAGE = CONFIG_PAGE;                                  // set SFR page
+                      SFRPGCN = 0x01;                                                 // turn on auto SFR paging for interrupts
+              
+                      OSCICN = 0x83;                                                  // 10000011 set internal oscillator to run at max frequency
+                      CLKSEL = 0x00;                                                  // Select the internal osc. as the SYSCLK source
+              
+                      PLL0CN= 0x00;                                                   // Set internal osc. as PLL source
+              
+                      SFRPAGE = LEGACY_PAGE;
+                      FLSCL   = 0x30;                                                 // Set FLASH read time for 100MHz clk
+              
+                      SFRPAGE = CONFIG_PAGE;
+                      PLL0CN |= 0x01;                                                 // Enable Power to PLL
+                      PLL0DIV = 0x01;                                                 // Set Pre-divide value to N (N = 1)
+                      PLL0FLT = 0x01;                                                 // 00000001 Set the PLL filter register for
+                                                                                                      // a reference clock from 19 - 30 MHz
+                                                                                                      // and an output clock from 65-100 MHz
+                      PLL0MUL = 0x04;                                                 // Multiply SYSCLK by M (M = 4)
+              
+                      for (i=0; i < 256; i++) ;                               // Wait at least 5us
+                      PLL0CN |= 0x02;                                                 // Enable the PLL
+                      while(!(PLL0CN & 0x10));                                // Wait until PLL frequency is locked
+                      CLKSEL= 0x02;                                                   // Select PLL as SYSCLK source
+              
+                      SFRPAGE = SFRPAGE_SAVE;                                 // Restore SFR page
+              #else // external clock
+ 106   1              int i;                                                                  // software timer
+ 107   1              u08 SFRPAGE_SAVE = SFRPAGE;                             // Save Current SFR page
+ 108   1      
+ 109   1              SFRPAGE = CONFIG_PAGE;                                  // set SFR page
+ 110   1              SFRPGCN = 0x01;                                                 // turn on auto SFR paging for interrupts
+ 111   1      
+ 112   1              OSCXCN = 0x67;                              // 01100111 start external oscillator
+ 113   1      
+ 114   1              for (i=0; i < 256; i++);                                // XTLVLD blanking interval (>1ms)
+ 115   1              
+C51 COMPILER V9.51   CYGFX120                                                              01/05/2016 18:47:25 PAGE 3   
+
+ 116   1              while (!(OSCXCN & 0x80));                               // Wait for crystal osc. to settle
+ 117   1      
+ 118   1              CLKSEL = 0x01;                                                  // Select the external osc. as the SYSCLK source
+ 119   1              OSCICN = 0x00;                                                  // 00000000 turn off internal osc
+ 120   1      
+ 121   1      #ifdef EXTCLK4          // 24.576, no PLL
+                      SFRPAGE = LEGACY_PAGE;
+                      FLSCL   = 0x00;                                                 // Set FLASH read time for 25MHz clk
+              #else // PLL
+ 125   1              PLL0CN = 0x05;                                                  // external osc src, powered
+ 126   1      
+ 127   1              SFRPAGE = LEGACY_PAGE;
+ 128   1      
+ 129   1      #ifdef EXTCLK5
+                      FLSCL   = 0x10;                                                 // Set FLASH read time for 50MHz clk
+              #elif defined EXTCLK6
+ 132   1              FLSCL   = 0x20;                                                 // Set FLASH read time for 75MHz clk
+ 133   1      #else
+                      FLSCL   = 0x30;                                                 // Set FLASH read time for 100MHz clk
+              #endif
+ 136   1      
+ 137   1              SFRPAGE = CONFIG_PAGE;
+ 138   1              PLL0DIV = 0x01;                                                 // Set Pre-divide value to N (N = 1)
+ 139   1              PLL0FLT = 0x01;                                                 // Set the PLL filter register for
+ 140   1                                                                                              // a reference clock from 19 - 30 MHz
+ 141   1                                                                                              // and an output clock from 65 - 100 MHz
+ 142   1      #ifdef EXTCLK5
+                      PLL0MUL = 0x02;                                                 // Multiply SYSCLK by M (M = 2)
+              #endif
+ 145   1      #ifdef EXTCLK6
+ 146   1              PLL0MUL = 0x03;                                                 // Multiply SYSCLK by M (M = 3)
+ 147   1      #endif
+ 148   1      #if defined (EXTCLK1) || defined (EXTCLK3)
+                      PLL0MUL = 0x04;                                                 // Multiply SYSCLK by M (M = 4)
+              #endif
+ 151   1      #ifdef EXTCLK2
+                      PLL0MUL = 0x05;                                                 // Multiply SYSCLK by M (M = 4)
+              #endif
+ 154   1      
+ 155   1              for (i=0; i < 256; i++) ;                               // Wait at least 5us
+ 156   1              PLL0CN |= 0x02;                                                 // Enable the PLL
+ 157   1              while(!(PLL0CN & 0x10));                                // Wait until PLL frequency is locked
+ 158   1              CLKSEL= 0x02;                                                   // Select PLL as SYSCLK source
+ 159   1      #endif // PLL
+ 160   1      
+ 161   1              SFRPAGE = SFRPAGE_SAVE;                                 // Restore SFR page
+ 162   1      #endif
+ 163   1      }
+ 164          
+ 165          //-----------------------------------------------------------------------------
+ 166          // UART_Init
+ 167          //-----------------------------------------------------------------------------
+ 168          //
+ 169          // Configure the UART for interrupt driven operation, <baud> and <parity>.
+ 170          //
+ 171          void UART_Init (comporthandle *handle, u32 baud)
+ 172          {
+ 173   1              u08 SFRPAGE_SAVE = SFRPAGE;             // Save Current SFR page
+ 174   1      
+ 175   1              switch(handle->port) {
+ 176   2                      case 0:                                                                 // Use Timer 2 for baud
+ 177   2      
+C51 COMPILER V9.51   CYGFX120                                                              01/05/2016 18:47:25 PAGE 4   
+
+ 178   2                              SFRPAGE = UART0_PAGE;
+ 179   2                              SSTA0 = 0x15;                                           // 00010101 no doubler, user timer 2
+ 180   2      
+ 181   2                              switch (handle->parity) {
+ 182   3                                      case 'n':
+ 183   3                                      case 'N':
+ 184   3                                              SCON0 = 0x50;                           // SCON0: mode 1, 8-bit UART, enable RX
+ 185   3                                              break;
+ 186   3                                      case 'e':
+ 187   3                                      case 'E':
+ 188   3                                      case 'o':
+ 189   3                                      case 'O':
+ 190   3                                              SCON0 = 0xD0;                           // SCON0: mode 3, 9-bit UART, enable RX
+ 191   3                                              break;
+ 192   3                              } // switch
+ 193   2      
+ 194   2                              SFRPAGE = TMR2_PAGE;
+ 195   2                              TMR2CN = 0x04;                                          // 00000100 no ext trig, enabled, timer, auto reload
+ 196   2                              TMR2CF = 0x08;                                          // 00001000 sysclk source, count up
+ 197   2      
+ 198   2                              RCAP2 = -(SYSCLK/baud/16);                      // set timer 2 reload value
+ 199   2                              TMR2 = 0xFFFF;                                          // set to reload immediately
+ 200   2                              TR2 = 1;                                                        // start timer
+ 201   2      
+ 202   2                              SFRPAGE = UART0_PAGE;
+ 203   2                              RI0 = TI0 = 0;                                          // Clear interrupt flags
+ 204   2                              ES0 = 1;                                                        // Enable UART0 interrupts
+ 205   2                              break;
+ 206   2                      case 1:                                                                 // User Timer 1 for baud
+ 207   2      
+ 208   2                              SFRPAGE = UART1_PAGE;
+ 209   2                              switch (handle->parity) {
+ 210   3                                      case 'n':
+ 211   3                                      case 'N':
+ 212   3                                              SCON1 = 0x10;                           // 00010000 SCON1: mode 1, 8-bit UART, enable RX
+ 213   3                                              break;
+ 214   3                                      case 'e':
+ 215   3                                      case 'E':
+ 216   3                                      case 'o':
+ 217   3                                      case 'O':
+ 218   3                                              SCON1 = 0x90;                           // 10010000 SCON1: mode 3, 9-bit UART, enable RX
+ 219   3                                              break;
+ 220   3                              } // switch
+ 221   2      
+ 222   2                              SFRPAGE = TIMER01_PAGE;
+ 223   2                              TMOD    &= ~0xF0;
+ 224   2                              TMOD    |=  0x20;                                               // TMOD: timer 1, mode 2, 8-bit reload
+ 225   2      
+ 226   2                              if (SYSCLK/baud/2/256 < 1) {
+ 227   3                                      TH1 = -(SYSCLK/baud/2);
+ 228   3                                      CKCON |= 0x10;                                          // T1M = 1; SCA1:0 = xx
+ 229   3                              } else if (SYSCLK/baud/2/256 < 4) {
+ 230   3                                      TH1 = -(SYSCLK/baud/2/4);
+ 231   3                                      CKCON &= ~0x13;                                         // Clear all T1 related bits
+ 232   3                                      CKCON |=0x01;                                           // T1M = 0; SCA1:0 = 01
+ 233   3                              } else if (SYSCLK/baud/2/256 < 12) {
+ 234   3                                      TH1 = -(SYSCLK/baud/2/12);
+ 235   3                                      CKCON &= ~0x13;                                         // T1M = 0; SCA1:0 = 00
+ 236   3                              } else {
+ 237   3                                      TH1 = -(SYSCLK/baud/2/48);
+ 238   3                                      CKCON &= ~0x13;                                         // Clear all T1 related bits
+ 239   3                                      CKCON |=0x02;                                           // T1M = 0; SCA1:0 = 10
+C51 COMPILER V9.51   CYGFX120                                                              01/05/2016 18:47:25 PAGE 5   
+
+ 240   3                              }
+ 241   2      
+ 242   2                              TL1 = TH1;                                                              // initialize Timer1
+ 243   2                              TR1 = 1;                                                                // start Timer1
+ 244   2      
+ 245   2                              SFRPAGE = UART1_PAGE;
+ 246   2                              RI1 = TI1 = 0;                                                  // Indicate TX1 ready
+ 247   2      
+ 248   2                              EIE2 |= 0x40;                                                   // ES1=1, Enable UART1 interrupts
+ 249   2                              break;
+ 250   2              } // switch
+ 251   1      
+ 252   1              SFRPAGE = SFRPAGE_SAVE;                 // Restore SFR page
+ 253   1      
+ 254   1      } // UART_Init
+ 255          
+ 256          // This function sets up the Cygnal 8051 for use with SPI
+ 257          void SPIO_Init(void) {
+ 258   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 259   1      
+ 260   1              SFRPAGE = SPI0_PAGE;
+ 261   1      
+ 262   1              // program SPI0
+ 263   1              SPI0CKR = SPI_CLOCK_DIVIDE;                     // set clock rate
+ 264   1              SPI0CFG = SPI_CONFIG_VALUE;                     // setup up     configuration register
+ 265   1              SPIF = 0;                                                       // clear interrupt flag
+ 266   1              SPIEN = 1;                                                      // enable SPI
+ 267   1      
+ 268   1              SFRPAGE = SFRPAGE_SAVE;                         // Restore SFR page
+ 269   1      }
+ 270          
+ 271          //-----------------------------------------------------------------------------
+ 272          // Timer3_Init
+ 273          //-----------------------------------------------------------------------------
+ 274          //
+ 275          // Configure Timer3 to auto-reload at interval specified by <counts> and generate
+ 276          // an interrupt which will start a sample sycle. Uses SYSCLK/12 as its time base.
+ 277          //
+ 278          void Timer3_Init (u16 counts)
+ 279          {
+ 280   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 281   1      
+ 282   1              SFRPAGE = TMR3_PAGE;
+ 283   1      
+ 284   1              TMR3CN = 0x00;                                          // Stop Timer3; Clear TF3;
+ 285   1              TMR3CF = 0x00;                                          // use SYSCLK/12 as timebase, count up
+ 286   1      
+ 287   1              RCAP3 = - (int) (counts + (1280/SAMPLE_RATE));  // Init reload values + crystal error margin
+ 288   1      
+ 289   1              TMR3 = 0xFFFF;                                          // set to reload immediately
+ 290   1              EIE2 |= 0x01;                                           // enable Timer3 interrupts
+ 291   1              TMR3CN |= 0x04;                                         // start Timer3
+ 292   1      
+ 293   1              SFRPAGE = SFRPAGE_SAVE;                         // Restore SFR page
+ 294   1      }
+ 295          //-----------------------------------------------------------------------------
+ 296          // Interrupt Service Routines
+ 297          //-----------------------------------------------------------------------------
+ 298          
+ 299          // MSG0 ISR - Message Protocol on UART 0
+ 300          #define COM 0
+ 301          void MSG0_ISR (void) interrupt 4 {
+C51 COMPILER V9.51   CYGFX120                                                              01/05/2016 18:47:25 PAGE 6   
+
+ 302   1      
+ 303   1      // this keeps the message protocol state machine in a single place
+ 304   1      #include <msgstatemachine.c>
+ 305   1      
+ 306   1      } // MSG0_ISR
+ 307          #undef COM
+ 308          
+ 309          #ifdef DISPLAY
+              #define COM 1
+              // MSG1 ISR - Message Protocol on UART 1
+              void MSG1_ISR (void) interrupt 20 {
+              
+              // this keeps the message protocol state machine in a single place
+              #include <msgstatemachine.c>
+              
+              } // MSG1_ISR
+              #endif // DISPLAY
+ 319          #undef COM
+ 320          
+ 321          #ifdef SENSOR
+ 322          #ifdef TSIP
+              // TSIP1 ISR - TSIP binary protocol on UART 1
+              void TSIP1_ISR (void) interrupt 20 {
+                      static xdata int rxnextchar = 0;
+                      static xdata u08 rxnextidx = 0;
+                      static xdata enum tsip_state {  FIND_START,             // looking for starting DLE
+                                                                              FOUND_DLE,              // found a DLE
+                                                                              CAPTURE_PACKET, // found starting DLE so capturing data
+                                                                              CAPTURE_DLE             // capturing data, found a DLE
+                                                                              } state = FIND_START;
+                      static u08 *tsipbuff;                                           // for quicker access to buffer
+                      char tempch;
+              
+                      // determine if tx or rx or both caused interrupt
+                      if (SCON1 & 0x01) {                     // byte received
+                              tempch = SBUF1;
+                              switch (state) {
+                                      case FIND_START:
+                                              if (DLE == tempch) state = FOUND_DLE;
+                                              break;  
+                                      case FOUND_DLE:
+                                              if ((DLE == tempch) || (ETX == tempch)) state = FIND_START;
+                                              else {
+                                                      state = CAPTURE_PACKET;
+                                                      tsipbuff = com[1].rxbuff+(com[1].rxnextidx*TSIPRXSIZE); // for quicker access to buffer
+                                                      tsipbuff[rxnextchar++] = tempch;
+                                              }
+                                              break;
+                                      case CAPTURE_PACKET:
+                                              if (DLE == tempch) state = CAPTURE_DLE;
+                                              else tsipbuff[rxnextchar++] = tempch;
+                                              break;
+                                      case CAPTURE_DLE:
+                                              if (DLE == tempch) {            // DLE char is just data so save it
+                                                      tsipbuff[rxnextchar++] = tempch;
+                                                      state = CAPTURE_PACKET;
+                                              }
+                                              else {
+                                                      if (ETX == tempch) {    // found a complete message             
+                                                              if (NULL == com[1].rxfirstidx) {
+                                                                      com[1].rxfirstidx = tsipbuff;
+                                                                      rxnextidx ^= 1;
+C51 COMPILER V9.51   CYGFX120                                                              01/05/2016 18:47:25 PAGE 7   
+
+                                                                      rxnextchar = 0;
+                                                              } // if                 // if not done processing dump the line
+                                                              else {
+                                                                      rxnextchar = 0;
+                                                              } // else
+                                                              state = FIND_START;
+                                                      } // if
+                                                      else {                  // single DTE so must be at start again
+                                                              state = CAPTURE_PACKET;
+                                                              rxnextchar = 1;
+                                                              tsipbuff[0] = tempch;
+                                                      } // else
+                                              } // else
+                                              break;
+                              } // switch
+                              SCON1 &= 0xFE;                                          // clear receive interrupt flag
+                      }
+              
+                      if (SCON1 & 0x02) {             // byte transmitted
+                              if (0 != com[1].txbytes) {
+                                      // set parity flag
+                                      switch (com[1].parity) {
+                                              case 'o':
+                                              case 'O':
+                                                      if (*(com[1].txptr) % 2) SCON1 &= ~0x04;
+                                                      else SCON1 |= 0x04;
+                                                      break;
+                                              case 'e':
+                                              case 'E':
+                                                      if (*(com[1].txptr) % 2) SCON1 |= 0x04;
+                                                      else SCON1 &= ~0x04;
+                                                      break;
+                                      } // switch
+                                      SBUF1 = *(com[1].txptr);
+                                      com[1].txptr++;
+                                      com[1].txbytes--;
+                              }
+                              else {  
+                                      com[1].txptr = NULL;
+                              }
+                              SCON1 &= 0xFD;                                          // clear transmit interrupt flag
+                      }
+              }
+              #else
+ 408          // UBX_ISR - UBX binary protocol on UART 1
+ 409          void UBX1_ISR (void) interrupt 20 {
+ 410   1              static xdata int rxnextchar = 0;
+ 411   1              static xdata enum ubx_state {
+ 412   1                                      FIND_START1,            // looking for first synch char
+ 413   1                                      FIND_START2,            // looking for second synch char
+ 414   1                                      GET_CLASS,                      // found synch so get the class and verify
+ 415   1                                      GET_MSGID,                      // get the message id
+ 416   1                                      GET_LEN1,                       // looking for LSB of payload length
+ 417   1                                      GET_LEN2,                       // looking for MSB of payload length
+ 418   1                                      CAPTURE_PACKET,         // capturing data in buffer
+ 419   1                                      GET_CKA,                        // verify checksum A
+ 420   1                                      GET_CKB                         // verify checksum B
+ 421   1              } state = FIND_START1;
+ 422   1      
+ 423   1              static u08 *ubxbuff;                                            // for quicker access to buffer
+ 424   1              static u16 len;                                                         // length of buffer payload
+ 425   1              static u08 cka, ckb;                                            // A and B checksums
+C51 COMPILER V9.51   CYGFX120                                                              01/05/2016 18:47:25 PAGE 8   
+
+ 426   1              u08 tempch;
+ 427   1      
+ 428   1              // determine if tx or rx or both caused interrupt
+ 429   1              if (SCON1 & 0x01) {                     // byte received
+ 430   2                      tempch = SBUF1;
+ 431   2                      switch (state) {
+ 432   3                              case FIND_START1:
+ 433   3                                      if (SYNCH1 == tempch)
+ 434   3                                              state = FIND_START2;
+ 435   3                                      break;
+ 436   3                              case FIND_START2:
+ 437   3                                      if (SYNCH2 == tempch)
+ 438   3                                              state = GET_CLASS;
+ 439   3                                      else state = FIND_START1;
+ 440   3                                      break;
+ 441   3                              case GET_CLASS:
+ 442   3                                      cka = ckb = 0;
+ 443   3                                      rxnextchar = 0;
+ 444   3                                      ubxbuff = com[1].rxbuff+(com[1].rxnextidx*UBXRXSIZE);   // for quicker access to buffer
+ 445   3                                      ubxbuff[rxnextchar++] = tempch;
+ 446   3                                      cka = cka + tempch;
+ 447   3                                      ckb = ckb + cka;
+ 448   3                                      state = GET_MSGID;
+ 449   3                                      break;
+ 450   3                              case GET_MSGID:
+ 451   3                                      ubxbuff[rxnextchar++] = tempch;
+ 452   3                                      cka = cka + tempch;
+ 453   3                                      ckb = ckb + cka;
+ 454   3                                      state = GET_LEN1;
+ 455   3                                      break;
+ 456   3                              case GET_LEN1:
+ 457   3                                      len = tempch;
+ 458   3                                      cka = cka + tempch;
+ 459   3                                      ckb = ckb + cka;
+ 460   3                                      state = GET_LEN2;
+ 461   3                                      break;
+ 462   3                              case GET_LEN2:
+ 463   3                                      len += tempch << 8;
+ 464   3                                      cka = cka + tempch;
+ 465   3                                      ckb = ckb + cka;
+ 466   3                                      if (0 == len)
+ 467   3                                              state = GET_CKA;
+ 468   3                                      else
+ 469   3                                              state = CAPTURE_PACKET;
+ 470   3                                      break;
+ 471   3                              case CAPTURE_PACKET:
+ 472   3                                      ubxbuff[rxnextchar++] = tempch;
+ 473   3                                      cka = cka + tempch;
+ 474   3                                      ckb = ckb + cka;
+ 475   3                                      if (rxnextchar == (len+2))
+ 476   3                                              state = GET_CKA;
+ 477   3                                      break;
+ 478   3                              case GET_CKA:
+ 479   3                                      if (cka == tempch)
+ 480   3                                              state = GET_CKB;
+ 481   3                                      else
+ 482   3                                              state = FIND_START1;
+ 483   3                                      break;
+ 484   3                              case GET_CKB: {
+ 485   4                                      // post buffer if open buffer available and second checksum good
+ 486   4                                      u08 temp = (com[1].rxnextidx == (GPSRXBUFCNT-1))? 0 : com[1].rxnextidx + 1;
+ 487   4                                      // if not done processing dump the line
+C51 COMPILER V9.51   CYGFX120                                                              01/05/2016 18:47:25 PAGE 9   
+
+ 488   4                                      if ((ckb == tempch) && (temp != com[1].rxfirstidx))
+ 489   4                                              com[1].rxnextidx = temp;        // if done, go to next buffer slot
+ 490   4                                      state = FIND_START1;
+ 491   4                                      } break;
+ 492   3                      } // switch
+ 493   2                      SCON1 &= 0xFE;                                          // clear receive interrupt flag
+ 494   2              }
+ 495   1      
+ 496   1              if (SCON1 & 0x02) {             // byte transmitted
+ 497   2                      if (0 != com[1].txbytes) {
+ 498   3                              // set parity flag
+ 499   3                              switch (com[1].parity) {
+ 500   4                                      case 'o':
+ 501   4                                      case 'O':
+ 502   4                                              if (*(com[1].txptr) % 2) SCON1 &= ~0x04;
+ 503   4                                              else SCON1 |= 0x04;
+ 504   4                                              break;
+ 505   4                                      case 'e':
+ 506   4                                      case 'E':
+ 507   4                                              if (*(com[1].txptr) % 2) SCON1 |= 0x04;
+ 508   4                                              else SCON1 &= ~0x04;
+ 509   4                                              break;
+ 510   4                              } // switch
+ 511   3                              SBUF1 = *(com[1].txptr);
+ 512   3                              com[1].txptr++;
+ 513   3                              com[1].txbytes--;
+ 514   3                      }
+ 515   2                      else {   
+ 516   3                              com[1].txptr = NULL;
+ 517   3                      }
+ 518   2                      SCON1 &= 0xFD;                                          // clear transmit interrupt flag
+ 519   2              } // if
+ 520   1      } // UBX1_ISR
+ 521          #endif // else
+ 522          #endif // SENSOR
+ 523          
+ 524          // Timer 3 Interrupt
+ 525          //
+ 526          // When T3 expires, start a series of ADC conversions and flash LED as required
+ 527          void T3_ISR (void) interrupt 14 {
+ 528   1              u16 i;
+ 529   1      
+ 530   1              SFRPAGE = TMR3_PAGE;
+ 531   1      
+ 532   1              // clear Timer 3 interrupt
+ 533   1              TMR3CN &= 0x7F;
+ 534   1      
+ 535   1              // increment a clock tick
+ 536   1              clocktick++;
+ 537   1      
+ 538   1              // keep track of seconds
+ 539   1              if (clocktick == nextsecond) {
+ 540   2                      nextsecond += SAMPLE_RATE;
+ 541   2                      secondtick++;
+ 542   2              } // if
+ 543   1      
+ 544   1              // count down timeouts for serial communication
+ 545   1              for (i = 0; i<NUMUNITS; i++)
+ 546   1                      if(CTS[i]) CTS[i]--;
+ 547   1      
+ 548   1      #ifdef DISPLAY
+                      for (i = 0; i<NUMBER_OF_BUTTONS; i++) {
+C51 COMPILER V9.51   CYGFX120                                                              01/05/2016 18:47:25 PAGE 10  
+
+                              SFRPAGE = CONFIG_PAGE;
+                              // if switch pressed, count up
+                              if (!(P5 & (1<<i)) && (debounce[i] < 0xFFFF))
+                                      debounce[i]++;
+                      } // for
+              #endif // DISPLAY
+ 556   1      
+ 557   1      #ifdef SENSOR
+ 558   1              // if switch pressed, count up
+ 559   1              SFRPAGE = CONFIG_PAGE;
+ 560   1              if (0 == SW1 && debounce < 0xFFFF) debounce++;
+ 561   1      
+ 562   1              SFRPAGE = ADC0_PAGE;
+ 563   1              // set mux back to first sample
+ 564   1              AMX0SL = 0x00;
+ 565   1      
+ 566   1              // clear conversion complete flag
+ 567   1              AD0INT = 0;
+ 568   1      
+ 569   1              // start ADC conversion
+ 570   1              AD0BUSY = 1;
+ 571   1      
+ 572   1      #endif // SENSOR
+ 573   1      } // T3_ISR
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   2011    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =      3    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     17      15
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

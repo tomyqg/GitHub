@@ -1,0 +1,208 @@
+C51 COMPILER V9.51   ADC                                                                   01/05/2016 18:47:24 PAGE 1   
+
+
+C51 COMPILER V9.51, COMPILATION OF MODULE ADC
+OBJECT MODULE PLACED IN adc.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE adc.c OPTIMIZE(SIZE) BROWSE MDU_F120 INCDIR(..\..\C51\INC\;..\CommonFiles\;
+                    -..\SU\) DB OE DEFINE(SENSOR,EXTCLK6,NODEBUG,UBLOX,DISPLAYATTACHED) DEBUG OBJECTEXTEND
+
+line level    source
+
+   1          // Part of traqmate.c
+   2          // 11/10/2003
+   3          // 12/15/2004 converted to x132 micro with PWM
+   4          // 4/24/2005 converted to variable sampling rate
+   5          //
+   6          // Author: GAStephens
+   7          //
+   8          // These functions read the ADC0 at a specified rate.
+   9          // 
+  10          // The ADC0 End of Conversion Interrupt Handler retrieves the sample
+  11          // from the ADC and adds it to a running accumulator.  Every <INT_DEC> 
+  12          // samples, the ADC updates and stores its result in the global variable
+  13          // <adcvalue>, which holds the current adcvalue in hundredths of a
+  14          // degree.  The sampling technique of adding a set of values and
+  15          // decimating them (posting results every (n)th sample) is called 'integrate
+  16          // and dump.'
+  17          //
+  18          // For each power of 4 of <INT_DEC>, you gain 1 bit of effective resolution.
+  19          // For example, <INT_DEC> = 256 gain you 4 bits of resolution: 4^4 = 256.
+  20          //
+  21          // mux settling time ~ 0.5 milliseconds
+  22          
+  23          #include <stdlib.h>
+  24          #include <sensor.h>
+  25          
+  26          //-----------------------------------------------------------------------------
+  27          // Initialization Subroutines
+  28          //-----------------------------------------------------------------------------
+  29          
+  30          //-----------------------------------------------------------------------------
+  31          // ADC0_Init
+  32          //-----------------------------------------------------------------------------
+  33          //
+  34          // Configure ADC0 to use Timer3 overflows as conversion source, to
+  35          // generate an interrupt on conversion complete, and to use right-justified
+  36          // output mode.  Enables ADC end of conversion interrupt. Leaves ADC disabled.
+  37          //
+  38          void ADC0_Init (void) {
+  39   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+  40   1              
+  41   1              // Get the calibration value for X, Y
+  42   1              ReadScratchpad(scratch.scratchbuff);
+  43   1      
+  44   1              // configure the PCA for PWM operation
+  45   1              if (!su2) {
+  46   2                      SFRPAGE = PCA0_PAGE;
+  47   2                      PCA0MD =        0x80;                                   // 1000000 suspend with microp, SYSCLK / 12
+  48   2                      PCA0CN =        0x40;                                   // 01000000 PCA0 enabled
+  49   2                      PCA0CPM0 =      0x42;                                   // CCM0 in 8-bit PWM mode
+  50   2                      PCA0CPM1 =      0x42;                                   // CCM1 in 8-bit PWM mode
+  51   2      
+  52   2                      PCA0CPL0 =      scratch.calibrate.calx;         // initialize PCA PWM value
+  53   2                      PCA0CPH0 =      scratch.calibrate.calx;
+  54   2                      PCA0CPL1 =      scratch.calibrate.caly;         // initialize PCA PWM value                     
+C51 COMPILER V9.51   ADC                                                                   01/05/2016 18:47:24 PAGE 2   
+
+  55   2                      PCA0CPH1 =      scratch.calibrate.caly;
+  56   2              } // if
+  57   1      
+  58   1              // configure sampling rate
+  59   1              int_dec = SAMPLE_RATE * NUM_CHAN / samps_per_sec;
+  60   1      
+  61   1              // set up the ADC
+  62   1              SFRPAGE = ADC0_PAGE;
+  63   1              ADC0CN = 0xC0;                                          // 11000001 ADC0 enabled; special tracking
+  64   1                                                                                      // ADC0 conversions are initiated 
+  65   1                                                                                      // on AD0BUSY=1; ADC0 data is right-justified
+  66   1      
+  67   1              REF0CN = 0x07;                      // enable temp sensor, on-chip VREF,
+  68   1                                                                                      // and VREF output buffer
+  69   1              AMX0CF = 0x00;                                          // all non-differential inputs, no gain
+  70   1              AMX0SL = 0x00;                      // Select AIN0 external input on mux
+  71   1              ADC0CF = ((SYSCLK/2/ADC_RATE) << 3) | 0x00;     // ** ADC conv clock = 2.5MHz, Gain = 1
+  72   1      
+  73   1              EIE2 |= 0x02;                                           // enable ADC interrupts
+  74   1      
+  75   1              SFRPAGE = SFRPAGE_SAVE;
+  76   1      }
+  77          
+  78          //-----------------------------------------------------------------------------
+  79          // Interrupt Service Routines
+  80          //-----------------------------------------------------------------------------
+  81          
+  82          //-----------------------------------------------------------------------------
+  83          // ADC0_ISR
+  84          //-----------------------------------------------------------------------------
+  85          //
+  86          // ADC0 end-of-conversion ISR 
+  87          // Here we take the ADC0 sample, add it to a running total <accumulator>, and
+  88          // decrement our local decimation counter <int_dec>.  When <int_dec> reaches
+  89          // zero, we post the decimated result in the global variable <result>.
+  90          //
+  91          void ADC0_ISR (void) interrupt 15 {
+  92   1              extern u08 channel;                                     // which ADC channel are we sampling
+  93   1              extern u16 int_dec;                             // integrate/decimate counter
+  94   1                                             // post results when int_dec = 0
+  95   1              extern xdata u16 accumulator[NUM_CHAN]; // ** here's where we integrate ADC samples             
+  96   1              int i;
+  97   1      
+  98   1              SFRPAGE = ADC0_PAGE;
+  99   1      
+ 100   1              AD0INT = 0;                                                     // clear ADC conversion complete indicator
+ 101   1      
+ 102   1              accumulator[channel] += ADC0;           // read ADC value and add to running total
+ 103   1      
+ 104   1              // reprogram mux to select next channel
+ 105   1              switch (channel) {
+ 106   2                      case 0:                                                                                                                 
+ 107   2                              AMX0SL = 0x01;                                  // AIN0 moving to AIN1 (y accel)
+ 108   2                              channel = 1;
+ 109   2                              break;
+ 110   2                      case 1:                                                         // AIN1 moving to AIN2 (power fail detect)
+ 111   2                              AMX0SL = 0x02;
+ 112   2                              channel = 2;
+ 113   2                              break;                  
+ 114   2                      case 2:                                                         // AIN1 moving to AIN7 (z accel) or AIN8 (temperature)
+ 115   2                              if (su2)
+ 116   2                                      AMX0SL = 0x07;
+C51 COMPILER V9.51   ADC                                                                   01/05/2016 18:47:24 PAGE 3   
+
+ 117   2                              else
+ 118   2                                      AMX0SL = 0x08;
+ 119   2                              channel = 3;
+ 120   2      //                      ADC0CF = ((SYSCLK/ADC_RATE - 1) << 3) | 0x00;   // ADC Gain = 1
+ 121   2                              break;
+ 122   2                      case 3:                                                                                                                 
+ 123   2                              AMX0SL = 0x03;                                  // TEMP moving to AIN3
+ 124   2                              channel = 4;
+ 125   2                              break;
+ 126   2                      case 4:                                                         // AIN3 moving to AIN4
+ 127   2                              AMX0SL = 0x04;
+ 128   2                              channel = 5;
+ 129   2                              break;
+ 130   2                      case 5:                                                         // AIN4 moving to AIN5
+ 131   2                              AMX0SL = 0x05;
+ 132   2                              channel = 6;
+ 133   2                              break;
+ 134   2                      case 6:                                                                                                                 
+ 135   2                              AMX0SL = 0x06;                                  // AIN5 moving to AIN6
+ 136   2                              channel = 7;
+ 137   2                              break;
+ 138   2                      case 7:                                                                                                                 
+ 139   2                              AMX0SL = 0x00;                                  // AIN6 moving to AIN0
+ 140   2                              channel = 0;
+ 141   2                              break;
+ 142   2              }
+ 143   1      
+ 144   1              // if all channels sampled and all samples taken then post results
+ 145   1              if (0 == --int_dec) {
+ 146   2                      u16 dividefactor = SAMPLE_RATE / samps_per_sec / 4;
+ 147   2      
+ 148   2                      // divide out oversample on all but temperature
+ 149   2                      for (i=0; i<NUM_CHAN; i++) {
+ 150   3                              if (i == 3 && !su2)
+ 151   3                                      // fix up the temperature
+ 152   3                                      result[3] = accumulator[3] * (samps_per_sec / 10);
+ 153   3                              else
+ 154   3                                      result[i] = accumulator[i] / dividefactor; // at 10, samprate value is x16
+ 155   3                                                                                              // 10 bit A-D x 16 shift right 2
+ 156   3                                                                                              // resultant range is 0-4095 or 12 bits
+ 157   3                              accumulator[i] = 0;                             // reset accumulator
+ 158   3                      } // for
+ 159   2      
+ 160   2      
+ 161   2                      if (!calibrating) {
+ 162   3                              // invert X to handle latest hardware
+ 163   3                              result[0] = scratch.calibrate.xminusg +
+ 164   3                                               scratch.calibrate.xplusg
+ 165   3                                               - result[0];
+ 166   3      //              result[1] = scratch.calibrate.yminusg +
+ 167   3      //                               scratch.calibrate.yplusg
+ 168   3      //                               - result[1];
+ 169   3                      } // if
+ 170   2                      
+ 171   2                      int_dec = SAMPLE_RATE * NUM_CHAN / samps_per_sec;       // reset counter
+ 172   2                      adcresults = TRUE;                              // set semaphore
+ 173   2              }
+ 174   1              if (!(0 == channel)) {
+ 175   2                      AD0BUSY = 1;    
+ 176   2              }
+ 177   1      }
+ 178          
+C51 COMPILER V9.51   ADC                                                                   01/05/2016 18:47:24 PAGE 4   
+
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    544    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----       3
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

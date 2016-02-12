@@ -1,0 +1,576 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     14/Jul/2015  19:00:18 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\FS__ECC256.c                         #
+#    Command line =  C:\DUII\TargetHW\FS\FS__ECC256.c -D DEBUG=1 -D           #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\FS #
+#                    __ECC256.lst                                             #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\FS_ #
+#                    _ECC256.o                                                #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\FS__ECC256.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : FS__ECC256.c
+     19          Purpose     : ECC functions (primarily for NAND driver)
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          /*********************************************************************
+     24          *
+     25          *       Includes
+     26          *
+     27          **********************************************************************
+     28          */
+     29          
+     30          #include "FS_Int.h"
+     31          
+     32          
+     33          /*********************************************************************
+     34          *
+     35          *       Static code
+     36          *
+     37          **********************************************************************
+     38          */
+     39          
+     40          /*********************************************************************
+     41          *
+     42          *       _CalcParity32
+     43          *
+     44          *  Function description:
+     45          *    Computes the parity of a 32-bit item.
+     46          *    Returns 0 for even parity, 1 for odd parity.
+     47          *
+     48          *  Add. notes:
+     49          *    Most compilers will (and should) inline this code in higher optimization levels
+     50          */
+     51          static U32 _CalcParity32(U32 Data) {
+     52            Data = (Data >> 16) ^ Data;           // Reduce 32 bits to 16 bits
+     53            Data = (Data >>  8) ^ Data;           // Reduce 16 bits to 8 bits
+     54            Data = (Data >>  4) ^ Data;           // Reduce 8 bits to 4 bits
+     55            Data = (Data >>  2) ^ Data;           // Reduce 4 bits to 2 bits
+     56            Data = (Data >>  1) ^ Data;           // Reduce 2 bits to 1 bit
+     57            return Data & 1;
+     58          }
+     59          
+     60          
+     61          /*********************************************************************
+     62          *
+     63          *       _ParityToECC
+     64          *
+     65          *  Function description:
+     66          *    Compute the ECC Pn bits (located at odd bit positions)
+     67          */
+     68          FS_OPTIMIZE
+
+   \                                 In section .text, align 4, keep-with-next
+     69          static U32 _ParityToECC(U32 ParLo, U32 ParHi) {
+     70            U32 ecc;
+     71            U32 Necc;
+     72            ecc  = _CalcParity32(ParLo & 0xAAAAAAAAUL) << 19;   // p1
+     73            ecc |= _CalcParity32(ParLo & 0xCCCCCCCCUL) << 21;   // p2
+   \                     _ParityToECC:
+   \   00000000   ........           LDR      R3,??DataTable0  ;; 0xcccccccc
+   \   00000004   ........           LDR      R2,??DataTable0_1  ;; 0xaaaaaaaa
+   \   00000008   003003E0           AND      R3,R3,R0
+   \   0000000C   002002E0           AND      R2,R2,R0
+   \   00000010   233823E0           EOR      R3,R3,R3, LSR #+16
+   \   00000014   10402DE9           PUSH     {R4,LR}
+   \   00000018   222822E0           EOR      R2,R2,R2, LSR #+16
+   \   0000001C   233423E0           EOR      R3,R3,R3, LSR #+8
+     74            ecc |= _CalcParity32(ParLo & 0xF0F0F0F0UL) << 23;   // p4
+   \   00000020   ........           LDR      R12,??DataTable0_2  ;; 0xf0f0f0f0
+   \   00000024   222422E0           EOR      R2,R2,R2, LSR #+8
+   \   00000028   233223E0           EOR      R3,R3,R3, LSR #+4
+   \   0000002C   222222E0           EOR      R2,R2,R2, LSR #+4
+   \   00000030   233123E0           EOR      R3,R3,R3, LSR #+2
+   \   00000034   00C00CE0           AND      R12,R12,R0
+   \   00000038   222122E0           EOR      R2,R2,R2, LSR #+2
+   \   0000003C   2CC82CE0           EOR      R12,R12,R12, LSR #+16
+     75            ecc |= _CalcParity32(ParLo & 0xFF00FF00UL) << 1;    // p8
+   \   00000040   FFE4A0E3           MOV      LR,#-16777216
+     76            ecc |= _CalcParity32(ParLo & 0xFFFF0000UL) << 3;    // p16
+     77          
+     78            ecc |= (ParHi & (1 << 0)) << 5;                   // p32
+     79            ecc |= (ParHi & (1 << 1)) << 6;                   // p64
+     80            ecc |= (ParHi & (1 << 2)) << 7;                   // p128
+     81            ecc |= (ParHi & (1 << 3)) << 8;                   // p256
+     82            ecc |= (ParHi & (1 << 4)) << 9;                   // p512
+     83            ecc |= (ParHi & (1 << 5)) <<10;                   // p1024
+   \   00000044   A33023E0           EOR      R3,R3,R3, LSR #+1
+   \   00000048   2CC42CE0           EOR      R12,R12,R12, LSR #+8
+   \   0000004C   FFEC8EE3           ORR      LR,LR,#0xFF00
+   \   00000050   A22022E0           EOR      R2,R2,R2, LSR #+1
+   \   00000054   013003E2           AND      R3,R3,#0x1
+   \   00000058   2CC22CE0           EOR      R12,R12,R12, LSR #+4
+   \   0000005C   00E00EE0           AND      LR,LR,R0
+   \   00000060   012002E2           AND      R2,R2,#0x1
+   \   00000064   833AA0E1           LSL      R3,R3,#+21
+   \   00000068   2CC12CE0           EOR      R12,R12,R12, LSR #+2
+   \   0000006C   2EE82EE0           EOR      LR,LR,LR, LSR #+16
+   \   00000070   822983E1           ORR      R2,R3,R2, LSL #+19
+   \   00000074   2EE42EE0           EOR      LR,LR,LR, LSR #+8
+   \   00000078   2048A0E1           LSR      R4,R0,#+16
+   \   0000007C   AC302CE0           EOR      R3,R12,R12, LSR #+1
+   \   00000080   2EE22EE0           EOR      LR,LR,LR, LSR #+4
+   \   00000084   0448A0E1           LSL      R4,R4,#+16
+   \   00000088   013003E2           AND      R3,R3,#0x1
+   \   0000008C   2EE12EE0           EOR      LR,LR,LR, LSR #+2
+   \   00000090   244824E0           EOR      R4,R4,R4, LSR #+16
+   \   00000094   832B82E1           ORR      R2,R2,R3, LSL #+23
+   \   00000098   244424E0           EOR      R4,R4,R4, LSR #+8
+   \   0000009C   AE302EE0           EOR      R3,LR,LR, LSR #+1
+   \   000000A0   244224E0           EOR      R4,R4,R4, LSR #+4
+   \   000000A4   013003E2           AND      R3,R3,#0x1
+   \   000000A8   244124E0           EOR      R4,R4,R4, LSR #+2
+   \   000000AC   832082E1           ORR      R2,R2,R3, LSL #+1
+   \   000000B0   A43024E0           EOR      R3,R4,R4, LSR #+1
+   \   000000B4   013003E2           AND      R3,R3,#0x1
+   \   000000B8   832182E1           ORR      R2,R2,R3, LSL #+3
+   \   000000BC   013001E2           AND      R3,R1,#0x1
+   \   000000C0   832282E1           ORR      R2,R2,R3, LSL #+5
+   \   000000C4   023001E2           AND      R3,R1,#0x2
+   \   000000C8   032382E1           ORR      R2,R2,R3, LSL #+6
+   \   000000CC   043001E2           AND      R3,R1,#0x4
+   \   000000D0   832382E1           ORR      R2,R2,R3, LSL #+7
+   \   000000D4   083001E2           AND      R3,R1,#0x8
+     84            //
+     85            // Compute the even bits of the ECC: Pn' = Pn ^ P;
+     86            //
+     87            Necc = ecc >> 1;
+     88            if (_CalcParity32(ParLo)) {
+   \   000000D8   200820E0           EOR      R0,R0,R0, LSR #+16
+   \   000000DC   032482E1           ORR      R2,R2,R3, LSL #+8
+   \   000000E0   200420E0           EOR      R0,R0,R0, LSR #+8
+   \   000000E4   103001E2           AND      R3,R1,#0x10
+   \   000000E8   200220E0           EOR      R0,R0,R0, LSR #+4
+   \   000000EC   832482E1           ORR      R2,R2,R3, LSL #+9
+   \   000000F0   200120E0           EOR      R0,R0,R0, LSR #+2
+   \   000000F4   A030A0E1           LSR      R3,R0,#+1
+   \   000000F8   013003E2           AND      R3,R3,#0x1
+   \   000000FC   010000E2           AND      R0,R0,#0x1
+   \   00000100   201001E2           AND      R1,R1,#0x20
+   \   00000104   030030E0           EORS     R0,R0,R3
+   \   00000108   011582E1           ORR      R1,R2,R1, LSL #+10
+     89              Necc ^= 0x00545555UL;
+   \   0000010C   ........           LDRNE    R0,??DataTable0_3  ;; 0x545555
+   \   00000110   A120A0E1           LSR      R2,R1,#+1
+   \   00000114   02202010           EORNE    R2,R0,R2
+     90            }
+     91            ecc |= Necc;
+     92            return ecc ^ 0xFCFFFFUL;      // Note: Bits 16 and 17 are not used, therefor 0
+   \   00000118   010082E1           ORR      R0,R2,R1
+   \   0000011C   FF14E0E3           MVN      R1,#-16777216
+   \   00000120   C01BC1E3           BIC      R1,R1,#0x30000
+   \   00000124   000021E0           EOR      R0,R1,R0
+   \   00000128   1080BDE8           POP      {R4,PC}          ;; return
+     93          }
+     94          
+     95          /*********************************************************************
+     96          *
+     97          *       Public code
+     98          *
+     99          **********************************************************************
+    100          */
+    101          
+    102          /*********************************************************************
+    103          *
+    104          *       FS__ECC256_Calc
+    105          *
+    106          *  Function description:
+    107          *    Calculates the ECC on a given 256 bytes stripe.
+    108          */
+    109          FS_OPTIMIZE
+
+   \                                 In section .text, align 4, keep-with-next
+    110          U32 FS__ECC256_Calc(const U32 * pData) {
+   \                     FS__ECC256_Calc:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0010A0E1           MOV      R1,R0
+    111            U32 i = 0;
+   \   00000008   0020A0E3           MOV      R2,#+0
+    112            U32 ParLo  = 0;       // Parity info for low bits 0..4
+   \   0000000C   0000A0E3           MOV      R0,#+0
+    113            U32 Par32  = 0;       // Parity info for bit 5  (A2 == 1)
+   \   00000010   0040A0E3           MOV      R4,#+0
+    114            U32 Par64  = 0;       // Parity info for bit 6  (A3 == 1)
+   \   00000014   00E0A0E3           MOV      LR,#+0
+    115            U32 Par128 = 0;       // Parity info for bit 7  (A4 == 1)
+   \   00000018   00C0A0E3           MOV      R12,#+0
+    116            U32 ParHi  = 0;       // Parity info for high bits 8..10
+   \   0000001C   0030A0E3           MOV      R3,#+0
+    117            //
+    118            // Load all data as words and xor into the variables.
+    119            //
+    120            do {
+    121              U32 Data;
+    122              U32 Par = 0;
+    123              Data = *pData++; Par ^= Data;
+   \                     ??FS__ECC256_Calc_0:
+   \   00000020   045091E4           LDR      R5,[R1], #+4
+    124              Data = *pData++; Par ^= Data; Par32 ^= Data;
+   \   00000024   046091E4           LDR      R6,[R1], #+4
+   \   00000028   055026E0           EOR      R5,R6,R5
+   \   0000002C   044026E0           EOR      R4,R6,R4
+    125              Data = *pData++; Par ^= Data;                Par64 ^= Data;
+   \   00000030   046091E4           LDR      R6,[R1], #+4
+    126              Data = *pData++; Par ^= Data; Par32 ^= Data; Par64 ^= Data;
+   \   00000034   047091E4           LDR      R7,[R1], #+4
+   \   00000038   055026E0           EOR      R5,R6,R5
+   \   0000003C   0E6026E0           EOR      R6,R6,LR
+   \   00000040   04E027E0           EOR      LR,R7,R4
+   \   00000044   064027E0           EOR      R4,R7,R6
+    127              Data = *pData++; Par ^= Data;                               Par128 ^= Data;
+   \   00000048   046091E4           LDR      R6,[R1], #+4
+   \   0000004C   055027E0           EOR      R5,R7,R5
+   \   00000050   055026E0           EOR      R5,R6,R5
+    128              Data = *pData++; Par ^= Data; Par32 ^= Data;                Par128 ^= Data;
+   \   00000054   047091E4           LDR      R7,[R1], #+4
+   \   00000058   0C6026E0           EOR      R6,R6,R12
+   \   0000005C   0EC027E0           EOR      R12,R7,LR
+   \   00000060   06E027E0           EOR      LR,R7,R6
+    129              Data = *pData++; Par ^= Data;                Par64 ^= Data; Par128 ^= Data;
+   \   00000064   046091E4           LDR      R6,[R1], #+4
+   \   00000068   055027E0           EOR      R5,R7,R5
+    130              Data = *pData++; Par ^= Data; Par32 ^= Data; Par64 ^= Data; Par128 ^= Data;
+   \   0000006C   048091E4           LDR      R8,[R1], #+4
+   \   00000070   055026E0           EOR      R5,R6,R5
+   \   00000074   055028E0           EOR      R5,R8,R5
+    131              ParLo ^= Par;
+   \   00000078   000025E0           EOR      R0,R5,R0
+    132              //
+    133              // Compute High parity bits
+    134              //
+    135              ParHi ^= i * _CalcParity32(Par);
+   \   0000007C   255825E0           EOR      R5,R5,R5, LSR #+16
+   \   00000080   255425E0           EOR      R5,R5,R5, LSR #+8
+   \   00000084   255225E0           EOR      R5,R5,R5, LSR #+4
+   \   00000088   047026E0           EOR      R7,R6,R4
+   \   0000008C   255125E0           EOR      R5,R5,R5, LSR #+2
+   \   00000090   0E6026E0           EOR      R6,R6,LR
+   \   00000094   0C4028E0           EOR      R4,R8,R12
+    136            } while (++i < 8);
+   \   00000098   A55025E0           EOR      R5,R5,R5, LSR #+1
+   \   0000009C   06C028E0           EOR      R12,R8,R6
+   \   000000A0   015005E2           AND      R5,R5,#0x1
+   \   000000A4   950206E0           MUL      R6,R5,R2
+   \   000000A8   012082E2           ADD      R2,R2,#+1
+   \   000000AC   07E028E0           EOR      LR,R8,R7
+   \   000000B0   033026E0           EOR      R3,R6,R3
+   \   000000B4   080052E3           CMP      R2,#+8
+   \   000000B8   D8FFFF3A           BCC      ??FS__ECC256_Calc_0
+    137            ParHi <<= 3;
+    138            ParHi |= _CalcParity32(Par32);
+   \   000000BC   241824E0           EOR      R1,R4,R4, LSR #+16
+   \   000000C0   211421E0           EOR      R1,R1,R1, LSR #+8
+    139            ParHi |= _CalcParity32(Par64)  << 1;
+   \   000000C4   2E282EE0           EOR      R2,LR,LR, LSR #+16
+   \   000000C8   211221E0           EOR      R1,R1,R1, LSR #+4
+   \   000000CC   222422E0           EOR      R2,R2,R2, LSR #+8
+   \   000000D0   211121E0           EOR      R1,R1,R1, LSR #+2
+   \   000000D4   222222E0           EOR      R2,R2,R2, LSR #+4
+   \   000000D8   222122E0           EOR      R2,R2,R2, LSR #+2
+    140            ParHi |= _CalcParity32(Par128) << 2;
+   \   000000DC   2CC82CE0           EOR      R12,R12,R12, LSR #+16
+    141            return _ParityToECC(ParLo, ParHi);
+   \   000000E0   A11021E0           EOR      R1,R1,R1, LSR #+1
+   \   000000E4   F041BDE8           POP      {R4-R8,LR}
+   \   000000E8   2CC42CE0           EOR      R12,R12,R12, LSR #+8
+   \   000000EC   011001E2           AND      R1,R1,#0x1
+   \   000000F0   A22022E0           EOR      R2,R2,R2, LSR #+1
+   \   000000F4   2CC22CE0           EOR      R12,R12,R12, LSR #+4
+   \   000000F8   831181E1           ORR      R1,R1,R3, LSL #+3
+   \   000000FC   012002E2           AND      R2,R2,#0x1
+   \   00000100   2CC12CE0           EOR      R12,R12,R12, LSR #+2
+   \   00000104   821081E1           ORR      R1,R1,R2, LSL #+1
+   \   00000108   AC202CE0           EOR      R2,R12,R12, LSR #+1
+   \   0000010C   012002E2           AND      R2,R2,#0x1
+   \   00000110   021181E1           ORR      R1,R1,R2, LSL #+2
+   \   00000114   ........           B        _ParityToECC     ;; tailcall
+    142          }
+    143          
+    144          
+    145          /*********************************************************************
+    146          *
+    147          *       FS__ECC256_Apply
+    148          *
+    149          *  Function description:
+    150          *    Uses the ECC values to correct the data if necessary
+    151          *    Works on a 256 bytes stripe
+    152          *
+    153          *  Return value:
+    154          *    0    - No error in data
+    155          *    1    - 1 bit error in data which has been corrected
+    156          *    2    - Error in ECC
+    157          *    3    - Uncorrectable error
+    158          */
+
+   \                                 In section .text, align 4, keep-with-next
+    159          int FS__ECC256_Apply(U32 * pData, U32 eccRead) {
+   \                     FS__ECC256_Apply:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0150A0E1           MOV      R5,R1
+    160            U32 eccCalced;
+    161            U32 eccXor;
+    162            int i;
+    163            int NumDiffBits;
+    164            unsigned BitPos;
+    165            unsigned Off;
+    166          
+    167            eccCalced = FS__ECC256_Calc(pData);
+    168            eccXor = eccCalced ^ eccRead;
+   \   00000010   ........           BL       FS__ECC256_Calc
+   \   00000014   000035E0           EORS     R0,R5,R0
+    169          //  eccXor &= 0xFCFFFF;    // Eliminate unused bits 16 and 17. Not required, but older ECC had these bits set to 1, so we stay compatible with old value.
+    170            if (eccXor == 0) {
+    171              return 0;          // Both ECCs match, data is o.k. without correction
+   \   00000018   0000A003           MOVEQ    R0,#+0
+   \   0000001C   2B00000A           BEQ      ??FS__ECC256_Apply_0
+    172            }
+    173            //
+    174            // Count number of different bits in both ECCs
+    175            //
+    176            NumDiffBits = 0;
+   \   00000020   0020A0E3           MOV      R2,#+0
+    177            for (i = 0; i < 24; i++) {
+   \   00000024   0030A0E3           MOV      R3,#+0
+   \   00000028   0110A0E3           MOV      R1,#+1
+    178              if (eccXor & (U32)(1UL << i)) {
+   \                     ??FS__ECC256_Apply_1:
+   \   0000002C   110310E1           TST      R0,R1, LSL R3
+    179                NumDiffBits++;
+   \   00000030   01208212           ADDNE    R2,R2,#+1
+    180              }
+    181            }
+   \   00000034   013083E2           ADD      R3,R3,#+1
+   \   00000038   180053E3           CMP      R3,#+24
+   \   0000003C   FAFFFFBA           BLT      ??FS__ECC256_Apply_1
+    182            //
+    183            // Check if this is a correctable error
+    184            //
+    185            if (NumDiffBits == 1) {
+   \   00000040   010052E3           CMP      R2,#+1
+    186              return 2;        // Error in ECC
+   \   00000044   0200A003           MOVEQ    R0,#+2
+   \   00000048   2000000A           BEQ      ??FS__ECC256_Apply_0
+    187            }
+    188            if (NumDiffBits != 11) {
+   \   0000004C   0B0052E3           CMP      R2,#+11
+    189              return 3;          // Uncorrectable error
+   \   00000050   0300A013           MOVNE    R0,#+3
+   \   00000054   1D00001A           BNE      ??FS__ECC256_Apply_0
+    190            }
+    191            //
+    192            // Perform correction
+    193            //
+    194            BitPos =  ((eccXor >> 19) & 1)
+    195                    | (((eccXor >> 21) & 1) << 1)
+    196                    | (((eccXor >> 23) & 1) << 2)
+    197                    | (((eccXor >>  1) & 1) << 3)
+    198                    | (((eccXor >>  3) & 1) << 4);
+    199            Off =      ((eccXor >>  5) & 1)
+    200                    | (((eccXor >>  7) & 1) << 1)
+    201                    | (((eccXor >>  9) & 1) << 2)
+    202                    | (((eccXor >> 11) & 1) << 3)
+    203                    | (((eccXor >> 13) & 1) << 4)
+    204                    | (((eccXor >> 15) & 1) << 5);
+   \   00000058   A022A0E1           LSR      R2,R0,#+5
+   \   0000005C   A03301E0           AND      R3,R1,R0, LSR #+7
+   \   00000060   A220B0E1           LSRS     R2,R2,#+1
+   \   00000064   0330A3E0           ADC      R3,R3,R3
+   \   00000068   A02401E0           AND      R2,R1,R0, LSR #+9
+   \   0000006C   022183E1           ORR      R2,R3,R2, LSL #+2
+    205            *(pData + Off) ^= (U32)(1UL << BitPos);
+   \   00000070   A0C9A0E1           LSR      R12,R0,#+19
+   \   00000074   A03501E0           AND      R3,R1,R0, LSR #+11
+   \   00000078   A0EAA0E1           LSR      LR,R0,#+21
+   \   0000007C   AC50B0E1           LSRS     R5,R12,#+1
+   \   00000080   832182E1           ORR      R2,R2,R3, LSL #+3
+   \   00000084   01E00EE2           AND      LR,LR,#0x1
+   \   00000088   A0CBA0E1           LSR      R12,R0,#+23
+   \   0000008C   A03601E0           AND      R3,R1,R0, LSR #+13
+   \   00000090   0EE0AEE0           ADC      LR,LR,LR
+   \   00000094   01C00CE2           AND      R12,R12,#0x1
+   \   00000098   032282E1           ORR      R2,R2,R3, LSL #+4
+   \   0000009C   0CC18EE1           ORR      R12,LR,R12, LSL #+2
+   \   000000A0   A03701E0           AND      R3,R1,R0, LSR #+15
+   \   000000A4   A0E0A0E1           LSR      LR,R0,#+1
+   \   000000A8   832282E1           ORR      R2,R2,R3, LSL #+5
+   \   000000AC   01E00EE2           AND      LR,LR,#0x1
+   \   000000B0   A001A0E1           LSR      R0,R0,#+3
+   \   000000B4   023194E7           LDR      R3,[R4, +R2, LSL #+2]
+   \   000000B8   8EC18CE1           ORR      R12,R12,LR, LSL #+3
+   \   000000BC   010000E2           AND      R0,R0,#0x1
+   \   000000C0   00028CE1           ORR      R0,R12,R0, LSL #+4
+   \   000000C4   110023E0           EOR      R0,R3,R1, LSL R0
+   \   000000C8   020184E7           STR      R0,[R4, +R2, LSL #+2]
+    206            return 1;       // Error has been corrected
+   \   000000CC   0100A0E3           MOV      R0,#+1
+   \                     ??FS__ECC256_Apply_0:
+   \   000000D0   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   000000D4   3080BDE8           POP      {R4,R5,PC}       ;; return
+    207          }
+    208          
+    209          /*********************************************************************
+    210          *
+    211          *       FS__ECC256_Store
+    212          *
+    213          *  Function description:
+    214          *    Stores the 24 bit ecc in memory
+    215          */
+
+   \                                 In section .text, align 4, keep-with-next
+    216          void FS__ECC256_Store(U8 * p, U32 ecc) {
+    217            *p++ = (U8)(ecc >>  0);
+   \                     FS__ECC256_Store:
+   \   00000000   0010C0E5           STRB     R1,[R0, #+0]
+    218            *p++ = (U8)(ecc >>  8);
+   \   00000004   2124A0E1           LSR      R2,R1,#+8
+   \   00000008   0120E0E5           STRB     R2,[R0, #+1]!
+    219            *p   = (U8)(ecc >> 16);
+   \   0000000C   2118A0E1           LSR      R1,R1,#+16
+   \   00000010   0110E0E5           STRB     R1,[R0, #+1]!
+    220          }
+   \   00000014   1EFF2FE1           BX       LR               ;; return
+    221          
+    222          /*********************************************************************
+    223          *
+    224          *       FS__ECC256_Load
+    225          *
+    226          *  Function description:
+    227          *    Loads a 24 bit ecc from memory
+    228          */
+
+   \                                 In section .text, align 4, keep-with-next
+    229          U32 FS__ECC256_Load(const U8 * p) {
+    230            U32 ecc;
+    231            ecc  = *p++;
+   \                     FS__ECC256_Load:
+   \   00000000   0010D0E5           LDRB     R1,[R0, #+0]
+    232            ecc |= ((U16)*p++) <<  8;  
+   \   00000004   0120F0E5           LDRB     R2,[R0, #+1]!
+   \   00000008   021481E1           ORR      R1,R1,R2, LSL #+8
+    233            ecc |= ((U32)*p++) << 16;
+    234            return ecc;
+   \   0000000C   0120F0E5           LDRB     R2,[R0, #+1]!
+   \   00000010   020881E1           ORR      R0,R1,R2, LSL #+16
+   \   00000014   1EFF2FE1           BX       LR               ;; return
+    235          }
+    236          
+    237          /*********************************************************************
+    238          *
+    239          *       FS__ECC256_IsValid
+    240          *
+    241          *  Function description:
+    242          *    Returns if a ECC appears to be valid. A valid ECC must have bits 16,17 == 0.
+    243          */
+
+   \                                 In section .text, align 4, keep-with-next
+    244          int  FS__ECC256_IsValid(U32 ecc) {
+    245            if ((ecc & 0x30000UL) == 0) {
+   \                     FS__ECC256_IsValid:
+   \   00000000   C00B10E3           TST      R0,#0x30000
+   \   00000004   0100001A           BNE      ??FS__ECC256_IsValid_0
+    246              return 1;                     // Valid
+   \   00000008   0100A0E3           MOV      R0,#+1
+   \   0000000C   1EFF2FE1           BX       LR
+    247            }
+    248            return 0;                       // Invalid
+   \                     ??FS__ECC256_IsValid_0:
+   \   00000010   0000A0E3           MOV      R0,#+0
+   \   00000014   1EFF2FE1           BX       LR               ;; return
+    249          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable0:
+   \   00000000   CCCCCCCC           DC32     0xcccccccc
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable0_1:
+   \   00000000   AAAAAAAA           DC32     0xaaaaaaaa
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable0_2:
+   \   00000000   F0F0F0F0           DC32     0xf0f0f0f0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable0_3:
+   \   00000000   55555400           DC32     0x545555
+    250          
+    251          
+    252          
+    253          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function           .cstack
+     --------           -------
+     FS__ECC256_Apply       16
+     FS__ECC256_Calc        24
+     FS__ECC256_IsValid      0
+     FS__ECC256_Load         0
+     FS__ECC256_Store        0
+     _ParityToECC            8
+
+
+   Section sizes:
+
+     Function/Label     Bytes
+     --------------     -----
+     _ParityToECC        300
+     FS__ECC256_Calc     280
+     FS__ECC256_Apply    216
+     FS__ECC256_Store     24
+     FS__ECC256_Load      24
+     FS__ECC256_IsValid   24
+     ??DataTable0          4
+     ??DataTable0_1        4
+     ??DataTable0_2        4
+     ??DataTable0_3        4
+
+ 
+ 884 bytes in section .text
+ 
+ 884 bytes of CODE memory
+
+Errors: none
+Warnings: none

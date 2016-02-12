@@ -1,0 +1,306 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.1.52143/W32 for ARM     06/Mar/2012  08:45:51 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\FS_CRC16.c                           #
+#    Command line =  C:\DUII\TargetHW\FS\FS_CRC16.c -D DEBUG=1 -D             #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -lCN                 #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files\IAR Systems\Embedded Workbench         #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    C:\DUII\TargetHW\Sounds\ -I \DUII\DUII\ --cpu_mode arm   #
+#                    -Ohs --use_c++_inline --require_prototypes               #
+#    List file    =  C:\DUII\TargetHW\Release\List\FS_CRC16.lst               #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\FS_CRC16.o                  #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\FS_CRC16.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          ----------------------------------------------------------------------
+     19          File        : FS_CRC32.c
+     20          Purpose     : Compute CRC32 in high speed.
+     21                        A CRC table with 256 entries is used.
+     22                        The polynom used is the mirrored version of 0x04c11DB7,
+     23                        which is for V.42, MPEG-2, PNG and others.
+     24                        The intial value can be freely chosen; 0xFFFFFFFF is
+     25                        recommended.
+     26          
+     27          ---------------------------END-OF-HEADER------------------------------
+     28          */
+     29          
+     30          /*********************************************************************
+     31          *
+     32          *       Includes
+     33          *
+     34          **********************************************************************
+     35          */
+     36          
+     37          #include "FS_Int.h"
+     38          
+     39          #define CRC_1021        0x1021
+     40          
+     41          /*********************************************************************
+     42          *
+     43          *       Static const
+     44          *
+     45          **********************************************************************
+     46          */
+     47          /*********************************************************************
+     48          *
+     49          *       _CRC_Table
+     50          */
+     51          #if 0  // Used for verification
+     52          static const U16 _aCRC[256] = {
+     53            0x0000,  0x1021,  0x2042,  0x3063,  0x4084,  0x50A5,  0x60C6,  0x70E7,
+     54            0x8108,  0x9129,  0xA14A,  0xB16B,  0xC18C,  0xD1AD,  0xE1CE,  0xF1EF,
+     55            0x1231,  0x0210,  0x3273,  0x2252,  0x52B5,  0x4294,  0x72F7,  0x62D6,
+     56            0x9339,  0x8318,  0xB37B,  0xA35A,  0xD3BD,  0xC39C,  0xF3FF,  0xE3DE,
+     57            0x2462,  0x3443,  0x0420,  0x1401,  0x64E6,  0x74C7,  0x44A4,  0x5485,
+     58            0xA56A,  0xB54B,  0x8528,  0x9509,  0xE5EE,  0xF5CF,  0xC5AC,  0xD58D,
+     59            0x3653,  0x2672,  0x1611,  0x0630,  0x76D7,  0x66F6,  0x5695,  0x46B4,
+     60            0xB75B,  0xA77A,  0x9719,  0x8738,  0xF7DF,  0xE7FE,  0xD79D,  0xC7BC,
+     61            0x48C4,  0x58E5,  0x6886,  0x78A7,  0x0840,  0x1861,  0x2802,  0x3823,
+     62            0xC9CC,  0xD9ED,  0xE98E,  0xF9AF,  0x8948,  0x9969,  0xA90A,  0xB92B,
+     63            0x5AF5,  0x4AD4,  0x7AB7,  0x6A96,  0x1A71,  0x0A50,  0x3A33,  0x2A12,
+     64            0xDBFD,  0xCBDC,  0xFBBF,  0xEB9E,  0x9B79,  0x8B58,  0xBB3B,  0xAB1A,
+     65            0x6CA6,  0x7C87,  0x4CE4,  0x5CC5,  0x2C22,  0x3C03,  0x0C60,  0x1C41,
+     66            0xEDAE,  0xFD8F,  0xCDEC,  0xDDCD,  0xAD2A,  0xBD0B,  0x8D68,  0x9D49,
+     67            0x7E97,  0x6EB6,  0x5ED5,  0x4EF4,  0x3E13,  0x2E32,  0x1E51,  0x0E70,
+     68            0xFF9F,  0xEFBE,  0xDFDD,  0xCFFC,  0xBF1B,  0xAF3A,  0x9F59,  0x8F78,
+     69            0x9188,  0x81A9,  0xB1CA,  0xA1EB,  0xD10C,  0xC12D,  0xF14E,  0xE16F,
+     70            0x1080,  0x00A1,  0x30C2,  0x20E3,  0x5004,  0x4025,  0x7046,  0x6067,
+     71            0x83B9,  0x9398,  0xA3FB,  0xB3DA,  0xC33D,  0xD31C,  0xE37F,  0xF35E,
+     72            0x02B1,  0x1290,  0x22F3,  0x32D2,  0x4235,  0x5214,  0x6277,  0x7256,
+     73            0xB5EA,  0xA5CB,  0x95A8,  0x8589,  0xF56E,  0xE54F,  0xD52C,  0xC50D,
+     74            0x34E2,  0x24C3,  0x14A0,  0x0481,  0x7466,  0x6447,  0x5424,  0x4405,
+     75            0xA7DB,  0xB7FA,  0x8799,  0x97B8,  0xE75F,  0xF77E,  0xC71D,  0xD73C,
+     76            0x26D3,  0x36F2,  0x0691,  0x16B0,  0x6657,  0x7676,  0x4615,  0x5634,
+     77            0xD94C,  0xC96D,  0xF90E,  0xE92F,  0x99C8,  0x89E9,  0xB98A,  0xA9AB,
+     78            0x5844,  0x4865,  0x7806,  0x6827,  0x18C0,  0x08E1,  0x3882,  0x28A3,
+     79            0xCB7D,  0xDB5C,  0xEB3F,  0xFB1E,  0x8BF9,  0x9BD8,  0xABBB,  0xBB9A,
+     80            0x4A75,  0x5A54,  0x6A37,  0x7A16,  0x0AF1,  0x1AD0,  0x2AB3,  0x3A92,
+     81            0xFD2E,  0xED0F,  0xDD6C,  0xCD4D,  0xBDAA,  0xAD8B,  0x9DE8,  0x8DC9,
+     82            0x7C26,  0x6C07,  0x5C64,  0x4C45,  0x3CA2,  0x2C83,  0x1CE0,  0x0CC1,
+     83            0xEF1F,  0xFF3E,  0xCF5D,  0xDF7C,  0xAF9B,  0xBFBA,  0x8FD9,  0x9FF8,
+     84            0x6E17,  0x7E36,  0x4E55,  0x5E74,  0x2E93,  0x3EB2,  0x0ED1,  0x1EF0
+     85          };
+     86          #endif
+     87          /*********************************************************************
+     88          *
+     89          *       Static code
+     90          *
+     91          **********************************************************************
+     92          */
+     93          
+     94          /*********************************************************************
+     95          *
+     96          *       _BuildTable
+     97          *
+     98          *  Function description
+     99          *    Build CRC table. This code has been used to build the table.
+    100          *
+    101          *  Notes
+    102          *    (1) The same code can also be used to build a CRC table for any other polynom
+    103          *
+    104          */
+    105          #if 0
+    106          static void _BuildTable(void) {
+    107            U32 Polynom;
+    108            U32 i, n, v;
+    109          
+    110            Polynom = 0x8408;
+    111            printf("static const U16 _aCRC[256] = {\n");
+    112            for (n = 0; n < 256; n++) {
+    113              v = n;
+    114              i = 8;
+    115              do {
+    116                if (v & 1) {
+    117                  v = (v >> 1) ^ Polynom;
+    118                } else {
+    119                  v >>= 1;
+    120                }
+    121              } while (--i);
+    122              _aCRC[n] = v;
+    123            }
+    124            for (n = 0; n < 256; n += 8) {
+    125              printf("0x%.4X, 0x%.4X, 0x%.4X, 0x%.4X,",   _aCRC[n],     _aCRC[n + 1], _aCRC[n + 2], _aCRC[n + 3]);
+    126              printf("0x%.4X, 0x%.4X, 0x%.4X, 0x%.4X,\n", _aCRC[n + 4], _aCRC[n + 5], _aCRC[n + 6], _aCRC[n + 7]);
+    127            }
+    128            printf("}\n");
+    129          }
+    130          #endif
+    131          
+    132          static U32 _CRC_Calc(const U8* pData, unsigned NumBytes, U32 crc, U32 Polynom) {
+    133            if (NumBytes) {
+    134              int i;
+    135              do {
+    136                crc ^= (*pData++ << 8);
+    137                i = 8;
+    138                do {
+    139                  if (crc & 0x8000) {
+    140                    crc = (crc << 1) ^ Polynom;
+    141                  } else {
+    142                    crc <<= 1;
+    143                  }
+    144                } while (--i);
+    145              } while (--NumBytes);
+    146            }
+    147            return crc;
+    148          }
+    149          
+    150          /*********************************************************************
+    151          *
+    152          *       Public code
+    153          *
+    154          **********************************************************************
+    155          */
+    156          /*********************************************************************
+    157          *
+    158          *       FS_CRC16_Validate
+    159          *
+    160          *
+    161          *  Return value
+    162          *     == 0: Implementation is correct. Test passed.
+    163          *     != 0: Test failed.
+    164          *
+    165          */
+    166          int FS_CRC16_Validate(void);
+
+   \                                 In section .text, align 4, keep-with-next
+    167          int FS_CRC16_Validate(void) {
+    168            U8 Data = 0xff;
+    169            U16 Crc = 0;
+    170            unsigned i;
+    171          
+    172            for (i = 0; i < 512; i++) {
+   \                     FS_CRC16_Validate:
+   \   00000000   2120A0E3           MOV      R2,#+33
+   \   00000004   0000A0E3           MOV      R0,#+0
+   \   00000008   801FA0E3           MOV      R1,#+512
+   \   0000000C   402D82E3           ORR      R2,R2,#0x1000
+    173              Crc = FS_CRC16_Calc(&Data, 1, Crc);
+   \                     ??FS_CRC16_Validate_0:
+   \   00000010   0008A0E1           LSL      R0,R0,#+16
+   \   00000014   2008A0E1           LSR      R0,R0,#+16
+   \   00000018   FF0C20E2           EOR      R0,R0,#0xFF00
+   \   0000001C   0830A0E3           MOV      R3,#+8
+   \                     ??FS_CRC16_Validate_1:
+   \   00000020   80C0A0E1           LSL      R12,R0,#+1
+   \   00000024   800C10E3           TST      R0,#0x8000
+   \   00000028   0C002210           EORNE    R0,R2,R12
+   \   0000002C   0C00A001           MOVEQ    R0,R12
+   \   00000030   013053E2           SUBS     R3,R3,#+1
+   \   00000034   F9FFFF1A           BNE      ??FS_CRC16_Validate_1
+    174            }
+   \   00000038   011051E2           SUBS     R1,R1,#+1
+   \   0000003C   F3FFFF1A           BNE      ??FS_CRC16_Validate_0
+    175            if (Crc != 0x7fa1) {
+   \   00000040   A110A0E3           MOV      R1,#+161
+   \   00000044   7F1C81E3           ORR      R1,R1,#0x7F00
+   \   00000048   0008A0E1           MOV      R0,R0, LSL #+16
+   \   0000004C   200851E1           CMP      R1,R0, LSR #+16
+   \   00000050   0100000A           BEQ      ??FS_CRC16_Validate_2
+    176              return -1;
+   \   00000054   0000E0E3           MVN      R0,#+0
+   \   00000058   1EFF2FE1           BX       LR
+    177            }
+    178            return 0;
+   \                     ??FS_CRC16_Validate_2:
+   \   0000005C   0000A0E3           MOV      R0,#+0
+   \   00000060   1EFF2FE1           BX       LR               ;; return
+    179          }
+    180          
+    181          
+    182          /*********************************************************************
+    183          *
+    184          *       FS_CRC16_Calc
+    185          */
+
+   \                                 In section .text, align 4, keep-with-next
+    186          U16 FS_CRC16_Calc(const U8* pData, unsigned NumBytes, U16 crc) {
+   \                     FS_CRC16_Calc:
+   \   00000000   00402DE9           PUSH     {LR}
+    187          #if 0
+    188            do {
+    189              crc ^= *pData++;
+    190              crc  = _aCRC[crc & 0xFF] ^ (crc >> 8);
+    191            } while (--NumBytes);
+    192            return crc;
+    193          #else
+    194            return (U16)_CRC_Calc(pData, NumBytes, crc, CRC_1021);
+   \   00000004   21C0A0E3           MOV      R12,#+33
+   \   00000008   000051E3           CMP      R1,#+0
+   \   0000000C   40CD8CE3           ORR      R12,R12,#0x1000
+   \   00000010   0A00000A           BEQ      ??FS_CRC16_Calc_0
+   \                     ??FS_CRC16_Calc_1:
+   \   00000014   0130D0E4           LDRB     R3,[R0], #+1
+   \   00000018   032422E0           EOR      R2,R2,R3, LSL #+8
+   \   0000001C   0830A0E3           MOV      R3,#+8
+   \                     ??FS_CRC16_Calc_2:
+   \   00000020   82E0A0E1           LSL      LR,R2,#+1
+   \   00000024   800C12E3           TST      R2,#0x8000
+   \   00000028   0E202C10           EORNE    R2,R12,LR
+   \   0000002C   0E20A001           MOVEQ    R2,LR
+   \   00000030   013053E2           SUBS     R3,R3,#+1
+   \   00000034   F9FFFF1A           BNE      ??FS_CRC16_Calc_2
+   \   00000038   011051E2           SUBS     R1,R1,#+1
+   \   0000003C   F4FFFF1A           BNE      ??FS_CRC16_Calc_1
+   \                     ??FS_CRC16_Calc_0:
+   \   00000040   0208A0E1           LSL      R0,R2,#+16
+   \   00000044   2008A0E1           LSR      R0,R0,#+16
+   \   00000048   0080BDE8           POP      {PC}             ;; return
+    195          #endif
+    196          }
+    197          
+    198          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function          .cstack
+     --------          -------
+     FS_CRC16_Calc          4
+     FS_CRC16_Validate      0
+
+
+   Section sizes:
+
+     Function/Label    Bytes
+     --------------    -----
+     FS_CRC16_Validate  100
+     FS_CRC16_Calc       76
+
+ 
+ 176 bytes in section .text
+ 
+ 176 bytes of CODE memory
+
+Errors: none
+Warnings: none

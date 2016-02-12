@@ -1,0 +1,2810 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     02/Feb/2016  18:32:11 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\Setup\message.c                         #
+#    Command line =  C:\DUII\TargetHW\Setup\message.c -D DEBUG=1 -D           #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\me #
+#                    ssage.lst                                                #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\mes #
+#                    sage.o                                                   #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\Setup\message.c
+      1          // Part of traqmate.c
+      2          // 3/10/2004
+      3          // Author: BLBoyer
+      4          // Modified for traqmate: GAStephens, 3/24/2004
+      5          // added opcode return to ParseMessage 7/29/04
+      6          // added sw download: JPaulos, GAStephens 4/28/05
+      7          //
+      8          // This file contains the routines to format and send coded messages
+      9          // between the Traqmate and Traqview software.
+     10          //
+     11          
+     12          #include <math.h>
+     13          #include "GUI_Type.h"
+     14          #include "DUII.h"
+     15          #include "CommTask.h"
+     16          #include "DataHandler.h"
+     17          #include "LEDHandler.h"
+     18          #include "tmtypes.h"
+     19          #include "datadecode.h"
+     20          #include "dataflash.h"
+     21          #include "InterTask.h"
+     22          #include "FlashReadWrite.h"
+     23          #include "dbgu.h"
+     24          
+     25          //
+     26          //	Global Resources
+     27          //
+     28          extern OS_RSEMA SEMA_GlobalData;			// resource semaphore around global data
+     29          extern void reset(void);
+     30          void mSDelay(int);
+     31          void uSDelay(int);
+     32          extern OS_Q Queue_tqm;						// file queue
+     33          
+     34          //
+     35          // Constants
+     36          //
+     37          #define SPEED_HYSTERESIS		10.0		// speed must change by 6 kph to record vmax or vmin
+     38          
+     39          //
+     40          // External data declarations
+     41          //
+     42          
+     43          #define SendACK_Data(DEST, LEN) SendMessage(msgrouting[0], (u08) DEST, (u08) ACK,(LEN))
+     44          #define SendACK(DEST) SendACK_Data(DEST, 0)
+     45          
+     46          // The following function gets passed all the input data
+     47          // necessary to build a complete message. For efficiency it does not
+     48          // get passed the data buffer itself.
+     49          // In addition to being passed the data, the function will also
+     50          // call supporting functions to calculate checksums for the header
+     51          // and if appropriate, crc's for the data portion of the message
+     52          
+
+   \                                 In section .text, align 4, keep-with-next
+     53          s16 SendMessage(	u08 source,		// unit id of source
+     54          					u08 dest,		// unit id of destination
+     55          			 		u08 opcode,		// message opcode
+     56          					u16 bytes)	{	// number of bytes to transmit
+   \                     SendMessage:
+   \   00000000   F0452DE9           PUSH     {R4-R8,R10,LR}
+   \   00000004   0150A0E1           MOV      R5,R1
+   \   00000008   0040A0E1           MOV      R4,R0
+     57          	u08 sendchk;					// used to start the header checksum calculation
+     58          	u16 i = 0;						// general index
+     59          	u16 crc = 0;					// used to hold the calculated CRC
+     60          	u08 port = msgrouting[dest];
+     61          
+     62          	// start timeout
+     63          	OS_RetriggerTimer(&(COMMCTSTIMERS[dest-1]));
+   \   0000000C   ........           LDR      R1,??DataTable2
+   \   00000010   1400A0E3           MOV      R0,#+20
+   \   00000014   ........           LDR      R10,??DataTable2_1
+   \   00000018   801501E1           SMLABB   R1,R0,R5,R1
+   \   0000001C   04D04DE2           SUB      SP,SP,#+4
+   \   00000020   0260A0E1           MOV      R6,R2
+   \   00000024   0370A0E1           MOV      R7,R3
+   \   00000028   0A80D5E7           LDRB     R8,[R5, +R10]
+   \   0000002C   140041E2           SUB      R0,R1,#+20
+   \   00000030   ........           BL       OS_RetriggerTimer
+     64          	COMMCTS[dest-1] = CTS_COUNTDOWN;
+   \   00000034   ........           LDR      R0,??DataTable2_2
+   \   00000038   9B1FA0E3           MOV      R1,#+620
+   \   0000003C   050180E0           ADD      R0,R0,R5, LSL #+2
+   \   00000040   041000E5           STR      R1,[R0, #-4]
+     65          
+     66          	// record this message as outstanding if from this device
+     67          	if (source == msgrouting[0] && opcode != ACK && opcode != NAK)
+   \   00000044   D010DAE1           LDRSB    R1,[R10, #+0]
+   \   00000048   010054E1           CMP      R4,R1
+   \   0000004C   0400001A           BNE      ??SendMessage_0
+   \   00000050   060056E3           CMP      R6,#+6
+   \   00000054   15005613           CMPNE    R6,#+21
+     68          		outstanding_msg[dest-1] = opcode;
+   \   00000058   ........           LDRNE    R0,??DataTable2_3
+   \   0000005C   00008510           ADDNE    R0,R5,R0
+   \   00000060   01604015           STRBNE   R6,[R0, #-1]
+     69          
+     70          	sendchk = 0xFF;						// initialize
+     71          	
+     72          	com[port].txbuff[START] = SOH ;  // start of header
+   \                     ??SendMessage_0:
+   \   00000064   ........           LDR      R2,??DataTable2_4
+   \   00000068   1810A0E3           MOV      R1,#+24
+   \   0000006C   812808E1           SMLABB   R8,R1,R8,R2
+   \   00000070   1620A0E3           MOV      R2,#+22
+   \   00000074   101098E5           LDR      R1,[R8, #+16]
+   \   00000078   FF00A0E3           MOV      R0,#+255
+   \   0000007C   0020C1E5           STRB     R2,[R1, #+0]
+     73          	com[port].txbuff[SOURCE] = source; // source of the message
+   \   00000080   101098E5           LDR      R1,[R8, #+16]
+   \   00000084   0140C1E5           STRB     R4,[R1, #+1]
+     74          	com[port].txbuff[DESTINATION] = dest; // destination of the message (same as above)
+   \   00000088   101098E5           LDR      R1,[R8, #+16]
+   \   0000008C   0250C1E5           STRB     R5,[R1, #+2]
+     75          
+     76          	bytes += 2;					// add two bytes to the total for the CRC
+   \   00000090   021087E2           ADD      R1,R7,#+2
+     77          
+     78          	com[port].txbuff[UPPER_BYTE_COUNT] = (bytes & 0xff00)>>8 ;  // format byte count to
+   \   00000094   0118A0E1           LSL      R1,R1,#+16
+   \   00000098   102098E5           LDR      R2,[R8, #+16]
+   \   0000009C   2118A0E1           LSR      R1,R1,#+16
+   \   000000A0   2134A0E1           LSR      R3,R1,#+8
+   \   000000A4   0330C2E5           STRB     R3,[R2, #+3]
+     79          	com[port].txbuff[LOWER_BYTE_COUNT] = bytes & 0xff;          // two byte field
+   \   000000A8   102098E5           LDR      R2,[R8, #+16]
+   \   000000AC   0410C2E5           STRB     R1,[R2, #+4]
+     80          
+     81          	com[port].txbuff[OPCODE]=opcode ;	// store the message op code
+   \   000000B0   102098E5           LDR      R2,[R8, #+16]
+   \   000000B4   0560C2E5           STRB     R6,[R2, #+5]
+     82          	
+     83          	for (i=0; i<CHECKSUM;i++)	// calculate the message header checksum
+   \   000000B8   0020A0E3           MOV      R2,#+0
+     84          		sendchk ^= com[port].txbuff[i] ;		// over all bytes from SOH through op code
+   \                     ??SendMessage_1:
+   \   000000BC   103098E5           LDR      R3,[R8, #+16]
+   \   000000C0   03C0D2E7           LDRB     R12,[R2, +R3]
+   \   000000C4   012082E2           ADD      R2,R2,#+1
+   \   000000C8   060052E3           CMP      R2,#+6
+   \   000000CC   00002CE0           EOR      R0,R12,R0
+   \   000000D0   F9FFFF3A           BCC      ??SendMessage_1
+     85          	
+     86          	com[port].txbuff[CHECKSUM] = sendchk ;	// store the checksum in final header byte
+   \   000000D4   0600C3E5           STRB     R0,[R3, #+6]
+     87          
+     88          	bytes -= 2;					// remove crc from total
+   \   000000D8   024041E2           SUB      R4,R1,#+2
+     89          
+     90          	crc = crc16(&(com[port].txbuff[DATA_START]),bytes);	// calculate the crc
+   \   000000DC   100098E5           LDR      R0,[R8, #+16]
+   \   000000E0   0418A0E1           LSL      R1,R4,#+16
+   \   000000E4   2118A0E1           LSR      R1,R1,#+16
+   \   000000E8   070080E2           ADD      R0,R0,#+7
+   \   000000EC   ........           BL       crc16
+     91          
+     92          	com[port].txbuff[++bytes+CHECKSUM] = (crc & 0xff00)>>8 ;		// store the high crc byte
+   \   000000F0   011084E2           ADD      R1,R4,#+1
+   \   000000F4   103098E5           LDR      R3,[R8, #+16]
+   \   000000F8   0128A0E1           LSL      R2,R1,#+16
+   \   000000FC   222883E0           ADD      R2,R3,R2, LSR #+16
+   \   00000100   4034A0E1           ASR      R3,R0,#+8
+   \   00000104   0630C2E5           STRB     R3,[R2, #+6]
+     93          	com[port].txbuff[++bytes+CHECKSUM] = (crc & 0xff) ;			// store the low crc byte
+   \   00000108   102098E5           LDR      R2,[R8, #+16]
+   \   0000010C   014081E2           ADD      R4,R1,#+1
+   \   00000110   021084E0           ADD      R1,R4,R2
+   \   00000114   0600C1E5           STRB     R0,[R1, #+6]
+     94          
+     95          //	App_putstring(com[port].txbuff, (DATA_START+bytes));
+     96          	XmitUART(&(com[port]), DATA_START+bytes);						// send it
+   \   00000118   071084E2           ADD      R1,R4,#+7
+   \   0000011C   0118A0E1           LSL      R1,R1,#+16
+   \   00000120   2118A0E1           LSR      R1,R1,#+16
+   \   00000124   0800A0E1           MOV      R0,R8
+   \   00000128   ........           BL       XmitUART
+     97          	return((s16) DATA_START+bytes) ;  // return total number of bytes processed in message
+   \   0000012C   070084E2           ADD      R0,R4,#+7
+   \   00000130   0008A0E1           LSL      R0,R0,#+16
+   \   00000134   4008A0E1           ASR      R0,R0,#+16
+   \   00000138   04D08DE2           ADD      SP,SP,#+4
+   \   0000013C   F085BDE8           POP      {R4-R8,R10,PC}   ;; return
+     98          
+     99          } // SendMessage
+    100          
+    101          // the following routine will parse a message based on the op code
+    102          // it is up to the opcode to determine any additional processing, such as
+    103          // CRC calculations, or the meaning of the data
+    104          #define G_FILTER_VAL		5	// number of samples over which to average G force, 3-5 is good
+    105          #define HEADING_FILTER_VAL	4	// number of samples over which to average heading
+    106          
+
+   \                                 In section .text, align 4, keep-with-next
+    107          s16 Parse_Message(u08 port, u08 *msgptr)
+    108          {
+   \                     Parse_Message:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   0180A0E1           MOV      R8,R1
+    109          	s16 retval = 0 ;
+    110          	u16 msgdatalen;
+    111          	static int gcnt = 0;		// how many tenths into a sample
+    112          	static int iocnt = 0;		// how many io points have been saved during this sample
+    113          	static int inhighrev;		// indicates we are in the middle of an overrev condition
+    114          	static int inoverrev;		// indicates we are in the middle of an overrev condition
+    115          	static float lastspeed = 0.0;		// last speed sample
+    116          	static int speedincreasing;	// true if speed is increasing, false if decreasing
+    117          	static float xgrolling[G_FILTER_VAL];
+    118          	static float ygrolling[G_FILTER_VAL];
+    119          	static float zgrolling[G_FILTER_VAL];
+    120          	static int grollingidx;		// index into latest value in rolling g value table used for filtering
+    121          	static int zrollingidx;		// index into latest value in rolling z axis g value table used for filtering
+    122          	static BOOL analogsinitialized = FALSE;		// used to know when to prime the filtering algorithm
+    123          	
+    124          	msgdatalen = (msgptr[UPPER_BYTE_COUNT] << 8);
+    125          	msgdatalen = msgdatalen + msgptr[LOWER_BYTE_COUNT];
+    126          	msgdatalen = msgdatalen - 2;
+   \   00000008   0300D8E5           LDRB     R0,[R8, #+3]
+   \   0000000C   0410D8E5           LDRB     R1,[R8, #+4]
+    127          
+    128          	retval = Verify_CRC(msgptr+DATA_START, msgdatalen);
+   \   00000010   074088E2           ADD      R4,R8,#+7
+   \   00000014   1CD04DE2           SUB      SP,SP,#+28
+   \   00000018   000481E0           ADD      R0,R1,R0, LSL #+8
+   \   0000001C   026040E2           SUB      R6,R0,#+2
+   \   00000020   0668A0E1           LSL      R6,R6,#+16
+   \   00000024   2668A0E1           LSR      R6,R6,#+16
+   \   00000028   0610A0E1           MOV      R1,R6
+   \   0000002C   0150A0E1           MOV      R5,R1
+   \   00000030   0400A0E1           MOV      R0,R4
+   \   00000034   ........           BL       crc16
+   \   00000038   042085E0           ADD      R2,R5,R4
+   \   0000003C   0410D5E7           LDRB     R1,[R5, +R4]
+   \   00000040   0120D2E5           LDRB     R2,[R2, #+1]
+   \   00000044   011482E0           ADD      R1,R2,R1, LSL #+8
+   \   00000048   0118A0E1           MOV      R1,R1, LSL #+16
+   \   0000004C   210850E1           CMP      R0,R1, LSR #+16
+   \   00000050   1800000A           BEQ      ??Parse_Message_4
+    129          
+    130          	if (retval) {		// bad data
+    131          		if (NAK != msgptr[OPCODE] && ACK != msgptr[OPCODE])	{ // don't NAK an ACK or NAK
+   \   00000054   0500D8E5           LDRB     R0,[R8, #+5]
+   \   00000058   0040E0E3           MVN      R4,#+0
+   \   0000005C   150050E3           CMP      R0,#+21
+   \   00000060   06005013           CMPNE    R0,#+6
+   \   00000064   AD05000A           BEQ      ??Parse_Message_5
+    132          			// grab the port
+    133          			COMMCTS[msgptr[SOURCE]-1] = CTS_COUNTDOWN;
+   \   00000068   0100D8E5           LDRB     R0,[R8, #+1]
+   \   0000006C   1C1F9FE5           LDR      R1,??Parse_Message_6
+    134          
+    135          			retval = SendNAK(msgptr[SOURCE], (u08) BAD_CRC);		// no data is returned and no crc
+   \   00000070   1CCF9FE5           LDR      R12,??Parse_Message_6+0x4
+   \   00000074   000181E0           ADD      R0,R1,R0, LSL #+2
+   \   00000078   9B1FA0E3           MOV      R1,#+620
+   \   0000007C   041000E5           STR      R1,[R0, #-4]
+   \   00000080   0110D8E5           LDRB     R1,[R8, #+1]
+   \   00000084   0C0F9FE5           LDR      R0,??Parse_Message_6+0x8
+   \   00000088   1830A0E3           MOV      R3,#+24
+   \   0000008C   D02091E1           LDRSB    R2,[R1, +R0]
+   \   00000090   82C302E1           SMLABB   R2,R2,R3,R12
+   \   00000094   0430A0E3           MOV      R3,#+4
+   \   00000098   102092E5           LDR      R2,[R2, #+16]
+   \   0000009C   0730C2E5           STRB     R3,[R2, #+7]
+   \   000000A0   0130A0E3           MOV      R3,#+1
+   \   000000A4   1520A0E3           MOV      R2,#+21
+   \   000000A8   0000D0E5           LDRB     R0,[R0, #+0]
+   \   000000AC   ........           BL       SendMessage
+    136          		} // if
+    137          	} // if
+   \   000000B0   0040A0E3           MOV      R4,#+0
+   \   000000B4   990500EA           B        ??Parse_Message_5
+    138          	else {		// message is good so parse it
+    139          		int i;
+    140          		u08 *tmpfrom;
+    141          		u08 *tmpto;
+    142          
+    143          		// if message from SU indicate it is present
+    144          		if (SENSOR_UNIT == msgptr[SOURCE]) {
+   \                     ??Parse_Message_4:
+   \   000000B8   0100D8E5           LDRB     R0,[R8, #+1]
+   \   000000BC   0040A0E3           MOV      R4,#+0
+   \   000000C0   020050E3           CMP      R0,#+2
+    145          			suData.suPresent = TRUE;
+   \   000000C4   D00E9F05           LDREQ    R0,??Parse_Message_6+0xC
+   \   000000C8   0110A003           MOVEQ    R1,#+1
+   \   000000CC   0C10C005           STRBEQ   R1,[R0, #+12]
+    146          		} // if
+    147          		
+    148          		// if message not for me, then route it
+    149          		if (msgptr[DESTINATION] != msgrouting[0] && msgptr[DESTINATION] != ANY_UNIT) {
+   \   000000D0   C00E9FE5           LDR      R0,??Parse_Message_6+0x8
+   \   000000D4   0210D8E5           LDRB     R1,[R8, #+2]
+   \   000000D8   D050D0E1           LDRSB    R5,[R0, #+0]
+   \   000000DC   050051E1           CMP      R1,R5
+   \   000000E0   FF005113           CMPNE    R1,#+255
+   \   000000E4   1C00000A           BEQ      ??Parse_Message_7
+    150          			// copy message into appropriate outbound buffer
+    151          
+    152          		// copy into output buffer
+    153          		tmpto = com[msgrouting[msgptr[DESTINATION]]].txbuff+DATA_START;
+   \   000000E8   D00091E1           LDRSB    R0,[R1, +R0]
+   \   000000EC   A02E9FE5           LDR      R2,??Parse_Message_6+0x4
+   \   000000F0   1810A0E3           MOV      R1,#+24
+   \   000000F4   802100E1           SMLABB   R0,R0,R1,R2
+    154          		tmpfrom = msgptr+DATA_START;
+   \   000000F8   071088E2           ADD      R1,R8,#+7
+   \   000000FC   100090E5           LDR      R0,[R0, #+16]
+    155          		for (i=0; i<msgdatalen; i++)
+   \   00000100   010056E3           CMP      R6,#+1
+   \   00000104   070080E2           ADD      R0,R0,#+7
+   \   00000108   0D0000BA           BLT      ??Parse_Message_8
+   \   0000010C   0030D1E5           LDRB     R3,[R1, #+0]
+   \   00000110   012046E2           SUB      R2,R6,#+1
+   \   00000114   010012E3           TST      R2,#0x1
+    156          			*tmpto++ = *tmpfrom++;
+   \   00000118   0130C014           STRBNE   R3,[R0], #+1
+   \   0000011C   0130F115           LDRBNE   R3,[R1, #+1]!
+   \   00000120   A220B0E1           LSRS     R2,R2,#+1
+   \   00000124   0500000A           BEQ      ??Parse_Message_9
+   \                     ??Parse_Message_10:
+   \   00000128   0130C0E4           STRB     R3,[R0], #+1
+   \   0000012C   01C0F1E5           LDRB     R12,[R1, #+1]!
+   \   00000130   012052E2           SUBS     R2,R2,#+1
+   \   00000134   01C0C0E4           STRB     R12,[R0], #+1
+   \   00000138   0130F1E5           LDRB     R3,[R1, #+1]!
+   \   0000013C   F9FFFF1A           BNE      ??Parse_Message_10
+   \                     ??Parse_Message_9:
+   \   00000140   0030C0E5           STRB     R3,[R0, #+0]
+    157          
+    158          			SendMessage(msgptr[SOURCE], msgptr[DESTINATION], msgptr[OPCODE], msgdatalen);
+   \                     ??Parse_Message_8:
+   \   00000144   0630A0E1           MOV      R3,R6
+   \   00000148   0520D8E5           LDRB     R2,[R8, #+5]
+   \   0000014C   0210D8E5           LDRB     R1,[R8, #+2]
+   \   00000150   0100D8E5           LDRB     R0,[R8, #+1]
+   \   00000154   ........           BL       SendMessage
+   \   00000158   700500EA           B        ??Parse_Message_5
+    159          		} // if
+    160          		else {	// message for me so process it
+    161          			switch (msgptr[OPCODE]) {
+   \                     ??Parse_Message_7:
+   \   0000015C   0510D8E5           LDRB     R1,[R8, #+5]
+   \   00000160   061041E2           SUB      R1,R1,#+6
+   \   00000164   920051E3           CMP      R1,#+146
+   \   00000168   01F18F90           ADDLS    PC,PC,R1, LSL #+2
+   \                     ??Parse_Message_0:
+   \   0000016C   5905008A           BHI      ??Parse_Message_11
+   \   00000170   910000EA           B        ??Parse_Message_12
+   \   00000174   570500EA           B        ??Parse_Message_11
+   \   00000178   560500EA           B        ??Parse_Message_11
+   \   0000017C   550500EA           B        ??Parse_Message_11
+   \   00000180   540500EA           B        ??Parse_Message_11
+   \   00000184   530500EA           B        ??Parse_Message_11
+   \   00000188   520500EA           B        ??Parse_Message_11
+   \   0000018C   510500EA           B        ??Parse_Message_11
+   \   00000190   500500EA           B        ??Parse_Message_11
+   \   00000194   4F0500EA           B        ??Parse_Message_11
+   \   00000198   A90000EA           B        ??Parse_Message_13
+   \   0000019C   4D0500EA           B        ??Parse_Message_11
+   \   000001A0   4C0500EA           B        ??Parse_Message_11
+   \   000001A4   4B0500EA           B        ??Parse_Message_11
+   \   000001A8   4A0500EA           B        ??Parse_Message_11
+   \   000001AC   A00000EA           B        ??Parse_Message_14
+   \   000001B0   480500EA           B        ??Parse_Message_11
+   \   000001B4   470500EA           B        ??Parse_Message_11
+   \   000001B8   460500EA           B        ??Parse_Message_11
+   \   000001BC   450500EA           B        ??Parse_Message_11
+   \   000001C0   440500EA           B        ??Parse_Message_11
+   \   000001C4   430500EA           B        ??Parse_Message_11
+   \   000001C8   420500EA           B        ??Parse_Message_11
+   \   000001CC   410500EA           B        ??Parse_Message_11
+   \   000001D0   400500EA           B        ??Parse_Message_11
+   \   000001D4   3F0500EA           B        ??Parse_Message_11
+   \   000001D8   3E0500EA           B        ??Parse_Message_11
+   \   000001DC   3D0500EA           B        ??Parse_Message_11
+   \   000001E0   570100EA           B        ??Parse_Message_15
+   \   000001E4   3B0500EA           B        ??Parse_Message_11
+   \   000001E8   3A0500EA           B        ??Parse_Message_11
+   \   000001EC   390500EA           B        ??Parse_Message_11
+   \   000001F0   380500EA           B        ??Parse_Message_11
+   \   000001F4   0A0300EA           B        ??Parse_Message_16
+   \   000001F8   360500EA           B        ??Parse_Message_11
+   \   000001FC   2B0100EA           B        ??Parse_Message_17
+   \   00000200   340500EA           B        ??Parse_Message_11
+   \   00000204   330500EA           B        ??Parse_Message_11
+   \   00000208   320500EA           B        ??Parse_Message_11
+   \   0000020C   310500EA           B        ??Parse_Message_11
+   \   00000210   300500EA           B        ??Parse_Message_11
+   \   00000214   2F0500EA           B        ??Parse_Message_11
+   \   00000218   F00000EA           B        ??Parse_Message_18
+   \   0000021C   2D0500EA           B        ??Parse_Message_11
+   \   00000220   2C0500EA           B        ??Parse_Message_11
+   \   00000224   2B0500EA           B        ??Parse_Message_11
+   \   00000228   F90000EA           B        ??Parse_Message_19
+   \   0000022C   290500EA           B        ??Parse_Message_11
+   \   00000230   280500EA           B        ??Parse_Message_11
+   \   00000234   270500EA           B        ??Parse_Message_11
+   \   00000238   F50000EA           B        ??Parse_Message_19
+   \   0000023C   250500EA           B        ??Parse_Message_11
+   \   00000240   240500EA           B        ??Parse_Message_11
+   \   00000244   230500EA           B        ??Parse_Message_11
+   \   00000248   220500EA           B        ??Parse_Message_11
+   \   0000024C   210500EA           B        ??Parse_Message_11
+   \   00000250   200500EA           B        ??Parse_Message_11
+   \   00000254   1F0500EA           B        ??Parse_Message_11
+   \   00000258   1E0500EA           B        ??Parse_Message_11
+   \   0000025C   1D0500EA           B        ??Parse_Message_11
+   \   00000260   1C0500EA           B        ??Parse_Message_11
+   \   00000264   1B0500EA           B        ??Parse_Message_11
+   \   00000268   1A0500EA           B        ??Parse_Message_11
+   \   0000026C   190500EA           B        ??Parse_Message_11
+   \   00000270   180500EA           B        ??Parse_Message_11
+   \   00000274   170500EA           B        ??Parse_Message_11
+   \   00000278   160500EA           B        ??Parse_Message_11
+   \   0000027C   150500EA           B        ??Parse_Message_11
+   \   00000280   140500EA           B        ??Parse_Message_11
+   \   00000284   130500EA           B        ??Parse_Message_11
+   \   00000288   120500EA           B        ??Parse_Message_11
+   \   0000028C   110500EA           B        ??Parse_Message_11
+   \   00000290   100500EA           B        ??Parse_Message_11
+   \   00000294   0F0500EA           B        ??Parse_Message_11
+   \   00000298   0E0500EA           B        ??Parse_Message_11
+   \   0000029C   0D0500EA           B        ??Parse_Message_11
+   \   000002A0   0C0500EA           B        ??Parse_Message_11
+   \   000002A4   0B0500EA           B        ??Parse_Message_11
+   \   000002A8   0A0500EA           B        ??Parse_Message_11
+   \   000002AC   090500EA           B        ??Parse_Message_11
+   \   000002B0   080500EA           B        ??Parse_Message_11
+   \   000002B4   070500EA           B        ??Parse_Message_11
+   \   000002B8   060500EA           B        ??Parse_Message_11
+   \   000002BC   050500EA           B        ??Parse_Message_11
+   \   000002C0   040500EA           B        ??Parse_Message_11
+   \   000002C4   030500EA           B        ??Parse_Message_11
+   \   000002C8   020500EA           B        ??Parse_Message_11
+   \   000002CC   010500EA           B        ??Parse_Message_11
+   \   000002D0   000500EA           B        ??Parse_Message_11
+   \   000002D4   FF0400EA           B        ??Parse_Message_11
+   \   000002D8   FE0400EA           B        ??Parse_Message_11
+   \   000002DC   FD0400EA           B        ??Parse_Message_11
+   \   000002E0   FC0400EA           B        ??Parse_Message_11
+   \   000002E4   FB0400EA           B        ??Parse_Message_11
+   \   000002E8   FA0400EA           B        ??Parse_Message_11
+   \   000002EC   F90400EA           B        ??Parse_Message_11
+   \   000002F0   F80400EA           B        ??Parse_Message_11
+   \   000002F4   F70400EA           B        ??Parse_Message_11
+   \   000002F8   F60400EA           B        ??Parse_Message_11
+   \   000002FC   F50400EA           B        ??Parse_Message_11
+   \   00000300   F40400EA           B        ??Parse_Message_11
+   \   00000304   F30400EA           B        ??Parse_Message_11
+   \   00000308   F20400EA           B        ??Parse_Message_11
+   \   0000030C   F10400EA           B        ??Parse_Message_11
+   \   00000310   F00400EA           B        ??Parse_Message_11
+   \   00000314   EF0400EA           B        ??Parse_Message_11
+   \   00000318   990000EA           B        ??Parse_Message_20
+   \   0000031C   A40000EA           B        ??Parse_Message_21
+   \   00000320   E00000EA           B        ??Parse_Message_22
+   \   00000324   EB0400EA           B        ??Parse_Message_11
+   \   00000328   EA0400EA           B        ??Parse_Message_11
+   \   0000032C   E90400EA           B        ??Parse_Message_11
+   \   00000330   E80400EA           B        ??Parse_Message_11
+   \   00000334   E70400EA           B        ??Parse_Message_11
+   \   00000338   E60400EA           B        ??Parse_Message_11
+   \   0000033C   E50400EA           B        ??Parse_Message_11
+   \   00000340   E40400EA           B        ??Parse_Message_11
+   \   00000344   E30400EA           B        ??Parse_Message_11
+   \   00000348   E20400EA           B        ??Parse_Message_11
+   \   0000034C   E10400EA           B        ??Parse_Message_11
+   \   00000350   E00400EA           B        ??Parse_Message_11
+   \   00000354   DF0400EA           B        ??Parse_Message_11
+   \   00000358   DE0400EA           B        ??Parse_Message_11
+   \   0000035C   DD0400EA           B        ??Parse_Message_11
+   \   00000360   DC0400EA           B        ??Parse_Message_11
+   \   00000364   DB0400EA           B        ??Parse_Message_11
+   \   00000368   DA0400EA           B        ??Parse_Message_11
+   \   0000036C   D90400EA           B        ??Parse_Message_11
+   \   00000370   D80400EA           B        ??Parse_Message_11
+   \   00000374   D70400EA           B        ??Parse_Message_11
+   \   00000378   D60400EA           B        ??Parse_Message_11
+   \   0000037C   D50400EA           B        ??Parse_Message_11
+   \   00000380   D40400EA           B        ??Parse_Message_11
+   \   00000384   D30400EA           B        ??Parse_Message_11
+   \   00000388   D20400EA           B        ??Parse_Message_11
+   \   0000038C   D10400EA           B        ??Parse_Message_11
+   \   00000390   D00400EA           B        ??Parse_Message_11
+   \   00000394   CF0400EA           B        ??Parse_Message_11
+   \   00000398   4C0000EA           B        ??Parse_Message_23
+   \   0000039C   CD0400EA           B        ??Parse_Message_11
+   \   000003A0   310300EA           B        ??Parse_Message_24
+   \   000003A4   A20000EA           B        ??Parse_Message_25
+   \   000003A8   CA0400EA           B        ??Parse_Message_11
+   \   000003AC   C90400EA           B        ??Parse_Message_11
+   \   000003B0   C80400EA           B        ??Parse_Message_11
+   \   000003B4   C70400EA           B        ??Parse_Message_11
+   \   000003B8   5B0000EA           B        ??Parse_Message_26
+    162          			case ACK:
+    163          
+    164          				// if ACK with data then parse the results
+    165          				if (SCRATCHLEN == msgdatalen) {
+   \                     ??Parse_Message_12:
+   \   000003BC   800056E3           CMP      R6,#+128
+   \   000003C0   1200001A           BNE      ??Parse_Message_27
+    166          					// must have received a scratchpad buffer
+    167          					int tmpctr;
+    168          
+    169          					// save the config data in RAM
+    170          					for (tmpctr = 0; tmpctr < SCRATCHLEN; tmpctr++)
+   \   000003C4   07C0D8E5           LDRB     R12,[R8, #+7]
+   \   000003C8   B00D9FE5           LDR      R0,??Parse_Message_28
+    171          						scratchpad.scratchbuff[tmpctr] = msgptr[DATA_START + tmpctr];
+   \   000003CC   0110A0E3           MOV      R1,#+1
+   \   000003D0   00C0C0E5           STRB     R12,[R0, #+0]
+   \   000003D4   08C0D8E5           LDRB     R12,[R8, #+8]
+   \   000003D8   092088E2           ADD      R2,R8,#+9
+   \   000003DC   3F30A0E3           MOV      R3,#+63
+   \                     ??Parse_Message_29:
+   \   000003E0   00C0C1E7           STRB     R12,[R1, +R0]
+   \   000003E4   01E0D2E4           LDRB     LR,[R2], #+1
+   \   000003E8   011081E2           ADD      R1,R1,#+1
+   \   000003EC   013053E2           SUBS     R3,R3,#+1
+   \   000003F0   00E0C1E7           STRB     LR,[R1, +R0]
+   \   000003F4   011081E2           ADD      R1,R1,#+1
+   \   000003F8   01C0D2E4           LDRB     R12,[R2], #+1
+   \   000003FC   F7FFFF1A           BNE      ??Parse_Message_29
+   \   00000400   00C0C1E7           STRB     R12,[R1, +R0]
+    172          					gotscratchpad = TRUE;
+   \   00000404   780D9FE5           LDR      R0,??Parse_Message_28+0x4
+   \   00000408   0110A0E3           MOV      R1,#+1
+   \   0000040C   0010C0E5           STRB     R1,[R0, #+0]
+    173          				} // if
+    174          
+    175          				// clear the message as outstanding from this device
+    176          				outstanding_msg[msgptr[SOURCE]-1] = 0;
+   \                     ??Parse_Message_27:
+   \   00000410   0100D8E5           LDRB     R0,[R8, #+1]
+   \   00000414   6C1D9FE5           LDR      R1,??Parse_Message_28+0x8
+   \   00000418   010080E0           ADD      R0,R0,R1
+   \   0000041C   014040E5           STRB     R4,[R0, #-1]
+    177          
+    178          				// free up unit for more communications
+    179          				COMMCTS[msgptr[SOURCE]-1] = 0;
+   \                     ??Parse_Message_30:
+   \   00000420   0100D8E5           LDRB     R0,[R8, #+1]
+   \   00000424   641B9FE5           LDR      R1,??Parse_Message_6
+   \   00000428   000181E0           ADD      R0,R1,R0, LSL #+2
+   \   0000042C   044000E5           STR      R4,[R0, #-4]
+    180          				break;
+   \   00000430   BA0400EA           B        ??Parse_Message_5
+    181          
+    182          			case NAK:
+    183          				// fall back and retry PUT CODE HERE
+    184          
+    185          				// clear the message as outstanding from this device
+    186          				outstanding_msg[msgptr[SOURCE-1]] = 0;
+   \                     ??Parse_Message_14:
+   \   00000434   0000D8E5           LDRB     R0,[R8, #+0]
+   \   00000438   481D9FE5           LDR      R1,??Parse_Message_28+0x8
+   \   0000043C   0140C0E7           STRB     R4,[R0, +R1]
+    187          
+    188          				// free up unit for more communications
+    189          				COMMCTS[msgptr[SOURCE]-1] = 0;
+   \   00000440   F6FFFFEA           B        ??Parse_Message_30
+    190          				break;
+    191          
+    192          		// the SendACK function should be called within each
+    193          		// case to ensure the appropriate data is returned for
+    194          		// the corresponding op code
+    195          			case WHO_ARE_YOU:
+    196          				if (DU2_OCCUPIED(unsavedSysData.systemMode))
+   \                     ??Parse_Message_13:
+   \   00000444   40AD9FE5           LDR      R10,??Parse_Message_28+0xC
+   \   00000448   8810DAE5           LDRB     R1,[R10, #+136]
+   \   0000044C   032041E2           SUB      R2,R1,#+3
+   \   00000450   FF2002E2           AND      R2,R2,#0xFF
+   \   00000454   130052E3           CMP      R2,#+19
+   \   00000458   0300003A           BCC      ??Parse_Message_31
+   \   0000045C   1E0051E3           CMP      R1,#+30
+   \   00000460   0100000A           BEQ      ??Parse_Message_31
+   \   00000464   170051E3           CMP      R1,#+23
+   \   00000468   0C00003A           BCC      ??Parse_Message_32
+    197          					retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+   \                     ??Parse_Message_31:
+   \   0000046C   0110D8E5           LDRB     R1,[R8, #+1]
+   \   00000470   1C3B9FE5           LDR      R3,??Parse_Message_6+0x4
+   \   00000474   1820A0E3           MOV      R2,#+24
+   \   00000478   D00091E1           LDRSB    R0,[R1, +R0]
+   \   0000047C   803200E1           SMLABB   R0,R0,R2,R3
+   \   00000480   2020A0E3           MOV      R2,#+32
+   \   00000484   100090E5           LDR      R0,[R0, #+16]
+   \   00000488   0130A0E3           MOV      R3,#+1
+   \   0000048C   0720C0E5           STRB     R2,[R0, #+7]
+   \   00000490   1520A0E3           MOV      R2,#+21
+   \   00000494   FF0005E2           AND      R0,R5,#0xFF
+   \   00000498   ........           BL       SendMessage
+   \   0000049C   050000EA           B        ??Parse_Message_33
+    198          				else
+    199          					retval = SendACK(msgptr[SOURCE]);
+   \                     ??Parse_Message_32:
+   \   000004A0   0030A0E3           MOV      R3,#+0
+   \                     ??Parse_Message_34:
+   \   000004A4   0620A0E3           MOV      R2,#+6
+   \   000004A8   0110D8E5           LDRB     R1,[R8, #+1]
+   \   000004AC   FF0005E2           AND      R0,R5,#0xFF
+   \   000004B0   ........           BL       SendMessage
+   \   000004B4   0040A0E1           MOV      R4,R0
+    200          				// free up unit for more communications
+    201          				COMMCTS[msgptr[SOURCE]-1] = 0;
+   \                     ??Parse_Message_33:
+   \   000004B8   0100D8E5           LDRB     R0,[R8, #+1]
+   \   000004BC   CC1A9FE5           LDR      R1,??Parse_Message_6
+   \   000004C0   000181E0           ADD      R0,R1,R0, LSL #+2
+   \   000004C4   0010A0E3           MOV      R1,#+0
+   \   000004C8   041000E5           STR      R1,[R0, #-4]
+    202          				break;
+   \   000004CC   930400EA           B        ??Parse_Message_5
+    203          	
+    204          			case READ_SEGMENT: {			// get specified segment data
+    205          				int segnum;				// segment number to get
+    206          
+    207          				if (DU2_OCCUPIED(unsavedSysData.systemMode))
+   \                     ??Parse_Message_23:
+   \   000004D0   B4AC9FE5           LDR      R10,??Parse_Message_28+0xC
+   \   000004D4   8810DAE5           LDRB     R1,[R10, #+136]
+   \   000004D8   032041E2           SUB      R2,R1,#+3
+   \   000004DC   FF2002E2           AND      R2,R2,#0xFF
+   \   000004E0   130052E3           CMP      R2,#+19
+   \   000004E4   E0FFFF3A           BCC      ??Parse_Message_31
+   \   000004E8   1E0051E3           CMP      R1,#+30
+   \   000004EC   DEFFFF0A           BEQ      ??Parse_Message_31
+   \   000004F0   170051E3           CMP      R1,#+23
+   \   000004F4   DCFFFF2A           BCS      ??Parse_Message_31
+    208          					retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+    209          				else {
+    210          					segnum = (msgptr[DATA_START]<<8) + msgptr[DATA_START+1];
+    211          
+    212          					DataFlash_Page_Read(0, unsavedSysData.dataflash[0].bytesPerPage, (char *) com[0].txbuff+DATA_START, segnum);
+   \   000004F8   0700D8E5           LDRB     R0,[R8, #+7]
+   \   000004FC   0810D8E5           LDRB     R1,[R8, #+8]
+   \   00000500   003481E0           ADD      R3,R1,R0, LSL #+8
+   \   00000504   880A9FE5           LDR      R0,??Parse_Message_6+0x4
+   \   00000508   0338A0E1           LSL      R3,R3,#+16
+   \   0000050C   100090E5           LDR      R0,[R0, #+16]
+   \   00000510   2338A0E1           LSR      R3,R3,#+16
+   \   00000514   072080E2           ADD      R2,R0,#+7
+   \   00000518   B218DAE1           LDRH     R1,[R10, #+130]
+   \   0000051C   0000A0E3           MOV      R0,#+0
+   \   00000520   ........           BL       DataFlash_Page_Read
+    213          					retval = SendACK_Data(msgptr[SOURCE], unsavedSysData.dataflash[0].bytesPerPage);  // send the segment data
+   \   00000524   B238DAE1           LDRH     R3,[R10, #+130]
+   \   00000528   DDFFFFEA           B        ??Parse_Message_34
+    214          				} // else
+    215          				// free up unit for more communications
+    216          				COMMCTS[msgptr[SOURCE]-1] = 0;
+    217          				break;
+    218          			} // READ_SEGMENT
+    219          			
+    220          			case WRITE_SEGMENT: {			// write data to specified segment
+    221          				int segnum;
+    222          
+    223          				if (DU2_OCCUPIED(unsavedSysData.systemMode))
+   \                     ??Parse_Message_26:
+   \   0000052C   58AC9FE5           LDR      R10,??Parse_Message_28+0xC
+   \   00000530   8810DAE5           LDRB     R1,[R10, #+136]
+   \   00000534   032041E2           SUB      R2,R1,#+3
+   \   00000538   FF2002E2           AND      R2,R2,#0xFF
+   \   0000053C   130052E3           CMP      R2,#+19
+   \   00000540   C9FFFF3A           BCC      ??Parse_Message_31
+   \   00000544   1E0051E3           CMP      R1,#+30
+   \   00000548   C7FFFF0A           BEQ      ??Parse_Message_31
+   \   0000054C   170051E3           CMP      R1,#+23
+   \   00000550   C5FFFF2A           BCS      ??Parse_Message_31
+    224          					retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+    225          				else {
+    226          					segnum = (msgptr[DATA_START]<<8) + msgptr[DATA_START+1];
+    227          
+    228          					DataFlash_Page_Write_Erase(0, GENBUFFER, unsavedSysData.dataflash[0].bytesPerPage, (char *) msgptr+DATA_START+2, segnum);
+   \   00000554   0700D8E5           LDRB     R0,[R8, #+7]
+   \   00000558   0810D8E5           LDRB     R1,[R8, #+8]
+   \   0000055C   093088E2           ADD      R3,R8,#+9
+   \   00000560   B228DAE1           LDRH     R2,[R10, #+130]
+   \   00000564   000481E0           ADD      R0,R1,R0, LSL #+8
+   \   00000568   0008A0E1           LSL      R0,R0,#+16
+   \   0000056C   2008A0E1           LSR      R0,R0,#+16
+   \   00000570   00008DE5           STR      R0,[SP, #+0]
+   \   00000574   0210A0E3           MOV      R1,#+2
+   \   00000578   0000A0E3           MOV      R0,#+0
+   \   0000057C   ........           BL       DataFlash_Page_Write_Erase
+    229          					
+    230          					retval = SendACK(msgptr[SOURCE]);
+   \   00000580   C6FFFFEA           B        ??Parse_Message_32
+    231          				} // else
+    232          				// free up unit for more communications
+    233          				COMMCTS[msgptr[SOURCE]-1] = 0;
+    234          				break;
+    235          			} // WRITE_SEGMENT
+    236          			
+    237          			case READ_UNIT_INFO: {		// gets the factory calibration data
+    238          				if (DU2_OCCUPIED(unsavedSysData.systemMode))
+   \                     ??Parse_Message_20:
+   \   00000584   00AC9FE5           LDR      R10,??Parse_Message_28+0xC
+   \   00000588   8810DAE5           LDRB     R1,[R10, #+136]
+   \   0000058C   032041E2           SUB      R2,R1,#+3
+   \   00000590   FF2002E2           AND      R2,R2,#0xFF
+   \   00000594   130052E3           CMP      R2,#+19
+   \   00000598   B3FFFF3A           BCC      ??Parse_Message_31
+   \   0000059C   1E0051E3           CMP      R1,#+30
+   \   000005A0   B1FFFF0A           BEQ      ??Parse_Message_31
+   \   000005A4   170051E3           CMP      R1,#+23
+   \   000005A8   AFFFFF2A           BCS      ??Parse_Message_31
+    239          					retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+    240          				else {
+    241          //					ReadScratchpad(com[port].txbuff+DATA_START);
+    242          					retval = SendACK_Data(msgptr[SOURCE], SCRATCHLEN);  // send the segment data
+   \   000005AC   8030A0E3           MOV      R3,#+128
+   \   000005B0   BBFFFFEA           B        ??Parse_Message_34
+    243          				} // else
+    244          
+    245          				// free up unit for more communications
+    246          				COMMCTS[msgptr[SOURCE]-1] = 0;
+    247          				break;
+    248          			} // READ_UNIT_INFO
+    249          			
+    250          			case WRITE_UNIT_INFO: {		// writes the factory calibration data
+    251          				if (DU2_OCCUPIED(unsavedSysData.systemMode))
+   \                     ??Parse_Message_21:
+   \   000005B4   D0AB9FE5           LDR      R10,??Parse_Message_28+0xC
+   \   000005B8   8810DAE5           LDRB     R1,[R10, #+136]
+   \   000005BC   032041E2           SUB      R2,R1,#+3
+   \   000005C0   FF2002E2           AND      R2,R2,#0xFF
+   \   000005C4   130052E3           CMP      R2,#+19
+   \   000005C8   A7FFFF3A           BCC      ??Parse_Message_31
+   \   000005CC   1E0051E3           CMP      R1,#+30
+   \   000005D0   A5FFFF0A           BEQ      ??Parse_Message_31
+   \   000005D4   170051E3           CMP      R1,#+23
+   \   000005D8   B0FFFF3A           BCC      ??Parse_Message_32
+    252          					retval = SendNAK(msgptr[SOURCE], (u08) UNIT_BUSY);
+   \   000005DC   A2FFFFEA           B        ??Parse_Message_31
+    253          				else {
+    254          //					EraseScratchpad();
+    255          //					WriteScratchpad( msgptr+DATA_START, MIN(msgdatalen, SCRATCHLEN));
+    256          
+    257          					// replenish local copy
+    258          //					ReadScratchpad(scratchpad.scratchbuff);
+    259          
+    260          					retval = SendACK(msgptr[SOURCE]);
+    261          				} // else
+    262          
+    263          				// free up unit for more communications
+    264          				COMMCTS[msgptr[SOURCE]-1] = 0;
+    265          				break;
+    266          			} // WRITE_UNIT_INFO
+    267          				
+    268          				
+    269          			case RESET_UNIT: {
+    270          				retval = SendACK(msgptr[SOURCE]);
+   \                     ??Parse_Message_18:
+   \   000005E0   0030A0E3           MOV      R3,#+0
+   \   000005E4   0620A0E3           MOV      R2,#+6
+   \   000005E8   0110D8E5           LDRB     R1,[R8, #+1]
+   \   000005EC   FF0005E2           AND      R0,R5,#0xFF
+   \   000005F0   ........           BL       SendMessage
+   \   000005F4   0040A0E1           MOV      R4,R0
+    271          				// free up unit for more communications
+    272          				COMMCTS[msgptr[SOURCE]-1] = 0;
+   \   000005F8   0100D8E5           LDRB     R0,[R8, #+1]
+   \   000005FC   8C199FE5           LDR      R1,??Parse_Message_6
+   \   00000600   000181E0           ADD      R0,R1,R0, LSL #+2
+   \   00000604   0010A0E3           MOV      R1,#+0
+   \   00000608   041000E5           STR      R1,[R0, #-4]
+    273          
+    274          				reset();
+   \   0000060C   ........           BL       reset
+    275          				
+    276          				break;
+   \   00000610   420400EA           B        ??Parse_Message_5
+    277          			} // RESET_UNIT
+    278          
+    279          			case DATAFLASHTEST:
+    280          			case DATAFLASHTEST2:
+    281          				// free up unit for more communications
+    282          				COMMCTS[msgptr[SOURCE]-1] = 0;
+   \                     ??Parse_Message_19:
+   \   00000614   0100D8E5           LDRB     R0,[R8, #+1]
+   \   00000618   70199FE5           LDR      R1,??Parse_Message_6
+   \   0000061C   000181E0           ADD      R0,R1,R0, LSL #+2
+   \   00000620   044000E5           STR      R4,[R0, #-4]
+    283          				
+    284          				DataflashTest((int) msgptr[OPCODE], 1);
+   \   00000624   0110A0E3           MOV      R1,#+1
+   \   00000628   0500D8E5           LDRB     R0,[R8, #+5]
+   \   0000062C   ........           BL       DataflashTest
+    285          				break;
+   \   00000630   3A0400EA           B        ??Parse_Message_5
+    286          
+    287          			case POWER_DOWN: {
+    288          //				int shutdowntime;
+    289          
+    290          				// SU has detected power failure and notified the DU
+    291          
+    292          // *** GAS TEST
+    293          //	shutdowntime = OS_GetTime32();
+    294          
+    295          				// change global state
+    296          				unsavedSysData.systemMode = DU2_POWERLOSS;
+   \                     ??Parse_Message_25:
+   \   00000634   500B9FE5           LDR      R0,??Parse_Message_28+0xC
+   \   00000638   2110A0E3           MOV      R1,#+33
+   \   0000063C   8810C0E5           STRB     R1,[R0, #+136]
+    297          					
+    298          				// shut down backlight and LEDs to save power
+    299          				LEDSystemShutdown();
+   \   00000640   ........           BL       LEDSystemShutdown
+    300          
+    301          				// close data file and save data
+    302          				if (NULL != sessionFile) {
+   \   00000644   AC4D9FE5           LDR      R4,??Parse_Message_35
+   \   00000648   000094E5           LDR      R0,[R4, #+0]
+   \   0000064C   000050E3           CMP      R0,#+0
+   \   00000650   0400000A           BEQ      ??Parse_Message_36
+    303          					FS_FClose(sessionFile);
+   \   00000654   ........           BL       FS_FClose
+    304          					FS_Sync("");
+   \   00000658   950F8FE2           ADR      R0,??Parse_Message_37  ;; ""
+   \   0000065C   ........           BL       FS_Sync
+    305          					sessionFile = NULL;
+   \   00000660   0000A0E3           MOV      R0,#+0
+   \   00000664   000084E5           STR      R0,[R4, #+0]
+    306          				} // if
+    307          				
+    308          // *** WORK alternative if there is enough time
+    309          //				notifyTQM (DU2_POWER_LOSS);		
+    310          //				OS_SetPriority( &TQMWriteTCB, 200);						// make tqm task run
+    311          
+    312          // *** WORK maybe a bad idea if running out of juice
+    313          
+    314          //	time1 = OS_GetTime32() - shutdowntime;
+    315          
+    316          				// save configuration
+    317          				WriteDataStructures(SYSTEM_DATA);
+   \                     ??Parse_Message_36:
+   \   00000668   ........           BL       WriteDataStructures
+    318          				OS_SetPriority( &SDcardRWTCB, 190);						// make tqm task run
+   \   0000066C   884D9FE5           LDR      R4,??Parse_Message_35+0x4
+   \   00000670   BE10A0E3           MOV      R1,#+190
+   \   00000674   0400A0E1           MOV      R0,R4
+   \   00000678   ........           BL       OS_SetPriority
+    319          				OS_WakeTask(&SDcardRWTCB);
+   \   0000067C   0400A0E1           MOV      R0,R4
+   \   00000680   ........           BL       OS_WakeTask
+    320          				
+    321          //	time2 = OS_GetTime32() - shutdowntime;
+    322          
+    323          				OS_Delay(2000);			// allow other tasks to do their work
+   \   00000684   7D0EA0E3           MOV      R0,#+2000
+   \                     ??Parse_Message_38:
+   \   00000688   ........           BL       OS_Delay
+    324          
+    325          				// I'm not dead yet? Then just go away.
+    326          				while (1) {
+    327          					// tell SU to shut us down
+    328          					SendMessage((u08) DISPLAY_UNIT, (u08) SENSOR_UNIT, (u08) POWER_DOWN, (u08) 0);
+   \   0000068C   0030A0E3           MOV      R3,#+0
+   \   00000690   9320A0E3           MOV      R2,#+147
+   \   00000694   0210A0E3           MOV      R1,#+2
+   \   00000698   0300A0E3           MOV      R0,#+3
+   \   0000069C   ........           BL       SendMessage
+    329          
+    330          					// wait a bit. if still alive, send it again
+    331          					OS_Delay( 1000 );
+   \   000006A0   FA0FA0E3           MOV      R0,#+1000
+   \   000006A4   F7FFFFEA           B        ??Parse_Message_38
+    332          				} // while
+    333          			} // POWER_DOWN
+    334          
+    335          			case WRITE_DISPLAY_TEXT: {
+    336          
+    337          				// put in code to write a line of text to screen
+    338          //				Write_Line((u08) 3, msgptr+DATA_START, TRUE, '-');		
+    339          				retval = SendACK(msgptr[SOURCE]);
+   \                     ??Parse_Message_22:
+   \   000006A8   0030A0E3           MOV      R3,#+0
+   \   000006AC   7CFFFFEA           B        ??Parse_Message_34
+    340          
+    341          				// free up unit for more communications
+    342          				COMMCTS[msgptr[SOURCE]-1] = 0;
+    343          				break;
+    344          			} // WRITE_DISPLAY_TEXT
+    345          			case CAM_STATUS: {
+    346          				// ignore pesky messages during startup
+    347          //				if (DU2_STARTUP != unsavedSysData.systemMode) {
+    348          					
+    349          					retval = SendACK(msgptr[SOURCE]);
+   \                     ??Parse_Message_17:
+   \   000006B0   0030A0E3           MOV      R3,#+0
+   \   000006B4   0620A0E3           MOV      R2,#+6
+   \   000006B8   0110D8E5           LDRB     R1,[R8, #+1]
+   \   000006BC   FF0005E2           AND      R0,R5,#0xFF
+   \   000006C0   ........           BL       SendMessage
+   \   000006C4   0040A0E1           MOV      R4,R0
+    350          
+    351          					// free up unit for more communications
+    352          					COMMCTS[msgptr[SOURCE]-1] = 0;
+   \   000006C8   0100D8E5           LDRB     R0,[R8, #+1]
+   \   000006CC   BC189FE5           LDR      R1,??Parse_Message_6
+   \   000006D0   000181E0           ADD      R0,R1,R0, LSL #+2
+   \   000006D4   0010A0E3           MOV      R1,#+0
+   \   000006D8   041000E5           STR      R1,[R0, #-4]
+    353          
+    354          					if ((CAMERA_NONE != vehicleData.camera) || (CAMERA_USB != vehicleData.camera)) {
+    355          						// first byte has camera status
+    356          						pdrlancstatus = (pdrlancstatustype) (msgptr[DATA_START]);
+   \   000006DC   0700D8E5           LDRB     R0,[R8, #+7]
+   \   000006E0   5C1F9FE5           LDR      R1,??Parse_Message_39
+   \   000006E4   0000C1E5           STRB     R0,[R1, #+0]
+    357          						
+    358          						switch (pdrlancstatus) {
+   \   000006E8   010040E2           SUB      R0,R0,#+1
+   \   000006EC   050050E3           CMP      R0,#+5
+   \   000006F0   00F18F90           ADDLS    PC,PC,R0, LSL #+2
+   \                     ??Parse_Message_1:
+   \   000006F4   0F00008A           BHI      ??Parse_Message_40
+   \   000006F8   040000EA           B        ??Parse_Message_41
+   \   000006FC   0D0000EA           B        ??Parse_Message_40
+   \   00000700   020000EA           B        ??Parse_Message_41
+   \   00000704   050000EA           B        ??Parse_Message_42
+   \   00000708   000000EA           B        ??Parse_Message_41
+   \   0000070C   060000EA           B        ??Parse_Message_43
+    359          							case PDROFF:
+    360          							case PDRLANCNOTREADY:
+    361          							case PDRLANC2WIRE:
+    362          								DataValues[CAMERA_STATUS].iVal = CAMERA_STATUS_NOT_READY;
+   \                     ??Parse_Message_41:
+   \   00000710   300F9FE5           LDR      R0,??Parse_Message_39+0x4
+   \   00000714   0110A0E3           MOV      R1,#+1
+   \                     ??Parse_Message_44:
+   \   00000718   581280E5           STR      R1,[R0, #+600]
+    363          								break;					
+   \   0000071C   FF0300EA           B        ??Parse_Message_5
+    364          							case PDRLANCREADY:
+    365          								DataValues[CAMERA_STATUS].iVal = CAMERA_STATUS_READY;
+   \                     ??Parse_Message_42:
+   \   00000720   200F9FE5           LDR      R0,??Parse_Message_39+0x4
+   \   00000724   0210A0E3           MOV      R1,#+2
+   \   00000728   FAFFFFEA           B        ??Parse_Message_44
+    366          								break;
+    367          							case PDRLANCRECORD:
+    368          								DataValues[CAMERA_STATUS].iVal = CAMERA_STATUS_RECORDING;
+   \                     ??Parse_Message_43:
+   \   0000072C   140F9FE5           LDR      R0,??Parse_Message_39+0x4
+   \   00000730   0310A0E3           MOV      R1,#+3
+   \   00000734   F7FFFFEA           B        ??Parse_Message_44
+    369          								break;
+    370          							case UNKNOWN:
+    371          							case PDRLANCNOTCONNECTED:
+    372          							default:
+    373          								DataValues[CAMERA_STATUS].iVal = CAMERA_STATUS_NOT_CONNECTED;
+   \                     ??Parse_Message_40:
+   \   00000738   080F9FE5           LDR      R0,??Parse_Message_39+0x4
+   \   0000073C   0010A0E3           MOV      R1,#+0
+   \   00000740   F4FFFFEA           B        ??Parse_Message_44
+    374          						} // switch
+    375          					} // if
+    376          //				} // if
+    377          				break;
+    378          			} // PDR_STATUS				
+    379          			case GPS_DATA: {
+    380          				s16 eastvel, northvel, vertvel;
+    381          				float tempfloat;
+    382          				int idx;
+    383          				s32 temp;
+    384          				
+    385          				// ACK the message
+    386          				retval = SendACK(msgptr[SOURCE]);
+   \                     ??Parse_Message_15:
+   \   00000744   0030A0E3           MOV      R3,#+0
+   \   00000748   0620A0E3           MOV      R2,#+6
+   \   0000074C   0110D8E5           LDRB     R1,[R8, #+1]
+   \   00000750   FF0005E2           AND      R0,R5,#0xFF
+   \   00000754   ........           BL       SendMessage
+   \   00000758   0040A0E1           MOV      R4,R0
+    387          
+    388          				// free up unit for more communications
+    389          				COMMCTS[msgptr[SOURCE]-1] = 0;
+   \   0000075C   0100D8E5           LDRB     R0,[R8, #+1]
+   \   00000760   28189FE5           LDR      R1,??Parse_Message_6
+   \   00000764   000181E0           ADD      R0,R1,R0, LSL #+2
+   \   00000768   0010A0E3           MOV      R1,#+0
+   \   0000076C   041000E5           STR      R1,[R0, #-4]
+   \   00000770   5C0F9FE5           LDR      R0,??Parse_Message_45
+    390          
+    391          				OS_Use(&SEMA_GlobalData);
+   \   00000774   ........           BL       OS_Use
+    392          
+    393          				// first byte tells whether position data is good
+    394          				DataValues[GPS_NUMSAT].uVal = msgptr[DATA_START];
+   \   00000778   C85E9FE5           LDR      R5,??Parse_Message_39+0x4
+   \   0000077C   0700D8E5           LDRB     R0,[R8, #+7]
+    395          				if (DataValues[GPS_NUMSAT].uVal < DataValues[MIN_SATS].uVal)
+   \   00000780   B01095E5           LDR      R1,[R5, #+176]
+   \   00000784   A80085E5           STR      R0,[R5, #+168]
+   \   00000788   010050E1           CMP      R0,R1
+   \   0000078C   0300002A           BCS      ??Parse_Message_46
+    396          					DataValues[MIN_SATS].uVal = MAX(GPS_GOOD, DataValues[GPS_NUMSAT].uVal);
+   \   00000790   040050E3           CMP      R0,#+4
+   \   00000794   0410A033           MOVCC    R1,#+4
+   \   00000798   0010A021           MOVCS    R1,R0
+   \   0000079C   B01085E5           STR      R1,[R5, #+176]
+    397          
+    398          				if (DataValues[GPS_NUMSAT].uVal > DataValues[MAX_SATS].uVal)
+   \                     ??Parse_Message_46:
+   \   000007A0   B81095E5           LDR      R1,[R5, #+184]
+   \   000007A4   000051E1           CMP      R1,R0
+    399          					DataValues[MAX_SATS].uVal = DataValues[GPS_NUMSAT].uVal;
+   \   000007A8   B8008535           STRCC    R0,[R5, #+184]
+    400          
+    401          				// relinquish global data
+    402          				OS_Unuse(&SEMA_GlobalData);		
+   \   000007AC   200F9FE5           LDR      R0,??Parse_Message_45
+   \   000007B0   ........           BL       OS_Unuse
+    403          
+    404          				// store the gps position data into the buffer
+    405          				// done with or without gpslock because su will interpolate
+    406          				tqmsample.secsamp.gps = *((gpstype *)(msgptr+DATA_START+1));
+   \   000007B4   ........           LDR      R6,??DataTable3
+   \   000007B8   081088E2           ADD      R1,R8,#+8
+   \   000007BC   0600A0E1           MOV      R0,R6
+   \   000007C0   1520A0E3           MOV      R2,#+21
+   \   000007C4   ........           BL       __aeabi_memcpy
+    407          				
+    408          				if (suData.suHwRev >= 200) {		// only do this if we are connected to 3 axis SU2
+   \   000007C8   CC179FE5           LDR      R1,??Parse_Message_6+0xC
+   \   000007CC   D401D6E1           LDRSB    R0,[R6, #+20]
+   \   000007D0   1410D1E5           LDRB     R1,[R1, #+20]
+   \   000007D4   C80051E3           CMP      R1,#+200
+   \   000007D8   3600003A           BCC      ??Parse_Message_47
+    409          
+    410          					tempfloat = (float) (u08) tqmsample.secsamp.gps.temp - accelz.zero;
+   \   000007DC   ........           LDR      R7,??DataTable3_1
+   \   000007E0   FF0000E2           AND      R0,R0,#0xFF
+   \   000007E4   048097E5           LDR      R8,[R7, #+4]
+   \   000007E8   ........           BL       __aeabi_ui2f
+   \   000007EC   0810A0E1           MOV      R1,R8
+   \   000007F0   ........           BL       __aeabi_fsub
+    411          					if (tempfloat < 0.0) {
+   \   000007F4   0010A0E3           MOV      R1,#+0
+   \   000007F8   ........           BL       __aeabi_cfcmple
+   \   000007FC   0090A0E1           MOV      R9,R0
+    412          						DataValues[Z_G].fVal = tempfloat / (accelz.zero - accelz.min);
+   \   00000800   0800A031           MOVCC    R0,R8
+   \   00000804   00109735           LDRCC    R1,[R7, #+0]
+    413          					} // if
+    414          					else  {
+    415          						DataValues[Z_G].fVal = tempfloat / (accelz.max - accelz.zero);
+   \   00000808   08009725           LDRCS    R0,[R7, #+8]
+   \   0000080C   0810A021           MOVCS    R1,R8
+   \   00000810   ........           BL       __aeabi_fsub
+   \   00000814   0010A0E1           MOV      R1,R0
+   \   00000818   0900A0E1           MOV      R0,R9
+   \   0000081C   ........           BL       __aeabi_fdiv
+    416          					} // else
+    417          					
+    418          					// update indices for rolling filter history				
+    419          					zrollingidx = (1+zrollingidx) % G_FILTER_VAL;
+   \   00000820   ........           LDR      R7,??DataTable3_2
+   \   00000824   100085E5           STR      R0,[R5, #+16]
+   \   00000828   580097E5           LDR      R0,[R7, #+88]
+   \   0000082C   ........           LDR      R1,??DataTable3_3  ;; 0x66666667
+   \   00000830   010080E2           ADD      R0,R0,#+1
+   \   00000834   9021C1E0           SMULL    R2,R1,R0,R1
+    420          					
+    421          					// put z value in rolling table
+    422          					zgrolling[zrollingidx] = DataValues[Z_G].fVal;
+    423          					
+    424          					// update the filtered G values
+    425          					tempfloat = 0.0;
+    426          					for (idx = 0; idx < G_FILTER_VAL; idx++) {
+   \   00000838   0580A0E3           MOV      R8,#+5
+   \   0000083C   C110B0E1           ASRS     R1,R1,#+1
+   \   00000840   01108142           ADDMI    R1,R1,#+1
+   \   00000844   011181E0           ADD      R1,R1,R1, LSL #+2
+   \   00000848   010040E0           SUB      R0,R0,R1
+   \   0000084C   580087E5           STR      R0,[R7, #+88]
+   \   00000850   101095E5           LDR      R1,[R5, #+16]
+   \   00000854   000187E0           ADD      R0,R7,R0, LSL #+2
+   \   00000858   401080E5           STR      R1,[R0, #+64]
+   \   0000085C   0010A0E3           MOV      R1,#+0
+   \   00000860   407087E2           ADD      R7,R7,#+64
+    427          						tempfloat += zgrolling[idx];
+   \                     ??Parse_Message_48:
+   \   00000864   040097E4           LDR      R0,[R7], #+4
+   \   00000868   ........           BL       __aeabi_fadd
+   \   0000086C   0010A0E1           MOV      R1,R0
+    428          					} // for
+   \   00000870   018058E2           SUBS     R8,R8,#+1
+   \   00000874   FAFFFF1A           BNE      ??Parse_Message_48
+    429          					
+    430          					DataValues[Z_G_DAMPED].fVal = tempfloat / (float) G_FILTER_VAL;
+   \   00000878   4014A0E3           MOV      R1,#+1073741824
+   \   0000087C   A01881E3           ORR      R1,R1,#0xA00000
+   \   00000880   ........           BL       __aeabi_fdiv
+   \   00000884   0020A0E1           MOV      R2,R0
+    431          
+    432          					// set the peaks using the filtered values
+    433          					if (DataValues[Z_G_DAMPED].fVal > DataValues[MAX_Z_G].fVal)
+   \   00000888   280095E5           LDR      R0,[R5, #+40]
+   \   0000088C   0210A0E1           MOV      R1,R2
+   \   00000890   ........           BL       __aeabi_cfcmple
+    434          						DataValues[MAX_Z_G].fVal = DataValues[Z_G_DAMPED].fVal;
+   \   00000894   28208535           STRCC    R2,[R5, #+40]
+    435          					if (DataValues[Z_G_DAMPED].fVal < DataValues[MIN_Z_G].fVal)
+   \   00000898   0200A0E1           MOV      R0,R2
+   \   0000089C   401095E5           LDR      R1,[R5, #+64]
+   \   000008A0   ........           BL       __aeabi_cfcmple
+   \   000008A4   582085E5           STR      R2,[R5, #+88]
+   \   000008A8   0500002A           BCS      ??Parse_Message_49
+    436          						DataValues[MIN_Z_G].fVal = DataValues[Z_G_DAMPED].fVal;
+   \   000008AC   402085E5           STR      R2,[R5, #+64]
+   \   000008B0   030000EA           B        ??Parse_Message_49
+   \                     ??Parse_Message_37:
+   \   000008B4   00000000           DC8      "",0x0,0x0,0x0
+    437          				} // if
+    438          				else {					// original 2 axis SU1
+    439          					DataValues[SU_TEMPERATURE].fVal = dotemp(tqmsample.secsamp.gps.temp, 'C');
+   \                     ??Parse_Message_47:
+   \   000008B8   4310A0E3           MOV      R1,#+67
+   \   000008BC   ........           BL       dotemp
+   \   000008C0   680285E5           STR      R0,[R5, #+616]
+    440          				} // else				
+    441          				
+    442          				if (DataValues[GPS_NUMSAT].uVal >= GPS_GOOD) {
+   \                     ??Parse_Message_49:
+   \   000008C4   A80095E5           LDR      R0,[R5, #+168]
+   \   000008C8   040050E3           CMP      R0,#+4
+   \   000008CC   9303003A           BCC      ??Parse_Message_5
+    443          					// update global time if good value received
+    444          					if (0 != tqmsample.secsamp.gps.time && 0xFFFFFFFF != tqmsample.secsamp.gps.time) {
+   \   000008D0   0600A0E1           MOV      R0,R6
+   \   000008D4   ........           BL       __aeabi_uread4
+   \   000008D8   000050E3           CMP      R0,#+0
+   \   000008DC   2E00000A           BEQ      ??Parse_Message_50
+   \   000008E0   0600A0E1           MOV      R0,R6
+   \   000008E4   ........           BL       __aeabi_uread4
+   \   000008E8   010070E3           CMN      R0,#+1
+   \   000008EC   2A00000A           BEQ      ??Parse_Message_50
+    445          						// save first good week as starting week
+    446          						if (0 != tqmsample.secsamp.gps.weeks && 0xFFFF != tqmsample.secsamp.gps.weeks) {
+   \   000008F0   0510D6E5           LDRB     R1,[R6, #+5]
+   \   000008F4   0400D6E5           LDRB     R0,[R6, #+4]
+   \   000008F8   011490E1           ORRS     R1,R0,R1, LSL #+8
+   \   000008FC   2600000A           BEQ      ??Parse_Message_50
+   \   00000900   0510D6E5           LDRB     R1,[R6, #+5]
+   \   00000904   0400D6E5           LDRB     R0,[R6, #+4]
+   \   00000908   011480E1           ORR      R1,R0,R1, LSL #+8
+   \   0000090C   FF00A0E3           MOV      R0,#+255
+   \   00000910   FF0C80E3           ORR      R0,R0,#0xFF00
+   \   00000914   000051E1           CMP      R1,R0
+   \   00000918   1F00000A           BEQ      ??Parse_Message_50
+    447          						// write global time
+    448          						// request use of global data
+    449          						OS_Use(&SEMA_GlobalData);
+   \   0000091C   B00D9FE5           LDR      R0,??Parse_Message_45
+   \   00000920   ........           BL       OS_Use
+    450          
+    451          						DataValues[GPS_WEEKS].iVal = SWAP16(tqmsample.secsamp.gps.weeks);
+   \   00000924   0500D6E5           LDRB     R0,[R6, #+5]
+   \   00000928   0410D6E5           LDRB     R1,[R6, #+4]
+   \   0000092C   0520D6E5           LDRB     R2,[R6, #+5]
+   \   00000930   000481E1           ORR      R0,R1,R0, LSL #+8
+   \   00000934   0410D6E5           LDRB     R1,[R6, #+4]
+   \   00000938   022481E1           ORR      R2,R1,R2, LSL #+8
+   \   0000093C   FF1CA0E3           MOV      R1,#+65280
+   \   00000940   021401E0           AND      R1,R1,R2, LSL #+8
+   \   00000944   200481E1           ORR      R0,R1,R0, LSR #+8
+   \   00000948   880085E5           STR      R0,[R5, #+136]
+    452          						DataValues[GPS_TIME].iVal = SWAP32(tqmsample.secsamp.gps.time);					
+   \   0000094C   0600A0E1           MOV      R0,R6
+   \   00000950   ........           BL       __aeabi_uread4
+   \   00000954   0070A0E1           MOV      R7,R0
+   \   00000958   0600A0E1           MOV      R0,R6
+   \   0000095C   ........           BL       __aeabi_uread4
+   \   00000960   0080A0E1           MOV      R8,R0
+   \   00000964   0600A0E1           MOV      R0,R6
+   \   00000968   ........           BL       __aeabi_uread4
+   \   0000096C   FF1CA0E3           MOV      R1,#+65280
+   \   00000970   281401E0           AND      R1,R1,R8, LSR #+8
+   \   00000974   FF28A0E3           MOV      R2,#+16711680
+   \   00000978   271C81E1           ORR      R1,R1,R7, LSR #+24
+   \   0000097C   000402E0           AND      R0,R2,R0, LSL #+8
+   \   00000980   017080E1           ORR      R7,R0,R1
+   \   00000984   0600A0E1           MOV      R0,R6
+   \   00000988   ........           BL       __aeabi_uread4
+   \   0000098C   000C87E1           ORR      R0,R7,R0, LSL #+24
+   \   00000990   900085E5           STR      R0,[R5, #+144]
+    453          								
+    454          						// relinquish global data
+    455          						OS_Unuse(&SEMA_GlobalData);							
+   \   00000994   380D9FE5           LDR      R0,??Parse_Message_45
+   \   00000998   ........           BL       OS_Unuse
+    456          						
+    457          						} // if
+    458          					} // if
+    459          					
+    460          					// get the speed vectors
+    461          					unpack_velocities ((void *)&(tqmsample.secsamp.gps.velpack[0]), &eastvel, &northvel, &vertvel);
+   \                     ??Parse_Message_50:
+   \   0000099C   0C308DE2           ADD      R3,SP,#+12
+   \   000009A0   08208DE2           ADD      R2,SP,#+8
+   \   000009A4   0A108DE2           ADD      R1,SP,#+10
+   \   000009A8   100086E2           ADD      R0,R6,#+16
+   \   000009AC   ........           BL       unpack_velocities
+    462          		
+    463          					// request use of global data
+    464          					OS_Use(&SEMA_GlobalData);				
+   \   000009B0   1C0D9FE5           LDR      R0,??Parse_Message_45
+   \   000009B4   ........           BL       OS_Use
+    465          					
+    466          					// use temp to preserve sign
+    467          					temp = SWAP32(tqmsample.secsamp.gps.lat);
+    468          					DataValues[LATITUDE].dVal = ((double) temp * 180.0) / GPSINTEGERTOFLOAT;
+   \   000009B8   060086E2           ADD      R0,R6,#+6
+   \   000009BC   ........           BL       __aeabi_uread4
+   \   000009C0   0080A0E1           MOV      R8,R0
+   \   000009C4   060086E2           ADD      R0,R6,#+6
+   \   000009C8   ........           BL       __aeabi_uread4
+   \   000009CC   0070A0E1           MOV      R7,R0
+   \   000009D0   060086E2           ADD      R0,R6,#+6
+   \   000009D4   ........           BL       __aeabi_uread4
+   \   000009D8   FF10A0E3           MOV      R1,#+255
+   \   000009DC   FF2CA0E3           MOV      R2,#+65280
+   \   000009E0   481C01E0           AND      R1,R1,R8, ASR #+24
+   \   000009E4   472402E0           AND      R2,R2,R7, ASR #+8
+   \   000009E8   011082E1           ORR      R1,R2,R1
+   \   000009EC   FF28A0E3           MOV      R2,#+16711680
+   \   000009F0   000402E0           AND      R0,R2,R0, LSL #+8
+   \   000009F4   017080E1           ORR      R7,R0,R1
+   \   000009F8   060086E2           ADD      R0,R6,#+6
+   \   000009FC   ........           BL       __aeabi_uread4
+   \   00000A00   000C87E1           ORR      R0,R7,R0, LSL #+24
+   \   00000A04   ........           BL       __aeabi_i2d
+   \   00000A08   0020A0E1           MOV      R2,R0
+   \   00000A0C   0130A0E1           MOV      R3,R1
+   \   00000A10   0000A0E3           MOV      R0,#+0
+   \   00000A14   ........           LDR      R1,??DataTable4  ;; 0x40668000
+   \   00000A18   ........           BL       __aeabi_dmul
+   \   00000A1C   612F8FE2           ADR      R2,??Parse_Message_51
+   \   00000A20   0C0092E8           LDM      R2,{R2,R3}
+   \   00000A24   ........           BL       __aeabi_ddiv
+   \   00000A28   03008DE8           STM      SP,{R0,R1}
+   \   00000A2C   F006C5E1           STRD     R0,R1,[R5, #+96]
+    469          					temp = SWAP32(tqmsample.secsamp.gps.lon);
+    470          					DataValues[LONGITUDE].dVal = ((double) temp * 180.0) / GPSINTEGERTOFLOAT;					
+   \   00000A30   0A0086E2           ADD      R0,R6,#+10
+   \   00000A34   ........           BL       __aeabi_uread4
+   \   00000A38   0080A0E1           MOV      R8,R0
+   \   00000A3C   0A0086E2           ADD      R0,R6,#+10
+   \   00000A40   ........           BL       __aeabi_uread4
+   \   00000A44   0070A0E1           MOV      R7,R0
+   \   00000A48   0A0086E2           ADD      R0,R6,#+10
+   \   00000A4C   ........           BL       __aeabi_uread4
+   \   00000A50   FF10A0E3           MOV      R1,#+255
+   \   00000A54   FF2CA0E3           MOV      R2,#+65280
+   \   00000A58   481C01E0           AND      R1,R1,R8, ASR #+24
+   \   00000A5C   472402E0           AND      R2,R2,R7, ASR #+8
+   \   00000A60   011082E1           ORR      R1,R2,R1
+   \   00000A64   FF28A0E3           MOV      R2,#+16711680
+   \   00000A68   000402E0           AND      R0,R2,R0, LSL #+8
+   \   00000A6C   017080E1           ORR      R7,R0,R1
+   \   00000A70   0A0086E2           ADD      R0,R6,#+10
+   \   00000A74   ........           BL       __aeabi_uread4
+   \   00000A78   000C87E1           ORR      R0,R7,R0, LSL #+24
+   \   00000A7C   ........           BL       __aeabi_i2d
+   \   00000A80   0020A0E1           MOV      R2,R0
+   \   00000A84   0130A0E1           MOV      R3,R1
+   \   00000A88   0000A0E3           MOV      R0,#+0
+   \   00000A8C   ........           LDR      R1,??DataTable4  ;; 0x40668000
+   \   00000A90   ........           BL       __aeabi_dmul
+   \   00000A94   432F8FE2           ADR      R2,??Parse_Message_51
+   \   00000A98   0C0092E8           LDM      R2,{R2,R3}
+   \   00000A9C   ........           BL       __aeabi_ddiv
+   \   00000AA0   03008DE8           STM      SP,{R0,R1}
+   \   00000AA4   F806C5E1           STRD     R0,R1,[R5, #+104]
+    471          	
+    472          					// calculate speed in kph times fudge factor
+    473          					DataValues[SPEED].fVal = (double) (3600.0 / 1000.0) * GPSVELSCALE * sqrt(((double) eastvel * (double) eastvel + (double) northvel * (double) northvel));
+   \   00000AA8   F800DDE1           LDRSH    R0,[SP, #+8]
+   \   00000AAC   ........           BL       __aeabi_i2d
+   \   00000AB0   0080A0E1           MOV      R8,R0
+   \   00000AB4   0190A0E1           MOV      R9,R1
+   \   00000AB8   FA00DDE1           LDRSH    R0,[SP, #+10]
+   \   00000ABC   ........           BL       __aeabi_i2d
+   \   00000AC0   0020A0E1           MOV      R2,R0
+   \   00000AC4   0130A0E1           MOV      R3,R1
+   \   00000AC8   ........           BL       __aeabi_dmul
+   \   00000ACC   00A0A0E1           MOV      R10,R0
+   \   00000AD0   01B0A0E1           MOV      R11,R1
+   \   00000AD4   0800A0E1           MOV      R0,R8
+   \   00000AD8   0910A0E1           MOV      R1,R9
+   \   00000ADC   0820A0E1           MOV      R2,R8
+   \   00000AE0   0930A0E1           MOV      R3,R9
+   \   00000AE4   ........           BL       __aeabi_dmul
+   \   00000AE8   0A20A0E1           MOV      R2,R10
+   \   00000AEC   0B30A0E1           MOV      R3,R11
+   \   00000AF0   ........           BL       __aeabi_dadd
+   \   00000AF4   ........           BL       sqrt
+   \   00000AF8   0020A0E1           MOV      R2,R0
+   \   00000AFC   0130A0E1           MOV      R3,R1
+   \   00000B00   EB0F8FE2           ADR      R0,??Parse_Message_52
+   \   00000B04   030090E8           LDM      R0,{R0,R1}
+   \   00000B08   ........           BL       __aeabi_dmul
+   \   00000B0C   ........           BL       __aeabi_d2f
+    474          
+    475          					// only calculate heading if moving
+    476          					if (DataValues[SPEED].fVal >= 1.0)
+   \   00000B10   FE15A0E3           MOV      R1,#+1065353216
+   \   00000B14   ........           BL       __aeabi_cfrcmple
+   \   00000B18   700085E5           STR      R0,[R5, #+112]
+   \   00000B1C   0300008A           BHI      ??Parse_Message_53
+    477          						DataValues[HEADING].fVal = compute_heading(eastvel, northvel);
+   \   00000B20   F810DDE1           LDRSH    R1,[SP, #+8]
+   \   00000B24   FA00DDE1           LDRSH    R0,[SP, #+10]
+   \   00000B28   ........           BL       compute_heading
+   \   00000B2C   780085E5           STR      R0,[R5, #+120]
+    478          					
+    479          					// look for vmax and vmin
+    480          					if (speedincreasing) { // previously speed was climbing
+   \                     ??Parse_Message_53:
+   \   00000B30   ........           LDR      R7,??DataTable3_2
+   \   00000B34   109097E5           LDR      R9,[R7, #+16]
+   \   00000B38   0900A0E1           MOV      R0,R9
+   \   00000B3C   ........           BL       __aeabi_f2d
+   \   00000B40   708095E5           LDR      R8,[R5, #+112]
+   \   00000B44   00A0A0E1           MOV      R10,R0
+   \   00000B48   01B0A0E1           MOV      R11,R1
+   \   00000B4C   0800A0E1           MOV      R0,R8
+   \   00000B50   ........           BL       __aeabi_f2d
+   \   00000B54   03008DE8           STM      SP,{R0,R1}
+   \   00000B58   F000CDE1           STRD     R0,R1,[SP, #+0]
+   \   00000B5C   140097E5           LDR      R0,[R7, #+20]
+   \   00000B60   0A20A0E1           MOV      R2,R10
+   \   00000B64   000050E3           CMP      R0,#+0
+   \   00000B68   0B30A0E1           MOV      R3,R11
+   \   00000B6C   0000A0E3           MOV      R0,#+0
+   \   00000B70   1300000A           BEQ      ??Parse_Message_54
+    481          						if (DataValues[SPEED].fVal < (lastspeed - SPEED_HYSTERESIS)) {
+   \   00000B74   C014A0E3           MOV      R1,#-1073741824
+   \   00000B78   901981E3           ORR      R1,R1,#0x240000
+   \   00000B7C   ........           BL       __aeabi_dadd
+   \   00000B80   0020A0E1           MOV      R2,R0
+   \   00000B84   0130A0E1           MOV      R3,R1
+   \   00000B88   D000CDE1           LDRD     R0,R1,[SP, #+0]
+   \   00000B8C   ........           BL       __aeabi_cdcmple
+   \   00000B90   0600002A           BCS      ??Parse_Message_55
+    482          							// speed was rising and is now falling so record VMAX
+    483          							DataValues[VMAX].fVal = lastspeed;
+    484          							DataValues[SPEED_PEAKS].fVal = lastspeed;
+    485          							speedincreasing = false;
+   \   00000B94   0000A0E3           MOV      R0,#+0
+   \   00000B98   309185E5           STR      R9,[R5, #+304]
+   \   00000B9C   389185E5           STR      R9,[R5, #+312]
+   \                     ??Parse_Message_56:
+   \   00000BA0   140087E5           STR      R0,[R7, #+20]
+    486          							lastspeed = DataValues[SPEED].fVal;
+   \   00000BA4   150000EA           B        ??Parse_Message_57
+   \                     ??Parse_Message_51:
+   \   00000BA8   0000C0FFFFFF       DC32     0xFFC00000,0x41DFFFFF
+   \              DF41        
+    487          						} // if
+    488          						else {
+    489          							// bump top speed if new speed is higher
+    490          							if (DataValues[SPEED].fVal > lastspeed)
+   \                     ??Parse_Message_55:
+   \   00000BB0   0900A0E1           MOV      R0,R9
+   \   00000BB4   0810A0E1           MOV      R1,R8
+   \   00000BB8   ........           BL       __aeabi_cfcmple
+   \   00000BBC   1000002A           BCS      ??Parse_Message_58
+    491          								lastspeed = DataValues[SPEED].fVal;
+   \   00000BC0   0E0000EA           B        ??Parse_Message_57
+    492          						} // else
+    493          					} // if
+    494          					else {		// previously speed was falling
+    495          						if (DataValues[SPEED].fVal > (lastspeed + SPEED_HYSTERESIS)) {
+   \                     ??Parse_Message_54:
+   \   00000BC4   4014A0E3           MOV      R1,#+1073741824
+   \   00000BC8   901981E3           ORR      R1,R1,#0x240000
+   \   00000BCC   ........           BL       __aeabi_dadd
+   \   00000BD0   D020CDE1           LDRD     R2,R3,[SP, #+0]
+   \   00000BD4   ........           BL       __aeabi_cdcmple
+   \   00000BD8   0400002A           BCS      ??Parse_Message_59
+    496          							// speed was falling and is now rising so record VMIN
+    497          							DataValues[VMIN].fVal = lastspeed;
+    498          							DataValues[SPEED_PEAKS].fVal = -lastspeed;
+   \   00000BDC   800429E2           EOR      R0,R9,#0x80000000
+   \   00000BE0   380185E5           STR      R0,[R5, #+312]
+    499          							speedincreasing = true;
+   \   00000BE4   0100A0E3           MOV      R0,#+1
+   \   00000BE8   289185E5           STR      R9,[R5, #+296]
+   \   00000BEC   EBFFFFEA           B        ??Parse_Message_56
+    500          							lastspeed = DataValues[SPEED].fVal;
+    501          						} // if
+    502          						else {
+    503          							// bump low speed if new speed is lower
+    504          							if (DataValues[SPEED].fVal < lastspeed)
+   \                     ??Parse_Message_59:
+   \   00000BF0   0800A0E1           MOV      R0,R8
+   \   00000BF4   0910A0E1           MOV      R1,R9
+   \   00000BF8   ........           BL       __aeabi_cfcmple
+   \   00000BFC   0000002A           BCS      ??Parse_Message_58
+    505          								lastspeed = DataValues[SPEED].fVal;
+   \                     ??Parse_Message_57:
+   \   00000C00   108087E5           STR      R8,[R7, #+16]
+    506          						} // else
+    507          					} // if
+    508          					
+    509          					// set max value
+    510          					if (DU2_AUTOX_COMPLETE != unsavedSysData.systemMode && DU2_DRAG_COMPLETE != unsavedSysData.systemMode) {
+   \                     ??Parse_Message_58:
+   \   00000C04   80A59FE5           LDR      R10,??Parse_Message_28+0xC
+   \   00000C08   8800DAE5           LDRB     R0,[R10, #+136]
+   \   00000C0C   140050E3           CMP      R0,#+20
+   \   00000C10   15005013           CMPNE    R0,#+21
+   \   00000C14   0800000A           BEQ      ??Parse_Message_60
+    511          						if (DataValues[SPEED].fVal > DataValues[MAX_SPEED].fVal) {
+   \   00000C18   D00095E5           LDR      R0,[R5, #+208]
+   \   00000C1C   0810A0E1           MOV      R1,R8
+   \   00000C20   ........           BL       __aeabi_cfcmple
+   \   00000C24   0400002A           BCS      ??Parse_Message_60
+    512          							DataValues[MAX_SPEED].fVal = DataValues[SPEED].fVal;
+    513          							if (DataValues[SPEED].fVal > sysData.maxSpeedEver)
+   \   00000C28   ........           LDR      R2,??DataTable4_1
+   \   00000C2C   D08085E5           STR      R8,[R5, #+208]
+   \   00000C30   B80092E5           LDR      R0,[R2, #+184]
+   \   00000C34   ........           BL       __aeabi_cfcmple
+    514          								sysData.maxSpeedEver = DataValues[SPEED].fVal;
+   \   00000C38   B8808235           STRCC    R8,[R2, #+184]
+    515          						} // if
+    516          					} // if
+    517          				
+    518          					// use temp to preserve sign
+    519          					temp = SWAP16(tqmsample.secsamp.gps.alt);
+    520          					DataValues[ALTITUDE].fVal = (float) temp;
+   \                     ??Parse_Message_60:
+   \   00000C3C   DF00D6E1           LDRSB    R0,[R6, #+15]
+   \   00000C40   0E10D6E5           LDRB     R1,[R6, #+14]
+   \   00000C44   DF20D6E1           LDRSB    R2,[R6, #+15]
+   \   00000C48   000481E1           ORR      R0,R1,R0, LSL #+8
+   \   00000C4C   0008A0E1           LSL      R0,R0,#+16
+   \   00000C50   4008A0E1           ASR      R0,R0,#+16
+   \   00000C54   FF10A0E3           MOV      R1,#+255
+   \   00000C58   400401E0           AND      R0,R1,R0, ASR #+8
+   \   00000C5C   0E10D6E5           LDRB     R1,[R6, #+14]
+   \   00000C60   022481E1           ORR      R2,R1,R2, LSL #+8
+   \   00000C64   FF1CA0E3           MOV      R1,#+65280
+   \   00000C68   021401E0           AND      R1,R1,R2, LSL #+8
+   \   00000C6C   000081E1           ORR      R0,R1,R0
+   \   00000C70   ........           BL       __aeabi_i2f
+   \   00000C74   980085E5           STR      R0,[R5, #+152]
+    521          
+    522          					if (DataValues[ALTITUDE].fVal > DataValues[MAX_ALTITUDE].fVal)
+   \   00000C78   0020A0E1           MOV      R2,R0
+   \   00000C7C   E00095E5           LDR      R0,[R5, #+224]
+   \   00000C80   0210A0E1           MOV      R1,R2
+   \   00000C84   ........           BL       __aeabi_cfcmple
+    523          						DataValues[MAX_ALTITUDE].fVal = DataValues[ALTITUDE].fVal;
+    524          
+    525          					if ((0.0 == DataValues[MIN_ALTITUDE].fVal) || (DataValues[ALTITUDE].fVal < DataValues[MIN_ALTITUDE].fVal))
+   \   00000C88   D83095E5           LDR      R3,[R5, #+216]
+   \   00000C8C   E0208535           STRCC    R2,[R5, #+224]
+   \   00000C90   0300A0E1           MOV      R0,R3
+   \   00000C94   0010A0E3           MOV      R1,#+0
+   \   00000C98   ........           BL       __aeabi_cfcmpeq
+   \   00000C9C   0300000A           BEQ      ??Parse_Message_61
+   \   00000CA0   0200A0E1           MOV      R0,R2
+   \   00000CA4   0310A0E1           MOV      R1,R3
+   \   00000CA8   ........           BL       __aeabi_cfcmple
+   \   00000CAC   0000002A           BCS      ??Parse_Message_62
+    526          						DataValues[MIN_ALTITUDE].fVal = DataValues[ALTITUDE].fVal;
+   \                     ??Parse_Message_61:
+   \   00000CB0   D82085E5           STR      R2,[R5, #+216]
+    527          
+    528          					// relinquish global data
+    529          					OS_Unuse(&SEMA_GlobalData);
+   \                     ??Parse_Message_62:
+   \   00000CB4   180A9FE5           LDR      R0,??Parse_Message_45
+   \   00000CB8   ........           BL       OS_Unuse
+    530          										
+    531          					// swap all the bytes around for windows
+    532          					tqmsample.secsamp.gps.time = SWAP32(tqmsample.secsamp.gps.time);
+   \   00000CBC   0600A0E1           MOV      R0,R6
+   \   00000CC0   ........           BL       __aeabi_uread4
+   \   00000CC4   0070A0E1           MOV      R7,R0
+   \   00000CC8   0600A0E1           MOV      R0,R6
+   \   00000CCC   ........           BL       __aeabi_uread4
+   \   00000CD0   0080A0E1           MOV      R8,R0
+   \   00000CD4   0600A0E1           MOV      R0,R6
+   \   00000CD8   ........           BL       __aeabi_uread4
+   \   00000CDC   0050A0E1           MOV      R5,R0
+   \   00000CE0   0600A0E1           MOV      R0,R6
+   \   00000CE4   ........           BL       __aeabi_uread4
+   \   00000CE8   FF2CA0E3           MOV      R2,#+65280
+   \   00000CEC   282402E0           AND      R2,R2,R8, LSR #+8
+   \   00000CF0   FF38A0E3           MOV      R3,#+16711680
+   \   00000CF4   272C82E1           ORR      R2,R2,R7, LSR #+24
+   \   00000CF8   053403E0           AND      R3,R3,R5, LSL #+8
+   \   00000CFC   022083E1           ORR      R2,R3,R2
+   \   00000D00   0610A0E1           MOV      R1,R6
+   \   00000D04   000C82E1           ORR      R0,R2,R0, LSL #+24
+   \   00000D08   ........           BL       __aeabi_uwrite4
+    533          					tqmsample.secsamp.gps.weeks = SWAP16(tqmsample.secsamp.gps.weeks);
+   \   00000D0C   0500D6E5           LDRB     R0,[R6, #+5]
+   \   00000D10   0410D6E5           LDRB     R1,[R6, #+4]
+   \   00000D14   000481E1           ORR      R0,R1,R0, LSL #+8
+   \   00000D18   0510D6E5           LDRB     R1,[R6, #+5]
+   \   00000D1C   0420D6E5           LDRB     R2,[R6, #+4]
+   \   00000D20   011482E1           ORR      R1,R2,R1, LSL #+8
+   \   00000D24   0114A0E1           LSL      R1,R1,#+8
+   \   00000D28   200481E1           ORR      R0,R1,R0, LSR #+8
+   \   00000D2C   0400C6E5           STRB     R0,[R6, #+4]
+   \   00000D30   2004A0E1           LSR      R0,R0,#+8
+   \   00000D34   0500C6E5           STRB     R0,[R6, #+5]
+    534          					tqmsample.secsamp.gps.lat = SWAP32(tqmsample.secsamp.gps.lat);
+   \   00000D38   060086E2           ADD      R0,R6,#+6
+   \   00000D3C   ........           BL       __aeabi_uread4
+   \   00000D40   0080A0E1           MOV      R8,R0
+   \   00000D44   060086E2           ADD      R0,R6,#+6
+   \   00000D48   ........           BL       __aeabi_uread4
+   \   00000D4C   0050A0E1           MOV      R5,R0
+   \   00000D50   060086E2           ADD      R0,R6,#+6
+   \   00000D54   ........           BL       __aeabi_uread4
+   \   00000D58   0070A0E1           MOV      R7,R0
+   \   00000D5C   060086E2           ADD      R0,R6,#+6
+   \   00000D60   ........           BL       __aeabi_uread4
+   \   00000D64   FF20A0E3           MOV      R2,#+255
+   \   00000D68   FF3CA0E3           MOV      R3,#+65280
+   \   00000D6C   482C02E0           AND      R2,R2,R8, ASR #+24
+   \   00000D70   453403E0           AND      R3,R3,R5, ASR #+8
+   \   00000D74   022083E1           ORR      R2,R3,R2
+   \   00000D78   FF38A0E3           MOV      R3,#+16711680
+   \   00000D7C   073403E0           AND      R3,R3,R7, LSL #+8
+   \   00000D80   022083E1           ORR      R2,R3,R2
+   \   00000D84   061086E2           ADD      R1,R6,#+6
+   \   00000D88   000C82E1           ORR      R0,R2,R0, LSL #+24
+   \   00000D8C   ........           BL       __aeabi_uwrite4
+    535          					tqmsample.secsamp.gps.lon = SWAP32(tqmsample.secsamp.gps.lon);
+   \   00000D90   0A0086E2           ADD      R0,R6,#+10
+   \   00000D94   ........           BL       __aeabi_uread4
+   \   00000D98   0080A0E1           MOV      R8,R0
+   \   00000D9C   0A0086E2           ADD      R0,R6,#+10
+   \   00000DA0   ........           BL       __aeabi_uread4
+   \   00000DA4   0050A0E1           MOV      R5,R0
+   \   00000DA8   0A0086E2           ADD      R0,R6,#+10
+   \   00000DAC   ........           BL       __aeabi_uread4
+   \   00000DB0   0070A0E1           MOV      R7,R0
+   \   00000DB4   0A0086E2           ADD      R0,R6,#+10
+   \   00000DB8   ........           BL       __aeabi_uread4
+   \   00000DBC   FF20A0E3           MOV      R2,#+255
+   \   00000DC0   FF3CA0E3           MOV      R3,#+65280
+   \   00000DC4   482C02E0           AND      R2,R2,R8, ASR #+24
+   \   00000DC8   453403E0           AND      R3,R3,R5, ASR #+8
+   \   00000DCC   022083E1           ORR      R2,R3,R2
+   \   00000DD0   FF38A0E3           MOV      R3,#+16711680
+   \   00000DD4   073403E0           AND      R3,R3,R7, LSL #+8
+   \   00000DD8   022083E1           ORR      R2,R3,R2
+   \   00000DDC   0A1086E2           ADD      R1,R6,#+10
+   \   00000DE0   000C82E1           ORR      R0,R2,R0, LSL #+24
+   \   00000DE4   ........           BL       __aeabi_uwrite4
+    536          					tqmsample.secsamp.gps.alt = SWAP16(tqmsample.secsamp.gps.alt);
+   \   00000DE8   DF00D6E1           LDRSB    R0,[R6, #+15]
+   \   00000DEC   0E10D6E5           LDRB     R1,[R6, #+14]
+   \   00000DF0   000481E1           ORR      R0,R1,R0, LSL #+8
+   \   00000DF4   DF10D6E1           LDRSB    R1,[R6, #+15]
+   \   00000DF8   0E20D6E5           LDRB     R2,[R6, #+14]
+   \   00000DFC   0008A0E1           LSL      R0,R0,#+16
+   \   00000E00   4008A0E1           ASR      R0,R0,#+16
+   \   00000E04   011482E1           ORR      R1,R2,R1, LSL #+8
+   \   00000E08   FF20A0E3           MOV      R2,#+255
+   \   00000E0C   400402E0           AND      R0,R2,R0, ASR #+8
+   \   00000E10   010480E1           ORR      R0,R0,R1, LSL #+8
+   \   00000E14   0E00C6E5           STRB     R0,[R6, #+14]
+   \   00000E18   2004A0E1           LSR      R0,R0,#+8
+   \   00000E1C   0F00C6E5           STRB     R0,[R6, #+15]
+   \   00000E20   3E0200EA           B        ??Parse_Message_5
+    537          
+    538          				} // if
+    539          				break;
+    540          			} // GPS_DATA
+    541          			case GPS_PULSE: {
+    542          				u16 dop = 0;
+    543          
+    544          				retval = SendACK(msgptr[SOURCE]);
+   \                     ??Parse_Message_16:
+   \   00000E24   0030A0E3           MOV      R3,#+0
+   \   00000E28   0620A0E3           MOV      R2,#+6
+   \   00000E2C   0110D8E5           LDRB     R1,[R8, #+1]
+   \   00000E30   FF0005E2           AND      R0,R5,#0xFF
+   \   00000E34   ........           BL       SendMessage
+   \   00000E38   0040A0E1           MOV      R4,R0
+    545          
+    546          				// free up unit for more communications
+    547          				COMMCTS[msgptr[SOURCE]-1] = 0;
+   \   00000E3C   0100D8E5           LDRB     R0,[R8, #+1]
+   \   00000E40   48119FE5           LDR      R1,??Parse_Message_6
+   \   00000E44   000181E0           ADD      R0,R1,R0, LSL #+2
+   \   00000E48   0010A0E3           MOV      R1,#+0
+   \   00000E4C   041000E5           STR      R1,[R0, #-4]
+    548          
+    549          				// record the dillution of precision number
+    550          				dop = ((u16) msgptr[DATA_START+1] << 8) + (u16) (msgptr[DATA_START+2] & 0x00FF);
+   \   00000E50   0800D8E5           LDRB     R0,[R8, #+8]
+   \   00000E54   0910D8E5           LDRB     R1,[R8, #+9]
+   \   00000E58   005481E0           ADD      R5,R1,R0, LSL #+8
+    551          
+    552          				if ((CAMERA_NONE != vehicleData.camera) || (CAMERA_USB != vehicleData.camera)) {
+    553          					// first byte has camera status
+    554          					pdrlancstatus = (pdrlancstatustype) (msgptr[DATA_START+3]);
+   \   00000E5C   0A00D8E5           LDRB     R0,[R8, #+10]
+   \   00000E60   DC179FE5           LDR      R1,??Parse_Message_39
+   \   00000E64   0000C1E5           STRB     R0,[R1, #+0]
+    555          					
+    556          					switch (pdrlancstatus) {
+   \   00000E68   010040E2           SUB      R0,R0,#+1
+   \   00000E6C   050050E3           CMP      R0,#+5
+   \   00000E70   00F18F90           ADDLS    PC,PC,R0, LSL #+2
+   \                     ??Parse_Message_2:
+   \   00000E74   1000008A           BHI      ??Parse_Message_63
+   \   00000E78   040000EA           B        ??Parse_Message_64
+   \   00000E7C   0E0000EA           B        ??Parse_Message_63
+   \   00000E80   020000EA           B        ??Parse_Message_64
+   \   00000E84   040000EA           B        ??Parse_Message_65
+   \   00000E88   000000EA           B        ??Parse_Message_64
+   \   00000E8C   050000EA           B        ??Parse_Message_66
+    557          						case PDROFF:
+    558          						case PDRLANCNOTREADY:
+    559          						case PDRLANC2WIRE:
+    560          							DataValues[CAMERA_STATUS].iVal = CAMERA_STATUS_NOT_READY;
+   \                     ??Parse_Message_64:
+   \   00000E90   B0079FE5           LDR      R0,??Parse_Message_39+0x4
+   \   00000E94   0110A0E3           MOV      R1,#+1
+   \   00000E98   090000EA           B        ??Parse_Message_67
+    561          							break;					
+    562          						case PDRLANCREADY:
+    563          							DataValues[CAMERA_STATUS].iVal = CAMERA_STATUS_READY;
+   \                     ??Parse_Message_65:
+   \   00000E9C   A4079FE5           LDR      R0,??Parse_Message_39+0x4
+   \   00000EA0   0210A0E3           MOV      R1,#+2
+   \   00000EA4   060000EA           B        ??Parse_Message_67
+    564          							break;
+    565          						case PDRLANCRECORD:
+    566          							DataValues[CAMERA_STATUS].iVal = CAMERA_STATUS_RECORDING;
+   \                     ??Parse_Message_66:
+   \   00000EA8   98079FE5           LDR      R0,??Parse_Message_39+0x4
+   \   00000EAC   0310A0E3           MOV      R1,#+3
+   \   00000EB0   030000EA           B        ??Parse_Message_67
+   \                     ??Parse_Message_52:
+   \   00000EB4   C74B37894160       DC32     0x89374BC7,0x400D6041
+   \              0D40        
+    567          							break;
+    568          						case UNKNOWN:
+    569          						case PDRLANCNOTCONNECTED:
+    570          						default:
+    571          							DataValues[CAMERA_STATUS].iVal = CAMERA_STATUS_NOT_CONNECTED;
+   \                     ??Parse_Message_63:
+   \   00000EBC   84079FE5           LDR      R0,??Parse_Message_39+0x4
+   \   00000EC0   0010A0E3           MOV      R1,#+0
+   \                     ??Parse_Message_67:
+   \   00000EC4   581280E5           STR      R1,[R0, #+600]
+    572          					} // switch
+    573          				} // if
+    574          				
+    575          				// don't save any data until we see a GPS pulse so we can
+    576          				// synchronize position and io data with accelerometer data
+    577          				if (firstpulse) {
+   \   00000EC8   ........           LDR      R0,??DataTable4_2
+   \   00000ECC   0010D0E5           LDRB     R1,[R0, #+0]
+   \   00000ED0   000051E3           CMP      R1,#+0
+    578          					firstpulse = false;
+   \   00000ED4   0010A013           MOVNE    R1,#+0
+   \   00000ED8   0010C015           STRBNE   R1,[R0, #+0]
+   \   00000EDC   4800001A           BNE      ??Parse_Message_68
+    579          				}
+    580          				// only do this if we are storing data
+    581          				else if (DU2_RECORDING(unsavedSysData.systemMode)) {
+   \   00000EE0   A4029FE5           LDR      R0,??Parse_Message_28+0xC
+   \   00000EE4   8800D0E5           LDRB     R0,[R0, #+136]
+   \   00000EE8   030040E2           SUB      R0,R0,#+3
+   \   00000EEC   FF0000E2           AND      R0,R0,#0xFF
+   \   00000EF0   130050E3           CMP      R0,#+19
+   \   00000EF4   4200002A           BCS      ??Parse_Message_68
+    582          					int size;
+    583          					
+    584          					// fill in any unprogrammed accel samples with previous values
+    585          					for (; gcnt < SAMP10S_PER_PAGE; gcnt++) {
+   \   00000EF8   ........           LDR      R7,??DataTable3_2
+   \   00000EFC   ........           LDR      R6,??DataTable3
+   \   00000F00   000097E5           LDR      R0,[R7, #+0]
+   \   00000F04   0A0050E3           CMP      R0,#+10
+   \   00000F08   3100002A           BCS      ??Parse_Message_69
+    586          						if (gcnt == 0) {
+   \                     ??Parse_Message_70:
+   \   00000F0C   000097E5           LDR      R0,[R7, #+0]
+   \   00000F10   000050E3           CMP      R0,#+0
+   \   00000F14   2100001A           BNE      ??Parse_Message_71
+    587          							tqmsample.secsamp.accel[gcnt][0] =
+    588          								((scratchpad.calibrate.xzero & 0x0F00) >> 4) +
+    589          								((scratchpad.calibrate.yzero & 0x0F00) >> 8);
+   \   00000F18   60029FE5           LDR      R0,??Parse_Message_28
+   \   00000F1C   5A10D0E5           LDRB     R1,[R0, #+90]
+   \   00000F20   5920D0E5           LDRB     R2,[R0, #+89]
+   \   00000F24   011482E1           ORR      R1,R2,R1, LSL #+8
+   \   00000F28   5C20D0E5           LDRB     R2,[R0, #+92]
+   \   00000F2C   5B30D0E5           LDRB     R3,[R0, #+91]
+   \   00000F30   022483E1           ORR      R2,R3,R2, LSL #+8
+   \   00000F34   F030A0E3           MOV      R3,#+240
+   \   00000F38   2224A0E1           LSR      R2,R2,#+8
+   \   00000F3C   211203E0           AND      R1,R3,R1, LSR #+4
+   \   00000F40   0F2002E2           AND      R2,R2,#0xF
+   \   00000F44   011082E0           ADD      R1,R2,R1
+   \   00000F48   002097E5           LDR      R2,[R7, #+0]
+   \   00000F4C   822082E0           ADD      R2,R2,R2, LSL #+1
+   \   00000F50   062082E0           ADD      R2,R2,R6
+   \   00000F54   1510C2E5           STRB     R1,[R2, #+21]
+    590          							tqmsample.secsamp.accel[gcnt][1] =
+    591          								scratchpad.calibrate.xzero & 0xFF;
+   \   00000F58   5A10D0E5           LDRB     R1,[R0, #+90]
+   \   00000F5C   5920D0E5           LDRB     R2,[R0, #+89]
+   \   00000F60   011482E1           ORR      R1,R2,R1, LSL #+8
+   \   00000F64   002097E5           LDR      R2,[R7, #+0]
+   \   00000F68   822082E0           ADD      R2,R2,R2, LSL #+1
+   \   00000F6C   062082E0           ADD      R2,R2,R6
+   \   00000F70   1610C2E5           STRB     R1,[R2, #+22]
+    592          							tqmsample.secsamp.accel[gcnt][2] =
+    593          								scratchpad.calibrate.yzero & 0xFF;
+   \   00000F74   5C10D0E5           LDRB     R1,[R0, #+92]
+   \   00000F78   5B20D0E5           LDRB     R2,[R0, #+91]
+   \   00000F7C   000097E5           LDR      R0,[R7, #+0]
+   \   00000F80   800080E0           ADD      R0,R0,R0, LSL #+1
+   \   00000F84   011482E1           ORR      R1,R2,R1, LSL #+8
+   \   00000F88   060080E0           ADD      R0,R0,R6
+   \   00000F8C   0A0000EA           B        ??Parse_Message_72
+   \                     ??Parse_Message_6:
+   \   00000F90   ........           DC32     COMMCTS
+   \   00000F94   ........           DC32     com
+   \   00000F98   ........           DC32     msgrouting
+   \   00000F9C   ........           DC32     suData
+    594          						} // if
+    595          						else {
+    596          							tqmsample.secsamp.accel[gcnt][0] =
+    597          								tqmsample.secsamp.accel[gcnt-1][0];
+   \                     ??Parse_Message_71:
+   \   00000FA0   800080E0           ADD      R0,R0,R0, LSL #+1
+   \   00000FA4   060080E0           ADD      R0,R0,R6
+   \   00000FA8   1210D0E5           LDRB     R1,[R0, #+18]
+   \   00000FAC   1510C0E5           STRB     R1,[R0, #+21]
+    598          							tqmsample.secsamp.accel[gcnt][1] =
+    599          								tqmsample.secsamp.accel[gcnt-1][1];
+   \   00000FB0   1310D0E5           LDRB     R1,[R0, #+19]
+   \   00000FB4   1610C0E5           STRB     R1,[R0, #+22]
+    600          							tqmsample.secsamp.accel[gcnt][2] =
+    601          								tqmsample.secsamp.accel[gcnt-1][2];
+   \   00000FB8   1410D0E5           LDRB     R1,[R0, #+20]
+   \                     ??Parse_Message_72:
+   \   00000FBC   1710C0E5           STRB     R1,[R0, #+23]
+    602          						} // else
+    603          					} // for
+   \   00000FC0   000097E5           LDR      R0,[R7, #+0]
+   \   00000FC4   010080E2           ADD      R0,R0,#+1
+   \   00000FC8   000087E5           STR      R0,[R7, #+0]
+   \   00000FCC   0A0050E3           CMP      R0,#+10
+   \   00000FD0   CDFFFF3A           BCC      ??Parse_Message_70
+    604          
+    605          					size = sizeof(samptype10) + (10*iobytesenabled);		// ten samples
+    606          					// variable length save depending on number of io points enabled
+    607          		
+    608          					if (0 != tqmWrite (&tqmsample, size)) {
+   \                     ??Parse_Message_69:
+   \   00000FD4   ........           LDR      R0,??DataTable4_3
+   \   00000FD8   0A10A0E3           MOV      R1,#+10
+   \   00000FDC   0000D0E5           LDRB     R0,[R0, #+0]
+   \   00000FE0   810060E1           SMULBB   R0,R1,R0
+   \   00000FE4   331080E2           ADD      R1,R0,#+51
+   \   00000FE8   0600A0E1           MOV      R0,R6
+   \   00000FEC   ........           BL       tqmWrite
+   \   00000FF0   000050E3           CMP      R0,#+0
+   \   00000FF4   0200000A           BEQ      ??Parse_Message_68
+    609          #ifdef BUILD_DEBUG_PORT
+    610          						DBGU_Print("Session file error -- QUEUE FULL\n\r");
+   \   00000FF8   ............       ADRL     R0,`?<Constant "Session file error --...">`
+   \              ....        
+   \   00001000   ........           BL       DBGU_Print
+    611          #endif
+    612          					} // if
+    613          				} // else
+    614          
+    615          				gcnt = 0;		// either way, start a new second for G data
+   \                     ??Parse_Message_68:
+   \   00001004   ........           LDR      R7,??DataTable3_2
+   \   00001008   0000A0E3           MOV      R0,#+0
+   \   0000100C   000087E5           STR      R0,[R7, #+0]
+    616          				iocnt = 0;
+   \   00001010   040087E5           STR      R0,[R7, #+4]
+   \   00001014   B8069FE5           LDR      R0,??Parse_Message_45
+    617          
+    618          				// request use of global data
+    619          				OS_Use(&SEMA_GlobalData);
+   \   00001018   ........           BL       OS_Use
+    620          			
+    621          				// update global data
+    622          				DataValues[GPS_DOP].fVal = ((float) dop) / 100.0F;
+   \   0000101C   0508A0E1           LSL      R0,R5,#+16
+   \   00001020   2008A0E1           LSR      R0,R0,#+16
+   \   00001024   ........           BL       __aeabi_ui2f
+   \   00001028   4014A0E3           MOV      R1,#+1073741824
+   \   0000102C   B21781E3           ORR      R1,R1,#0x2C80000
+   \   00001030   ........           BL       __aeabi_fdiv
+   \   00001034   0C569FE5           LDR      R5,??Parse_Message_39+0x4
+   \   00001038   0020A0E1           MOV      R2,R0
+    623          				if (DataValues[GPS_DOP].fVal < DataValues[MIN_DOP].fVal)
+   \   0000103C   C01095E5           LDR      R1,[R5, #+192]
+   \   00001040   ........           BL       __aeabi_cfcmple
+    624          					DataValues[MIN_DOP].fVal = DataValues[GPS_DOP].fVal;
+   \   00001044   C0208535           STRCC    R2,[R5, #+192]
+    625          
+    626          				if (DataValues[GPS_DOP].fVal > DataValues[MAX_DOP].fVal)
+   \   00001048   C80095E5           LDR      R0,[R5, #+200]
+   \   0000104C   0210A0E1           MOV      R1,R2
+   \   00001050   ........           BL       __aeabi_cfcmple
+   \   00001054   A02085E5           STR      R2,[R5, #+160]
+    627          					DataValues[MAX_DOP].fVal = DataValues[GPS_DOP].fVal;
+   \   00001058   C8208535           STRCC    R2,[R5, #+200]
+    628          
+    629          				// relinquish global data
+    630          				OS_Unuse(&SEMA_GlobalData);				
+   \   0000105C   70069FE5           LDR      R0,??Parse_Message_45
+   \   00001060   ........           BL       OS_Unuse
+    631          
+    632          				notifyGPS();			// tell lap timer that we have a new gps position
+   \   00001064   ........           BL       notifyGPS
+    633          				
+    634          				break;
+   \   00001068   AC0100EA           B        ??Parse_Message_5
+    635          			} // GPS_PULSE
+    636          			case ACCEL_DATA: {
+    637          				int checkbits;			// used to check off the enable bits for data i/o
+    638          				u16 tempxy;
+    639          				u16 period = 0;
+   \                     ??Parse_Message_24:
+   \   0000106C   0090A0E3           MOV      R9,#+0
+    640          				float xg, yg;
+    641          
+    642          				retval = SendACK(msgptr[SOURCE]);
+   \   00001070   0030A0E3           MOV      R3,#+0
+   \   00001074   0620A0E3           MOV      R2,#+6
+   \   00001078   0110D8E5           LDRB     R1,[R8, #+1]
+   \   0000107C   FF0005E2           AND      R0,R5,#0xFF
+   \   00001080   ........           BL       SendMessage
+   \   00001084   0040A0E1           MOV      R4,R0
+    643          			
+    644          				// free up unit for more communications
+    645          				COMMCTS[msgptr[SOURCE]-1] = 0;
+   \   00001088   0100D8E5           LDRB     R0,[R8, #+1]
+   \   0000108C   ........           LDR      R1,??DataTable4_4
+    646          
+    647          				// put accel data into buffer
+    648          				tqmsample.secsamp.accel[gcnt][0] = msgptr[DATA_START];
+   \   00001090   ........           LDR      R7,??DataTable3_2
+   \   00001094   000181E0           ADD      R0,R1,R0, LSL #+2
+   \   00001098   049000E5           STR      R9,[R0, #-4]
+   \   0000109C   000097E5           LDR      R0,[R7, #+0]
+   \   000010A0   ........           LDR      R6,??DataTable3
+   \   000010A4   800080E0           ADD      R0,R0,R0, LSL #+1
+   \   000010A8   065080E0           ADD      R5,R0,R6
+   \   000010AC   0700D8E5           LDRB     R0,[R8, #+7]
+   \   000010B0   1500C5E5           STRB     R0,[R5, #+21]
+    649          				tqmsample.secsamp.accel[gcnt][1] = msgptr[DATA_START+1];
+   \   000010B4   0800D8E5           LDRB     R0,[R8, #+8]
+   \   000010B8   1600C5E5           STRB     R0,[R5, #+22]
+    650          				tqmsample.secsamp.accel[gcnt][2] = msgptr[DATA_START+2];
+   \   000010BC   0900D8E5           LDRB     R0,[R8, #+9]
+   \   000010C0   1700C5E5           STRB     R0,[R5, #+23]
+   \   000010C4   ........           LDR      R0,??DataTable4_5
+   \   000010C8   1710D5E5           LDRB     R1,[R5, #+23]
+   \   000010CC   04A090E5           LDR      R10,[R0, #+4]
+   \   000010D0   1500D5E5           LDRB     R0,[R5, #+21]
+   \   000010D4   0F0000E2           AND      R0,R0,#0xF
+   \   000010D8   000481E0           ADD      R0,R1,R0, LSL #+8
+   \   000010DC   0008A0E1           LSL      R0,R0,#+16
+   \   000010E0   2008A0E1           LSR      R0,R0,#+16
+   \   000010E4   ........           BL       __aeabi_ui2f
+   \   000010E8   0010A0E1           MOV      R1,R0
+   \   000010EC   0A00A0E1           MOV      R0,R10
+   \   000010F0   ........           BL       __aeabi_fsub
+    651          
+    652          				// scale the Y Gs
+    653          				tempxy = (tqmsample.secsamp.accel[gcnt][0] & 0x0F) << 8;
+    654          				tempxy += tqmsample.secsamp.accel[gcnt][2];
+    655          				yg = (float) accely.zero - tempxy;
+    656          				if (yg < 0.0) {
+   \   000010F4   0010A0E3           MOV      R1,#+0
+   \   000010F8   ........           BL       __aeabi_cfcmple
+   \   000010FC   00B0A0E1           MOV      R11,R0
+   \   00001100   0300002A           BCS      ??Parse_Message_73
+    657          					yg = yg / (accely.zero - accely.min);
+   \   00001104   ........           LDR      R1,??DataTable4_5
+   \   00001108   0A00A0E1           MOV      R0,R10
+   \   0000110C   001091E5           LDR      R1,[R1, #+0]
+   \   00001110   020000EA           B        ??Parse_Message_74
+    658          				} // if
+    659          				else  {
+    660          					yg = yg / (accely.max - accely.zero);
+   \                     ??Parse_Message_73:
+   \   00001114   ........           LDR      R0,??DataTable4_5
+   \   00001118   0A10A0E1           MOV      R1,R10
+   \   0000111C   080090E5           LDR      R0,[R0, #+8]
+   \                     ??Parse_Message_74:
+   \   00001120   ........           BL       __aeabi_fsub
+   \   00001124   0010A0E1           MOV      R1,R0
+   \   00001128   0B00A0E1           MOV      R0,R11
+   \   0000112C   ........           BL       __aeabi_fdiv
+   \   00001130   00A0A0E1           MOV      R10,R0
+   \   00001134   ........           LDR      R0,??DataTable4_6
+   \   00001138   1610D5E5           LDRB     R1,[R5, #+22]
+   \   0000113C   04B090E5           LDR      R11,[R0, #+4]
+   \   00001140   1500D5E5           LDRB     R0,[R5, #+21]
+   \   00001144   F00000E2           AND      R0,R0,#0xF0
+   \   00001148   000281E0           ADD      R0,R1,R0, LSL #+4
+   \   0000114C   0008A0E1           LSL      R0,R0,#+16
+   \   00001150   2008A0E1           LSR      R0,R0,#+16
+   \   00001154   ........           BL       __aeabi_ui2f
+   \   00001158   0B10A0E1           MOV      R1,R11
+   \   0000115C   ........           BL       __aeabi_fsub
+    661          				} // else
+    662          
+    663          				// scale the X Gs
+    664          				tempxy = (tqmsample.secsamp.accel[gcnt][0] & 0xF0) << 4;
+    665          				tempxy += tqmsample.secsamp.accel[gcnt][1];
+    666          				xg = (float) tempxy - accelx.zero;
+    667          
+    668          				if (xg < 0.0) {
+   \   00001160   0010A0E3           MOV      R1,#+0
+   \   00001164   ........           BL       __aeabi_cfcmple
+   \   00001168   0050A0E1           MOV      R5,R0
+   \   0000116C   0700002A           BCS      ??Parse_Message_75
+    669          					xg = xg / (accelx.zero - accelx.min);
+   \   00001170   ........           LDR      R1,??DataTable4_6
+   \   00001174   0B00A0E1           MOV      R0,R11
+   \   00001178   001091E5           LDR      R1,[R1, #+0]
+   \   0000117C   060000EA           B        ??Parse_Message_76
+   \                     ??Parse_Message_28:
+   \   00001180   ........           DC32     scratchpad
+   \   00001184   ........           DC32     gotscratchpad
+   \   00001188   ........           DC32     outstanding_msg
+   \   0000118C   ........           DC32     unsavedSysData
+    670          				} // if
+    671          				else {
+    672          					xg = xg / (accelx.max - accelx.zero);
+   \                     ??Parse_Message_75:
+   \   00001190   ........           LDR      R0,??DataTable4_6
+   \   00001194   0B10A0E1           MOV      R1,R11
+   \   00001198   080090E5           LDR      R0,[R0, #+8]
+   \                     ??Parse_Message_76:
+   \   0000119C   ........           BL       __aeabi_fsub
+   \   000011A0   0010A0E1           MOV      R1,R0
+   \   000011A4   0500A0E1           MOV      R0,R5
+   \   000011A8   ........           BL       __aeabi_fdiv
+   \   000011AC   0050A0E1           MOV      R5,R0
+   \   000011B0   1C059FE5           LDR      R0,??Parse_Message_45
+    673          				} // else
+    674          				
+    675          				// request use of global data
+    676          				OS_Use(&SEMA_GlobalData);
+   \   000011B4   ........           BL       OS_Use
+    677          			
+    678          				// update indices for rolling filter history				
+    679          				grollingidx = (1+grollingidx) % G_FILTER_VAL;
+   \   000011B8   540097E5           LDR      R0,[R7, #+84]
+   \   000011BC   ........           LDR      R1,??DataTable3_3  ;; 0x66666667
+   \   000011C0   010080E2           ADD      R0,R0,#+1
+   \   000011C4   9021C1E0           SMULL    R2,R1,R0,R1
+    680          				
+    681          				// update global data
+    682          				DataValues[X_G].fVal = xgrolling[grollingidx] = xg;
+    683          				DataValues[Y_G].fVal = ygrolling[grollingidx] = yg;
+    684          				
+    685          				// update the filtered G values
+    686          				xg = yg = 0.0;
+   \   000011C8   00B0A0E3           MOV      R11,#+0
+   \   000011CC   C110B0E1           ASRS     R1,R1,#+1
+   \   000011D0   01108142           ADDMI    R1,R1,#+1
+   \   000011D4   011181E0           ADD      R1,R1,R1, LSL #+2
+   \   000011D8   010040E0           SUB      R0,R0,R1
+   \   000011DC   540087E5           STR      R0,[R7, #+84]
+   \   000011E0   000187E0           ADD      R0,R7,R0, LSL #+2
+   \   000011E4   185080E5           STR      R5,[R0, #+24]
+   \   000011E8   58549FE5           LDR      R5,??Parse_Message_39+0x4
+   \   000011EC   181090E5           LDR      R1,[R0, #+24]
+   \   000011F0   001085E5           STR      R1,[R5, #+0]
+   \   000011F4   2CA080E5           STR      R10,[R0, #+44]
+    687          				for (tempxy = 0; tempxy < G_FILTER_VAL; tempxy++) {
+   \   000011F8   180087E2           ADD      R0,R7,#+24
+   \   000011FC   08008DE5           STR      R0,[SP, #+8]
+   \   00001200   08A085E5           STR      R10,[R5, #+8]
+   \   00001204   2C0087E2           ADD      R0,R7,#+44
+   \   00001208   0510A0E3           MOV      R1,#+5
+   \   0000120C   00A0A0E3           MOV      R10,#+0
+   \   00001210   04008DE5           STR      R0,[SP, #+4]
+   \   00001214   00108DE5           STR      R1,[SP, #+0]
+    688          				  	xg += xgrolling[tempxy];
+   \                     ??Parse_Message_77:
+   \   00001218   08209DE5           LDR      R2,[SP, #+8]
+   \   0000121C   0B00A0E1           MOV      R0,R11
+   \   00001220   041092E4           LDR      R1,[R2], #+4
+   \   00001224   08208DE5           STR      R2,[SP, #+8]
+   \   00001228   ........           BL       __aeabi_fadd
+    689          					yg += ygrolling[tempxy];
+   \   0000122C   04209DE5           LDR      R2,[SP, #+4]
+   \   00001230   00B0A0E1           MOV      R11,R0
+   \   00001234   041092E4           LDR      R1,[R2], #+4
+   \   00001238   04208DE5           STR      R2,[SP, #+4]
+   \   0000123C   0A00A0E1           MOV      R0,R10
+   \   00001240   ........           BL       __aeabi_fadd
+   \   00001244   00A0A0E1           MOV      R10,R0
+    690          				} // for
+   \   00001248   00009DE5           LDR      R0,[SP, #+0]
+   \   0000124C   010040E2           SUB      R0,R0,#+1
+   \   00001250   00008DE5           STR      R0,[SP, #+0]
+   \   00001254   000050E3           CMP      R0,#+0
+   \   00001258   EEFFFF1A           BNE      ??Parse_Message_77
+    691          				
+    692          				DataValues[X_G_DAMPED].fVal = xg / (float) G_FILTER_VAL;
+   \   0000125C   4014A0E3           MOV      R1,#+1073741824
+   \   00001260   0B00A0E1           MOV      R0,R11
+   \   00001264   A01881E3           ORR      R1,R1,#0xA00000
+   \   00001268   ........           BL       __aeabi_fdiv
+   \   0000126C   00B0A0E1           MOV      R11,R0
+    693          				DataValues[Y_G_DAMPED].fVal = yg / (float) G_FILTER_VAL;
+   \   00001270   4014A0E3           MOV      R1,#+1073741824
+   \   00001274   48B085E5           STR      R11,[R5, #+72]
+   \   00001278   0A00A0E1           MOV      R0,R10
+   \   0000127C   A01881E3           ORR      R1,R1,#0xA00000
+   \   00001280   ........           BL       __aeabi_fdiv
+   \   00001284   00A0A0E1           MOV      R10,R0
+    694          				
+    695          				// set max and min values using filtered values
+    696          				if (DataValues[X_G_DAMPED].fVal > DataValues[MAX_X_G].fVal)
+   \   00001288   180095E5           LDR      R0,[R5, #+24]
+   \   0000128C   0B10A0E1           MOV      R1,R11
+   \   00001290   ........           BL       __aeabi_cfcmple
+    697          					DataValues[MAX_X_G].fVal = DataValues[X_G_DAMPED].fVal;
+   \   00001294   18B08535           STRCC    R11,[R5, #+24]
+    698          				if (DataValues[X_G_DAMPED].fVal < DataValues[MIN_X_G].fVal)
+   \   00001298   0B00A0E1           MOV      R0,R11
+   \   0000129C   301095E5           LDR      R1,[R5, #+48]
+   \   000012A0   ........           BL       __aeabi_cfcmple
+    699          					DataValues[MIN_X_G].fVal = DataValues[X_G_DAMPED].fVal;
+   \   000012A4   30B08535           STRCC    R11,[R5, #+48]
+    700          				
+    701          				if (DataValues[Y_G_DAMPED].fVal > DataValues[MAX_Y_G].fVal)
+   \   000012A8   200095E5           LDR      R0,[R5, #+32]
+   \   000012AC   0A10A0E1           MOV      R1,R10
+   \   000012B0   ........           BL       __aeabi_cfcmple
+    702          						DataValues[MAX_Y_G].fVal = DataValues[Y_G_DAMPED].fVal;
+   \   000012B4   20A08535           STRCC    R10,[R5, #+32]
+    703          				if (DataValues[Y_G_DAMPED].fVal < DataValues[MIN_Y_G].fVal)
+   \   000012B8   0A00A0E1           MOV      R0,R10
+   \   000012BC   381095E5           LDR      R1,[R5, #+56]
+   \   000012C0   ........           BL       __aeabi_cfcmple
+   \   000012C4   50A085E5           STR      R10,[R5, #+80]
+    704          					DataValues[MIN_Y_G].fVal = DataValues[Y_G_DAMPED].fVal;
+   \   000012C8   38A08535           STRCC    R10,[R5, #+56]
+    705          				
+    706          				DataValues[COMBINED_G].fVal = sqrt(DataValues[X_G_DAMPED].fVal * DataValues[X_G_DAMPED].fVal + DataValues[Y_G_DAMPED].fVal * DataValues[Y_G_DAMPED].fVal);
+   \   000012CC   0B00A0E1           MOV      R0,R11
+   \   000012D0   0B10A0E1           MOV      R1,R11
+   \   000012D4   ........           BL       __aeabi_fmul
+   \   000012D8   00B0A0E1           MOV      R11,R0
+   \   000012DC   0A00A0E1           MOV      R0,R10
+   \   000012E0   0A10A0E1           MOV      R1,R10
+   \   000012E4   ........           BL       __aeabi_fmul
+   \   000012E8   0010A0E1           MOV      R1,R0
+   \   000012EC   0B00A0E1           MOV      R0,R11
+   \   000012F0   ........           BL       __aeabi_fadd
+   \   000012F4   ........           BL       __aeabi_f2d
+   \   000012F8   ........           BL       sqrt
+   \   000012FC   ........           BL       __aeabi_d2f
+   \   00001300   800285E5           STR      R0,[R5, #+640]
+    707          				
+    708          				// relinquish global data
+    709          				OS_Unuse(&SEMA_GlobalData);
+   \   00001304   C8039FE5           LDR      R0,??Parse_Message_45
+   \   00001308   ........           BL       OS_Unuse
+   \   0000130C   0A00D8E5           LDRB     R0,[R8, #+10]
+   \   00001310   ........           LDR      R1,??DataTable4_7
+    710          
+    711          				// check if Data Interface attached - digital byte inverted at this point
+    712          				suData.traqDataConnected = (~msgptr[DATA_START+3] & TACHORDATA);
+    713          
+    714          				// scan the i/o points in the order they arrive, MSB - LSB, DIA3A2A1A0F1F0
+    715          				for (checkbits = 6; checkbits >= 0; checkbits--) {
+   \   00001314   74BF85E2           ADD      R11,R5,#+464
+   \   00001318   0000E0E1           MVN      R0,R0
+   \   0000131C   030000E2           AND      R0,R0,#0x3
+   \   00001320   0D00C1E5           STRB     R0,[R1, #+13]
+   \   00001324   0610A0E3           MOV      R1,#+6
+   \   00001328   0C108DE5           STR      R1,[SP, #+12]
+   \   0000132C   ........           LDR      R1,??DataTable4_8
+   \   00001330   0A0088E2           ADD      R0,R8,#+10
+   \   00001334   10008DE5           STR      R0,[SP, #+16]
+   \   00001338   08108DE5           STR      R1,[SP, #+8]
+   \   0000133C   ........           LDR      R10,??DataTable4_9
+    716          					// check for bit set enabling i/o point
+    717          					if ((iocollect >> checkbits) & 0x01) {
+   \                     ??Parse_Message_78:
+   \   00001340   ........           LDR      R0,??DataTable4_10
+   \   00001344   0C109DE5           LDR      R1,[SP, #+12]
+   \   00001348   0000D0E5           LDRB     R0,[R0, #+0]
+   \   0000134C   5001A0E1           ASR      R0,R0,R1
+   \   00001350   010010E3           TST      R0,#0x1
+   \   00001354   6500000A           BEQ      ??Parse_Message_79
+    718          						
+    719          						// if we are recording save the io point byte
+    720          						if (DU2_RECORDING(unsavedSysData.systemMode)) {
+   \   00001358   8800DAE5           LDRB     R0,[R10, #+136]
+   \   0000135C   030040E2           SUB      R0,R0,#+3
+   \   00001360   FF0000E2           AND      R0,R0,#0xFF
+   \   00001364   130050E3           CMP      R0,#+19
+   \   00001368   0F00002A           BCS      ??Parse_Message_80
+    721          							if (suData.traqDataConnected)
+   \   0000136C   ........           LDR      R2,??DataTable4_7
+   \   00001370   040097E5           LDR      R0,[R7, #+4]
+   \   00001374   0D20D2E5           LDRB     R2,[R2, #+13]
+   \   00001378   061080E0           ADD      R1,R0,R6
+    722          								tqmsample.IoData[iocnt] = msgptr[DATA_START+9-checkbits];
+    723          							else
+    724          								tqmsample.IoData[iocnt] = 0;
+    725          							if (iocnt < (10*iobytesenabled)-1)
+   \   0000137C   0030E0E3           MVN      R3,#+0
+   \   00001380   000052E3           CMP      R2,#+0
+   \   00001384   10209D15           LDRNE    R2,[SP, #+16]
+   \   00001388   0020D215           LDRBNE   R2,[R2, #+0]
+   \   0000138C   3320C1E5           STRB     R2,[R1, #+51]
+   \   00001390   ........           LDR      R1,??DataTable4_3
+   \   00001394   0A20A0E3           MOV      R2,#+10
+   \   00001398   0010D1E5           LDRB     R1,[R1, #+0]
+   \   0000139C   823101E1           SMLABB   R1,R2,R1,R3
+   \   000013A0   010050E1           CMP      R0,R1
+    726          								iocnt++;		// increment array index
+   \   000013A4   010080B2           ADDLT    R0,R0,#+1
+   \   000013A8   040087B5           STRLT    R0,[R7, #+4]
+    727          						} // if
+    728          
+    729          						switch (checkbits) {						
+   \                     ??Parse_Message_80:
+   \   000013AC   0C009DE5           LDR      R0,[SP, #+12]
+   \   000013B0   060050E3           CMP      R0,#+6
+   \   000013B4   00F18F90           ADDLS    PC,PC,R0, LSL #+2
+   \                     ??Parse_Message_3:
+   \   000013B8   4C00008A           BHI      ??Parse_Message_79
+   \   000013BC   470000EA           B        ??Parse_Message_81
+   \   000013C0   430000EA           B        ??Parse_Message_82
+   \   000013C4   0D0000EA           B        ??Parse_Message_83
+   \   000013C8   0C0000EA           B        ??Parse_Message_83
+   \   000013CC   0B0000EA           B        ??Parse_Message_83
+   \   000013D0   0A0000EA           B        ??Parse_Message_83
+   \   000013D4   FFFFFFEA           B        ??Parse_Message_84
+    730          							case 6:
+    731          								DataValues[DIGITAL_INPUT_4].iVal = (msgptr[DATA_START+9-checkbits] & 0x10)? 1:0;
+   \                     ??Parse_Message_84:
+   \   000013D8   0A00D8E5           LDRB     R0,[R8, #+10]
+   \   000013DC   0110A0E3           MOV      R1,#+1
+   \   000013E0   200201E0           AND      R0,R1,R0, LSR #+4
+   \   000013E4   D00185E5           STR      R0,[R5, #+464]
+    732          								DataValues[DIGITAL_INPUT_5].iVal = (msgptr[DATA_START+9-checkbits] & 0x20)? 1:0;
+   \   000013E8   0A00D8E5           LDRB     R0,[R8, #+10]
+   \   000013EC   A00201E0           AND      R0,R1,R0, LSR #+5
+   \   000013F0   D80185E5           STR      R0,[R5, #+472]
+    733          								break;
+   \   000013F4   3D0000EA           B        ??Parse_Message_79
+   \                     ??Parse_Message_35:
+   \   000013F8   ........           DC32     sessionFile
+   \   000013FC   ........           DC32     SDcardRWTCB
+    734          							case 5:
+    735          							case 4:
+    736          							case 3:
+    737          							case 2: {
+    738          								float tempfloat;
+    739          								
+    740          								if (vehicleData.analogInput[checkbits - 2].enabled) {
+   \                     ??Parse_Message_83:
+   \   00001400   08009DE5           LDR      R0,[SP, #+8]
+   \   00001404   1300D0E5           LDRB     R0,[R0, #+19]
+   \   00001408   000050E3           CMP      R0,#+0
+   \   0000140C   3700000A           BEQ      ??Parse_Message_79
+    741          
+    742          									// get the unfiltered value and scale it across its range
+    743          									tempfloat = (float) vehicleData.analogInput[checkbits - 2].inputRange *
+    744          										(float) msgptr[DATA_START+9-checkbits] / (float) VOLTFULLSCALE;
+   \   00001410   08009DE5           LDR      R0,[SP, #+8]
+   \   00001414   2000D0E5           LDRB     R0,[R0, #+32]
+   \   00001418   ........           BL       __aeabi_ui2f
+   \   0000141C   00008DE5           STR      R0,[SP, #+0]
+   \   00001420   10009DE5           LDR      R0,[SP, #+16]
+   \   00001424   0000D0E5           LDRB     R0,[R0, #+0]
+   \   00001428   ........           BL       __aeabi_ui2f
+   \   0000142C   00109DE5           LDR      R1,[SP, #+0]
+   \   00001430   ........           BL       __aeabi_fmul
+   \   00001434   4014A0E3           MOV      R1,#+1073741824
+   \   00001438   DE1781E3           ORR      R1,R1,#0x3780000
+   \   0000143C   ........           BL       __aeabi_fdiv
+   \   00001440   14008DE5           STR      R0,[SP, #+20]
+    745          
+    746          									// filter
+    747          									if (analogsinitialized && (vehicleData.analogInput[checkbits - 2].enabled > 1)) {
+   \   00001444   5C00D7E5           LDRB     R0,[R7, #+92]
+   \   00001448   000050E3           CMP      R0,#+0
+   \   0000144C   1300000A           BEQ      ??Parse_Message_85
+   \   00001450   08009DE5           LDR      R0,[SP, #+8]
+   \   00001454   1300D0E5           LDRB     R0,[R0, #+19]
+   \   00001458   0400CDE5           STRB     R0,[SP, #+4]
+   \   0000145C   020050E3           CMP      R0,#+2
+   \   00001460   0E00003A           BCC      ??Parse_Message_85
+    748          										// apply filtering: ((current value) * (filter level - 1) + new value) / (filter level)
+    749          										DataValues[ANALOG_INPUT_0 + (checkbits - 2)].fVal = (tempfloat +
+    750          											(DataValues[ANALOG_INPUT_0 + (checkbits - 2)].fVal * (float) (vehicleData.analogInput[checkbits - 2].enabled - 1))) /
+    751          											(float) vehicleData.analogInput[checkbits - 2].enabled;
+   \   00001464   010040E2           SUB      R0,R0,#+1
+   \   00001468   ........           BL       __aeabi_i2f
+   \   0000146C   0010A0E1           MOV      R1,R0
+   \   00001470   00009BE5           LDR      R0,[R11, #+0]
+   \   00001474   ........           BL       __aeabi_fmul
+   \   00001478   0010A0E1           MOV      R1,R0
+   \   0000147C   14009DE5           LDR      R0,[SP, #+20]
+   \   00001480   ........           BL       __aeabi_fadd
+   \   00001484   00008DE5           STR      R0,[SP, #+0]
+   \   00001488   0400DDE5           LDRB     R0,[SP, #+4]
+   \   0000148C   ........           BL       __aeabi_ui2f
+   \   00001490   0010A0E1           MOV      R1,R0
+   \   00001494   00009DE5           LDR      R0,[SP, #+0]
+   \   00001498   ........           BL       __aeabi_fdiv
+   \   0000149C   000000EA           B        ??Parse_Message_86
+    752          									} // if
+    753          									else {		// first value so treat it differently
+    754          										DataValues[ANALOG_INPUT_0 + (checkbits - 2)].fVal = tempfloat;		// assign first value
+   \                     ??Parse_Message_85:
+   \   000014A0   14009DE5           LDR      R0,[SP, #+20]
+   \                     ??Parse_Message_86:
+   \   000014A4   00008BE5           STR      R0,[R11, #+0]
+    755          									} // if
+    756          
+    757          									// set max and min values in VOLTS
+    758          									if (DataValues[ANALOG_INPUT_0 + (checkbits - 2)].fVal > DataValues[MAX_A_0 + (checkbits - 2)].fVal)
+   \   000014A8   00209BE5           LDR      R2,[R11, #+0]
+   \   000014AC   30009BE5           LDR      R0,[R11, #+48]
+   \   000014B0   0210A0E1           MOV      R1,R2
+   \   000014B4   ........           BL       __aeabi_cfcmple
+    759          										DataValues[MAX_A_0 + (checkbits - 2)].fVal = DataValues[ANALOG_INPUT_0 + (checkbits - 2)].fVal;
+   \   000014B8   30208B35           STRCC    R2,[R11, #+48]
+    760          									
+    761          									if (DataValues[ANALOG_INPUT_0 + (checkbits - 2)].fVal < DataValues[MIN_A_0 + (checkbits - 2)].fVal)
+   \   000014BC   0200A0E1           MOV      R0,R2
+   \   000014C0   50109BE5           LDR      R1,[R11, #+80]
+   \   000014C4   ........           BL       __aeabi_cfcmple
+   \   000014C8   0800002A           BCS      ??Parse_Message_79
+    762          										DataValues[MIN_A_0 + (checkbits - 2)].fVal = DataValues[ANALOG_INPUT_0 + (checkbits - 2)].fVal;
+   \   000014CC   50208BE5           STR      R2,[R11, #+80]
+   \   000014D0   060000EA           B        ??Parse_Message_79
+    763          								
+    764          								} // if
+    765          								break;
+    766          							} // case
+    767          							case 1:		// MSB
+    768          								period = (msgptr[DATA_START+9-checkbits]) << 8;
+   \                     ??Parse_Message_82:
+   \   000014D4   0F00D8E5           LDRB     R0,[R8, #+15]
+   \   000014D8   0094A0E1           LSL      R9,R0,#+8
+    769          								break;
+   \   000014DC   030000EA           B        ??Parse_Message_79
+    770          							case 0:		// LSB
+    771          								period += msgptr[DATA_START+9-checkbits];
+   \                     ??Parse_Message_81:
+   \   000014E0   1000D8E5           LDRB     R0,[R8, #+16]
+   \   000014E4   099080E0           ADD      R9,R0,R9
+   \   000014E8   0998A0E1           LSL      R9,R9,#+16
+   \   000014EC   2998A0E1           LSR      R9,R9,#+16
+    772          								break;
+    773          						} // switch
+    774          					} // if
+    775          				} // for
+   \                     ??Parse_Message_79:
+   \   000014F0   0C009DE5           LDR      R0,[SP, #+12]
+   \   000014F4   08B04BE2           SUB      R11,R11,#+8
+   \   000014F8   010040E2           SUB      R0,R0,#+1
+   \   000014FC   0C008DE5           STR      R0,[SP, #+12]
+   \   00001500   08009DE5           LDR      R0,[SP, #+8]
+   \   00001504   400040E2           SUB      R0,R0,#+64
+   \   00001508   08008DE5           STR      R0,[SP, #+8]
+   \   0000150C   10009DE5           LDR      R0,[SP, #+16]
+   \   00001510   010080E2           ADD      R0,R0,#+1
+   \   00001514   10008DE5           STR      R0,[SP, #+16]
+   \   00001518   0C009DE5           LDR      R0,[SP, #+12]
+   \   0000151C   000050E3           CMP      R0,#+0
+   \   00001520   86FFFF5A           BPL      ??Parse_Message_78
+    776          				
+    777          				// completed at least one time through
+    778          				analogsinitialized = TRUE;
+   \   00001524   0180A0E3           MOV      R8,#+1
+   \   00001528   5C80C7E5           STRB     R8,[R7, #+92]
+    779          
+    780          				// request use of global data
+    781          				OS_Use(&SEMA_GlobalData);
+   \   0000152C   A0019FE5           LDR      R0,??Parse_Message_45
+   \   00001530   ........           BL       OS_Use
+    782          				
+    783          				// process the rpm
+    784          				if (period == 0)
+   \   00001534   0900B0E1           MOVS     R0,R9
+    785          					DataValues[VEHICLE_RPM].iVal = 0;
+   \   00001538   0000A003           MOVEQ    R0,#+0
+   \   0000153C   A8018505           STREQ    R0,[R5, #+424]
+   \   00001540   4B00000A           BEQ      ??Parse_Message_87
+    786          				else {
+    787          					float tempfloat;
+    788          
+    789          					// figure out rpm in hz
+    790          					tempfloat = (float) FREQ_SAMPLE_RATE / (float) period;
+   \   00001544   ........           BL       __aeabi_ui2f
+   \   00001548   0010A0E1           MOV      R1,R0
+   \   0000154C   4804A0E3           MOV      R0,#+1207959552
+   \   00001550   7A0880E3           ORR      R0,R0,#0x7A0000
+   \   00001554   ........           BL       __aeabi_fdiv
+    791          			
+    792          					// rpm
+    793          					if (0 == vehicleData.engineCylinders) // kart
+   \   00001558   ........           LDR      R1,??DataTable4_11
+   \   0000155C   0D60D1E5           LDRB     R6,[R1, #+13]
+   \   00001560   ........           BL       __aeabi_f2d
+   \   00001564   000056E3           CMP      R6,#+0
+   \   00001568   0500001A           BNE      ??Parse_Message_88
+    794          						DataValues[VEHICLE_RPM].iVal = (u16) (tempfloat * 60.0 * 4.0);
+   \   0000156C   4034A0E3           MOV      R3,#+1073741824
+   \   00001570   0020A0E3           MOV      R2,#+0
+   \   00001574   6E3883E3           ORR      R3,R3,#0x6E0000
+   \   00001578   ........           BL       __aeabi_dmul
+   \   0000157C   ........           BL       __aeabi_d2iz
+   \   00001580   110000EA           B        ??Parse_Message_89
+    795          					else {
+    796          						tempfloat = tempfloat * 60.0 * 2.0 / (float) vehicleData.engineCylinders;
+    797          						DataValues[VEHICLE_RPM].uVal = (u16) tempfloat;
+   \                     ??Parse_Message_88:
+   \   00001584   0130A0E1           MOV      R3,R1
+   \   00001588   0020A0E1           MOV      R2,R0
+   \   0000158C   4014A0E3           MOV      R1,#+1073741824
+   \   00001590   0000A0E3           MOV      R0,#+0
+   \   00001594   5E1881E3           ORR      R1,R1,#0x5E0000
+   \   00001598   ........           BL       __aeabi_dmul
+   \   0000159C   00A0A0E1           MOV      R10,R0
+   \   000015A0   01B0A0E1           MOV      R11,R1
+   \   000015A4   0600A0E1           MOV      R0,R6
+   \   000015A8   ........           BL       __aeabi_ui2f
+   \   000015AC   ........           BL       __aeabi_f2d
+   \   000015B0   0020A0E1           MOV      R2,R0
+   \   000015B4   0130A0E1           MOV      R3,R1
+   \   000015B8   0A00A0E1           MOV      R0,R10
+   \   000015BC   0B10A0E1           MOV      R1,R11
+   \   000015C0   ........           BL       __aeabi_ddiv
+   \   000015C4   ........           BL       __aeabi_d2f
+   \   000015C8   ........           BL       __aeabi_f2iz
+   \                     ??Parse_Message_89:
+   \   000015CC   0008A0E1           LSL      R0,R0,#+16
+   \   000015D0   2008A0E1           LSR      R0,R0,#+16
+    798          					} // else
+    799          
+    800          					// count highrevs and overrevs
+    801          					if (DataValues[VEHICLE_RPM].uVal > vehicleData.tach.lowerRedStart) {	// high rev
+   \   000015D4   ........           LDR      R1,??DataTable4_11
+   \   000015D8   A80185E5           STR      R0,[R5, #+424]
+   \   000015DC   A80195E5           LDR      R0,[R5, #+424]
+   \   000015E0   2C1091E5           LDR      R1,[R1, #+44]
+   \   000015E4   000051E1           CMP      R1,R0
+   \   000015E8   0700002A           BCS      ??Parse_Message_90
+    802          						if (!inhighrev) {
+   \   000015EC   081097E5           LDR      R1,[R7, #+8]
+   \   000015F0   000051E3           CMP      R1,#+0
+   \   000015F4   0600001A           BNE      ??Parse_Message_91
+    803          							inhighrev = true;
+    804          							DataValues[TOTAL_HIGHREVS].uVal++;
+   \   000015F8   281295E5           LDR      R1,[R5, #+552]
+   \   000015FC   088087E5           STR      R8,[R7, #+8]
+   \   00001600   011081E2           ADD      R1,R1,#+1
+   \   00001604   281285E5           STR      R1,[R5, #+552]
+   \   00001608   010000EA           B        ??Parse_Message_91
+    805          						} // if
+    806          					} // if
+    807          					else {		// not in high rev
+    808          						inhighrev = false;
+   \                     ??Parse_Message_90:
+   \   0000160C   0010A0E3           MOV      R1,#+0
+   \   00001610   081087E5           STR      R1,[R7, #+8]
+    809          					} // else
+    810          
+    811          					if (DataValues[VEHICLE_RPM].uVal > vehicleData.tach.scaleEnd) {	// overrev
+   \                     ??Parse_Message_91:
+   \   00001614   ........           LDR      R1,??DataTable4_11
+   \   00001618   141091E5           LDR      R1,[R1, #+20]
+   \   0000161C   000051E1           CMP      R1,R0
+   \   00001620   0900002A           BCS      ??Parse_Message_92
+    812          						if (!inoverrev) {
+   \   00001624   0C1097E5           LDR      R1,[R7, #+12]
+   \   00001628   000051E3           CMP      R1,#+0
+   \   0000162C   0800001A           BNE      ??Parse_Message_93
+    813          							inoverrev = true;
+    814          							DataValues[TOTAL_OVERREVS].uVal++;
+   \   00001630   301295E5           LDR      R1,[R5, #+560]
+   \   00001634   0C8087E5           STR      R8,[R7, #+12]
+   \   00001638   011081E2           ADD      R1,R1,#+1
+   \   0000163C   301285E5           STR      R1,[R5, #+560]
+   \   00001640   030000EA           B        ??Parse_Message_93
+   \                     ??Parse_Message_39:
+   \   00001644   ........           DC32     pdrlancstatus
+   \   00001648   ........           DC32     DataValues
+    815          						} // if
+    816          					} // if
+    817          					else {		// not in high rev
+    818          						inoverrev = false;
+   \                     ??Parse_Message_92:
+   \   0000164C   0010A0E3           MOV      R1,#+0
+   \   00001650   0C1087E5           STR      R1,[R7, #+12]
+    819          					} // else
+    820          						
+    821          					// set max values
+    822          					if (DataValues[VEHICLE_RPM].uVal > DataValues[MAX_RPM].uVal) {
+   \                     ??Parse_Message_93:
+   \   00001654   201295E5           LDR      R1,[R5, #+544]
+   \   00001658   000051E1           CMP      R1,R0
+   \   0000165C   0400002A           BCS      ??Parse_Message_87
+    823          						DataValues[MAX_RPM].uVal = DataValues[VEHICLE_RPM].uVal;
+    824          						if (DataValues[VEHICLE_RPM].uVal > sysData.maxRpmEver)
+   \   00001660   ........           LDR      R2,??DataTable4_1
+   \   00001664   200285E5           STR      R0,[R5, #+544]
+   \   00001668   BC1092E5           LDR      R1,[R2, #+188]
+   \   0000166C   000051E1           CMP      R1,R0
+    825          							sysData.maxRpmEver = DataValues[VEHICLE_RPM].uVal;
+   \   00001670   BC008235           STRCC    R0,[R2, #+188]
+    826          					} // if
+    827          				} // else
+    828          				
+    829          				// relinquish global data
+    830          				OS_Unuse(&SEMA_GlobalData);
+   \                     ??Parse_Message_87:
+   \   00001674   58009FE5           LDR      R0,??Parse_Message_45
+   \   00001678   ........           BL       OS_Unuse
+    831          
+    832          				SetGear( GEAR_CALC );		// calculate the gear we are in
+   \   0000167C   0100A0E3           MOV      R0,#+1
+   \   00001680   ........           BL       SetGear
+    833          				SetWarningLED(BOTH_WARNING_LED, (int) GetValue(ANALOG_INPUT_0).fVal);
+   \   00001684   3610A0E3           MOV      R1,#+54
+   \   00001688   0D00A0E1           MOV      R0,SP
+   \   0000168C   ........           BL       GetValue
+   \   00001690   00009DE5           LDR      R0,[SP, #+0]
+   \   00001694   ........           BL       __aeabi_f2iz
+   \   00001698   ........           BL       __aeabi_i2f
+   \   0000169C   0010A0E1           MOV      R1,R0
+   \   000016A0   0300A0E3           MOV      R0,#+3
+   \   000016A4   ........           BL       SetWarningLED
+    834          				SetTachLEDs(GetValue(VEHICLE_RPM).iVal);
+   \   000016A8   3510A0E3           MOV      R1,#+53
+   \   000016AC   0D00A0E1           MOV      R0,SP
+   \   000016B0   ........           BL       GetValue
+   \   000016B4   00009DE5           LDR      R0,[SP, #+0]
+   \   000016B8   ........           BL       SetTachLEDs
+    835          				
+    836          				if (gcnt < 9)
+   \   000016BC   000097E5           LDR      R0,[R7, #+0]
+   \   000016C0   090050E3           CMP      R0,#+9
+   \   000016C4   150000AA           BGE      ??Parse_Message_5
+    837          					gcnt++;		// increment array index
+   \   000016C8   010080E2           ADD      R0,R0,#+1
+   \   000016CC   000087E5           STR      R0,[R7, #+0]
+   \   000016D0   120000EA           B        ??Parse_Message_5
+   \                     ??Parse_Message_45:
+   \   000016D4   ........           DC32     SEMA_GlobalData
+    838          				break;
+    839          			} // ACCEL_DATA
+    840          
+    841          			default:
+    842          				// grab the port
+    843          				COMMCTS[msgptr[SOURCE]-1] = CTS_COUNTDOWN;
+   \                     ??Parse_Message_11:
+   \   000016D8   0110D8E5           LDRB     R1,[R8, #+1]
+   \   000016DC   ........           LDR      R2,??DataTable4_4
+    844          
+    845          				// say what?
+    846          				retval = SendNAK(msgptr[SOURCE], UNKNOWN_FUNCTION);
+   \   000016E0   ........           LDR      R3,??DataTable4_12
+   \   000016E4   011182E0           ADD      R1,R2,R1, LSL #+2
+   \   000016E8   9B2FA0E3           MOV      R2,#+620
+   \   000016EC   042001E5           STR      R2,[R1, #-4]
+   \   000016F0   0110D8E5           LDRB     R1,[R8, #+1]
+   \   000016F4   1820A0E3           MOV      R2,#+24
+   \   000016F8   D00091E1           LDRSB    R0,[R1, +R0]
+   \   000016FC   803200E1           SMLABB   R0,R0,R2,R3
+   \   00001700   0220A0E3           MOV      R2,#+2
+   \   00001704   100090E5           LDR      R0,[R0, #+16]
+   \   00001708   0130A0E3           MOV      R3,#+1
+   \   0000170C   0720C0E5           STRB     R2,[R0, #+7]
+   \   00001710   1520A0E3           MOV      R2,#+21
+   \   00001714   FF0005E2           AND      R0,R5,#0xFF
+   \   00001718   ........           BL       SendMessage
+    847          				retval = -1; // no valid opcode found - normally send NAK
+   \   0000171C   0440E0E1           MVN      R4,R4
+    848          				break;		
+    849          			} // switch
+    850          		} // else
+    851          	} // else
+    852          
+    853          	return(retval);  // this should be the return value of sending ACK or ACK with
+   \                     ??Parse_Message_5:
+   \   00001720   0400A0E1           MOV      R0,R4
+   \   00001724   1CD08DE2           ADD      SP,SP,#+28
+   \   00001728   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    854          	                 // data, assuming the opcode processes successfully
+    855          }
+
+   \                                 In section .bss, align 4
+   \                     ??gcnt:
+   \   00000000                      DS8 4
+   \   00000004                      DS8 4
+   \   00000008                      DS8 4
+   \   0000000C                      DS8 4
+   \   00000010                      DS8 4
+   \   00000014                      DS8 4
+   \   00000018                      DS8 20
+   \   0000002C                      DS8 20
+   \   00000040                      DS8 20
+   \   00000054                      DS8 4
+   \   00000058                      DS8 4
+   \   0000005C                      DS8 1
+    856          
+    857          // The following function calculates the crc16 result and verifies it against*/
+    858          // the received value in the data.  The function returns:
+    859          // 0 if the crc compares
+    860          // -1 if the crc does not match
+    861          
+
+   \                                 In section .text, align 4, keep-with-next
+    862          s16 Verify_CRC(u08 * dat, u16 bytecount) {
+   \                     Verify_CRC:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0040A0E1           MOV      R4,R0
+    863          	u16 retval, data_crc ;
+    864          
+    865          	retval = crc16(dat, bytecount); // calculate the crc on the received data
+    866          
+    867          	data_crc = (dat[bytecount])<<8 ;  // get the crc from the message
+    868          	data_crc += (dat[bytecount+1]);
+    869          
+    870          	if (retval == data_crc) // check calculated against received
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   ........           BL       crc16
+   \   00000014   042085E0           ADD      R2,R5,R4
+   \   00000018   0410D5E7           LDRB     R1,[R5, +R4]
+   \   0000001C   0120D2E5           LDRB     R2,[R2, #+1]
+    871          		return((s16) 0) ;  // if the crc's match
+    872          	else
+    873          		return((s16) -1); // -1 otherwise
+   \   00000020   04D08DE2           ADD      SP,SP,#+4
+   \   00000024   011482E0           ADD      R1,R2,R1, LSL #+8
+   \   00000028   0118A0E1           MOV      R1,R1, LSL #+16
+   \   0000002C   210850E1           CMP      R0,R1, LSR #+16
+   \   00000030   0000A003           MOVEQ    R0,#+0
+   \   00000034   0000E013           MVNNE    R0,#+0
+   \   00000038   3080BDE8           POP      {R4,R5,PC}       ;; return
+    874          }
+    875          
+
+   \                                 In section .text, align 4, keep-with-next
+    876          s16 SendNAK(u08 dest,		// unit id of destination
+    877          			u08 reason) {
+   \                     SendNAK:
+   \   00000000   00402DE9           PUSH     {LR}
+    878          	com[msgrouting[dest]].txbuff[DATA_START] = reason ;
+   \   00000004   ........           LDR      R12,??DataTable4_13
+   \   00000008   ........           LDR      LR,??DataTable4_12
+   \   0000000C   DC2090E1           LDRSB    R2,[R0, +R12]
+   \   00000010   1830A0E3           MOV      R3,#+24
+   \   00000014   04D04DE2           SUB      SP,SP,#+4
+   \   00000018   82E302E1           SMLABB   R2,R2,R3,LR
+    879          	SendMessage(msgrouting[0], dest,NAK,1);
+   \   0000001C   0130A0E3           MOV      R3,#+1
+   \   00000020   102092E5           LDR      R2,[R2, #+16]
+   \   00000024   0710C2E5           STRB     R1,[R2, #+7]
+   \   00000028   0010A0E1           MOV      R1,R0
+   \   0000002C   1520A0E3           MOV      R2,#+21
+   \   00000030   0000DCE5           LDRB     R0,[R12, #+0]
+   \   00000034   ........           BL       SendMessage
+    880          
+    881          	return((s16) 0) ;
+   \   00000038   0000A0E3           MOV      R0,#+0
+   \   0000003C   04D08DE2           ADD      SP,SP,#+4
+   \   00000040   0080BDE8           POP      {PC}             ;; return
+    882          
+    883          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable2:
+   \   00000000   ........           DC32     COMMCTSTIMERS
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable2_1:
+   \   00000000   ........           DC32     msgrouting
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable2_2:
+   \   00000000   ........           DC32     COMMCTS
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable2_3:
+   \   00000000   ........           DC32     outstanding_msg
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable2_4:
+   \   00000000   ........           DC32     com
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3:
+   \   00000000   ........           DC32     tqmsample
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_1:
+   \   00000000   ........           DC32     accelz
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_2:
+   \   00000000   ........           DC32     ??gcnt
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3_3:
+   \   00000000   67666666           DC32     0x66666667
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4:
+   \   00000000   00806640           DC32     0x40668000
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_1:
+   \   00000000   ........           DC32     sysData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_2:
+   \   00000000   ........           DC32     firstpulse
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_3:
+   \   00000000   ........           DC32     iobytesenabled
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_4:
+   \   00000000   ........           DC32     COMMCTS
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_5:
+   \   00000000   ........           DC32     accely
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_6:
+   \   00000000   ........           DC32     accelx
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_7:
+   \   00000000   ........           DC32     suData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_8:
+   \   00000000   ........           DC32     vehicleData+0x180
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_9:
+   \   00000000   ........           DC32     unsavedSysData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_10:
+   \   00000000   ........           DC32     iocollect
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_11:
+   \   00000000   ........           DC32     vehicleData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_12:
+   \   00000000   ........           DC32     com
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable4_13:
+   \   00000000   ........           DC32     msgrouting
+
+   \                                 In section .rodata, align 1, keep-with-next
+   \                     `?<Constant "">`:
+   \   00000000                      ; Initializer data, 1 bytes
+   \   00000000   00                 DC8 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Session file error --...">`:
+   \   00000000                      ; Initializer data, 36 bytes
+   \   00000000   53657373696F       DC8 83, 101, 115, 115, 105, 111, 110, 32, 102, 105
+   \              6E206669    
+   \   0000000A   6C6520657272       DC8 108, 101, 32, 101, 114, 114, 111, 114, 32, 45
+   \              6F72202D    
+   \   00000014   2D2051554555       DC8 45, 32, 81, 85, 69, 85, 69, 32, 70, 85
+   \              45204655    
+   \   0000001E   4C4C0A0D0000       DC8 76, 76, 10, 13, 0, 0
+
+   Maximum stack usage in bytes:
+
+     Function      .cstack
+     --------      -------
+     Parse_Message     64
+     SendMessage       32
+     SendNAK            8
+     Verify_CRC        16
+
+
+   Section sizes:
+
+     Function/Label                         Bytes
+     --------------                         -----
+     SendMessage                             320
+     Parse_Message                          5932
+     gcnt                                     93
+     iocnt
+     inhighrev
+     inoverrev
+     lastspeed
+     speedincreasing
+     xgrolling
+     ygrolling
+     zgrolling
+     grollingidx
+     zrollingidx
+     analogsinitialized
+     Verify_CRC                               60
+     SendNAK                                  68
+     ??DataTable2                              4
+     ??DataTable2_1                            4
+     ??DataTable2_2                            4
+     ??DataTable2_3                            4
+     ??DataTable2_4                            4
+     ??DataTable3                              4
+     ??DataTable3_1                            4
+     ??DataTable3_2                            4
+     ??DataTable3_3                            4
+     ??DataTable4                              4
+     ??DataTable4_1                            4
+     ??DataTable4_2                            4
+     ??DataTable4_3                            4
+     ??DataTable4_4                            4
+     ??DataTable4_5                            4
+     ??DataTable4_6                            4
+     ??DataTable4_7                            4
+     ??DataTable4_8                            4
+     ??DataTable4_9                            4
+     ??DataTable4_10                           4
+     ??DataTable4_11                           4
+     ??DataTable4_12                           4
+     ??DataTable4_13                           4
+     ?<Constant "">                            1
+     ?<Constant "Session file error --...">   36
+
+ 
+    93 bytes in section .bss
+     1 byte  in section .rodata
+ 6 508 bytes in section .text
+ 
+ 6 508 bytes of CODE  memory
+     1 byte  of CONST memory
+    93 bytes of DATA  memory
+
+Errors: none
+Warnings: none

@@ -1,0 +1,347 @@
+###############################################################################
+#                                                                             #
+#     IAR Assembler V6.10.2.52244/W32 for ARM 26/Jun/2014  10:07:04           #
+#     Copyright 1999-2010 IAR Systems AB.                                     #
+#                                                                             #
+#           Source file   =  C:\DUII\TargetHW\Util\SEGGER_ARM_memcpy_IAR.s    #
+#           List file     =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\SEGGER_ARM_memcpy_IAR.lst#
+#           Object file   =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\SEGGER_ARM_memcpy_IAR.o#
+#           Command line  =  C:\DUII\TargetHW\Util\SEGGER_ARM_memcpy_IAR.s    #
+#                            -OC:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\ #
+#                            -s+ -M<> -w+ -r                                  #
+#                            -LC:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\ #
+#                            -t8 --cpu ARM926EJ-S --fpu None                  #
+#                            -IC:\DUII\TargetHW\INC\                          #
+#                                                                             #
+###############################################################################
+
+    1                          /**********************************************
+                               ************
+    2                          *          SEGGER MICROCONTROLLER SYSTEME
+                                GmbH
+    3                          *   Solutions for real time microcontroller
+                                applications
+    4                          ***********************************************
+                               ************
+    5                          *
+    6                          * File    : ARM_memcpy.asm
+    7                          * Purpose : Efficient implementation of some
+                                time critical routines
+    8                          --------- END-OF-HEADER -----------------------
+                               ----------*/
+    9                          
+   10                          #ifdef __IAR_SYSTEMS_ASM__
+   11                          
+   12                          ;/*********************************************
+                               ************************
+   13                          ;*
+   14                          ;*       These defines are necessary to be able
+                                to
+   15                          ;*       let run code in ram.
+   16                          ;*       As there are not defined in any IAR
+                                header file
+   17                          ;*       we need to define them here.
+   18                          ;*  References:  ARM ELF manual
+   19                          ;*                Document number: SWS ESPC
+                                0003 B-02
+   20                          ;*               IAR ARM Assembler reference
+                                manual
+   21                          ;*                EWARM_AssemblerReference.ENU.
+                               pdf
+   22                          ;*/
+   23                          #define SHT_PROGBITS   0x01
+   24                          #define SHF_WRITE      0x01
+   25                          #define SHF_EXECINSTR  0x04
+   26                          
+   27                          ;/*********************************************
+                               ************************
+   28                          ;*
+   29                          ;*       IAR V6: Code in program memory
+   30                          ;*
+   31                          ;*/
+   32                          #if (__VER__ / 1000000) == 6
+   33                                  MODULE ARMMEMCPY
+   34                                  PUBLIC SEGGER_ARM_memcpy
+   35                                  SECTION .textrw:CODE:NOROOT(2)         
+                                      // Code is in RAM
+   36                                  SECTION_TYPE SHT_PROGBITS, SHF_WRITE |
+                                SHF_EXECINSTR
+   37                                  CODE32
+   38                          
+   39                          ;/*********************************************
+                               ************************
+   40                          ;*
+   41                          ;*       IAR V5: Code in program memory
+   42                          ;*
+   43                          ;*/
+   44                          #elif   (__VER__ / 1000000) == 5
+   56                          #elif (__VER__ / 100) == 4
+   68                          #else
+   69                          #error Unsupported version of IAR toolchain
+   70                          #endif
+   71                          
+   72                          
+   73                          /**********************************************
+                               ***********************
+   74                          *
+   75                          *       Public code
+   76                          *
+   77                          ***********************************************
+                               ***********************
+   78                          */
+   79                          /**********************************************
+                               ***********************
+   80                          *
+   81                          *       SEGGER_ARM_memcpy
+   82                          *
+   83                          * Function description
+   84                          *   Copy data in memory from source address to
+                                destination address.
+   85                          *
+   86                          * Register usage:
+   87                          *   R0    pDest
+   88                          *   R1    pSrc
+   89                          *   R2    NumBytes
+   90                          *   R3    Used for data transfers
+   91                          *   R4    Used for data transfers
+   92                          *   R12   Used for data transfers
+   93                          *   R13   SP
+   94                          *   R14   LR (contains return address)
+   95                          *   R15   PC
+   96                          */
+   97                          
+   98                                  CODE32
+   99                          //__ramfunc __arm int ARM_memcpy(void* pDest,
+                                void* pSrc, U32 NumBytes);
+  100                          SEGGER_ARM_memcpy:
+  101    00000000 030052E3             cmp         R2, #+3
+  102    00000004 3D00009A             bls         HandleTrailingBytes        
+  // If we have less than one complete word, use single byte transfer
+  103    00000008 03C010E2             ands        R12, R0, #+3
+  104    0000000C 0800000A             beq         DestIsAligned              
+  // Is destination address already word aligned ?
+  105                          
+  106                          //
+  107                          // Handle as much bytes as necessary to align
+                                destination address
+  108                          //
+  109    00000010 0130D1E4             ldrb        R3,  [R1], #+1             
+                                                         // We need at least
+                                                         one byte to the next
+                                                         word alignment, so we
+                                                         read one.
+  110    00000014 02005CE3             cmp         R12, #+2                   
+                                                         // Set condition codes
+                                                         according to the
+                                                         mis-alignment
+  111    00000018 0C2082E0             add         R2,  R2, R12               
+                                                         // Adjust NumBytes
+  112    0000001C 01C0D194             ldrlsb      R12, [R1], #+1             
+                                                         // Lower or same (LS)?
+                                                         -> We need one or two
+                                                         bytes to the next word
+                                                         aligned address
+  113    00000020 0130C0E4             strb        R3,  [R0], #+1
+  114    00000024 0130D134             ldrccb      R3,  [R1], #+1             
+                                                         // Carry clear (CC)?
+                                                         -> We need one more
+                                                         byte
+  115    00000028 01C0C094             strlsb      R12, [R0], #+1
+  116    0000002C 042042E2             sub         R2,  R2, #+4               
+                                                         // Adjust NumBytes
+  117    00000030 0130C034             strccb      R3,  [R0], #+1
+  118                          
+  119                          //
+  120                          // Choose best way to transfer data
+  121                          //
+  122                          DestIsAligned:
+  123    00000034 033011E2             ands        R3,  R1, #+3
+  124    00000038 1D00000A             beq         HandleBulkWordData         
+  // If source and destination are aligned, use bulk word transfer
+  125    0000003C 042052E2             subs        R2,  R2, #+4
+  126    00000040 2E00003A             bcc         HandleTrailingBytes        
+  // If we have less than one complete word left, use single byte transfer
+  127    00000044 03C031E7             ldr         R12, [R1, -R3]!            
+                                                         // Read first
+                                                         mis-aligned data word
+                                                         and word align source
+                                                         address
+  128    00000048 020053E3             cmp         R3,  #+2
+  129    0000004C 0800000A             beq         Loop16BitShift
+  130    00000050 0F00008A             bhi         Loop24BitShift
+  131                          
+  132                          //
+  133                          // Handle data in units of word
+  134                          //
+  135                          // This is done by reading mis-aligned words
+                                from source address and
+  136                          // shift them into the right alignment. After
+                                this the next data word
+  137                          // will be read to complete the missing data
+                                part.
+  138                          //
+  139                          Loop8BitShift:
+  140    00000054 2C34A0E1             mov         R3,  R12, LSR #+8          
+                                                         // Shift data word
+                                                         into right position
+  141    00000058 04C0B1E5             ldr         R12, [R1, #+4]!            
+                                                         // Load next
+                                                         mis-aligned data
+                                                         word
+  142    0000005C 042052E2             subs        R2,  R2, #+4               
+                                                         // Decrement
+                                                         NumBytes
+  143    00000060 0C3C83E1             orr         R3,  R3, R12, LSL #+24     
+                                                         // Combine missing
+                                                         part of data to build
+                                                         full data word
+  144    00000064 043080E4             str         R3,  [R0], #+4             
+                                                         // Store complete
+                                                         word
+  145    00000068 F9FFFF2A             bcs         Loop8BitShift
+  146    0000006C 011081E2             add         R1,  R1, #+1               
+                                                         // Adjust source
+                                                         address
+  147    00000070 220000EA             b           HandleTrailingBytes        
+  // Handle trailing bytes
+  148                          Loop16BitShift:
+  149    00000074 2C38A0E1             mov         R3,  R12, LSR #+16         
+                                                         // Shift data word
+                                                         into right position
+  150    00000078 04C0B1E5             ldr         R12, [R1,#+4]!             
+                                                         // Load next
+                                                         mis-aligned data
+                                                         word
+  151    0000007C 042052E2             subs        R2,  R2, #+4               
+                                                         // Decrement
+                                                         NumBytes
+  152    00000080 0C3883E1             orr         R3,  R3, R12, LSL #+16     
+                                                         // Combine missing
+                                                         part of data to build
+                                                         full data word
+  153    00000084 043080E4             str         R3,  [R0], #+4             
+                                                         // Store complete
+                                                         word
+  154    00000088 F9FFFF2A             bcs         Loop16BitShift
+  155    0000008C 021081E2             add         R1,  R1, #+2               
+                                                         // Adjust source
+                                                         address
+  156    00000090 1A0000EA             b           HandleTrailingBytes        
+  // Handle trailing bytes
+  157                          Loop24BitShift:
+  158    00000094 2C3CA0E1             mov         R3,  R12, LSR #+24         
+                                                         // Shift data word
+                                                         into right position
+  159    00000098 04C0B1E5             ldr         R12, [R1, #+4]!            
+                                                         // Load next
+                                                         mis-aligned data
+                                                         word
+  160    0000009C 042052E2             subs        R2,  R2, #+4               
+                                                         // Decrement
+                                                         NumBytes
+  161    000000A0 0C3483E1             orr         R3,  R3, R12, LSL #+8      
+                                                         // Combine missing
+                                                         part of data to build
+                                                         full data word
+  162    000000A4 043080E4             str         R3,  [R0], #+4             
+                                                         // Store complete
+                                                         word
+  163    000000A8 F9FFFF2A             bcs         Loop24BitShift
+  164    000000AC 031081E2             add         R1,  R1, #+3               
+                                                         // Adjust source
+                                                         address
+  165    000000B0 120000EA             b           HandleTrailingBytes        
+  // Handle trailing bytes
+  166                          
+  167                          //
+  168                          // Handle large bulk data in blocks of 8 words
+                                (32 bytes)
+  169                          //
+  170                          HandleBulkWordData:
+  171    000000B4 202052E2             subs        R2,  R2, #+0x20
+  172    000000B8 10402DE9             stmdb       SP!, {R4,LR}
+  173    000000BC 0500003A             bcc         HandleTrailingWords
+  174                          LoopHandleBulkWord:
+  175    000000C0 1850B1E8             ldm         R1!, {R3,R4,R12,LR}        
+                                                       // Transfer 16 bytes at
+                                                       once
+  176    000000C4 1850A0E8             stm         R0!, {R3,R4,R12,LR}
+  177    000000C8 1850B1E8             ldm         R1!, {R3,R4,R12,LR}        
+                                                       // Transfer 16 bytes at
+                                                       once
+  178    000000CC 1850A0E8             stm         R0!, {R3,R4,R12,LR}
+  179    000000D0 202052E2             subs        R2,  R2, #+0x20
+  180    000000D4 F9FFFF2A             bcs         LoopHandleBulkWord
+  181                          
+  182                          //
+  183                          // Handle trailing 7 words
+  184                          //
+  185                          HandleTrailingWords:
+  186    000000D8 02CEB0E1             movs        R12, R2, LSL #28           
+                                                         // Shift NumBytes left
+                                                         to use C and N flag of
+                                                         CPSR to conditional
+                                                         load/store data
+  187    000000DC 1850B128             ldmcs       R1!, {R3,R4,R12,LR}        
+                                                       // C flag contain bit 4
+                                                       of NumBytes (transfer 16
+                                                       bytes if it is
+                                                       set)
+  188    000000E0 1850A028             stmcs       R0!, {R3,R4,R12,LR}
+  189    000000E4 1800B148             ldmmi       R1!, {R3,R4}               
+                                                       // N flag contain bit 3
+                                                       of NumBytes (transfer 8
+                                                       bytes if it is
+                                                       set)
+  190    000000E8 1800A048             stmmi       R0!, {R3,R4}
+  191    000000EC 02CFB0E1             movs        R12, R2, LSL #+30          
+                                                         // Shift NumBytes left
+                                                         to use C and N flag of
+                                                         CPSR to conditional
+                                                         load/store data
+  192    000000F0 1040BDE8             ldmia       SP!, {R4,LR}
+  193    000000F4 04309124             ldrcs       R3,  [R1], #+4             
+                                                         // C flag contain bit
+                                                         2 of NumBytes
+                                                         (transfer 4 bytes if
+                                                         it is set)
+  194    000000F8 04308024             strcs       R3,  [R0], #+4
+  195    000000FC 1EFF2F01             bxeq        LR
+  196                          
+  197                          //
+  198                          // Handle trailing 3 bytes
+  199                          //
+  200                          HandleTrailingBytes:
+  201    00000100 822FB0E1             movs        R2,  R2, LSL #+31          
+                                                         // Shift NumBytes left
+                                                         to use C and N flag of
+                                                         CPSR to conditional
+                                                         load/store data
+  202    00000104 0120D144             ldrmib      R2,  [R1], #+1             
+                                                         // N flag contain bit
+                                                         0 of NumBytes
+                                                         (transfer 1 byte if it
+                                                         is set)
+  203    00000108 0130D124             ldrcsb      R3,  [R1], #+1             
+                                                         // C flag contain bit
+                                                         1 of NumBytes
+                                                         (transfer 2 bytes if
+                                                         it is set)
+  204    0000010C 01C0D124             ldrcsb      R12, [R1], #+1
+  205    00000110 0120C044             strmib      R2,  [R0], #+1
+  206    00000114 0130C024             strcsb      R3,  [R0], #+1
+  207    00000118 01C0C024             strcsb      R12, [R0], #+1
+  208    0000011C 1EFF2FE1             bx          LR
+  209                          
+  210                          
+  211                                  END
+##############################
+#           CRC:0            #
+#        Errors:   0         #
+#        Warnings: 0         #
+#         Bytes: 288         #
+##############################
+
+
+
+

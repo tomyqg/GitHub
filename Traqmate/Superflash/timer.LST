@@ -1,0 +1,858 @@
+C51 COMPILER V8.02   TIMER                                                                 01/18/2010 16:51:01 PAGE 1   
+
+
+C51 COMPILER V8.02, COMPILATION OF MODULE TIMER
+OBJECT MODULE PLACED IN timer.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE timer.c OPTIMIZE(SIZE) BROWSE INCDIR(C:\Keil\C51\INC\;C:\Keil\Traqmate\132m
+                    -icro\CommonFiles\;C:\Keil\Traqmate\132micro\Superflash\) DB OE DEFINE(DISPLAY,EXTCLK6,NODEBUG) DEBUG OBJECTEXTEND
+
+line level    source
+
+   1          // Part of traqmate.c
+   2          // 9/6/2004
+   3          // 5/15/2007 added autocross mode
+   4          // Author: GAStephens
+   5          //
+   6          // These functions perform the lap timer function for the display unit
+   7          //
+   8          
+   9          #include <display.h>
+  10          #include <math.h>
+  11          #define PI 3.14159265359
+  12          #define CIRCUM          40455.0                                                                         // circumference of earth in km
+  13          #define TODEGREE(A) ((A) * (180.0 / 2147483647.0))              // converts from storage format to degrees
+  14          #define LATMET          (1000.0*CIRCUM/360.0)                                           // meters per degree
+  15          #define LONMET(B)       (1000.0*CIRCUM*cos((B)/57.29577951)/360.0)      // meters per degree, B must be current latit
+             -ude
+  16          
+  17          /******************************************************************************
+  18          ** Write_Timer **************************************** GAS 6 SEP 04 ****
+  19          *******************************************************************************
+  20          This function writes the timer to the screen.
+  21          ******************************************************************************/
+  22          void Write_Timer(void) {
+  23   1              xdata s32 temp;
+  24   1              xdata s32 displaytime;
+  25   1              u08 digitoffset;
+  26   1                                                        
+  27   1              // hold the previous timer on screen for X seconds
+  28   1              if (lap.currentlap > 1 && tm_state == TIMING && lap.timer < (1000L * (long) scratch.calibrate.lapholdtime
+             -))
+  29   1                      displaytime = laplist[lap.currentlap-2];        // -2 because it is 1 based
+  30   1              else
+  31   1                      displaytime = lap.timer;
+  32   1      
+  33   1              if (REV == timingmode) digitoffset = 0;         // put lap times in center of screen for reviewing
+  34   1              else digitoffset = 5;                                           // put lap times above bar graph
+  35   1      
+  36   1              // don't write garbage on screen
+  37   1              if (displaytime < 0) displaytime = 0;
+  38   1      
+  39   1              // write the hour
+  40   1              temp = (displaytime / (60L * 60L * 1000L)) % 24;
+  41   1              Write_Icon(21, 9-digitoffset, 8, 14, &(largeascii['0' - ' '+ (temp % 10)][0][0]), '-');
+  42   1      
+  43   1              // write the minutes
+  44   1              temp = (displaytime / (60L * 1000L)) % 60;
+  45   1              Write_Icon(38, 9-digitoffset, 8, 14, &(largeascii['0' - ' ' + (temp / 10)][0][0]), '-');
+  46   1              Write_Icon(49, 9-digitoffset, 8, 14, &(largeascii['0' - ' ' + (temp % 10)][0][0]), '-');
+  47   1      
+  48   1              // write the seconds
+  49   1              temp = (displaytime / 1000L) % 60;
+  50   1              Write_Icon(66, 9-digitoffset, 8, 14, &(largeascii['0' - ' ' + (temp / 10)][0][0]), '-');
+  51   1              Write_Icon(77, 9-digitoffset, 8, 14, &(largeascii['0' - ' ' + (temp % 10)][0][0]), '-');
+  52   1      
+C51 COMPILER V8.02   TIMER                                                                 01/18/2010 16:51:01 PAGE 2   
+
+  53   1              // write the tenth
+  54   1              temp = displaytime / (100L);
+  55   1              Write_Icon(94, 9-digitoffset, 8, 14, &(largeascii['0' - ' ' + (temp % 10)][0][0]), '-');
+  56   1      
+  57   1      } // Write_Timer
+  58          
+  59          /******************************************************************************
+  60          ** Write_Qual **************************************** GAS 11 AUG 07 ****
+  61          *******************************************************************************
+  62          This function writes the qualifying graph and digits to the screen.
+  63          ******************************************************************************/
+  64          void Write_Qual(float sectoradd) {
+  65   1              xdata BOOL plus;                // TRUE if gap positive
+  66   1              xdata u16 pixels;               // pixel scale for graph
+  67   1              xdata u08 digit1, digit2;
+  68   1              
+  69   1              // clear the graph
+  70   1              Write_Icon(0, 23, 122, 8, (u08 *) graphbckgnd, '-');
+  71   1              
+  72   1              // up or down?
+  73   1              plus = (sectoradd >= 0.0);
+  74   1              
+  75   1              // remove the sign and round up to nearest tenth
+  76   1              sectoradd = FLOATABS(sectoradd) + 0.05;
+  77   1                      
+  78   1              // scale to number of pixels, rounding up, checking bounds
+  79   1              pixels = MIN(((u16) (.5 + (sectoradd / graphratio * 60.0))), 60);
+  80   1      
+  81   1              // limit the value
+  82   1              if (sectoradd > 99.0) sectoradd = 99.0;
+  83   1      
+  84   1              if (sectoradd >= 10.0) {        // double digit
+  85   2                      digit1 = (int) sectoradd / 10;
+  86   2                      digit2 = (int) sectoradd % 10;
+  87   2      
+  88   2                      // write the sign, gap, and graph
+  89   2                      if (plus) {
+  90   3                              Write_Icon(95, 23, 8, 8, (u08 *) plussign, '-');
+  91   3                              Write_Icon(105, 23, 6, 8, &(smallbolddigits[digit1][0][0]), '-');
+  92   3                              Write_Icon(113, 23, 6, 8, &(smallbolddigits[digit2][0][0]), '-');
+  93   3                              Write_Icon(62, 23, pixels, 8, (u08 *) reversebar, '^');
+  94   3                      } // if
+  95   2                      else {
+  96   3                              Write_Icon(3, 23, 8, 8, (u08 *) minussign, '-');
+  97   3                              Write_Icon(13, 23, 6, 8, &(smallbolddigits[digit1][0][0]), '-');
+  98   3                              Write_Icon(21, 23, 6, 8, &(smallbolddigits[digit2][0][0]), '-');
+  99   3                              Write_Icon(60-pixels, 23, pixels, 8, (u08 *) reversebar, '^');
+ 100   3                      } // else
+ 101   2              } // if
+ 102   1              else { // single digit and tenth
+ 103   2                      digit1 = (int) sectoradd % 10;
+ 104   2                      digit2 = ((int) (sectoradd * 10.0)) % 10;
+ 105   2      
+ 106   2                      // write the sign, gap, and graph
+ 107   2                      if (plus) {
+ 108   3                              Write_Icon(91, 23, 8, 8, (u08 *) plussign, '-');
+ 109   3                              Write_Icon(101, 23, 6, 8, &(smallbolddigits[digit1][0][0]), '-');
+ 110   3                              Write_Icon(109, 23, 2, 8, (u08 *) smallboldperiod, '-');
+ 111   3                              Write_Icon(113, 23, 6, 8, &(smallbolddigits[digit2][0][0]), '-');
+ 112   3                              Write_Icon(62, 23, pixels, 8, (u08 *) reversebar, '^');
+ 113   3                      } // if
+ 114   2                      else {
+C51 COMPILER V8.02   TIMER                                                                 01/18/2010 16:51:01 PAGE 3   
+
+ 115   3                              Write_Icon(3, 23, 8, 8, (u08 *) minussign, '-');
+ 116   3                              Write_Icon(13, 23, 6, 8, &(smallbolddigits[digit1][0][0]), '-');
+ 117   3                              Write_Icon(21, 23, 2, 8, (u08 *) smallboldperiod, '-');
+ 118   3                              Write_Icon(25, 23, 6, 8, &(smallbolddigits[digit2][0][0]), '-');
+ 119   3                              Write_Icon(60-pixels, 23, pixels, 8, (u08 *) reversebar, '^');
+ 120   3                      } // else
+ 121   2              } // else
+ 122   1      
+ 123   1      } // Write_Qual
+ 124          
+ 125          /******************************************************************************
+ 126          ** Write_Lap ********************************************** GAS 29 JAN 05 ****
+ 127          *******************************************************************************
+ 128          This function writes the lap number to the screen.
+ 129          ******************************************************************************/
+ 130          void Write_Lap(void) {
+ 131   1              xdata u08 tempstring[5];
+ 132   1      
+ 133   1              // write lap number on lower left of screen
+ 134   1              if (lap.currentlap <= 99)
+ 135   1                      sprintf(tempstring, "%02u ", lap.currentlap);
+ 136   1              else
+ 137   1                      sprintf(tempstring, "%03u", lap.currentlap);
+ 138   1                      
+ 139   1              // upper left
+ 140   1              Write_Med_Text((u08) 1, (u08) 1, tempstring, '-');
+ 141   1      
+ 142   1      } // Write_Lap
+ 143          
+ 144          #if 0
+              /******************************************************************************
+              ** Write_Sigstrength *************************************** GAS 29 JAN 05 ****
+              *******************************************************************************
+              This function writes the signal strength meter on the upper left of the screen
+              ******************************************************************************/
+              void Write_Sigstrength(BOOL replayicon) {
+              
+                      if (replayicon)
+                              // Write the replay icon
+                              Write_Icon(0, 0, 12, 10, (u08 *) replay, '-');
+                      else
+                              // Write the appropriate GPS Lock Icon
+                              Write_Icon(0, 0, 10, 10, &(sigstrength[(gpslock+2)/3][0][0]), '-');
+              
+              } // Write_Sigstrength
+              #endif
+ 161          
+ 162          /******************************************************************************
+ 163          ** Write_Flag ********************************************** GAS 29 JAN 05 ****
+ 164          *******************************************************************************
+ 165          This function writes/clears the best lap (flag) indicator to the screen.
+ 166          ******************************************************************************/
+ 167          void Write_Flag(BOOL on) {
+ 168   1      
+ 169   1              if (on)
+ 170   1                      // write flag icon on upper right of screen
+ 171   1                      Write_Icon(LAST_COLUMN - 10, 1, 10, 10, (u08 *) flag, '-');
+ 172   1              else
+ 173   1                      // remove flag icon on upper right of screen
+ 174   1                      Write_Icon(LAST_COLUMN - 10, 1, 10, 10, (u08 *) blankicon, '-');
+ 175   1                              
+ 176   1      } // Write_Flag
+C51 COMPILER V8.02   TIMER                                                                 01/18/2010 16:51:01 PAGE 4   
+
+ 177          
+ 178          #if 0   // removed when LAP mode changed for 2.10
+              /******************************************************************************
+              ** Write_Arrow ********************************************** GAS 29 JAN 05 ****
+              *******************************************************************************
+              This function writes up or down arrow indicator to the screen.
+              ******************************************************************************/
+              void Write_Arrow(BOOL up) {
+              
+                      if (up)
+                              // write up arrow icon on upper right of screen
+                              Write_Icon(LAST_COLUMN - 11, 2, 11, 10, (u08 *) arrowup, '-');
+                      else
+                              // write down arrow icon on upper right of screen
+                              Write_Icon(LAST_COLUMN - 11, 2, 11, 10, (u08 *) arrowdown, '-');
+              
+              } // Write_Arrow
+              #endif
+ 195          
+ 196          /******************************************************************************
+ 197          ** Lap_Check **************************************** GAS 8 SEP 04 ****
+ 198          *******************************************************************************
+ 199          This function performs all numerical lap timer functions.
+ 200          Could be enhanced to returns TRUE if we are at the Start/Finish Line
+ 201          ******************************************************************************/
+ 202          void Lap_Check(lapop oper, gpstype *gps) {
+ 203   1      #ifdef DEBUG
+                      xdata char tempstring[21];
+              #endif
+ 206   1              xdata float tempfloat;
+ 207   1              static BOOL inrange;
+ 208   1       
+ 209   1              switch (oper) {
+ 210   2                      case INC_TIME:
+ 211   2                              // increment by msec
+ 212   2                              lap.timer += 1000 / (samps_per_sec);
+ 213   2                              break;
+ 214   2      
+ 215   2                      case INITIALIZE:
+ 216   2                              inrange = FALSE;
+ 217   2                              seeklat = lap.startpos.lat;
+ 218   2                              seeklon = lap.startpos.lon;
+ 219   2                              seekhdg = lap.startheading;
+ 220   2                              lap.timer = lap.timernminus1 = 0;
+ 221   2                              refsectornum = cursectornum = 0;
+ 222   2                              
+ 223   2                      case NEW_POSITION: {
+ 224   3                              xdata float fdeltalat, fdeltalon;
+ 225   3                              xdata s16 eastvel, northvel, vertvel;
+ 226   3      
+ 227   3                              // **** DOES THIS EVER GET SAVED IN FLASH?
+ 228   3                              // in launch mode, now that we are moving, save the heading one second after launch
+ 229   3                              if ((AUTOCROSS == tm_state || AUTOXFINISH == tm_state) && AUTOXSETHDGTIME == lap.timer)
+ 230   3                                      lap.startheading = lap.currentheading;
+ 231   3      
+ 232   3                              lap.previouspos = lap.currentpos;
+ 233   3                              lap.previousheading = lap.currentheading;
+ 234   3                              lap.currentpos = *gps;
+ 235   3      
+ 236   3                              // don't look for starting line in AutoX
+ 237   3                              if (AUTOXSTAGE == tm_state) return;
+ 238   3      
+C51 COMPILER V8.02   TIMER                                                                 01/18/2010 16:51:01 PAGE 5   
+
+ 239   3                              unpack_velocities (gps->velpack, &eastvel, &northvel, &vertvel);
+ 240   3      
+ 241   3                              // skip all this if we are not moving to eliminate divide by zero
+ 242   3                              if (eastvel != 0 || northvel != 0) {
+ 243   4                                      xdata int headrange;
+ 244   4                                      xdata int distrange;
+ 245   4      
+ 246   4                                      // use a smaller range circle for segment timing and autocross
+ 247   4                                      if (TIMING == tm_state || WAITSTART == tm_state) {
+ 248   5                                              headrange = LAP_HEADRANGE;
+ 249   5                                              distrange = LAP_DISTRANGE;
+ 250   5                                      } // if
+ 251   4                                      else {                                                          
+ 252   5                                              headrange = AUTOX_HEADRANGE;
+ 253   5                                              distrange = AUTOX_DISTRANGE;
+ 254   5                                      } // else
+ 255   4      
+ 256   4                                      // compute heading = vector sum of east/west vel and north/south vel (due east is 0)
+ 257   4                                      lap.currentheading = compute_heading(eastvel, northvel);
+ 258   4      //                              if (WAITSTART != tm_state && INITIALIZE == oper) // we are done
+ 259   4      //                                      return;
+ 260   4      
+ 261   4                                      // calculate lap distance
+ 262   4                                      tempfloat = TODEGREE(lap.previouspos.lat);
+ 263   4      
+ 264   4                                      // find difference in meters of lat, lon
+ 265   4                                      fdeltalat = ((TODEGREE(lap.currentpos.lat) - tempfloat) * LATMET);
+ 266   4                                      fdeltalon = ((TODEGREE(lap.currentpos.lon) - TODEGREE(lap.previouspos.lon)) * LONMET(tempfloat));
+ 267   4      
+ 268   4                                      // remember the distance at the last sample point
+ 269   4                                      lastdist = (s16) lap.distance;
+ 270   4                                      
+ 271   4                                      // add on distance traveled in this sample
+ 272   4                                      lap.distance += sqrt(fdeltalat * fdeltalat + fdeltalon * fdeltalon);
+ 273   4      
+ 274   4                                      if (lap.currentlap > 0 && lastdist > 0) {       // only process after passing S/F and collecting one more sa
+             -mple
+ 275   5                                              s16 lapdist = ((s16) lap.distance) % tracksampledist;           // integer lap distance - limit 40 miles long!
+             -!
+ 276   5      
+ 277   5                                              // get just the remainder in this sector
+ 278   5                                              lastdist = lastdist % tracksampledist;
+ 279   5      
+ 280   5                                              // process sectors if we are in a lap
+ 281   5                                              if (TIMING == tm_state ||
+ 282   5                                                      HILLCLIMBFINISH == tm_state ||
+ 283   5                                                      HILLCLIMBGETFINISH == tm_state ||
+ 284   5                                                      AUTOCROSS == tm_state ||
+ 285   5                                                      AUTOXFINISH == tm_state) {
+ 286   6              
+ 287   6                                                      if (lapdist < lastdist) {       // crossed sector boundary
+ 288   7                                                              xdata float sectoradd;          // bit to add to last timing measurement to get to sector bounday
+ 289   7                                                              // interpolate and save the time
+ 290   7                                                              sectoradd = (float) (tracksampledist - lastdist) /
+ 291   7                                                                                      (float) (lapdist + tracksampledist - lastdist); // ratio between points
+ 292   7                                                              sectoradd = sectoradd * (float) (lap.timer - lap.timernminus1); // time in ms to add to previous
+ 293   7              
+ 294   7                                                              // if no best time then reference sectors all zero. otherwise check them
+ 295   7                                                              if (0xFFFFFFFF != lap.besttime) {
+ 296   8                                                                      // are we out of comparison sectors?
+ 297   8                                                                      if (0L == sector[refsectornum].reference && refsectornum > 0)
+ 298   8                                                                              // if so, back up a sector
+C51 COMPILER V8.02   TIMER                                                                 01/18/2010 16:51:01 PAGE 6   
+
+ 299   8                                                                              refsectornum--;
+ 300   8                                                              } // if
+ 301   7      
+ 302   7                                                              // store interpolated sector time as current for comparison
+ 303   7                                                              sector[cursectornum].current = lap.timernminus1 + (s32) sectoradd;
+ 304   7              
+ 305   7                                                              // only update graph until we run out of sectors
+ 306   7                                                              if (cursectornum < (NUMSECTORS-1)) {
+ 307   8                                                                      // if sector data loaded then compare progress and display graph                                                
+ 308   8                                                                      if (0xFFFFFFFF != lap.besttime) {
+ 309   9                                                                              // determine how much ahead / behind. + is ahead, - is behind
+ 310   9                                                                              sectoradd = (float) (sector[refsectornum].reference - sector[cursectornum].current) / 1000.0;
+ 311   9                      
+ 312   9                                                                              // write the graph
+ 313   9                                                                              Write_Qual(sectoradd);
+ 314   9                                                                      } // if
+ 315   8                                                                      cursectornum++;
+ 316   8                                                              } // if
+ 317   7                                                              if (refsectornum < (NUMSECTORS-1))
+ 318   7                                                                      refsectornum++;
+ 319   7                                                      } // if
+ 320   6                                              } // if
+ 321   5                                      } // if
+ 322   4                                      // save the current timer for future interpolation
+ 323   4                                      lap.timernminus1 = lap.timer;
+ 324   4                                      
+ 325   4                                      // if we are waiting for user action, don't bother going any further
+ 326   4                                      if (HILLCLIMBGETFINISH == tm_state || AUTOCROSS == tm_state)
+ 327   4                                              return;
+ 328   4      
+ 329   4                                      // if current heading matches the start/finish heading then check for position
+ 330   4                                      // while allowing for headings near 0 (due east)
+ 331   4                                      if (ABS((s16) lap.currentheading - (s16) seekhdg) < headrange ||
+ 332   4                                              ABS((s16) lap.currentheading - (s16) seekhdg) > (360 - headrange)) {
+ 333   5      
+ 334   5                                              tempfloat = TODEGREE(seeklat);
+ 335   5      
+ 336   5                                              // find difference in meters of lat, lon
+ 337   5                                              fdeltalat = ((TODEGREE(lap.currentpos.lat) - tempfloat) * LATMET);
+ 338   5                                              fdeltalon = ((TODEGREE(lap.currentpos.lon) - TODEGREE(seeklon)) * LONMET(tempfloat));
+ 339   5      
+ 340   5                                              if (ABS(fdeltalat) < distrange && ABS(fdeltalon) < distrange) {
+ 341   6                                                      // found either the Start or the Finish
+ 342   6                                                      if (!inrange) {
+ 343   7                                                              xdata float distance;
+ 344   7                                                              xdata float speed;
+ 345   7                                                              xdata s32 offset;
+ 346   7                                                              xdata BOOL dofirststart = FALSE;
+ 347   7                                                              xdata BOOL dostart = FALSE;
+ 348   7                                                              xdata BOOL dofinish = FALSE;
+ 349   7      
+ 350   7                                                              // now we are in range
+ 351   7                                                              inrange = TRUE;
+ 352   7      
+ 353   7                                                              // find the actual distance to start/finish in meters
+ 354   7                                                              distance = sqrt(fdeltalat * fdeltalat + fdeltalon * fdeltalon);
+ 355   7      
+ 356   7                                                              // calculate speed in meters/msec
+ 357   7                                                              speed = sqrt((float) eastvel * (float) eastvel + (float) northvel * (float) northvel);
+ 358   7      
+ 359   7                                                              // fix up the timer and lap distance based on our speed, rounding up the hundredth
+ 360   7                                                              offset = (s32) (50.0 + (1000.0 * distance) / speed);
+C51 COMPILER V8.02   TIMER                                                                 01/18/2010 16:51:01 PAGE 7   
+
+ 361   7      
+ 362   7                                                              // process the incoming states                                                  
+ 363   7                                                              switch (tm_state) {
+ 364   8                                                                      case WAITSTART:
+ 365   8                                                                      case HILLCLIMBWAITSTART:
+ 366   8                                                                              dofirststart = TRUE;
+ 367   8                                                                              break;
+ 368   8                                                                      case HILLCLIMBSTART:
+ 369   8                                                                              dostart = TRUE;
+ 370   8                                                                              break;
+ 371   8                                                                      case TIMING:
+ 372   8                                                                              dostart = TRUE;
+ 373   8                                                                              dofinish = TRUE;
+ 374   8                                                                              break;
+ 375   8                                                                      case HILLCLIMBFINISH:
+ 376   8                                                                      case AUTOXFINISH:
+ 377   8                                                                              dofinish = TRUE;
+ 378   8                                                                              break;
+ 379   8                                                              } // switch
+ 380   7                                                      
+ 381   7                                                              // first time start line stuff
+ 382   7                                                              if (dofirststart) {
+ 383   8                                                                      u08 i;
+ 384   8      
+ 385   8                                                                      // found starting line so begin timing
+ 386   8                                                                      lap.currentlap = 0;
+ 387   8                                                                      lap.lastlap = 0;
+ 388   8                                                                      
+ 389   8      //                                                              Write_Timer();
+ 390   8      
+ 391   8                                                                      // initialize lap storage
+ 392   8                                                                      for (i = 0; i < NUMLAPS; i++)
+ 393   8                                                                              laplist[i] = 0xFFFFFFFF;
+ 394   8                                                              } // if
+ 395   7                                                      
+ 396   7                                                              // general finish line stuff
+ 397   7                                                              if (dofinish) {
+ 398   8                                                                      // fudge to where time would be when we cross s/f, rounding up
+ 399   8                                                                      lap.timer += offset;
+ 400   8      
+ 401   8                                                                      // store the lap plus a fudge based on our speed
+ 402   8                                                                      if (lap.currentlap <= NUMLAPS)
+ 403   8                                                                              laplist[lap.currentlap-1] = (u32) lap.timer;
+ 404   8      
+ 405   8                                                                      // autox is single 'lap' so don't show symbols
+ 406   8                                                                      if (AUTOXFINISH != tm_state) {  // put up all the symbols and get ready for next lap
+ 407   9                                                                              // clear the graph
+ 408   9                                                                              Write_Icon(0, 23, 122, 8, (u08 *) graphbckgnd, '-');
+ 409   9              
+ 410   9                                                                              // check for best lap
+ 411   9                                                                              if (lap.timer <= (u32) lap.besttime) {
+ 412  10                                                                                      lap.besttime = lap.timer;
+ 413  10                      
+ 414  10                                                                                      // put checker up
+ 415  10                                                                                      Write_Flag(TRUE);
+ 416  10      
+ 417  10                                                                                      // make current lap the reference lap
+ 418  10                                                                                      for (cursectornum = 0; cursectornum < NUMSECTORS; cursectornum++)
+ 419  10                                                                                              sector[cursectornum].reference = sector[cursectornum].current;
+ 420  10                                                                              } // if
+ 421   9                                                                              else
+ 422   9                                                                                      Write_Flag(FALSE);
+C51 COMPILER V8.02   TIMER                                                                 01/18/2010 16:51:01 PAGE 8   
+
+ 423   9                                                                      } // if
+ 424   8                                                              } // if
+ 425   7      
+ 426   7                                                              // general start line stuff
+ 427   7                                                              if (dostart || dofirststart) {
+ 428   8                                                                      // initialize to where start will be
+ 429   8                                                                      lap.timer = -offset;
+ 430   8                                                                      lap.distance = -distance;
+ 431   8                                                                      lastdist = 0;
+ 432   8                                                                      lap.timernminus1 = 0;
+ 433   8                                                                      // clear the current sector data
+ 434   8                                                                      for (cursectornum = 0; cursectornum < NUMSECTORS; cursectornum++)
+ 435   8                                                                              sector[cursectornum].current = 0;
+ 436   8                                                                      cursectornum = 0;
+ 437   8                                                                      refsectornum = 0;
+ 438   8      
+ 439   8                                                                      // next lap please
+ 440   8                                                                      lap.currentlap++;
+ 441   8                                                                              
+ 442   8                                                                      // write new lap number on screen
+ 443   8                                                                      Write_Lap();
+ 444   8                                                              } // if
+ 445   7                                                              
+ 446   7                                                              // do state transitions                         
+ 447   7                                                              switch (tm_state) {
+ 448   8                                                                      case WAITSTART:
+ 449   8                                                                              tm_state = TIMING;
+ 450   8                                                                              Write_Screen((u08 *) predictive, '-');
+ 451   8                                                                              if (0xFFFFFFFF == lap.besttime) {
+ 452   9                                                                                      // no sectors
+ 453   9                                                                                      Write_Icon(111, 23, 8, 8, (u08 *) plussign, '-');
+ 454   9                                                                                      Write_Icon(3, 23, 8, 8, (u08 *) minussign, '-');
+ 455   9                                                                              } // if
+ 456   8                                                                              break;
+ 457   8                                                                      case HILLCLIMBWAITSTART:
+ 458   8                                                                              // has finish line been set?
+ 459   8                                                                              if (0L == lap.finishpos.lat) {
+ 460   9                                                                                      tm_state = HILLCLIMBGETFINISH;
+ 461   9                                                                                      Clear_Screen();
+ 462   9                                                                                      Write_Icon(21, 4, 81, 14, (u08 *) timingicon, '-');
+ 463   9                                                                                      Write_Text(3, 1, "Hit SELECT at Finish", '-');
+ 464   9                                                                                      button_overlay[SEL] = markfinish;
+ 465   9                                                                              } // if
+ 466   8                                                                              else { // finish line set
+ 467   9                                                                                      // set up to find the finish
+ 468   9                                                                                      seeklat = lap.finishpos.lat;
+ 469   9                                                                                      seeklon = lap.finishpos.lon;
+ 470   9                                                                                      seekhdg = lap.finishheading;
+ 471   9                                                                                      tm_state = HILLCLIMBFINISH;
+ 472   9                                                                                      Write_Screen((u08 *) predictive, '-');
+ 473   9                                                                                      // if no sector times show +- while gathering sectors on next lap
+ 474   9                                                                                      if (0xFFFFFFFF == lap.besttime) {
+ 475  10                                                                                              // no sectors
+ 476  10                                                                                              Write_Icon(111, 23, 8, 8, (u08 *) plussign, '-');
+ 477  10                                                                                              Write_Icon(3, 23, 8, 8, (u08 *) minussign, '-');
+ 478  10                                                                                      } // if
+ 479   9                                                                                      button_overlay[SEL] = NULL;
+ 480   9                                                                              } // else
+ 481   8                                                                              // write lap number on screen
+ 482   8                                                                              Write_Lap();
+ 483   8                                                                              break;
+ 484   8                                                                      case HILLCLIMBSTART:
+C51 COMPILER V8.02   TIMER                                                                 01/18/2010 16:51:01 PAGE 9   
+
+ 485   8                                                                              // set up to find the finish
+ 486   8                                                                              seeklat = lap.finishpos.lat;
+ 487   8                                                                              seeklon = lap.finishpos.lon;
+ 488   8                                                                              seekhdg = lap.finishheading;
+ 489   8                                                                              tm_state = HILLCLIMBFINISH;
+ 490   8                                                                              break;
+ 491   8                                                                      case HILLCLIMBFINISH:
+ 492   8                                                                              // set up to find the start
+ 493   8                                                                              seeklat = lap.startpos.lat;
+ 494   8                                                                              seeklon = lap.startpos.lon;
+ 495   8                                                                              seekhdg = lap.startheading;
+ 496   8                                                                              tm_state = HILLCLIMBSTART;
+ 497   8                                                                              
+ 498   8                                                                              // put up final adjusted number
+ 499   8                                                                              Write_Timer();
+ 500   8                                                                              break;
+ 501   8                                                                      case AUTOXFINISH:
+ 502   8                                                                              tm_state = AUTOXHOLDTIME;
+ 503   8      
+ 504   8                                                                              // put up final adjusted number
+ 505   8                                                                              Write_Timer();
+ 506   8                                                                              break;
+ 507   8                                                                      case TIMING:
+ 508   8                                                                              break;
+ 509   8                                                              } // switch     
+ 510   7                                                      } // if !inrange
+ 511   6                                              } // if
+ 512   5                                              else // no longer in range
+ 513   5                                                      inrange = FALSE;
+ 514   5                                      } // if
+ 515   4                              } // if
+ 516   3                              break;
+ 517   3                      } // INITIALIZE, NEW_POSITION
+ 518   2                      case START_POSITION: {
+ 519   3                              xdata flashpagetype tempflash;  // structure to access one page of flash
+ 520   3      
+ 521   3                              // we are in range
+ 522   3                              inrange = TRUE;
+ 523   3      
+ 524   3                              lap.currentlap = 1;
+ 525   3                              lap.timer = lap.timernminus1 = 0;
+ 526   3                              lap.besttime = 0xFFFFFFFF;
+ 527   3                              lap.lastlap = 0;
+ 528   3                              lap.distance = 0.0;
+ 529   3                              lastdist = 0L;
+ 530   3      
+ 531   3                              // initialize lap storage
+ 532   3                              for (cursectornum = 0; cursectornum < NUMLAPS; cursectornum++)
+ 533   3                                      laplist[cursectornum] = 0xFFFFFFFF;
+ 534   3      
+ 535   3                              // initialize sectors
+ 536   3                              for (cursectornum = 0; cursectornum < NUMSECTORS; cursectornum++)
+ 537   3                                      sector[cursectornum].reference = 
+ 538   3                                      sector[cursectornum].current = 0;
+ 539   3                              cursectornum = 0;
+ 540   3                              refsectornum = 0;
+ 541   3      
+ 542   3                              // save starting position for this track
+ 543   3                              // get the track info
+ 544   3                              DataFlash_Page_Read(MAX_PAGE_SIZE, tempflash.bigbuff, TRACKPAGE);
+ 545   3      
+ 546   3                              // initialize and save the information
+C51 COMPILER V8.02   TIMER                                                                 01/18/2010 16:51:01 PAGE 10  
+
+ 547   3                              lap.startpos.lat = tempflash.circuit.track[lap.tracknum].startlat = lap.currentpos.lat;
+ 548   3                              lap.startpos.lon = tempflash.circuit.track[lap.tracknum].startlon = lap.currentpos.lon;
+ 549   3                              lap.startheading = tempflash.circuit.track[lap.tracknum].starthead = lap.currentheading;
+ 550   3      //                      tempflash.circuit.track[lap.tracknum].startalt = lap.startpos.alt;
+ 551   3      
+ 552   3                              // write it out
+ 553   3                              DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, tempflash.bigbuff, TRACKPAGE);
+ 554   3      
+ 555   3                              Clear_Screen();
+ 556   3                              Write_Icon(21, 4, 81, 14, (u08 *) timingicon, '-');
+ 557   3      
+ 558   3                              // do we need a finish line?
+ 559   3                              if (AUTOXREADY == tm_state || HILLCLIMB == tm_state) {                  
+ 560   4                                      // has finish been set?
+ 561   4                                      if (0L == lap.finishpos.lat) {                                                                  
+ 562   5                                              // no finish line so get ready to get finish line                       
+ 563   5                                              Write_Text(3, 1, "Hit SELECT at Finish", '-');
+ 564   5                                              button_overlay[SEL] = markfinish;
+ 565   5                                              if (HILLCLIMB == tm_state)
+ 566   5                                                      tm_state = HILLCLIMBGETFINISH;
+ 567   5                                              else
+ 568   5                                                      tm_state = AUTOCROSS;
+ 569   5                                      } // if
+ 570   4                                      else {  // got a finish line - can't happen in hillclimb mode
+ 571   5                                              tm_state = AUTOXFINISH;
+ 572   5                                              Write_Text(3, 4, "* Finish Line Set *", '-');
+ 573   5                                              button_overlay[SEL] = NULL;
+ 574   5                                              Write_Timer();
+ 575   5                                              
+ 576   5                                              // get ready for the big finish
+ 577   5                                              seeklat = lap.finishpos.lat;
+ 578   5                                              seeklon = lap.finishpos.lon;
+ 579   5                                              seekhdg = lap.finishheading;
+ 580   5                                      } // else
+ 581   4                              } // if
+ 582   3                              else {  // not AUTOCROSS or HILLCLIMB
+ 583   4                                      Write_Screen((u08 *) predictive, '-');
+ 584   4                                      Write_Icon(111, 23, 8, 8, (u08 *) plussign, '-');
+ 585   4                                      Write_Icon(3, 23, 8, 8, (u08 *) minussign, '-');
+ 586   4                                      button_overlay[SEL] = NULL;
+ 587   4                                      tm_state = TIMING;
+ 588   4                                      
+ 589   4                                      // find this starting line again next lap
+ 590   4                                      seeklat = lap.startpos.lat;
+ 591   4                                      seeklon = lap.startpos.lon;
+ 592   4                                      seekhdg = lap.startheading;
+ 593   4                              } // else
+ 594   3                              
+ 595   3                              // write lap number on screen
+ 596   3                              if (AUTOCROSS != tm_state && AUTOXFINISH != tm_state)
+ 597   3                                      Write_Lap();
+ 598   3                              break;
+ 599   3                      } // case
+ 600   2                      case FINISH_POSITION: {
+ 601   3                              xdata flashpagetype tempflash;  // structure to access one page of flash
+ 602   3      
+ 603   3                              // finishandgear / autox run over. hold the time on the display
+ 604   3                              if (HILLCLIMBGETFINISH == tm_state) {
+ 605   4                                      seeklat = lap.startpos.lat;
+ 606   4                                      seeklon = lap.startpos.lon;
+ 607   4                                      seekhdg = lap.startheading;
+ 608   4                                      tm_state = HILLCLIMBSTART;
+C51 COMPILER V8.02   TIMER                                                                 01/18/2010 16:51:01 PAGE 11  
+
+ 609   4                                      Write_Screen((u08 *) predictive, '-');
+ 610   4      //                              Write_Icon(111, 23, 8, 8, (u08 *) plussign, '-');
+ 611   4      //                              Write_Icon(3, 23, 8, 8, (u08 *) minussign, '-');
+ 612   4                                      Write_Timer();
+ 613   4      
+ 614   4                                      // save as best lap
+ 615   4                                      lap.besttime = lap.timer;
+ 616   4              
+ 617   4                                      // put checker up
+ 618   4                                      Write_Flag(TRUE);
+ 619   4              
+ 620   4                                      // make current lap the reference lap
+ 621   4                                      for (cursectornum = 0; cursectornum < NUMSECTORS; cursectornum++)
+ 622   4                                              sector[cursectornum].reference = sector[cursectornum].current;
+ 623   4      
+ 624   4                              } // if
+ 625   3                              else {
+ 626   4                                      tm_state = AUTOXHOLDTIME;
+ 627   4                                      // note that we have set the line
+ 628   4                                      Clear_Line(3);
+ 629   4                                      Write_Text(3, 4, "* Finish Line Set *", '-');
+ 630   4                              } // else
+ 631   3                                      
+ 632   3                              // remove sel button overlay
+ 633   3                              button_overlay[SEL] = NULL;
+ 634   3                      
+ 635   3                              // save the lap
+ 636   3                              laplist[0] = (u32) lap.timer;
+ 637   3              
+ 638   3                              // get the track finish info
+ 639   3                              DataFlash_Page_Read(MAX_PAGE_SIZE, tempflash.bigbuff, TRACKFINPAGE);            
+ 640   3                      
+ 641   3                              // save the finish information and set up to find the start
+ 642   3                              lap.finishpos.lat = tempflash.finishandgear.trackfinish[lap.tracknum].finishlat = lap.currentpos.lat;
+ 643   3                              lap.finishpos.lon = tempflash.finishandgear.trackfinish[lap.tracknum].finishlon = lap.currentpos.lon;
+ 644   3      //                      tempflash.finishandgear.trackfinish[lap.tracknum].finishalt = lap.currentpos.alt;
+ 645   3                              lap.finishheading = tempflash.finishandgear.trackfinish[lap.tracknum].finishhead = lap.currentheading;
+ 646   3      
+ 647   3                              // write to flash
+ 648   3                              DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, tempflash.bigbuff, TRACKFINPAGE);
+ 649   3                      } // case
+ 650   2              } // switch
+ 651   1      } // Lap_Check
+ 652          
+ 653          /******************************************************************************
+ 654          ** Lap_Store **************************************** GAS 28 JAN 05 ****
+ 655          *******************************************************************************
+ 656          This function stores the laps collected into flash after a session.
+ 657          ******************************************************************************/
+ 658          void Lap_Store( void ) {
+ 659   1      
+ 660   1              // update the index
+ 661   1              DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, (u08 *) laplist, (LASTLAPPAGE - NUMLAPPAGES + sessio
+             -n));
+ 662   1      
+ 663   1      } // Lap_Store
+ 664          
+ 665          /******************************************************************************
+ 666          ** Sector_Store **************************************** GAS 13 APR 07 ****
+ 667          *******************************************************************************
+ 668          This function stores the lap sectors collected into flash after a session.
+ 669          ******************************************************************************/
+C51 COMPILER V8.02   TIMER                                                                 01/18/2010 16:51:01 PAGE 12  
+
+ 670          void Sector_Store( void ) {
+ 671   1      
+ 672   1              // get the predictive lap timing sectors for this track
+ 673   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, PREDPAGESTART + (lap.tracknum / 4));
+ 674   1                      
+ 675   1              // if lap better than that stored, replace it
+ 676   1              if ((u32) lap.besttime < (u32) flashpage.storedsectors[lap.tracknum % 4].bestlapever) {
+ 677   2                      int i;
+ 678   2                      
+ 679   2                      // copy lap time
+ 680   2                      flashpage.storedsectors[lap.tracknum % 4].bestlapever = lap.besttime;
+ 681   2      
+ 682   2                      // copy sector times
+ 683   2                      for (i = 0; i < NUMSECTORS; i++)
+ 684   2                              flashpage.storedsectors[lap.tracknum % 4].bestsectortimes[i] = sector[i].reference;
+ 685   2      
+ 686   2                      // write out new best lap info
+ 687   2                      DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, PREDPAGESTART + (lap.tracknum / 
+             -4));
+ 688   2              } // if
+ 689   1      } // Sector_Store
+ 690          
+ 691          void unpack_velocities( u08 *velptr, s16 *eastvel, s16 *northvel, s16 *vertvel) {
+ 692   1              
+ 693   1              *eastvel = (s16) ((((u16) (velptr[0] & 0xE0)) << 3) + (u16) velptr[1]);
+ 694   1              // sign extend
+ 695   1              if (*eastvel & 0x0400) *eastvel |= 0xF800;
+ 696   1      
+ 697   1              *northvel = (s16) ((((u16) (velptr[0] & 0x1C)) << 6) + (u16) velptr[2]);
+ 698   1              // sign extend
+ 699   1              if (*northvel & 0x0400) *northvel |= 0xF800;
+ 700   1      
+ 701   1              *vertvel = (s16) ((((u16) (velptr[0] & 0x03)) << 8) + (u16) velptr[3]);
+ 702   1              // sign extend
+ 703   1              if (*vertvel & 0x0200) *vertvel |= 0xFC00;
+ 704   1      } // unpack_velocities
+ 705          
+ 706          u16 compute_heading (s16 eastvel, s16 northvel) {
+ 707   1              xdata float tempfloat;
+ 708   1              xdata s16 tempint;
+ 709   1      
+ 710   1              // compute heading = vector sum of east/west vel and inverse of north/south vel (due east is 0)
+ 711   1              tempfloat = atan2((float) northvel, (float) eastvel);
+ 712   1      
+ 713   1              tempfloat = (tempfloat * (180.0 / PI));
+ 714   1              tempint = (s16) tempfloat;
+ 715   1      
+ 716   1              // make sure it is 0-360
+ 717   1              tempint = (tempint + 360) % 360;
+ 718   1      
+ 719   1              return ((u16) tempint);
+ 720   1      
+ 721   1      } // compute_heading
+ 722          
+ 723          #ifdef AUTOX
+              /******************************************************************************
+              ** AutoCross/Rally Functions******************************** GAS 15 May 07 ****
+              *******************************************************************************/
+              
+              // this function times the run and looks for the finish line if previously set
+              BOOL AutoX_Timing(lapop oper, gpstype *gps) {
+              
+C51 COMPILER V8.02   TIMER                                                                 01/18/2010 16:51:01 PAGE 13  
+
+                      switch (oper) {
+                              case INC_TIME:
+                                      // increment by msec
+                                      lap.timer += 1000 / (samps_per_sec);
+              
+                                      // now that we are moving, save the heading one second after launch
+                                      if (AUTOXSETHDGTIME == lap.timer)
+                                              lap.startheading = lap.currentheading;
+                                      break;
+              
+                              case NEW_POSITION: {
+                                      xdata s32 deltalat, deltalon;
+                                      xdata s16 eastvel, northvel, vertvel;
+                                      xdata float tempfloat;
+              
+                                      lap.previouspos = lap.currentpos;
+                                      lap.previousheading = lap.currentheading;
+                                      lap.currentpos = *gps;
+              
+                                      unpack_velocities (gps->velpack, &eastvel, &northvel, &vertvel);
+              
+                                      // skip all this if we are not moving to eliminate divide by zero
+                                      if (eastvel != 0 || northvel != 0) {
+                                              // get heading
+                                              lap.currentheading = compute_heading(eastvel, northvel);
+                                      
+                                              if (AUTOXFINISH == tm_state) {          // finish line present so look for it 
+                                                      // if current heading matches the finish heading then check for position
+                                                      // while allowing for headings near 0 (due east)
+                                                      if (ABS((s16) lap.currentheading - (s16) lap.finishheading) < AUTOX_HEADRANGE ||
+                                                              ABS((s16) lap.currentheading - (s16) lap.finishheading) > (360 - AUTOX_HEADRANGE)) {
+                                      
+                                                              tempfloat = TODEGREE(lap.finishpos.lat);
+                                      
+                                                              // find difference in meters of lat, lon
+                                                              deltalat = (s32) ((TODEGREE(lap.currentpos.lat) - tempfloat) * LATMET);
+                                                              deltalon = (s32) ((TODEGREE(lap.currentpos.lon) - TODEGREE(lap.finishpos.lon)) * LONMET(tempfloat));
+                                      
+                                                              // check if we are close to finish point
+                                                              if (ABS(deltalat) < AUTOX_DISTRANGE && ABS(deltalon) < AUTOX_DISTRANGE) {
+                                                                      xdata float distance;
+                                                                      xdata float speed;
+                                                                      xdata s32 offset;
+                                      
+                                                                      // find the actual distance to finish in met/sec
+                                                                      distance =
+                                                                      sqrt((float) deltalat * (float) deltalat + (float) deltalon * (float) deltalon);
+                                      
+                                                                      // calculate speed in meters/msec
+                                                                      speed =
+                                                                      sqrt((float) eastvel * (float) eastvel + (float) northvel * (float) northvel);
+                                      
+                                                                      // fix up the timer based on our speed, rounding to the hundredth
+                                                                      offset = (s32) (50.0 + (1000.0 * distance) / speed);
+                                      
+                                                                      // fudge to where time would be when we cross finish
+                                                                      lap.timer += offset;
+                      
+                                                                      // save the lap
+                                                                      laplist[0] = (u32) lap.timer;
+                      
+                                                                      return (TRUE);
+C51 COMPILER V8.02   TIMER                                                                 01/18/2010 16:51:01 PAGE 14  
+
+                                                              } // if
+                                                      } // if
+                                              } // if
+                                      } // if
+                                      break;
+                              } // case
+                      } // switch
+                      return (FALSE);
+              } // AutoX_Timing
+              #endif
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   6257    ----
+   CONSTANT SIZE    =     52    ----
+   XDATA SIZE       =   ----    1121
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =      1      26
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

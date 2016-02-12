@@ -1,0 +1,662 @@
+C51 COMPILER V7.20   FACTORYCAL                                                            04/12/2005 18:41:05 PAGE 1   
+
+
+C51 COMPILER V7.20, COMPILATION OF MODULE FACTORYCAL
+OBJECT MODULE PLACED IN factorycal.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE factorycal.c DB OE DF(SENSOR) INCDIR(C:\Keil\C51\INC;C:\Keil\Traqmate\132mi
+                    -cro\CommonFiles;C:\Keil\Traqmate\132micro\SU) OT(8,SIZE)
+
+line level    source
+
+   1          // This is the main program for factorycal.c
+   2          // This program will calibrate the PWMs and store the values into the microprocessor flash memory
+   3          //
+   4          // This version runs on the first gen SU with Cygnal 132 microprocessor
+   5          //
+   6          
+   7          #define MAIN
+   8          
+   9          #include <stdio.h>
+  10          #include <stdlib.h>
+  11          #include <string.h>
+  12          #include <boolean.h>
+  13          #include <c8051f120.h>
+  14          
+  15          sfr16 DP       = 0x82;                 // data pointer
+  16          sfr16 ADC0     = 0xbe;                 // ADC0 data
+  17          sfr16 ADC0GT   = 0xc4;                 // ADC0 greater than window
+  18          sfr16 ADC0LT   = 0xc6;                 // ADC0 less than window
+  19          sfr16 RCAP2    = 0xca;                 // Timer2 capture/reload
+  20          sfr16 RCAP3    = 0xca;                 // Timer3 capture/reload
+  21          sfr16 RCAP4    = 0xca;                 // Timer4 capture/reload
+  22          sfr16 TMR2     = 0xcc;                 // Timer2
+  23          sfr16 TMR3     = 0xcc;                 // Timer3
+  24          sfr16 TMR4     = 0xcc;                 // Timer4
+  25          sfr16 PCA0CP5  = 0xe1;                 // PCA0 Module 5 capture
+  26          sfr16 PCA0CP2  = 0xe9;                 // PCA0 Module 2 capture
+  27          sfr16 PCA0CP3  = 0xeb;                 // PCA0 Module 3 capture
+  28          sfr16 PCA0CP4  = 0xed;                 // PCA0 Module 4 capture
+  29          sfr16 PCA0     = 0xf9;                 // PCA0 counter
+  30          sfr16 PCA0CP0  = 0xfb;                 // PCA0 Module 0 capture
+  31          sfr16 PCA0CP1  = 0xfd;                 // PCA0 Module 1 capture
+  32          
+  33          //#define LED0  P3.3                                            // upper left = power
+  34          //#define LED1  P3.6                                            // upper right = recording
+  35          //#define LED2  P3.5                                            // lower right = GPS
+  36          //#define LED3  P3.4                                            // lower left = COM
+  37          
+  38          sbit LED0 = P3 ^ 3;                                             // upper left = power
+  39          sbit LED1 = P3 ^ 6;                                             // upper right = recording
+  40          sbit LED2 = P3 ^ 5;                                             // lower right = GPS
+  41          sbit LED3 = P3 ^ 4;                                             // lower left = COM
+  42          
+  43          #define STABILITY       4                                       // range of values to allow
+  44          #define CALIBRATED      20                                      // max variation from midpoint to allow
+  45          #define PWMHI           255                                     // highest PWM calibration value
+  46          #define PWMLO           0                                       // lowest PWM calibration value
+  47          #define STARTZERO       (PWMHI-PWMLO)/2         // middle of road value to start with
+  48          #define SETTLING        40                                      // number of samples to collect to see if settled
+  49          #define MIDPOINT        2048                            // midpoint of accelerometer range (12 bits)
+  50          
+  51          #define ASCIIBAUD               115200L                 // Baud rate of UART0 in bps
+  52          #define INTCLK                  24500000L               // Internal oscillator frequency in Hz
+  53          #define SYSCLK                  98000000L               // Output of PLL derived from (INTCLK*4)
+  54          #define SAMPLE_RATE     160                                     // THIS AFFECTS COMM TIMEOUT!!
+C51 COMPILER V7.20   FACTORYCAL                                                            04/12/2005 18:41:05 PAGE 2   
+
+  55                                                                                          // ADC record rate in hz (must be 10x INT_DEC)
+  56          #define INT_DEC         16                                      // integrate and decimate ratio (64x oversample)
+  57          #define NUM_CHAN        3                                       // 10g x,y, temp
+  58          #define ADC_RATE                2500000                 // ADC conversion clock
+  59          
+  60          #define NAMELEN                 16                              // length of text string for driver, car, track
+  61          #define NUMSESSIONS             21                              // 528 / 19 = 26 sessions
+  62          #define NUMDRIVERS              12                              // 12 individual drivers allowed
+  63          #define NUMCARS                 12                              // 12 individual cars allowed
+  64          #define NUMTRACKS               16                              // 16 tracks allowed
+  65                                                  
+  66          #define OWNER_LEN                                       20              // number of characters in owner name
+  67          #define PHONE_LEN                                       20              // number of characters in owner phone number
+  68          #define NOTE_LEN                                        40              // number of characters in owner note
+  69          #define SCRATCHLEN              128             // size of scratchpad in flash */
+  70          
+  71          #define tohex(c) (c<10? (c+'0'):(c+'A'-10))
+  72          #define MIN(q,r) ((q)<(r)? (q):(r))
+  73          #define MAX(q,r) ((q)>(r)? (q):(r))
+  74          #define AVG(q,r) (((q)+(r))/2)
+  75          #define ABS(q) ((q)>0? q:-(q))
+  76          #define WAIT(CYCLES) do {int z=CYCLES; do {z--;} while (z > 0);} while(0)
+  77          /* universal data elements */
+  78          typedef unsigned char u08;
+  79          typedef unsigned int u16;
+  80          typedef unsigned long u32;
+  81          typedef char s08;
+  82          typedef int s16;
+  83          typedef long s32;
+  84          
+  85          // this is the format for the Cygnal microprocessor scratchpad flash memory
+  86          typedef struct {                        // ***** DO NOT CHANGE STRUCTURE. CODE DEPENDENT!! *****
+  87                  char owner[OWNER_LEN];          // 20 name of Traqmate owner (entered by Traqview for security)
+  88                  char phone[PHONE_LEN];          // 20 contact number for owner, entered by Traqview
+  89                  char note[NOTE_LEN];            // 40 address or anything the user wants to put here, entered by Traqview
+  90                  s08 timecode;                           // 1 hours +/- from GMT for display, entered by Traqview
+  91                  u08 model;                                      // 1 model number, entered by Factory Cal
+  92                  u08 hwrev;                                      // 1 hardware revision * 100 (237 = 2.37), entered by Factory Cal
+  93                  u32 serno;                                      // 4 serial number, entered by Factory Cal
+  94                  u08 week;                                       // 1 week of year of manufacture, entered by Factory Cal
+  95                  u08 year;                                       // 1 year of manufacture, entered by Factory Cal
+  96                  u16 xzero;                                      // 2 zero offset value for x, entered by Factory Cal
+  97                  u16 yzero;                                      // 2 zero offset value for y, entered by Factory Cal
+  98                  u16 xminusg;                            // 2 max deflection negative at 1 G, entered by Factory Cal
+  99                  u16 xplusg;                                     // 2 max deflection positive at 1 G, entered by Factory Cal
+ 100                  u16 yminusg;                            // 2 max deflection negative at 1 G, entered by Factory Cal
+ 101                  u16 yplusg;                                     // 2 max deflection positive at 1 G, entered by Factory Cal
+ 102                  u16 calx;                                       // 2 zero offset value for PWM, entered by Factory Cal
+ 103                  u16 caly;                                       // 2 zero offset value for PWM, entered by Factory Cal
+ 104                  u16 swrev;                                      // 2 software version * 100 (xxx.yy) 65535 = 655.35, entered by SW
+ 105                  u16 datarev;                            // 2 data format version, entered by SW
+ 106                  u08 contrast;                           // 1 LCD contrast setting, changed by program
+ 107                  u08 hwconfig;                           // 1 bit 7-3: reserved, all entered by Factory Cal
+ 108                                                                          //       bit 2 - 0 if 2 dataflash chips installed
+ 109                                                                          //       bit 1 - 0 if 7 switches installed
+ 110                                                                          //       bit 0 - 0 if bling LEDs are installed
+ 111          } caltype;                                              // 111 total out of 128
+ 112          
+ 113          typedef union {                         // ***** DO NOT CHANGE STRUCTURE. CODE DEPENDENT!! *****
+ 114                  caltype calibrate;
+ 115                  u08 scratchbuff[SCRATCHLEN];
+ 116          } scratchpadtype;
+C51 COMPILER V7.20   FACTORYCAL                                                            04/12/2005 18:41:05 PAGE 3   
+
+ 117          
+ 118          // function prototypes
+ 119          void Stabilize ( void );
+ 120          void ZeroOutXY( void );
+ 121          void SYSCLK_Init (void);
+ 122          void PORT_Init (void);
+ 123          void ADC0_Init (void);
+ 124          void UART0_Init (void);
+ 125          void Timer3_Init (u16 counts);
+ 126          void EraseScratchpad( void );
+ 127          void WriteScratchpad( unsigned char *, int );
+ 128          void ReadScratchpad( unsigned char *);
+ 129          
+ 130          // Global Variables
+ 131          xdata u16 result[] = {0, 0, 0};         // array to hold ADC samples    
+ 132          xdata u08 adcresults = FALSE;           // TRUE when samples collected
+ 133          xdata scratchpadtype scratch;           // structure to access scratchpad memory
+ 134          u16 minx, maxx, miny, maxy, mintemp, maxtemp;
+ 135          
+ 136          void main (     void ) {
+ 137   1              u16 temp;
+ 138   1      
+ 139   1              SFRPAGE = CONFIG_PAGE;
+ 140   1              
+ 141   1              // disable watchdog timer
+ 142   1              WDTCN = 0xde;
+ 143   1              WDTCN = 0xad;
+ 144   1      
+ 145   1              SYSCLK_Init();                                          // initialize oscillator
+ 146   1              PORT_Init();                                            // enable ports
+ 147   1              UART0_Init();                                           // enable UART to write to
+ 148   1      
+ 149   1              Timer3_Init ((u16) (SYSCLK/SAMPLE_RATE/12));    // initialize Timer3 to overflow at sample rate
+ 150   1              ADC0_Init();                        // init ADC
+ 151   1      
+ 152   1              // seize the 5V Enable line to keep power up
+ 153   1              P7 |= 0x80;
+ 154   1      
+ 155   1              EA = 1;                                                         // enable global interrupts
+ 156   1      
+ 157   1              // initialize
+ 158   1              scratch.calibrate.timecode = (s08) 0;
+ 159   1              scratch.calibrate.model = 1;
+ 160   1              scratch.calibrate.hwrev = 85;
+ 161   1              scratch.calibrate.swrev = 9300; // 0.93
+ 162   1              scratch.calibrate.datarev = 5;
+ 163   1              scratch.calibrate.serno = 1;
+ 164   1              scratch.calibrate.week = 4;
+ 165   1              scratch.calibrate.year = 5;
+ 166   1              scratch.calibrate.contrast = 0xFF;
+ 167   1              scratch.calibrate.hwconfig = 0xFF;
+ 168   1              scratch.calibrate.xzero = MIDPOINT;
+ 169   1              scratch.calibrate.yzero = MIDPOINT;
+ 170   1              strcpy(scratch.calibrate.owner, "");
+ 171   1              strcpy(scratch.calibrate.phone, "");
+ 172   1              strcpy(scratch.calibrate.owner, "");
+ 173   1      
+ 174   1              scratch.calibrate.calx = scratch.calibrate.caly = STARTZERO;
+ 175   1      
+ 176   1              SFRPAGE = PCA0_PAGE;
+ 177   1      
+ 178   1              LED0 = LED1 = LED2 = LED3 = 1;
+C51 COMPILER V7.20   FACTORYCAL                                                            04/12/2005 18:41:05 PAGE 4   
+
+ 179   1      
+ 180   1              printf( "\r\nTraqMate 132 SU, Data Rev 5 with PWM Factory Calibration 01-27-2005\r\n");
+ 181   1      
+ 182   1              printf( "Place unit flat on level surface.\r\n");
+ 183   1      
+ 184   1              Stabilize();
+ 185   1      
+ 186   1              ZeroOutXY();
+ 187   1      
+ 188   1              LED0 = LED1 = LED2 = LED3 = 0;
+ 189   1      
+ 190   1              printf( "Stand on end so cables face up.\r\n");
+ 191   1      
+ 192   1              Stabilize();
+ 193   1              scratch.calibrate.xplusg = AVG(minx, maxx);
+ 194   1      
+ 195   1              LED0 = 1;
+ 196   1      
+ 197   1              printf( "Stand on end so cables face down.\r\n");
+ 198   1      
+ 199   1              Stabilize();
+ 200   1              scratch.calibrate.xminusg = AVG(minx, maxx);
+ 201   1      
+ 202   1              LED1 = 1;
+ 203   1      
+ 204   1              printf( "Stand on right side (as in car).\r\n");
+ 205   1      
+ 206   1              Stabilize();
+ 207   1              scratch.calibrate.yminusg = AVG(miny, maxy);
+ 208   1      
+ 209   1              LED2 = 1;
+ 210   1      
+ 211   1              printf( "Stand on left side (as in car).\r\n");
+ 212   1      
+ 213   1              Stabilize();
+ 214   1              scratch.calibrate.yplusg = AVG(miny, maxy);
+ 215   1      
+ 216   1              LED3 = 1;
+ 217   1      
+ 218   1              if (scratch.calibrate.xplusg < scratch.calibrate.xminusg) {
+ 219   2                      printf("Inverting X Values\n");
+ 220   2                      temp = scratch.calibrate.xplusg;
+ 221   2                      scratch.calibrate.xplusg = scratch.calibrate.xminusg;
+ 222   2                      scratch.calibrate.xminusg = temp;
+ 223   2              }
+ 224   1              if (scratch.calibrate.yplusg < scratch.calibrate.yminusg) {
+ 225   2                      printf("Inverting Y Values\n");
+ 226   2                      temp = scratch.calibrate.yplusg;
+ 227   2                      scratch.calibrate.yplusg = scratch.calibrate.yminusg;
+ 228   2                      scratch.calibrate.yminusg = temp;
+ 229   2              }
+ 230   1      
+ 231   1              printf( "Calibration Values: %u, %u\r\n", scratch.calibrate.calx, scratch.calibrate.caly);
+ 232   1      
+ 233   1              printf( "Actual Zero Points: X %u, Y %u\n", scratch.calibrate.xzero, scratch.calibrate.yzero);
+ 234   1      
+ 235   1              printf( "X Range: %d, %d\r\n", scratch.calibrate.xminusg, scratch.calibrate.xplusg);
+ 236   1      
+ 237   1              printf( "Y Range: %d, %d\r\n", scratch.calibrate.yminusg, scratch.calibrate.yplusg);
+ 238   1      
+ 239   1              printf( "\r\nStoring Calibration Data in Flash.\r\n");
+ 240   1      
+C51 COMPILER V7.20   FACTORYCAL                                                            04/12/2005 18:41:05 PAGE 5   
+
+ 241   1              EraseScratchpad();
+ 242   1      
+ 243   1              WriteScratchpad(scratch.scratchbuff, sizeof(caltype));
+ 244   1      
+ 245   1              printf( "\r\nOperation Complete.\r\n");
+ 246   1      
+ 247   1              LED0 = LED1 = LED2 = LED3 = 0;
+ 248   1      
+ 249   1      #define DELAYVAL 55000
+ 250   1      
+ 251   1              while (1) {
+ 252   2                      unsigned int delay;
+ 253   2      
+ 254   2                      LED3 = !LED3;
+ 255   2                      for (delay=0; delay < DELAYVAL; delay++);
+ 256   2      
+ 257   2                      LED2 = !LED2;
+ 258   2                      for (delay=0; delay < DELAYVAL; delay++);
+ 259   2      
+ 260   2                      LED1 = !LED1;
+ 261   2                      for (delay=0; delay < DELAYVAL; delay++);
+ 262   2      
+ 263   2                      LED0 = !LED0;
+ 264   2                      for (delay=0; delay < DELAYVAL; delay++);
+ 265   2              } ;
+ 266   1      
+ 267   1      } // main
+ 268          
+ 269          void Stabilize( void ) {
+ 270   1      
+ 271   1              int counter = 0;
+ 272   1      
+ 273   1              do {            // sit here until values stabilize
+ 274   2      
+ 275   2                      counter = 0;
+ 276   2      
+ 277   2                      // initialize
+ 278   2                      while (!adcresults) ;
+ 279   2      
+ 280   2                      minx = maxx = result[0];
+ 281   2                      miny = maxy = result[1];
+ 282   2                      mintemp = maxtemp = result[2];
+ 283   2      
+ 284   2                      adcresults = FALSE;
+ 285   2      
+ 286   2                      while (counter < SETTLING) { // collect several values to compare
+ 287   3      
+ 288   3                              if (adcresults) {
+ 289   4                                      if (!(counter % 10)) {
+ 290   5                                              printf( "%u,%u,%u\r\n", result[0], result[1], result[2]);
+ 291   5                                      }
+ 292   4                                      minx = MIN(minx, result[0]);
+ 293   4                                      miny = MIN(miny, result[1]);
+ 294   4                                      mintemp = MIN(mintemp, result[2]);
+ 295   4                                      maxx = MAX(maxx, result[0]);
+ 296   4                                      maxy = MAX(maxy, result[1]);
+ 297   4                                      maxtemp = MAX(maxtemp, result[2]);
+ 298   4      
+ 299   4                                      adcresults = FALSE;
+ 300   4                                      counter++;
+ 301   4                              } // if
+ 302   3                      } // while
+C51 COMPILER V7.20   FACTORYCAL                                                            04/12/2005 18:41:05 PAGE 6   
+
+ 303   2              } while ((ABS(maxy - miny) > STABILITY) || (ABS(maxx - minx) > STABILITY));
+ 304   1      } // Stabilize
+ 305          
+ 306          void ZeroOutXY( void ) {
+ 307   1      
+ 308   1              unsigned char xdone = FALSE;
+ 309   1              unsigned char ydone = FALSE;
+ 310   1              int counter = 0;
+ 311   1      
+ 312   1              SFRPAGE = PCA0_PAGE;
+ 313   1      
+ 314   1              do {            // zero in on x,y
+ 315   2      
+ 316   2                      if (adcresults) {
+ 317   3                              if (!(counter % 10)) {
+ 318   4                                      printf( "Cal: %d,%d\r\n", scratch.calibrate.calx, scratch.calibrate.caly);
+ 319   4                                      printf( "Val: %u,%u,%u\r\n", result[0], result[1], result[2]);
+ 320   4                              }
+ 321   3      
+ 322   3                              if (!xdone) xdone = (ABS(((s16) result[0])-MIDPOINT) <= CALIBRATED);
+ 323   3                              if (!xdone) {
+ 324   4                                      if (result[0] < MIDPOINT)
+ 325   4                                              if (PWMLO == scratch.calibrate.calx)
+ 326   4                                                      // couldn't get to middle so go with what we got
+ 327   4                                                      xdone = TRUE;
+ 328   4                                              else
+ 329   4                                                      // drop the cal value and try again
+ 330   4                                                      scratch.calibrate.calx -= 1;
+ 331   4                                      else
+ 332   4                                              if (PWMHI == scratch.calibrate.calx)
+ 333   4                                                      // couldn't get to middle so go with what we got
+ 334   4                                                      xdone = TRUE;
+ 335   4                                              else
+ 336   4                                                      // raise the cal value and try again
+ 337   4                                                      scratch.calibrate.calx += 1;
+ 338   4      
+ 339   4                                      // record the actual zero point
+ 340   4                                      scratch.calibrate.xzero = result[0];
+ 341   4      
+ 342   4                                      // reprogram the PWM
+ 343   4                                      PCA0CPL0 =      scratch.calibrate.calx;
+ 344   4                                      PCA0CPH0 =      scratch.calibrate.calx;
+ 345   4                              }
+ 346   3                              if (!ydone) ydone = (ABS(((s16) result[1])-MIDPOINT) <= CALIBRATED);
+ 347   3                              if (!ydone) {
+ 348   4                                      if (result[1] < MIDPOINT)
+ 349   4                                              if (PWMLO == scratch.calibrate.caly)
+ 350   4                                                      // couldn't get to middle so go with what we got
+ 351   4                                                      ydone = TRUE;
+ 352   4                                              else
+ 353   4                                                      // drop the cal value and try again
+ 354   4                                                      scratch.calibrate.caly -= 1;
+ 355   4                                      else
+ 356   4                                              if (PWMHI == scratch.calibrate.caly)
+ 357   4                                                      // couldn't get to middle so go with what we got
+ 358   4                                                      ydone = TRUE;
+ 359   4                                              else
+ 360   4                                                      // raise the cal value and try again
+ 361   4                                                      scratch.calibrate.caly += 1;
+ 362   4      
+ 363   4                                      // record the actual zero point
+ 364   4                                      scratch.calibrate.yzero = result[1];
+C51 COMPILER V7.20   FACTORYCAL                                                            04/12/2005 18:41:05 PAGE 7   
+
+ 365   4      
+ 366   4                                      // reprogram the PWM
+ 367   4                                      PCA0CPL1 =      scratch.calibrate.caly;
+ 368   4                                      PCA0CPH1 =      scratch.calibrate.caly;
+ 369   4                              }
+ 370   3      
+ 371   3                              adcresults = FALSE;
+ 372   3                      } // if
+ 373   2              } while (!(xdone && ydone));
+ 374   1      
+ 375   1              printf( "X, Y Zeroed Out.\r\n");
+ 376   1      
+ 377   1      } // ZeroOutXY
+ 378          
+ 379          void SYSCLK_Init (void) {
+ 380   1              int i;                                                                  // software timer
+ 381   1              u08 SFRPAGE_SAVE = SFRPAGE;                             // Save Current SFR page
+ 382   1      
+ 383   1              SFRPAGE = CONFIG_PAGE;                                  // set SFR page
+ 384   1              SFRPGCN = 0x01;                                                 // turn on auto SFR paging for interrupts
+ 385   1      
+ 386   1              OSCICN = 0x83;                                                  // 10000011 set internal oscillator to run at max frequency
+ 387   1              CLKSEL = 0x00;                                                  // Select the internal osc. as the SYSCLK source
+ 388   1      
+ 389   1              PLL0CN= 0x00;                                                   // Set internal osc. as PLL source
+ 390   1      
+ 391   1              SFRPAGE = LEGACY_PAGE;
+ 392   1              FLSCL   = 0x30;                                                 // Set FLASH read time for 100MHz clk
+ 393   1      
+ 394   1              SFRPAGE = CONFIG_PAGE;
+ 395   1              PLL0CN |= 0x01;                                                 // Enable Power to PLL
+ 396   1              PLL0DIV = 0x01;                                                 // Set Pre-divide value to N (N = 1)
+ 397   1              PLL0FLT = 0x01;                                                 // Set the PLL filter register for
+ 398   1                                                                                              // a reference clock from 19 - 30 MHz
+ 399   1                                                                                              // and an output clock from 45 - 80 MHz
+ 400   1              PLL0MUL = 0x04;                                                 // Multiply SYSCLK by M (M = 4)
+ 401   1      
+ 402   1              for (i=0; i < 256; i++) ;                               // Wait at least 5us
+ 403   1              PLL0CN |= 0x02;                                                 // Enable the PLL
+ 404   1              while(!(PLL0CN & 0x10));                                // Wait until PLL frequency is locked
+ 405   1              CLKSEL= 0x02;                                                   // Select PLL as SYSCLK source
+ 406   1      
+ 407   1              SFRPAGE = SFRPAGE_SAVE;                                 // Restore SFR page
+ 408   1      }
+ 409          
+ 410          void PORT_Init (void) {
+ 411   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 412   1      
+ 413   1              SFRPAGE = CONFIG_PAGE;                          // set SFR page
+ 414   1      
+ 415   1              XBR0    = 0xEF;                                         // 11101111 Enable all but CEX5
+ 416   1              XBR1    = 0x07;                                         // Turn on INT0, T0, CP1
+ 417   1              XBR2    = 0x44;                     // Enable crossbar, weak pull-ups, UART1
+ 418   1      
+ 419   1      //      SFRPAGE = EMI0_PAGE;
+ 420   1      //      EMI0CF  = 0x00;                                         // turn off external memory interface
+ 421   1      
+ 422   1      //      SFRPAGE = CONFIG_PAGE;                          // set SFR page
+ 423   1      
+ 424   1              P0MDOUT = 0x15;                                         // 00010101 enable TX0, SI, SCK, as push-pulls
+ 425   1              P0 = 0xEA;                                                      // set all open drain pins to 1
+ 426   1      
+C51 COMPILER V7.20   FACTORYCAL                                                            04/12/2005 18:41:05 PAGE 8   
+
+ 427   1      //      P1MDIN  = 0xFE;                                         // 11111110 set all digital inputs except TX1
+ 428   1      //      P1MDOUT = 0xFE;                                         // 11111110 set P1 inputs to high impedance
+ 429   1      
+ 430   1              P1MDIN  = 0xFF;                                         // set all digital inputs
+ 431   1              P1MDOUT = 0x0D;                                         // 00001101 enable tx1, pwmx,y as push-pull
+ 432   1              P1 = 0x01;                                                      // set rx1 to impedance
+ 433   1      
+ 434   1              P2MDOUT = 0x00;                                         // all pins open drain
+ 435   1              P2 = 0xFF;                                                      // high impedance
+ 436   1      
+ 437   1              P3MDOUT = 0x00;                                         // all pins open drain
+ 438   1              P3 = 0xFF;                                                      // high impedance
+ 439   1      
+ 440   1              P4MDOUT = 0xFF;                                         // all pins open drain
+ 441   1              P4 = 0x00;                                                      // high impedance
+ 442   1      
+ 443   1              P5MDOUT = 0x00;                                         // all pins push-pull
+ 444   1              P5 = 0xFF;                                                      // 01100001
+ 445   1      
+ 446   1              P6MDOUT = 0x00;                                         // all pins open drain
+ 447   1              P6 = 0xFF;                                                      // 11110111
+ 448   1      
+ 449   1              P7MDOUT = 0xFF;                                         // all pins push-pull
+ 450   1              P7 = 0xF7;                                                      // 11111110
+ 451   1      
+ 452   1              SFRPAGE = SFRPAGE_SAVE;                         // Restore SFR page
+ 453   1      }
+ 454          
+ 455          void ADC0_Init (void) {
+ 456   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 457   1      
+ 458   1              // configure the PCA for PWM operation
+ 459   1              SFRPAGE = PCA0_PAGE;
+ 460   1              PCA0MD =        0x80;                                   // 1000000 suspend with microp, SYSCLK / 12
+ 461   1              PCA0CN =        0x40;                                   // 01000000 PCA0 enabled
+ 462   1              PCA0CPM0 =      0x42;                                   // CCM0 in 8-bit PWM mode
+ 463   1              PCA0CPM1 =      0x42;                                   // CCM1 in 8-bit PWM mode
+ 464   1      
+ 465   1              PCA0CPL0 =      STARTZERO;                              // initialize PCA PWM value
+ 466   1              PCA0CPH0 =      STARTZERO;
+ 467   1              PCA0CPL1 =      STARTZERO;                              // initialize PCA PWM value                     
+ 468   1              PCA0CPH1 =      STARTZERO;
+ 469   1      
+ 470   1              // set up the ADC
+ 471   1              SFRPAGE = ADC0_PAGE;
+ 472   1              ADC0CN = 0xC0;                                          // 11000001 ADC0 enabled; special tracking
+ 473   1                                                                                      // ADC0 conversions are initiated 
+ 474   1                                                                                      // on AD0BUSY=1; ADC0 data is right-justified
+ 475   1      
+ 476   1              REF0CN = 0x07;                      // enable temp sensor, on-chip VREF,
+ 477   1                                                                                      // and VREF output buffer
+ 478   1              AMX0CF = 0x00;                                          // all non-differential inputs, no gain
+ 479   1              AMX0SL = 0x00;                      // Select AIN0 external input on mux
+ 480   1              ADC0CF = ((SYSCLK/ADC_RATE - 1) << 3) | 0x00;   // ** ADC conv clock = 2.5MHz, Gain = 1
+ 481   1      
+ 482   1              EIE2 |= 0x02;                                           // enable ADC interrupts
+ 483   1      
+ 484   1              SFRPAGE = SFRPAGE_SAVE;
+ 485   1      }
+ 486          
+ 487          //-----------------------------------------------------------------------------
+ 488          // Timer3_Init
+C51 COMPILER V7.20   FACTORYCAL                                                            04/12/2005 18:41:05 PAGE 9   
+
+ 489          //-----------------------------------------------------------------------------
+ 490          //
+ 491          // Configure Timer3 to auto-reload at interval specified by <counts> and generate
+ 492          // an interrupt which will start a sample sycle. Uses SYSCLK as its time base.
+ 493          //
+ 494          void Timer3_Init (u16 counts) {
+ 495   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 496   1      
+ 497   1              SFRPAGE = TMR3_PAGE;
+ 498   1      
+ 499   1              TMR3CN = 0x00;                                          // Stop Timer3; Clear TF3;
+ 500   1              TMR3CF = 0x01;                                          // use SYSCLK/12 as timebase, count up
+ 501   1      
+ 502   1              RCAP3 = - (int) counts;                         // Init reload values
+ 503   1      
+ 504   1              TMR3 = 0xFFFF;                                          // set to reload immediately
+ 505   1              EIE2 |= 0x01;                                           // enable Timer3 interrupts
+ 506   1              TMR3CN |= 0x04;                                         // start Timer3
+ 507   1      
+ 508   1              SFRPAGE = SFRPAGE_SAVE;                         // Restore SFR page
+ 509   1      }
+ 510          //-----------------------------------------------------------------------------
+ 511          // UART0_Init
+ 512          //-----------------------------------------------------------------------------
+ 513          //
+ 514          // Configure the UART0 using Timer2, for <baudrate> and 8-N-1.
+ 515          //
+ 516          void UART0_Init (void) {
+ 517   1         char SFRPAGE_SAVE = SFRPAGE;        // Save Current SFR page
+ 518   1              unsigned int temp;
+ 519   1      
+ 520   1              SFRPAGE = UART0_PAGE;
+ 521   1              SSTA0 = 0x15;                                           // 00010101 no doubler, use timer 2
+ 522   1      
+ 523   1              SCON0 = 0x50;                                           // SCON0: mode 1, 8-bit UART, enable RX
+ 524   1      
+ 525   1              SFRPAGE = TMR2_PAGE;
+ 526   1              TMR2CN = 0x04;                                          // 00000100 no ext trig, enabled, timer, auto reload
+ 527   1              TMR2CF = 0x08;                                          // 00001000 sysclk source, count up
+ 528   1      
+ 529   1          temp = -(SYSCLK/ASCIIBAUD/16);
+ 530   1              RCAP2 = -(SYSCLK/ASCIIBAUD/16);         // set timer 2 reload value
+ 531   1              TMR2 = 0xFFFF;
+ 532   1              TR2 = 1;                                                        // start timer 2
+ 533   1      
+ 534   1              SFRPAGE = UART0_PAGE;
+ 535   1              TI0 = 1;                            // Indicate TX0 ready
+ 536   1      
+ 537   1              SFRPAGE = SFRPAGE_SAVE;             // Restore SFR page
+ 538   1      }
+ 539          
+ 540          //-----------------------------------------------------------------------------
+ 541          // Interrupt Service Routines
+ 542          //-----------------------------------------------------------------------------
+ 543          
+ 544          //-----------------------------------------------------------------------------
+ 545          // ADC0_ISR
+ 546          //-----------------------------------------------------------------------------
+ 547          //
+ 548          // ADC0 end-of-conversion ISR 
+ 549          // Here we take the ADC0 sample, add it to a running total <accumulator>, and
+ 550          // decrement our local decimation counter <int_dec>.  When <int_dec> reaches
+C51 COMPILER V7.20   FACTORYCAL                                                            04/12/2005 18:41:05 PAGE 10  
+
+ 551          // zero, we post the decimated result in the global variable <result>.
+ 552          //
+ 553          void ADC0_ISR (void) interrupt 15
+ 554          {
+ 555   1              static u08 channel = 0;                         // which ADC channel are we sampling
+ 556   1              static u16 int_dec=INT_DEC*NUM_CHAN;    // integrate/decimate counter
+ 557   1                                             // post results when int_dec = 0
+ 558   1              static xdata u16 accumulator[NUM_CHAN] = { 0 }; // ** here's where we integrate ADC samples             
+ 559   1              int i;
+ 560   1      
+ 561   1              SFRPAGE = ADC0_PAGE;
+ 562   1      
+ 563   1              AD0INT = 0;                                                     // clear ADC conversion complete indicator
+ 564   1      
+ 565   1              accumulator[channel] += ADC0;           // read ADC value and add to running total
+ 566   1      
+ 567   1              // reprogram mux to select next channel
+ 568   1              switch (channel) {
+ 569   2                      case 0:                                                                                                                 
+ 570   2                              AMX0SL = 0x01;                                  // AIN0 moving to AIN1
+ 571   2                              channel = 1;
+ 572   2                              break;
+ 573   2                      case 1:                                                         // AIN1 moving to internal temperature  
+ 574   2                              AMX0SL = 0x08;
+ 575   2                              channel = 2;
+ 576   2      //                      ADC0CF = ((SYSCLK/ADC_RATE - 1) << 3) | 0x00;   // ADC Gain = 1
+ 577   2                              break;
+ 578   2                      case 2:                                                         // internal temp moving to AIN0
+ 579   2                              AMX0SL = 0x00;
+ 580   2                              channel = 0;
+ 581   2      //                      ADC0CF = ((SYSCLK/ADC_RATE - 1) << 3) | 0x00;   // ADC Gain = 1
+ 582   2                              break;
+ 583   2              }
+ 584   1      
+ 585   1              // if all channels sampled and all samples taken then post results
+ 586   1              if (0 == --int_dec) {
+ 587   2      
+ 588   2                      for (i=0; i<NUM_CHAN; i++) {
+ 589   3                              result[i] = accumulator[i] >> 2; // ** note value is x16
+ 590   3                                                                                              // 10 bit A-D x 16 shift right 2
+ 591   3                                                                                              // resultant range is 0-4095 or 12 bits
+ 592   3                              accumulator[i] = 0;                             // reset accumulator
+ 593   3                      }
+ 594   2                      int_dec = INT_DEC*NUM_CHAN;             // reset counter
+ 595   2                      adcresults = TRUE;                              // set semaphore
+ 596   2              }
+ 597   1              if (!(0 == channel)) {
+ 598   2                      AD0BUSY = 1;    
+ 599   2              }
+ 600   1      }
+ 601          
+ 602          // Timer 3 Interrupt
+ 603          //
+ 604          // When T3 expires, start a series of ADC conversions and flash LED as required
+ 605          void T3_ISR (void) interrupt 14 {
+ 606   1              SFRPAGE = TMR3_PAGE;
+ 607   1      
+ 608   1              // clear Timer 3 interrupt
+ 609   1              TMR3CN &= 0x7F;
+ 610   1      
+ 611   1              SFRPAGE = ADC0_PAGE;
+ 612   1              // added 3/30/04 set mux back to first sample
+C51 COMPILER V7.20   FACTORYCAL                                                            04/12/2005 18:41:05 PAGE 11  
+
+ 613   1              AMX0SL = 0x00;
+ 614   1      
+ 615   1              AD0INT = 0;
+ 616   1              // start ADC conversion
+ 617   1              AD0BUSY = 1;
+ 618   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   2173    ----
+   CONSTANT SIZE    =    507    ----
+   XDATA SIZE       =    141    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     15      12
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

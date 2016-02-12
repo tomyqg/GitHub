@@ -1,0 +1,902 @@
+C51 COMPILER V9.51   SESSION                                                               11/30/2014 18:01:40 PAGE 1   
+
+
+C51 COMPILER V9.51, COMPILATION OF MODULE SESSION
+OBJECT MODULE PLACED IN .\session.obj
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE ..\CommonFiles\session.c OPTIMIZE(9,SIZE) BROWSE MDU_F120 INCDIR(..\..\C51\
+                    -INC\;..\CommonFiles\) DB DEFINE(DISPLAY,EXTCLK6,NODEBUG,PACKMEM) PRINT(.\session.lst) OBJECT(.\session.obj)
+
+line level    source
+
+   1          // don't compile in sensorunit complete
+   2          #if !defined (DISPLAYATTACHED)
+   3          // Part of traqmate.c
+   4          // 4/12/2004
+   5          // Author: GAStephens
+   6          //
+   7          // These functions update the index page (page 0) in the DataFlash
+   8          // These functions are not portable. They depend on 8052 byte ordering MSB..LSB.
+   9          //
+  10          #include <ctype.h>
+  11          #include <tmtypes.h>
+  12          #ifdef DISPLAY
+  13          #include <display.h>
+  14          #else
+              #include <sensor.h>
+              #endif
+  17          
+  18          //
+  19          // This function is used to initialize the session pointers.
+  20          // OPTIMIZE: could combine with code in Start_Session
+  21          // Pass in pointers to locations to store segment numbers
+  22          //
+  23          void Init_Session(u16 * startpage, u16 *iopage) {
+  24   1              xdata u08 i;
+  25   1      
+  26   1              // get the index information
+  27   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+  28   1      
+  29   1              *startpage = FIRSTDATAPAGE-1;  // will get incremented later
+  30   1              *iopage = IOPAGESTART+1;         // will get decremented later
+  31   1      
+  32   1              // find the last available segment and lowest ending io segment
+  33   1              // session available when session starting segment = 0xFFFF
+  34   1              for (i = 0; i < NUMSESSIONS; i++) {
+  35   2                      // if starting segment not programmed, that segment index is available
+  36   2                      if (0xFFFF != flashpage.index.session[i].startseg) {
+  37   3                              // starting segment was programmed so note ending segment
+  38   3                              // don't use if ending segment is blank
+  39   3                              if (0xFFFF != flashpage.index.session[i].endseg) {
+  40   4                                      *startpage = MAX(flashpage.index.session[i].endseg,*startpage);
+  41   4                                      // don't do comparison if no data was ever programmed
+  42   4                                      if (0xFFFF != flashpage.index.session[i].ioendseg)
+  43   4                                              *iopage = MIN(flashpage.index.session[i].ioendseg,*iopage);
+  44   4                              } // if
+  45   3                      } //  if
+  46   2              } // for
+  47   1      
+  48   1              ++*startpage;                   // start data on next page up
+  49   1              --*iopage;                              // start io on previous page
+  50   1      } // Init_Session
+  51          
+  52          //
+  53          // This function is used to start a session.
+  54          // Pass in pointer to location to store segment number
+C51 COMPILER V9.51   SESSION                                                               11/30/2014 18:01:40 PAGE 2   
+
+  55          // returns the starting session number (1-16) or 0 if no segments available
+  56          //
+  57          u08 Start_Session(u16 * startpage, u16 *iopage) {
+  58   1              xdata flashpagetype flashpage;          // where to put the index
+  59   1              xdata u08 driveridx, trackidx, caridx, modesamp;
+  60   1              xdata u08 startsess, i;
+  61   1      
+  62   1              // initialize the starting and ending date/times
+  63   1              sessstarttime =
+  64   1              sessendtime = 0xFFFFFFFF;
+  65   1              sessstartweeks =
+  66   1              sessendweeks = 0xFFFF;
+  67   1      
+  68   1              // get the user information
+  69   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, USERPAGE);
+  70   1              driveridx = flashpage.user.selecteddriver;
+  71   1              trackidx = flashpage.user.selectedtrack;
+  72   1              caridx = flashpage.user.selectedcar;
+  73   1      
+  74   1              modesamp = flashpage.user.modesample & 0x0F;
+  75   1      
+  76   1      #ifdef SENSOR           // set elsewhere in DU
+                      // set up the proper sampling rate
+                      switch (modesamp) {
+                              case 2:
+                                      samps_per_sec = 20;
+                                      break;
+                              case 4:
+                                      samps_per_sec = 40;
+                                      break;
+                              case 0:
+                              default:
+                                      samps_per_sec = 10;
+                      } // switch
+              #endif
+  90   1      
+  91   1      #ifdef DISPLAY   // SensorUnit must do locally so it can check if TraqData plugged in
+  92   1              // set up the I/O collection
+  93   1              iocollect = flashpage.user.iodata;
+  94   1      #endif
+  95   1              iobyte = MAX_PAGE_SIZE - 1;             // point to MSB
+  96   1              if (iocollect & 0x80)
+  97   1                      iocollect |= 0x03;
+  98   1      
+  99   1              // clear the io buffer
+ 100   1              DataFlash_Buffer_Clear(IOBUFFER, pagesize);
+ 101   1              // if 16 bit mode selected, turn on all the frequency lines
+ 102   1      
+ 103   1      #ifdef SENSOR
+                      ADC0_Init();                                            // init ADC
+                      UBXInit();                                                      // init Ublox GPS
+              #endif
+ 107   1      
+ 108   1              // get the index information
+ 109   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+ 110   1      
+ 111   1              *startpage = FIRSTDATAPAGE-1;  // will get incremented later
+ 112   1              startsess = 0;
+ 113   1              *iopage = IOPAGESTART+1;         // will get decremented later
+ 114   1      
+ 115   1              // find the first available session number, last available segment, and lowest ending io segment
+ 116   1              // session available when session starting segment = 0xFFFF
+C51 COMPILER V9.51   SESSION                                                               11/30/2014 18:01:40 PAGE 3   
+
+ 117   1              for (i = 0; i < NUMSESSIONS; i++) {
+ 118   2                      // if starting segment not programmed, that segment index is available
+ 119   2                      if (0xFFFF == flashpage.index.session[i].startseg) {
+ 120   3                              if (!startsess) startsess = i+1;
+ 121   3                      } // if
+ 122   2                      // starting segment was programmed so note ending segment
+ 123   2                      // don't use ending segment if blank
+ 124   2                      else if (0xFFFF != flashpage.index.session[i].endseg) {
+ 125   3                              *startpage = MAX(flashpage.index.session[i].endseg,*startpage);
+ 126   3                              // don't do comparison if no data was ever programmed
+ 127   3                              if (0xFFFF != flashpage.index.session[i].ioendseg)
+ 128   3                                      *iopage = MIN(flashpage.index.session[i].ioendseg,*iopage);
+ 129   3                      } // else if
+ 130   2              } // for
+ 131   1      
+ 132   1              if (0 == startsess) return (0);                         // no sessions available
+ 133   1              if (*startpage >= *iopage) return (0);  // all memory full
+ 134   1      
+ 135   1              ++*startpage;                   // start data on next page up
+ 136   1              --*iopage;                              // start io on previous page
+ 137   1      
+ 138   1              // mark the chosen segment as taken
+ 139   1              flashpage.index.session[startsess-1].startseg = MAX(*startpage, FIRSTDATAPAGE);
+ 140   1              // only create data io start address if there are io bits selected
+ 141   1              flashpage.index.session[startsess-1].iostartseg = (iocollect? *iopage : 0xFFFF);
+ 142   1              flashpage.index.session[startsess-1].ioendseg = 0xFFFF;
+ 143   1      
+ 144   1              // record which i/o points were recorded
+ 145   1              flashpage.index.session[startsess-1].iodata = iocollect;
+ 146   1      
+ 147   1              // write car, track, and driver
+ 148   1              flashpage.index.session[startsess-1].driver = driveridx;
+ 149   1              flashpage.index.session[startsess-1].car = caridx;
+ 150   1              flashpage.index.session[startsess-1].track = trackidx;
+ 151   1      
+ 152   1      #ifdef DISPLAY
+ 153   1              // upper nibble is mode, lower nibble is sampling rate
+ 154   1              // write the mode
+ 155   1              switch (tm_state) {
+ 156   2                      case LAPS:
+ 157   2                      case TIMING:
+ 158   2                      case WAITSTART:
+ 159   2                              flashpage.index.session[startsess-1].modesample = modesamp;
+ 160   2                              break;
+ 161   2                      case AUTOXGETFINISH:
+ 162   2                      case AUTOXSTAGE:
+ 163   2                              flashpage.index.session[startsess-1].modesample = 0x14;         // force 40Hz
+ 164   2                              break;
+ 165   2                      case DRAGSTAGE:
+ 166   2                              flashpage.index.session[startsess-1].modesample = 0x24;         // force 40Hz
+ 167   2                              break;
+ 168   2                      case HILLCLIMBWAITSTART:
+ 169   2                      case HILLCLIMB:
+ 170   2                              flashpage.index.session[startsess-1].modesample = 0x40 + modesamp;
+ 171   2                              break;
+ 172   2                      case DRIVE:
+ 173   2                      case GPSREC:
+ 174   2                              flashpage.index.session[startsess-1].modesample = 0x50 + modesamp;
+ 175   2                              break;
+ 176   2                      default:
+ 177   2                              flashpage.index.session[startsess-1].modesample = modesamp;
+ 178   2                              break;
+C51 COMPILER V9.51   SESSION                                                               11/30/2014 18:01:40 PAGE 4   
+
+ 179   2              } // switch
+ 180   1      
+ 181   1      #else
+                      // write the mode & sampling rate
+                      flashpage.index.session[startsess-1].modesample = modesamp;
+              #endif          
+ 185   1      
+ 186   1              // write the index
+ 187   1              DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+ 188   1      
+ 189   1              return (startsess);
+ 190   1      }
+ 191          
+ 192          // This function is used to end a session
+ 193          // Pass in the session number and ending segment number
+ 194          //
+ 195          void End_Session(u08 session, u16 endseg, u16 endioseg) {
+ 196   1              xdata flashpagetype flashpage;          // where to put the index
+ 197   1      
+ 198   1              // make session a better index
+ 199   1              session--;
+ 200   1      
+ 201   1              // get the index information
+ 202   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+ 203   1      
+ 204   1              // if no valid time data found blow it away
+ 205   1              if (0xFFFFFFFF == sessstarttime) {
+ 206   2                      flashpage.index.session[session].starttime =
+ 207   2                      flashpage.index.session[session].endtime = 0xFFFFFFFF;
+ 208   2                      flashpage.index.session[session].startweeks =
+ 209   2                      flashpage.index.session[session].endweeks = 0xFFFF;
+ 210   2                      flashpage.index.session[session].startseg =
+ 211   2                      flashpage.index.session[session].endseg = 0xFFFF;
+ 212   2              } // if
+ 213   1              else {
+ 214   2                      flashpage.index.session[session].starttime = sessstarttime;
+ 215   2                      flashpage.index.session[session].startweeks = sessstartweeks;
+ 216   2                      flashpage.index.session[session].endtime = sessendtime;
+ 217   2                      flashpage.index.session[session].endweeks = sessendweeks;
+ 218   2      
+ 219   2                      // put in the sessions ending segment number
+ 220   2                      flashpage.index.session[session].endseg = endseg;
+ 221   2      
+ 222   2                      // put in ending io segment number if data inputs selected and valid starting segment
+ 223   2                      if (iocollect && (0xFFFF != flashpage.index.session[session].iostartseg))
+ 224   2                              flashpage.index.session[session].ioendseg = endioseg;
+ 225   2                      else
+ 226   2                              flashpage.index.session[session].iostartseg =
+ 227   2                              flashpage.index.session[session].ioendseg = 0xFFFF;
+ 228   2      
+ 229   2              } // else
+ 230   1      
+ 231   1              // update the index
+ 232   1              DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+ 233   1      }
+ 234          
+ 235          // This function is used to fix all sessions without ending dates due to power loss
+ 236          // or other circumstance.
+ 237          //
+ 238          void Repair_Sessions(void) {
+ 239   1              xdata flashpagetype flashpage;          // where to put the index
+ 240   1              xdata u16 segment;
+C51 COMPILER V9.51   SESSION                                                               11/30/2014 18:01:40 PAGE 5   
+
+ 241   1              xdata u16 session = 0;
+ 242   1      
+ 243   1              // get the index information
+ 244   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+ 245   1      
+ 246   1              for (session = 0; session<NUMSESSIONS; session++) {
+ 247   2                      // look for a starting segment number
+ 248   2                      if (0xFFFF != flashpage.index.session[session].startseg) {
+ 249   3                              // if invalid start date the segment was not ended correctly so search for data
+ 250   3                              if (0xFFFF == flashpage.index.session[session].startweeks) {
+ 251   4                                      xdata u16 startio, endio;
+ 252   4      
+ 253   4                                      segment = flashpage.index.session[session].startseg;
+ 254   4                                      startio = flashpage.index.session[session].iostartseg;
+ 255   4                                      endio = flashpage.index.session[session].ioendseg;
+ 256   4      
+ 257   4                                      // read first segment to get start date
+ 258   4                                      DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, segment);
+ 259   4                                      sessstarttime = flashpage.secsamp10[0].gps.time;
+ 260   4                                      sessstartweeks = flashpage.secsamp10[0].gps.weeks;                              
+ 261   4      
+ 262   4                                      // find the last programmed segment
+ 263   4                                      for (; segment < LASTDATAPAGE; segment++) {
+ 264   5                                              // read a segment of the session
+ 265   5                                              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, segment);
+ 266   5                                              
+ 267   5                                              // check for unprogrammed segment
+ 268   5                                              if (0xFFFFFFFF == *(u32 *) &flashpage) {
+ 269   6                                                      // read previous segment again
+ 270   6                                                      DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, segment-1);
+ 271   6      
+ 272   6                                                      // find an approximate end time
+ 273   6                                                      sessendtime = flashpage.secsamp10[0].gps.time;
+ 274   6                                                      sessendweeks = flashpage.secsamp10[0].gps.weeks;
+ 275   6      
+ 276   6                                                      // if invalid io end address, just use start address and toss the data
+ 277   6                                                      if (endio == 0xFFFF) endio = startio;
+ 278   6                                                      // write an end record
+ 279   6                                                      End_Session(session+1, segment-1, endio);
+ 280   6                                                      break;
+ 281   6                                              } // if
+ 282   5                                      } // for
+ 283   4                              } // if                                                 
+ 284   3                              // get the index information back
+ 285   3                              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+ 286   3                      } // if
+ 287   2              } // for
+ 288   1      }
+ 289          
+ 290          #ifdef PACKMEM
+ 291          // This function is used to pack all sessions down into memory
+ 292          //
+ 293          // *** While relocating of position and io data works, there is a known bug.
+ 294          // if the highest segment session is not the highest number session, packing works but does not
+ 295          // free up memory because the highest segment session is not relocated.
+ 296          //
+ 297          // key note. the only session that can ever be recorded at FIRSTDATAPAGE is session 1 (index=0)
+ 298          //
+ 299          void Pack_Sessions(BOOL report) {
+ 300   1              xdata flashpagetype flashpage;          // where to put the index and data
+ 301   1              xdata u16 firstfree;
+ 302   1              xdata u08 sessiontomove;
+C51 COMPILER V9.51   SESSION                                                               11/30/2014 18:01:40 PAGE 6   
+
+ 303   1              xdata u16 lowestunmovedstart;
+ 304   1              xdata u16 endaddr = iopagecnt;          // highest address moved (for cleanup)
+ 305   1              xdata s08 tempsession;                          // temporary session number so global not destroyed
+ 306   1      
+ 307   1              // ==== Pack the position data
+ 308   1              firstfree = FIRSTDATAPAGE;
+ 309   1      
+ 310   1              // get the index information
+ 311   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+ 312   1      
+ 313   1      // **** ADDED 3/29/10 to fix a bug where pack would not erase single sessions at top of memory
+ 314   1              // step through the sessions eliminating single page sessions
+ 315   1              for (tempsession = 0; tempsession < NUMSESSIONS; tempsession++) {
+ 316   2                      // only process segment if it is programmed
+ 317   2                      if (0xFFFF != flashpage.index.session[tempsession].startseg) {
+ 318   3                              // if session is only single page long, just eliminate it
+ 319   3                              if (flashpage.index.session[tempsession].startseg == flashpage.index.session[tempsession].endseg)
+ 320   3                                      Erase_Session(tempsession+1);   // session numbers start at 1 in Erase_Session
+ 321   3                      } // if
+ 322   2              } // for
+ 323   1      
+ 324   1              // get the index information
+ 325   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+ 326   1      
+ 327   1              do {    // keep moving until no more to move
+ 328   2                      // initialize
+ 329   2                      lowestunmovedstart = iopagecnt;
+ 330   2                      sessiontomove = NUMSESSIONS;
+ 331   2      
+ 332   2                      // step through the sessions looking for the lowest starting 
+ 333   2                      for (tempsession = 0; tempsession < NUMSESSIONS; tempsession++) {
+ 334   3              
+ 335   3                              // only process segment if it is programmed
+ 336   3                              if (0xFFFF != flashpage.index.session[tempsession].startseg) {
+ 337   4                                      if (firstfree == flashpage.index.session[tempsession].startseg) { 
+ 338   5                                              firstfree = flashpage.index.session[tempsession].endseg + 1; // point to space after used area
+ 339   5                                              sessiontomove = NUMSESSIONS;    // reset counters
+ 340   5                                              lowestunmovedstart = iopagecnt;
+ 341   5                                              tempsession = -1;                                       // start at beginning of list again
+ 342   5                                      } // if
+ 343   4                                      else if ((flashpage.index.session[tempsession].startseg > firstfree) &&
+ 344   4                                              (flashpage.index.session[tempsession].startseg < lowestunmovedstart)) {
+ 345   5                                              // check to see if this is the lowest starting segment that has not been processed
+ 346   5                                                      lowestunmovedstart = flashpage.index.session[tempsession].startseg;
+ 347   5                                                      sessiontomove = tempsession;
+ 348   5                                      } // if
+ 349   4                              } // if
+ 350   3                      } // for
+ 351   2      
+ 352   2                      // check to see if we are done
+ 353   2                      if (NUMSESSIONS == sessiontomove) {
+ 354   3                              if (endaddr != iopagecnt) {
+ 355   4                                      if (report) {
+ 356   5      #ifdef DISPLAY
+ 357   5                                              Clear_Screen();
+ 358   5                                              Write_Big_Line(1, "Cleaning", FALSE, '-');
+ 359   5      #endif
+ 360   5      #ifdef SENSOR
+                                                      LO(LED1);
+              #endif
+ 363   5                                      } // if
+ 364   4                                      DataFlash_Erase_Range(firstfree, endaddr, report);      // clean up rest of memory      
+C51 COMPILER V9.51   SESSION                                                               11/30/2014 18:01:40 PAGE 7   
+
+ 365   4                              } // if
+ 366   3                              break;                                                                                                  // blow this popsicle stand
+ 367   3                      } // if
+ 368   2                      else {
+ 369   3                              xdata u16 segmentcnt;
+ 370   3                              xdata u16 startaddr = flashpage.index.session[sessiontomove].startseg;
+ 371   3                              xdata u16 savefirst = firstfree;
+ 372   3      #ifdef DISPLAY
+ 373   3                              xdata u08 tempstring[13];
+ 374   3      #endif
+ 375   3                              endaddr = flashpage.index.session[sessiontomove].endseg;
+ 376   3      
+ 377   3      #ifdef DISPLAY
+ 378   3                              if (report) {
+ 379   4                                      Clear_Screen();
+ 380   4                                      sprintf(tempstring, "Packing %u", (u16) sessiontomove+1);
+ 381   4                                      Write_Big_Line(1, tempstring, FALSE, '-');
+ 382   4                              } // if
+ 383   3      #endif
+ 384   3      
+ 385   3                              for (segmentcnt = startaddr; segmentcnt <= endaddr;      segmentcnt++) {
+ 386   4                                              // read a segment of the session
+ 387   4                                              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, segmentcnt);
+ 388   4                                              // write to new location
+ 389   4                                              DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, firstfree++);
+ 390   4                              } // for
+ 391   3      
+ 392   3                              // fix up indexes to new locations
+ 393   3                              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);         // get the index information
+ 394   3                              flashpage.index.session[sessiontomove].startseg = savefirst;
+ 395   3                              flashpage.index.session[sessiontomove].endseg = firstfree-1;
+ 396   3      
+ 397   3                              // update the index
+ 398   3                              DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+ 399   3                      } // else
+ 400   2              } while (1); // while
+ 401   1      
+ 402   1              // ==== Now pack the io data
+ 403   1              endaddr = pagecnt;
+ 404   1              firstfree = IOPAGESTART;
+ 405   1      
+ 406   1              // get the index information
+ 407   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+ 408   1      
+ 409   1              do {    // keep moving until no more to move
+ 410   2                      // initialize
+ 411   2                      lowestunmovedstart = pagecnt;
+ 412   2                      sessiontomove = NUMSESSIONS;
+ 413   2      
+ 414   2                      // step through the sessions looking for the lowest starting 
+ 415   2                      for (tempsession = 0; tempsession < NUMSESSIONS; tempsession++) {
+ 416   3              
+ 417   3                              // only process segment if it is data and io programmed
+ 418   3                              if (0xFFFF != flashpage.index.session[tempsession].startseg &&
+ 419   3                                      0xFFFF != flashpage.index.session[tempsession].iostartseg) {
+ 420   4                                      // if there is a session already packed then skip it
+ 421   4                                      if (firstfree == flashpage.index.session[tempsession].iostartseg) { 
+ 422   5                                              firstfree = flashpage.index.session[tempsession].ioendseg - 1; // point to space after used area
+ 423   5                                              sessiontomove = NUMSESSIONS;    // reset counters
+ 424   5                                              lowestunmovedstart = pagecnt;
+ 425   5                                              tempsession = -1;                                       // start at beginning of list again
+ 426   5                                      } // if
+C51 COMPILER V9.51   SESSION                                                               11/30/2014 18:01:40 PAGE 8   
+
+ 427   4                                      else if ((flashpage.index.session[tempsession].iostartseg < firstfree) &&
+ 428   4                                              (flashpage.index.session[tempsession].iostartseg > lowestunmovedstart)) {
+ 429   5                                              // check to see if this is the lowest starting segment that has not been processed
+ 430   5                                                      lowestunmovedstart = flashpage.index.session[tempsession].iostartseg;
+ 431   5                                                      sessiontomove = tempsession;
+ 432   5                                      } // if
+ 433   4                              } // if
+ 434   3                      } // for
+ 435   2      
+ 436   2                      // check to see if we are done
+ 437   2                      if (NUMSESSIONS == sessiontomove) {
+ 438   3                              if (endaddr != pagecnt) {
+ 439   4      #ifdef DISPLAY
+ 440   4                                      if (report) {
+ 441   5                                              Clear_Screen();
+ 442   5                                              Write_Big_Line(1, "IO Cleaning", FALSE, '-');
+ 443   5                                      } // if
+ 444   4      #endif
+ 445   4                                      DataFlash_Erase_Range(endaddr, firstfree, TRUE);        // clean up rest of memory      
+ 446   4                              } // if
+ 447   3                              break;                                                                                                  // blow this popsicle stand
+ 448   3                      } // if
+ 449   2                      else {
+ 450   3                              xdata u16 segmentcnt;
+ 451   3                              xdata u16 startaddr = flashpage.index.session[sessiontomove].iostartseg;
+ 452   3                              xdata u16 savefirst = firstfree;
+ 453   3      #ifdef DISPLAY
+ 454   3                              xdata u08 tempstring[13];
+ 455   3      #endif
+ 456   3                              endaddr = flashpage.index.session[sessiontomove].ioendseg;
+ 457   3      
+ 458   3      #ifdef DISPLAY
+ 459   3                              if (report) {
+ 460   4                                      Clear_Screen();
+ 461   4                                      sprintf(tempstring, "IO Pack %u", (u16) sessiontomove+1);
+ 462   4                                      Write_Big_Line(1, tempstring, FALSE, '-');
+ 463   4                              } // if
+ 464   3      #endif
+ 465   3      
+ 466   3                              for (segmentcnt = startaddr; segmentcnt >= endaddr;      segmentcnt--) {
+ 467   4                                              // read a segment of the session
+ 468   4                                              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, segmentcnt);
+ 469   4                                              // write to new location
+ 470   4                                              DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, firstfree--);
+ 471   4                              } // for
+ 472   3      
+ 473   3                              // fix up indexes to new locations
+ 474   3                              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);         // get the index information
+ 475   3                              flashpage.index.session[sessiontomove].iostartseg = savefirst;
+ 476   3                              flashpage.index.session[sessiontomove].ioendseg = firstfree+1;
+ 477   3      
+ 478   3                              // update the index
+ 479   3                              DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+ 480   3                      } // else
+ 481   2              } while (1); // while
+ 482   1      } // Pack_Sessions
+ 483          #endif
+ 484          
+ 485          #if 0
+              // This function returns the number of sessions in use and the amount of memory (in segments).
+              //
+              u08 Session_Usage(u16 *memusage) {
+C51 COMPILER V9.51   SESSION                                                               11/30/2014 18:01:40 PAGE 9   
+
+                      xdata u08 sesscnt = 0;
+                      xdata u08 i;
+              
+                      // initialize
+                      *memusage = 0;
+              
+                      // get the index information
+                      DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+              
+                      for (i = 0; i<NUMSESSIONS; i++) {
+                              // look for a starting segment number
+                              if (0xFFFF != flashpage.index.session[i].startseg) {
+              
+                                      sesscnt++;
+              
+                                      *memusage += (flashpage.index.session[i].endseg - flashpage.index.session[i].startseg + 1) +
+                                      (flashpage.index.session[i].iostartseg - flashpage.index.session[i].ioendseg + 1);
+                              } // if
+                      } // for
+                      return(sesscnt);
+              }
+              #endif
+ 511          
+ 512          // This function is used to delete a session
+ 513          // Pass in the session number. Note Session Numbers start at 1.
+ 514          //
+ 515          void Erase_Session(u08 session) {
+ 516   1              xdata flashpagetype flashpage;          // where to put the index
+ 517   1      
+ 518   1              // get the index information
+ 519   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+ 520   1      
+ 521   1              // erase the flash pages if valid start and end segments
+ 522   1              if (0xFFFF != flashpage.index.session[session-1].startseg &&
+ 523   1                      0xFFFF != flashpage.index.session[session-1].endseg) {
+ 524   2      
+ 525   2      #ifdef SENSOR
+                              DataFlash_Erase_Range(flashpage.index.session[session-1].startseg,
+                                      flashpage.index.session[session-1].endseg, TRUE);
+              #endif
+ 529   2      #ifdef DISPLAY
+ 530   2                      DataFlash_Erase_Range(flashpage.index.session[session-1].startseg,
+ 531   2                              flashpage.index.session[session-1].endseg, FALSE);
+ 532   2      #endif
+ 533   2              } // if
+ 534   1      
+ 535   1              // get the index information
+ 536   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+ 537   1      
+ 538   1              // erase the flash pages if valid io start and end segments
+ 539   1              if (0xFFFF != flashpage.index.session[session-1].iostartseg &&
+ 540   1                      0xFFFF != flashpage.index.session[session-1].ioendseg) {
+ 541   2      
+ 542   2      #ifdef SENSOR
+                              DataFlash_Erase_Range(flashpage.index.session[session-1].ioendseg,
+                                      flashpage.index.session[session-1].iostartseg, TRUE);
+              #endif
+ 546   2      #ifdef DISPLAY
+ 547   2                      DataFlash_Erase_Range(flashpage.index.session[session-1].ioendseg,
+ 548   2                              flashpage.index.session[session-1].iostartseg, FALSE);
+ 549   2      #endif
+ 550   2              } // if
+C51 COMPILER V9.51   SESSION                                                               11/30/2014 18:01:40 PAGE 10  
+
+ 551   1      
+ 552   1      #ifdef DISPLAY
+ 553   1              // erase the laps
+ 554   1              DataFlash_Erase_Page(LASTLAPPAGE - NUMLAPPAGES + session);
+ 555   1      #endif
+ 556   1      
+ 557   1              // get the index information
+ 558   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+ 559   1      
+ 560   1              flashpage.index.session[session-1].startseg = 
+ 561   1              flashpage.index.session[session-1].endseg =
+ 562   1              flashpage.index.session[session-1].iostartseg = 
+ 563   1              flashpage.index.session[session-1].ioendseg = 0xFFFF;
+ 564   1      
+ 565   1              flashpage.index.session[session-1].starttime =
+ 566   1              flashpage.index.session[session-1].endtime = 0xFFFFFFFF;
+ 567   1      
+ 568   1              flashpage.index.session[session-1].startweeks =
+ 569   1              flashpage.index.session[session-1].endweeks = 0xFFFF;
+ 570   1      
+ 571   1              // initialize
+ 572   1              flashpage.index.session[session-1].modesample =
+ 573   1              flashpage.index.session[session-1].iodata = 0x00;
+ 574   1      
+ 575   1              // update the index
+ 576   1              DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, INDEXPAGE);
+ 577   1      
+ 578   1              // pack memory
+ 579   1      //      Pack_Sessions(TRUE);
+ 580   1      }
+ 581          
+ 582          // This function sets up default data in driver, car, and track tables
+ 583          //
+ 584          void Init_Tables( void ) {
+ 585   1              xdata flashpagetype flashpage;          // where to put the index
+ 586   1              u08 i;
+ 587   1              BOOL writepage = FALSE;
+ 588   1      
+ 589   1              // get the driver information
+ 590   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, USERPAGE);
+ 591   1      
+ 592   1              // if page not programmed, fill it up
+ 593   1              if (0xFFFFFFFF == *((u32 *) flashpage.bigbuff)) {
+ 594   2      
+ 595   2                      writepage = TRUE;
+ 596   2      
+ 597   2                      // initialize
+ 598   2                      flashpage.user.selecteddriver =
+ 599   2                      flashpage.user.selectedtrack =
+ 600   2                      flashpage.user.selectedcar = 0x00;
+ 601   2                      flashpage.user.iodata = 0x80;                   // default to tach enabled
+ 602   2      
+ 603   2                      flashpage.user.modesample = 0x02;               // 20 Hz
+ 604   2      
+ 605   2                      for (i = 0; i < NUMDRIVERS; i++) {
+ 606   3                              xdata char name[] = "DriverA";
+ 607   3      
+ 608   3                              name[6] = 'A' + i;
+ 609   3                              strcpy(flashpage.user.drivername[i], name);
+ 610   3                      } // for
+ 611   2      
+ 612   2                      for (i = 0; i < NUMCARS; i++) {
+C51 COMPILER V9.51   SESSION                                                               11/30/2014 18:01:40 PAGE 11  
+
+ 613   3                              xdata char name[] = "CarA";
+ 614   3      
+ 615   3                              name[3] = 'A' + i;
+ 616   3                              strcpy(flashpage.user.car[i].name, name);
+ 617   3      
+ 618   3                              flashpage.user.car[i].carspecs.cylandweight = 4;
+ 619   3                              flashpage.user.car[i].carspecs.revwarning = 6000;
+ 620   3                              flashpage.user.car[i].carspecs.revlimit = 7000;
+ 621   3                      } // for
+ 622   2              } // if
+ 623   1              else {
+ 624   2                      // make sure indices are valid
+ 625   2                      if (flashpage.user.selecteddriver > NUMDRIVERS) {
+ 626   3                              flashpage.user.selecteddriver = 0;
+ 627   3                              writepage = TRUE;
+ 628   3                      }
+ 629   2                      if (flashpage.user.selectedtrack > NUMTRACKS) {
+ 630   3                              flashpage.user.selectedtrack = 0;
+ 631   3                              writepage = TRUE;
+ 632   3                      }
+ 633   2                      if (flashpage.user.selectedcar > NUMCARS) {
+ 634   3                              flashpage.user.selectedcar = 0;
+ 635   3                              writepage = TRUE;
+ 636   3                      } // if
+ 637   2      
+ 638   2                      // if driver name is unprintable, NULL it out
+ 639   2                      for (i = 0; i < NUMDRIVERS; i++) {
+ 640   3                              if (!isprint(flashpage.user.drivername[i][0]) && flashpage.user.drivername[i][0] != '\0') {
+ 641   4                                      flashpage.user.drivername[i][0] = '\0';
+ 642   4                                      writepage = TRUE;
+ 643   4                              } // if
+ 644   3                      } // for
+ 645   2      
+ 646   2                      // if car name is unprintable, NULL it out
+ 647   2                      for (i = 0; i < NUMCARS; i++) {
+ 648   3                              if (!isprint(flashpage.user.car[i].name[0]) && flashpage.user.car[i].name[0] != '\0') {
+ 649   4                                      flashpage.user.car[i].name[0] = '\0';
+ 650   4                                      flashpage.user.car[i].carspecs.cylandweight = 4;
+ 651   4                                      flashpage.user.car[i].carspecs.revwarning = 6000;
+ 652   4                                      flashpage.user.car[i].carspecs.revlimit = 7000;
+ 653   4                                      writepage = TRUE;
+ 654   4                              } // if
+ 655   3                      } // for
+ 656   2      
+ 657   2              } // else
+ 658   1      
+ 659   1              if (writepage)
+ 660   1                      // write it back out
+ 661   1                      DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, USERPAGE);
+ 662   1      
+ 663   1              // get the track information
+ 664   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, TRACKPAGE);
+ 665   1      
+ 666   1              writepage = FALSE;
+ 667   1      
+ 668   1              // if page not programmed, fill it up
+ 669   1              if (0xFF == flashpage.bigbuff[0] && 0xFF == flashpage.bigbuff[1]) {
+ 670   2      
+ 671   2                      writepage = TRUE;
+ 672   2      
+ 673   2                      for (i = 0; i < NUMTRACKS; i++) {
+ 674   3                              xdata char name[] = "TrackA";
+C51 COMPILER V9.51   SESSION                                                               11/30/2014 18:01:40 PAGE 12  
+
+ 675   3      
+ 676   3                              name[5] = 'A' + i;
+ 677   3                              strcpy(flashpage.circuit.track[i].name, name);
+ 678   3      
+ 679   3                              flashpage.circuit.track[i].startlat =
+ 680   3                              flashpage.circuit.track[i].startlon = 0;
+ 681   3                              flashpage.circuit.track[i].startalt = 0;
+ 682   3                              flashpage.circuit.track[i].starthead = 0;
+ 683   3      
+ 684   3                      } // for
+ 685   2              } // if
+ 686   1              else {
+ 687   2                      // if track name is unprintable, NULL it out
+ 688   2                      for (i = 0; i < NUMTRACKS; i++) {
+ 689   3                              if (!isprint(flashpage.circuit.track[i].name[0]) && flashpage.circuit.track[i].name[0] != '\0') {
+ 690   4                                      flashpage.circuit.track[i].name[0] = '\0';
+ 691   4                                      flashpage.circuit.track[i].startlat =
+ 692   4                                      flashpage.circuit.track[i].startlon = 0;
+ 693   4                                      flashpage.circuit.track[i].startalt = 0;
+ 694   4                                      flashpage.circuit.track[i].starthead = 0;
+ 695   4      
+ 696   4                                      writepage = TRUE;
+ 697   4                              } // if
+ 698   3                      } // for
+ 699   2              } // else
+ 700   1      
+ 701   1              if (writepage)
+ 702   1                      // write it back out
+ 703   1                      DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, TRACKPAGE);
+ 704   1      
+ 705   1              writepage = FALSE;
+ 706   1      
+ 707   1              // get the track finishline information
+ 708   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, TRACKFINPAGE);
+ 709   1      
+ 710   1              // if page not programmed, fill it up
+ 711   1              if (0xFF == flashpage.bigbuff[0] && 0xFF == flashpage.bigbuff[1]) {
+ 712   2      
+ 713   2                      writepage = TRUE;
+ 714   2      
+ 715   2                      // set the finish line to zeroes
+ 716   2                      for (i = 0; i < NUMTRACKS; i++) {
+ 717   3                              flashpage.finishandgear.trackfinish[i].finishlat =
+ 718   3                              flashpage.finishandgear.trackfinish[i].finishlon = 0;
+ 719   3                              flashpage.finishandgear.trackfinish[i].finishalt = 0;
+ 720   3                              flashpage.finishandgear.trackfinish[i].finishhead = 0;
+ 721   3                      } // for
+ 722   2      
+ 723   2                      // set the gear ratios and stuff to zeroes
+ 724   2                      for (i = 0; i < NUMCARS; i++) {
+ 725   3                              int j;
+ 726   3      
+ 727   3                              flashpage.finishandgear.gears[i].diffratio =
+ 728   3                              flashpage.finishandgear.gears[i].wheelcircumference = 0;
+ 729   3                              for (j = 0; j < NUMGEARS; j++)
+ 730   3                                      flashpage.finishandgear.gears[i].inchesperenginerev[j] = 0;
+ 731   3                      } // for
+ 732   2              } // if         
+ 733   1      
+ 734   1              if (writepage)
+ 735   1                      // write it back out
+ 736   1                      DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, TRACKFINPAGE);
+C51 COMPILER V9.51   SESSION                                                               11/30/2014 18:01:40 PAGE 13  
+
+ 737   1      
+ 738   1              writepage = FALSE;
+ 739   1      
+ 740   1      #ifdef DISPLAY
+ 741   1              // clear out stored sector times
+ 742   1              for (i = 0; i < 4; i++) {                       // 4 pages
+ 743   2                      int j;
+ 744   2                      writepage = FALSE;
+ 745   2              
+ 746   2                      // get the track finishline information
+ 747   2                      DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, PREDPAGESTART + i);
+ 748   2      
+ 749   2                      for (j=0; j < 4; j++) {         // 4 tracks per page
+ 750   3                              // track sectors not programmed, then initialize
+ 751   3                              if (0xFFFFFFFF == flashpage.storedsectors[j].bestsectortimes[0]) {
+ 752   4                                      int k;
+ 753   4              
+ 754   4                                      writepage = TRUE;
+ 755   4                                      // clear out the page
+ 756   4                                      for (k = 0; k < NUMSECTORS; k++)
+ 757   4                                              flashpage.storedsectors[j].bestsectortimes[k] = 0L;
+ 758   4              
+ 759   4                                      // set the best time to maximum                         
+ 760   4                                      flashpage.storedsectors[j].bestlapever = 0xFFFFFFFF;
+ 761   4                              } // if
+ 762   3                      } // for
+ 763   2      
+ 764   2                      if (writepage)
+ 765   2                              // write it back out
+ 766   2                              DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, PREDPAGESTART + i);
+ 767   2              } // for
+ 768   1      
+ 769   1              writepage = FALSE;
+ 770   1      #endif
+ 771   1      
+ 772   1              // IO Initialization
+ 773   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, IODEFPAGE);
+ 774   1      
+ 775   1              // if page not programmed, fill it up
+ 776   1              if (0xFFFFFFFF == *((u32 *) flashpage.bigbuff)) {
+ 777   2      
+ 778   2                      writepage = TRUE;
+ 779   2      
+ 780   2                      for (i = 0; i < NUMANALOGS; i++) {
+ 781   3                              xdata char name[] = "Analogx";
+ 782   3      
+ 783   3                              name[6] = '0' + i;
+ 784   3                              strcpy(flashpage.io.analogs[i].pointname, name);
+ 785   3                              strcpy(flashpage.io.analogs[i].unitname, "VOLTS");
+ 786   3      
+ 787   3                              flashpage.io.analogs[i].maxscale = 20;
+ 788   3                              flashpage.io.analogs[i].lowval = 0.0;
+ 789   3                              flashpage.io.analogs[i].highval = 20.0;
+ 790   3                              flashpage.io.analogs[i].alarmval = 20.0;
+ 791   3                              flashpage.io.analogs[i].alarmdirection = 1;
+ 792   3                              flashpage.io.analogs[i].lowreading = 0;
+ 793   3                              flashpage.io.analogs[i].highreading = VOLTFULLSCALE;
+ 794   3      
+ 795   3                      } // for
+ 796   2                      for (i = 0; i < NUMDIGITALS; i++) {
+ 797   3                              xdata char name[] = "Digitalx";
+ 798   3      
+C51 COMPILER V9.51   SESSION                                                               11/30/2014 18:01:40 PAGE 14  
+
+ 799   3                              name[7] = '0' + i;
+ 800   3                              strcpy(flashpage.io.digitals[i].pointname, name);
+ 801   3      
+ 802   3                              strcpy(flashpage.io.digitals[i].onname, "ON");
+ 803   3                              strcpy(flashpage.io.digitals[i].offname, "OFF");
+ 804   3                      } // for
+ 805   2      
+ 806   2                      for (i = 0; i < NUMFREQS; i++) {
+ 807   3                              flashpage.io.frequency[i].rpmwarning =
+ 808   3                              flashpage.io.frequency[i].rpmlimit = 0;
+ 809   3                              flashpage.io.frequency[i].divider = 1;
+ 810   3                      } // for
+ 811   2      
+ 812   2                      for (i=0; i < NUMDIGOUTS/2; i++) {
+ 813   3                              flashpage.io.digouts[i] = 0x0000;               // default = digital inputs except D4
+ 814   3                      } // for
+ 815   2      
+ 816   2                      flashpage.io.digouts[0] = 0x03;                                 // D4 = camera output default
+ 817   2      //              flashpage.io.digouts[0] = 0x0B;                                 // changed to mobius in V3.70
+ 818   2                      flashpage.io.lancconfig = DEFAULTLANC;                  // default to most likely LANC device
+ 819   2              } // if
+ 820   1              else {
+ 821   2                      // if point name is unprintable, NULL it out
+ 822   2                      for (i = 0; i < NUMANALOGS; i++) {
+ 823   3                              if (!isprint(flashpage.io.analogs[i].pointname[0]) && flashpage.io.analogs[i].pointname[0] != '\0') {
+ 824   4                                      flashpage.io.analogs[i].pointname[0] = '\0';
+ 825   4                                      flashpage.io.analogs[i].maxscale = 20;
+ 826   4                                      flashpage.io.analogs[i].lowval = 0.0;
+ 827   4                                      flashpage.io.analogs[i].highval = 20.0;
+ 828   4                                      flashpage.io.analogs[i].alarmval = 20.0;
+ 829   4                                      flashpage.io.analogs[i].alarmdirection = 1;
+ 830   4                                      flashpage.io.analogs[i].lowreading = 0;
+ 831   4                                      flashpage.io.analogs[i].highreading = VOLTFULLSCALE;
+ 832   4                                      writepage = TRUE;
+ 833   4                              } // if
+ 834   3                      } // for
+ 835   2                      for (i = 0; i < NUMDIGITALS; i++) {
+ 836   3                              if (!isprint(flashpage.io.digitals[i].pointname[0]) && flashpage.io.digitals[i].pointname[0] != '\0') {
+ 837   4                                      flashpage.io.digitals[i].pointname[0] = '\0';
+ 838   4                                      strcpy(flashpage.io.digitals[i].onname, "ON");
+ 839   4                                      strcpy(flashpage.io.digitals[i].offname, "OFF");
+ 840   4                                      writepage = TRUE;
+ 841   4                              } // if
+ 842   3                      } // for
+ 843   2              } // else
+ 844   1      
+ 845   1              if (writepage)
+ 846   1                      // write it back out
+ 847   1                      DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, IODEFPAGE);
+ 848   1      
+ 849   1      } // Init_Tables
+ 850          #endif // conditional compilation
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   4952    ----
+   CONSTANT SIZE    =     93    ----
+   XDATA SIZE       =   ----    3266
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      25
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+C51 COMPILER V9.51   SESSION                                                               11/30/2014 18:01:40 PAGE 15  
+
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

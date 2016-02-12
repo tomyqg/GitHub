@@ -1,0 +1,540 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     14/Jul/2015  19:01:46 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\RAMDISK.c                            #
+#    Command line =  C:\DUII\TargetHW\FS\RAMDISK.c -D DEBUG=1 -D              #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\RA #
+#                    MDISK.lst                                                #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\RAM #
+#                    DISK.o                                                   #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\RAMDISK.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : R_Misc.c
+     19          Purpose     : Device Driver for simple array in RAM
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          /*********************************************************************
+     24          *
+     25          *             #include Section
+     26          *
+     27          **********************************************************************
+     28          */
+     29          
+     30          #include "FS_Int.h"
+     31          
+     32          #ifdef WIN32
+     33            #include <windows.h>
+     34          #endif
+     35          
+     36          
+     37          /*********************************************************************
+     38          *
+     39          *        Local defines
+     40          *
+     41          **********************************************************************
+     42          */
+     43          #ifdef FS_RAMDISK_MAXUNIT
+     44            #define NUM_UNITS FS_RAMDISK_MAXUNIT
+     45          #else
+     46            #define NUM_UNITS 2
+     47          #endif
+     48          
+     49          
+     50          
+     51          /*********************************************************************
+     52          *
+     53          *        Types
+     54          *
+     55          **********************************************************************
+     56          */
+     57          typedef struct {
+     58            U8 FS_HUGE * pData;
+     59            U32  NumSectors;
+     60            U16  BytesPerSector;
+     61          } RAMDISK_PROPS;
+     62          
+     63          /*********************************************************************
+     64          *
+     65          *        Static data
+     66          *
+     67          **********************************************************************
+     68          */
+
+   \                                 In section .bss, align 4
+     69          static RAMDISK_PROPS _aRAMDISK_PROPS[NUM_UNITS];
+   \                     _aRAMDISK_PROPS:
+   \   00000000                      DS8 24
+
+   \                                 In section .bss, align 4
+     70          static int   _NumUnits;
+   \                     _NumUnits:
+   \   00000000                      DS8 4
+     71          #ifdef WIN32
+     72          static int _ReadDelay;
+     73          static int _WriteDelay;
+     74          #endif
+     75          
+     76          /*********************************************************************
+     77          *
+     78          *       Static code
+     79          *
+     80          **********************************************************************
+     81          */
+     82          
+     83          
+     84          /*********************************************************************
+     85          *
+     86          *       _GetStatus
+     87          *
+     88          *  Description:
+     89          *    FS driver function. Get status of the RAM disk.
+     90          *
+     91          *  Parameters:
+     92          *    Unit    - Device number.
+     93          *
+     94          *  Return value:
+     95          *    FS_MEDIA_STATE_UNKNOWN    - Media state is unknown
+     96          *    FS_MEDIA_NOT_PRESENT      - Media is not present
+     97          *    FS_MEDIA_IS_PRESENT       - Media is present
+     98          */
+
+   \                                 In section .text, align 4, keep-with-next
+     99          static int _GetStatus(U8 Unit) {
+    100            RAMDISK_PROPS * pRAMDISK_PROPS;
+    101          
+    102            pRAMDISK_PROPS = &_aRAMDISK_PROPS[Unit];
+    103            return pRAMDISK_PROPS->pData ? FS_MEDIA_IS_PRESENT : FS_MEDIA_NOT_PRESENT;
+   \                     _GetStatus:
+   \   00000000   ........           LDR      R2,??DataTable9_1
+   \   00000004   0C10A0E3           MOV      R1,#+12
+   \   00000008   812000E1           SMLABB   R0,R1,R0,R2
+   \   0000000C   000090E5           LDR      R0,[R0, #+0]
+   \   00000010   000050E3           CMP      R0,#+0
+   \   00000014   0100A013           MOVNE    R0,#+1
+   \   00000018   1EFF2FE1           BX       LR               ;; return
+    104          }
+    105          
+    106          
+    107          
+    108          /*********************************************************************
+    109          *
+    110          *       _Read
+    111          *
+    112          *  Description:
+    113          *    FS driver function. Read a sectors from the RAM disk.
+    114          *
+    115          *  Parameters:
+    116          *    Unit        - Unit number.
+    117          *    SectorNo    - Sector to be read from the device.
+    118          *    pBuffer     - Pointer to buffer for storing the data.
+    119          *    NumSectors  - number of sectors to be read
+    120          *
+    121          *  Return value:
+    122          *    ==0         - Sector has been read and copied to pBuffer.
+    123          *    <0          - An error has occurred.
+    124          */
+
+   \                                 In section .text, align 4, keep-with-next
+    125          static int _Read(U8 Unit, U32 SectorNo, void *pBuffer, U32 NumSectors) {
+   \                     _Read:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   00C0A0E1           MOV      R12,R0
+   \   00000008   0200A0E1           MOV      R0,R2
+    126            RAMDISK_PROPS * pRAMDISK_PROPS;
+    127            U8 * FS_HUGE pData;
+    128          
+    129            pRAMDISK_PROPS = &_aRAMDISK_PROPS[Unit];
+   \   0000000C   ........           LDR      LR,??DataTable9_1
+   \   00000010   0C20A0E3           MOV      R2,#+12
+   \   00000014   82EC0CE1           SMLABB   R12,R2,R12,LR
+    130            if (SectorNo + NumSectors > pRAMDISK_PROPS->NumSectors) {
+   \   00000018   01E083E0           ADD      LR,R3,R1
+   \   0000001C   04209CE5           LDR      R2,[R12, #+4]
+   \   00000020   04D04DE2           SUB      SP,SP,#+4
+   \   00000024   0E0052E1           CMP      R2,LR
+    131              FS_DEBUG_ERROROUT((FS_MTYPE_DRIVER,  "RAM: _ReadBurst: Sector out of range\n"));
+    132              return -1;
+   \   00000028   0000E033           MVNCC    R0,#+0
+   \   0000002C   0500003A           BCC      ??_Read_0
+   \   00000030   B8E0DCE1           LDRH     LR,[R12, #+8]
+   \   00000034   9E0302E0           MUL      R2,LR,R3
+   \   00000038   00309CE5           LDR      R3,[R12, #+0]
+   \   0000003C   9E3121E0           MLA      R1,LR,R1,R3
+    133            }
+    134            pData  = pRAMDISK_PROPS->pData;
+    135            pData += SectorNo * pRAMDISK_PROPS->BytesPerSector;
+    136            FS_MEMCPY(pBuffer, (void *)pData, NumSectors * pRAMDISK_PROPS->BytesPerSector);
+   \   00000040   ........           BL       FS_memcpy
+    137          #ifdef WIN32
+    138            Sleep(_ReadDelay);
+    139          #endif
+    140            return 0;
+   \   00000044   0000A0E3           MOV      R0,#+0
+   \                     ??_Read_0:
+   \   00000048   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   0000004C   0080BDE8           POP      {PC}             ;; return
+    141          }
+    142          
+    143          /*********************************************************************
+    144          *
+    145          *       _Write
+    146          *
+    147          *  Description:
+    148          *    Write sectors.
+    149          *
+    150          *  Parameters:
+    151          *    Unit        - Unit number.
+    152          *    SectorNo    - First sector to be written to the device.
+    153          *    NumSectors  - Number of sectors to be written to the device.
+    154          *    pBuffer     - Pointer to buffer for holding the data.
+    155          *
+    156          *  Return value:
+    157          *    ==0         - O.K.: Sector has been written to device.
+    158          *    <0          - An error has occurred.
+    159          */
+
+   \                                 In section .text, align 4, keep-with-next
+    160          static int _Write(U8 Unit, U32 SectorNo, const void *pBuffer, U32 NumSectors, U8 RepeatSame) {
+   \                     _Write:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   0350A0E1           MOV      R5,R3
+    161            RAMDISK_PROPS * pRAMDISK_PROPS;
+    162            U8 * FS_HUGE pData;
+    163          
+    164            pRAMDISK_PROPS = &_aRAMDISK_PROPS[Unit];
+   \   00000008   ........           LDR      R12,??DataTable9_1
+   \   0000000C   0C30A0E3           MOV      R3,#+12
+   \   00000010   83C006E1           SMLABB   R6,R3,R0,R12
+    165            if (SectorNo + NumSectors > pRAMDISK_PROPS->NumSectors) {
+   \   00000014   013085E0           ADD      R3,R5,R1
+   \   00000018   040096E5           LDR      R0,[R6, #+4]
+   \   0000001C   04D04DE2           SUB      SP,SP,#+4
+   \   00000020   0240A0E1           MOV      R4,R2
+   \   00000024   030050E1           CMP      R0,R3
+   \   00000028   1820DDE5           LDRB     R2,[SP, #+24]
+    166              FS_DEBUG_ERROROUT((FS_MTYPE_DRIVER,  "RAM: _WriteBurst: Sector out of range\n"));
+    167              return -1;
+   \   0000002C   0000E033           MVNCC    R0,#+0
+   \   00000030   1200003A           BCC      ??_Write_0
+   \   00000034   B800D6E1           LDRH     R0,[R6, #+8]
+   \   00000038   003096E5           LDR      R3,[R6, #+0]
+    168            }
+    169            pData  = pRAMDISK_PROPS->pData;
+    170            pData += SectorNo * pRAMDISK_PROPS->BytesPerSector;
+    171            if (RepeatSame) {
+   \   0000003C   000052E3           CMP      R2,#+0
+   \   00000040   903127E0           MLA      R7,R0,R1,R3
+   \   00000044   0800000A           BEQ      ??_Write_1
+    172              do {
+    173                FS_MEMCPY((void *)pData, pBuffer, pRAMDISK_PROPS->BytesPerSector);
+   \                     ??_Write_2:
+   \   00000048   B820D6E1           LDRH     R2,[R6, #+8]
+   \   0000004C   0410A0E1           MOV      R1,R4
+   \   00000050   0700A0E1           MOV      R0,R7
+   \   00000054   ........           BL       FS_memcpy
+    174                pData += pRAMDISK_PROPS->BytesPerSector;
+   \   00000058   B800D6E1           LDRH     R0,[R6, #+8]
+    175              } while (--NumSectors);
+   \   0000005C   015055E2           SUBS     R5,R5,#+1
+   \   00000060   077080E0           ADD      R7,R0,R7
+   \   00000064   F7FFFF1A           BNE      ??_Write_2
+   \   00000068   030000EA           B        ??_Write_3
+    176            } else {
+    177                FS_MEMCPY((void *)pData, pBuffer, pRAMDISK_PROPS->BytesPerSector * NumSectors);
+   \                     ??_Write_1:
+   \   0000006C   950002E0           MUL      R2,R5,R0
+   \   00000070   0410A0E1           MOV      R1,R4
+   \   00000074   0700A0E1           MOV      R0,R7
+   \   00000078   ........           BL       FS_memcpy
+    178            }
+    179          #ifdef WIN32
+    180            Sleep(_WriteDelay);
+    181          #endif
+    182            return 0;
+   \                     ??_Write_3:
+   \   0000007C   0000A0E3           MOV      R0,#+0
+   \                     ??_Write_0:
+   \   00000080   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000084   F080BDE8           POP      {R4-R7,PC}       ;; return
+    183          }
+    184          
+    185          /*********************************************************************
+    186          *
+    187          *       _IoCtl
+    188          *
+    189          *  Description:
+    190          *    FS driver function. Execute device command.
+    191          *
+    192          *  Parameters:
+    193          *    Unit        - Unit number.
+    194          *    Cmd         - Command to be executed.
+    195          *    Aux         - Parameter depending on command.
+    196          *    pBuffer     - Pointer to a buffer used for the command.
+    197          *
+    198          *  Return value:
+    199          *    Command specific. In general a negative value means an error.
+    200          */
+
+   \                                 In section .text, align 4, keep-with-next
+    201          static int _IoCtl(U8 Unit, I32 Cmd, I32 Aux, void *pBuffer) {
+    202            RAMDISK_PROPS * pRAMDISK_PROPS;
+    203            FS_DEV_INFO *pInfo;
+    204            FS_USE_PARA(Aux);
+    205          
+    206            pRAMDISK_PROPS = &_aRAMDISK_PROPS[Unit];
+   \                     _IoCtl:
+   \   00000000   ........           LDR      R12,??DataTable9_1
+   \   00000004   0C20A0E3           MOV      R2,#+12
+   \   00000008   82C000E1           SMLABB   R0,R2,R0,R12
+    207            switch (Cmd) {
+   \   0000000C   FB0F51E3           CMP      R1,#+1004
+   \   00000010   0700001A           BNE      ??_IoCtl_0
+    208            case FS_CMD_GET_DEVINFO:
+    209              if (!pBuffer) {
+   \   00000014   000053E3           CMP      R3,#+0
+   \   00000018   0100001A           BNE      ??_IoCtl_1
+    210                return -1;
+   \   0000001C   0000E0E3           MVN      R0,#+0
+   \   00000020   1EFF2FE1           BX       LR
+    211              }
+    212              pInfo = (FS_DEV_INFO *)pBuffer;
+    213              pInfo->NumSectors      = pRAMDISK_PROPS->NumSectors;
+   \                     ??_IoCtl_1:
+   \   00000024   041090E5           LDR      R1,[R0, #+4]
+   \   00000028   041083E5           STR      R1,[R3, #+4]
+    214              pInfo->BytesPerSector  = pRAMDISK_PROPS->BytesPerSector;
+   \   0000002C   B800D0E1           LDRH     R0,[R0, #+8]
+   \   00000030   B800C3E1           STRH     R0,[R3, #+8]
+    215              break;
+    216          #ifdef WIN32
+    217            case FS_CMD_SET_DELAY:
+    218              _ReadDelay  = Aux;
+    219              _WriteDelay = (int)pBuffer;
+    220              break;
+    221          #endif
+    222          
+    223            default:
+    224              break;
+    225            }
+    226            return 0;
+   \                     ??_IoCtl_0:
+   \   00000034   0000A0E3           MOV      R0,#+0
+   \   00000038   1EFF2FE1           BX       LR               ;; return
+    227          }
+    228          
+    229          
+    230          /*********************************************************************
+    231          *
+    232          *       _AddDevice
+    233          */
+
+   \                                 In section .text, align 4, keep-with-next
+    234          static int _AddDevice(void) {
+    235            if (_NumUnits >= NUM_UNITS) {
+   \                     _AddDevice:
+   \   00000000   ........           LDR      R1,??DataTable9_2
+   \   00000004   000091E5           LDR      R0,[R1, #+0]
+   \   00000008   020050E3           CMP      R0,#+2
+   \   0000000C   010000BA           BLT      ??_AddDevice_0
+    236              return -1;
+   \   00000010   0000E0E3           MVN      R0,#+0
+   \   00000014   1EFF2FE1           BX       LR
+    237            }
+    238            return _NumUnits++;
+   \                     ??_AddDevice_0:
+   \   00000018   012080E2           ADD      R2,R0,#+1
+   \   0000001C   002081E5           STR      R2,[R1, #+0]
+   \   00000020   1EFF2FE1           BX       LR               ;; return
+    239          }
+    240          
+    241          /*********************************************************************
+    242          *
+    243          *       _GetNumUnits
+    244          */
+
+   \                                 In section .text, align 4, keep-with-next
+    245          static int _GetNumUnits(void) {
+    246            return _NumUnits;
+   \                     _GetNumUnits:
+   \   00000000   ........           LDR      R0,??DataTable9_2
+   \   00000004   000090E5           LDR      R0,[R0, #+0]
+   \   00000008   1EFF2FE1           BX       LR               ;; return
+    247          }
+    248          
+    249          /*********************************************************************
+    250          *
+    251          *       _GetDriverName
+    252          */
+
+   \                                 In section .text, align 4, keep-with-next
+    253          static const char * _GetDriverName(U8 Unit) {
+    254            FS_USE_PARA(Unit);
+    255            return "ram";
+   \                     _GetDriverName:
+   \   00000000   ........           ADR      R0,??DataTable9  ;; "ram"
+   \   00000004   1EFF2FE1           BX       LR               ;; return
+    256          }
+    257          
+    258          
+    259          /*********************************************************************
+    260          *
+    261          *       Public data
+    262          *
+    263          **********************************************************************
+    264          */
+    265          
+
+   \                                 In section .rodata, align 4, keep-with-next
+    266          const FS_DEVICE_TYPE FS_RAMDISK_Driver = {
+   \                     FS_RAMDISK_Driver:
+   \   00000000                      ; Initializer data, 32 bytes
+   \   00000000   ............       DC32 _GetDriverName, _AddDevice, _Read, _Write, _IoCtl, 0, _GetStatus, _GetNumUnits
+   \              ............
+   \              ............
+   \              ....00000000
+   \              ............
+   \              ....        
+    267            _GetDriverName,
+    268            _AddDevice,
+    269            _Read,
+    270            _Write,
+    271            _IoCtl,
+    272            NULL,
+    273            _GetStatus,
+    274            _GetNumUnits
+    275          };
+    276          
+    277          
+    278          /*********************************************************************
+    279          *
+    280          *       FS_RAMDISK_Configure
+    281          *
+    282          *  Description:
+    283          *    Configures a single instance of the driver
+    284          */
+
+   \                                 In section .text, align 4, keep-with-next
+    285          void FS_RAMDISK_Configure(U8 Unit, void * pData, U16 BytesPerSector, U32 NumSectors) {
+   \                     FS_RAMDISK_Configure:
+   \   00000000   00402DE9           PUSH     {LR}
+    286            RAMDISK_PROPS * pRAMDISK_PROPS;
+    287          
+    288          // TBD: Add parameter checks in debug build
+    289          
+    290            pRAMDISK_PROPS = &_aRAMDISK_PROPS[Unit];
+   \   00000004   ........           LDR      LR,??DataTable9_1
+   \   00000008   0CC0A0E3           MOV      R12,#+12
+   \   0000000C   8CE000E1           SMLABB   R0,R12,R0,LR
+    291            pRAMDISK_PROPS->pData          = (U8 *)pData;
+   \   00000010   001080E5           STR      R1,[R0, #+0]
+    292            pRAMDISK_PROPS->NumSectors     = NumSectors;
+   \   00000014   043080E5           STR      R3,[R0, #+4]
+    293            pRAMDISK_PROPS->BytesPerSector = BytesPerSector;
+   \   00000018   B820C0E1           STRH     R2,[R0, #+8]
+    294          }
+   \   0000001C   0080BDE8           POP      {PC}             ;; return
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable9:
+   \   00000000   72616D00           DC8      "ram"
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable9_1:
+   \   00000000   ........           DC32     _aRAMDISK_PROPS
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable9_2:
+   \   00000000   ........           DC32     _NumUnits
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "ram">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   72616D00           DC8 114, 97, 109, 0
+    295          
+    296          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function             .cstack
+     --------             -------
+     FS_RAMDISK_Configure      4
+     _AddDevice                0
+     _GetDriverName            0
+     _GetNumUnits              0
+     _GetStatus                0
+     _IoCtl                    0
+     _Read                     8
+     _Write                   24
+
+
+   Section sizes:
+
+     Function/Label       Bytes
+     --------------       -----
+     _aRAMDISK_PROPS        24
+     _NumUnits               4
+     _GetStatus             28
+     _Read                  80
+     _Write                136
+     _IoCtl                 60
+     _AddDevice             36
+     _GetNumUnits           12
+     _GetDriverName          8
+     FS_RAMDISK_Driver      32
+     FS_RAMDISK_Configure   32
+     ??DataTable9            4
+     ??DataTable9_1          4
+     ??DataTable9_2          4
+     ?<Constant "ram">       4
+
+ 
+  28 bytes in section .bss
+  36 bytes in section .rodata
+ 404 bytes in section .text
+ 
+ 404 bytes of CODE  memory
+  36 bytes of CONST memory
+  28 bytes of DATA  memory
+
+Errors: none
+Warnings: none

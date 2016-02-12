@@ -1,0 +1,383 @@
+C51 COMPILER V8.02   DATAFLASH                                                             04/22/2007 00:08:14 PAGE 1   
+
+
+C51 COMPILER V8.02, COMPILATION OF MODULE DATAFLASH
+OBJECT MODULE PLACED IN dataflash.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE dataflash.c DB DF(SENSOR) DF(EXTCLK6) DF(NODEBUG) INCDIR(C:\Keil\C51\INC;C:
+                    -\Keil\Traqmate\132micro\CommonFiles;C:\Keil\Traqmate\132micro\SU) OT(8,SIZE) NOCO
+
+line level    source
+
+   1          #undef WRITEPROTECT
+   2          // Part of traqmate.c
+   3          // 11/10/2003
+   4          // Author: GAStephens
+   5          //
+   6          // This file contains all the functions to read and write to an Atmel Dataflash
+   7          // serial flash memory chip. 
+   8          
+   9          #ifdef DISPLAY
+  12          #ifdef SENSOR
+  13          #include <sensor.h>
+  14          #endif
+  15          
+  16          #define DFWAIT do {int q; for (q=0; q<64; q++) ; } while(0)  // 64 seems to work well. should be verified.
+  17          
+  18          // This function transfers a page from an array to the designated buffer and then to
+  19          // the designated memory page. Non-blocking.
+  20          void DataFlash_Page_Write_Erase(int buffnum, int bufsize, char *buffer, int pagenum) {
+  21   1      
+  22   1              u08 status;
+  23   1              int i;
+  24   1      
+  25   1              // wait for Serial Flash to be available
+  26   1              do {
+  27   2                      status = DataFlash_Read_Status();
+  28   2              } while (!(status & STATUS_READY_MASK));
+  29   1      
+  30   1              // set CS to low        
+  31   1              LO(DF_CS1);
+  32   1      #ifdef WRITEPROTECT
+  35   1              DFWAIT;
+  36   1              // shift out command
+  37   1              if (1 == buffnum)
+  38   1                      xferSPI(BUFFER1_WRITE);
+  39   1              else
+  40   1                      xferSPI(BUFFER2_WRITE);
+  41   1      
+  42   1              // shift out 24 more bits to start at byte 0
+  43   1              xferSPI(0); xferSPI(0); xferSPI(0);
+  44   1      
+  45   1              // shift out the data
+  46   1              for (i=0; i<bufsize; i++) xferSPI(buffer[i]);
+  47   1      
+  48   1              // set CS to high to end buffer transfer
+  49   1              HI(DF_CS1);
+  50   1      
+  51   1              DataFlash_Buffer_to_Page_Write_Erase(buffnum, pagenum);
+  52   1      }
+  53          
+  54          
+  55          // This function transfers a page from the designated buffer to
+  56          // the designated memory page. Non-blocking.
+  57          void DataFlash_Buffer_to_Page_Write_Erase(int buffnum, int pagenum) {
+  58   1              u08 status;
+C51 COMPILER V8.02   DATAFLASH                                                             04/22/2007 00:08:14 PAGE 2   
+
+  59   1              BOOL erased;
+  60   1      
+  61   1              erased = DataFlash_Page_Erased(pagesize, pagenum);
+  62   1      
+  63   1              // wait for Serial Flash to be available
+  64   1              do {
+  65   2                      status = DataFlash_Read_Status();
+  66   2              } while (!(status & STATUS_READY_MASK));
+  67   1      
+  68   1              // set CS to low        
+  69   1              LO(DF_CS1);
+  70   1      #ifdef WRITEPROTECT
+  73   1              DFWAIT;
+  74   1      
+  75   1              if (erased) {
+  76   2                      // shift out command
+  77   2                      if (1 == buffnum)
+  78   2                              xferSPI(MEMORY_PAGE_THRU_BUFFER1_WRITE_ERASE);
+  79   2                      else
+  80   2                              xferSPI(MEMORY_PAGE_THRU_BUFFER2_WRITE_ERASE);
+  81   2              } // if
+  82   1              else {
+  83   2                      // shift out command
+  84   2                      if (1 == buffnum)
+  85   2                              xferSPI(MEMORY_PAGE_THRU_BUFFER1_WRITE);
+  86   2                      else
+  87   2                              xferSPI(MEMORY_PAGE_THRU_BUFFER2_WRITE);
+  88   2              } // else
+  89   1      
+  90   1              // shift out reserved bits and upper bits of page address
+  91   1              xferSPI(pagenum >> 6);  
+  92   1      
+  93   1              // shift out bottom 6 bits of page address and top bits of byte address
+  94   1              xferSPI((u08) pagenum << 2);
+  95   1      
+  96   1              // shift out bottom 8 bits of unsigned char address
+  97   1              xferSPI(0);
+  98   1      
+  99   1      #ifdef WRITEPROTECT
+ 102   1              // raise CS to end command and start flash write
+ 103   1              HI(DF_CS1);
+ 104   1      }
+ 105          
+ 106          #if !defined(DISPLAYATTACHED) && !defined(IVOX)
+ 172          
+ 173          // returns the value of DataFlash Status Register. Non-blocking.
+ 174          u08 DataFlash_Read_Status(void)
+ 175          {
+ 176   1         u08 dat;
+ 177   1      
+ 178   1              LO(DF_CS1);
+ 179   1              DFWAIT;
+ 180   1      
+ 181   1              //command
+ 182   1              xferSPI(STATUS_REGISTER_READ);
+ 183   1      
+ 184   1              dat = xferSPI(0);
+ 185   1      
+ 186   1              HI(DF_CS1);
+ 187   1        
+ 188   1         return (dat);
+ 189   1      }
+C51 COMPILER V8.02   DATAFLASH                                                             04/22/2007 00:08:14 PAGE 3   
+
+ 190          
+ 191          // This function transfers a page from the designated memory page to an array. Blocking.
+ 192          void DataFlash_Page_Read(int bufsize, char *buffer, int pagenum) {
+ 193   1      
+ 194   1              u08 status;
+ 195   1              int i;
+ 196   1      
+ 197   1              // wait for Serial Flash to be available
+ 198   1              do {
+ 199   2                      status = DataFlash_Read_Status();
+ 200   2              } while (!(status & STATUS_READY_MASK));
+ 201   1      
+ 202   1              // set CS to low
+ 203   1              LO(DF_CS1);
+ 204   1              DFWAIT;
+ 205   1      
+ 206   1              // shift out command
+ 207   1              xferSPI(MEMORY_PAGE_READ);
+ 208   1              
+ 209   1              // shift out reserved bits and upper bits of page address
+ 210   1              xferSPI(pagenum >> 6);  
+ 211   1      
+ 212   1              // shift out bottom 6 bits of page address and top bits of byte address
+ 213   1              xferSPI((u08) pagenum << 2);
+ 214   1      
+ 215   1              // shift out bottom 8 bits of unsigned char address
+ 216   1              xferSPI(0);
+ 217   1      
+ 218   1              // shift out 4 bytes of don't cares
+ 219   1              xferSPI(0);     xferSPI(0);     xferSPI(0);     xferSPI(0);
+ 220   1              
+ 221   1              // shift in the data
+ 222   1              for (i=0; i<bufsize; i++) buffer[i] = xferSPI(0);
+ 223   1      
+ 224   1              // raise CS to end operation
+ 225   1              HI(DF_CS1);
+ 226   1      }
+ 227          
+ 228          // This function determines if a page is erased. Blocking.
+ 229          BOOL DataFlash_Page_Erased(int bufsize, int pagenum) {
+ 230   1      
+ 231   1              u08 status;
+ 232   1              BOOL result = TRUE;
+ 233   1              int i;
+ 234   1      
+ 235   1              // wait for Serial Flash to be available
+ 236   1              do {
+ 237   2                      status = DataFlash_Read_Status();
+ 238   2              } while (!(status & STATUS_READY_MASK));
+ 239   1      
+ 240   1              // set CS to low
+ 241   1              LO(DF_CS1);
+ 242   1              DFWAIT;
+ 243   1      
+ 244   1              // shift out command
+ 245   1              xferSPI(MEMORY_PAGE_READ);
+ 246   1              
+ 247   1              // shift out reserved bits and upper bits of page address
+ 248   1              xferSPI(pagenum >> 6);  
+ 249   1      
+ 250   1              // shift out bottom 6 bits of page address and top bits of byte address
+ 251   1              xferSPI((u08) pagenum << 2);
+C51 COMPILER V8.02   DATAFLASH                                                             04/22/2007 00:08:14 PAGE 4   
+
+ 252   1      
+ 253   1              // shift out bottom 8 bits of unsigned char address
+ 254   1              xferSPI(0);
+ 255   1      
+ 256   1              // shift out 4 bytes of don't cares
+ 257   1              xferSPI(0);     xferSPI(0);     xferSPI(0);     xferSPI(0);
+ 258   1              
+ 259   1              // shift in the data while checking for erasure
+ 260   1              for (i=0; i<bufsize; i++)
+ 261   1                      if (!(result = (0xFF == xferSPI(0)))) break;
+ 262   1      
+ 263   1              // raise CS to end operation
+ 264   1              HI(DF_CS1);
+ 265   1      
+ 266   1              return(result);
+ 267   1      }
+ 268          
+ 269          // erases a block from memory. Non-blocking.
+ 270          void DataFlash_Erase_Block(u16 pagenum)
+ 271          {
+ 272   1              u08 status;
+ 273   1      
+ 274   1              // wait for Serial Flash to be available
+ 275   1              do {
+ 276   2                      status = DataFlash_Read_Status();
+ 277   2              } while (!(status & STATUS_READY_MASK));
+ 278   1      
+ 279   1              LO(DF_CS1);
+ 280   1      #ifdef WRITEPROTECT
+ 283   1              DFWAIT;
+ 284   1      
+ 285   1              //command
+ 286   1              xferSPI(BLOCK_ERASE);
+ 287   1      
+ 288   1              // shift out reserved bits and upper bits of page address
+ 289   1              xferSPI(pagenum >> 6);
+ 290   1      
+ 291   1              // shift out bottom 6 bits of page address and top bits of byte address
+ 292   1              xferSPI((u08) pagenum << 2);
+ 293   1      
+ 294   1              // shift out bottom 8 bits of unsigned char address
+ 295   1              xferSPI(0);
+ 296   1      
+ 297   1      #ifdef WRITEPROTECT
+ 300   1              HI(DF_CS1);
+ 301   1      }
+ 302          
+ 303          // erases a page from memory. Non-blocking.
+ 304          void DataFlash_Erase_Page(u16 pagenum)
+ 305          {
+ 306   1              u08 status;
+ 307   1      
+ 308   1              // wait for Serial Flash to be available
+ 309   1              do {
+ 310   2                      status = DataFlash_Read_Status();
+ 311   2              } while (!(status & STATUS_READY_MASK));
+ 312   1      
+ 313   1              LO(DF_CS1);
+ 314   1      #ifdef WRITEPROTECT
+ 317   1              DFWAIT;
+ 318   1      
+ 319   1              //command
+C51 COMPILER V8.02   DATAFLASH                                                             04/22/2007 00:08:14 PAGE 5   
+
+ 320   1              xferSPI(PAGE_ERASE);
+ 321   1      
+ 322   1              // shift out reserved bits and upper bits of page address
+ 323   1              xferSPI(pagenum >> 6);
+ 324   1      
+ 325   1              // shift out bottom 6 bits of page address and top bits of byte address
+ 326   1              xferSPI((u08) pagenum << 2);
+ 327   1      
+ 328   1              // shift out bottom 8 bits of unsigned char address
+ 329   1              xferSPI(0);
+ 330   1      
+ 331   1      #ifdef WRITEPROTECT
+ 334   1              HI(DF_CS1);
+ 335   1      }
+ 336          
+ 337          // erases a range of pages from memory.
+ 338          void DataFlash_Erase_Range(u16 firstpage, u16 lastpage, BOOL showprogress) {
+ 339   1              u16 segment;
+ 340   1      
+ 341   1              if (showprogress) {
+ 342   2      #ifdef SENSOR
+ 343   2                      LO(LED1);
+ 344   2      #endif
+ 345   2      #ifdef DISPLAY
+ 348   2              } // if
+ 349   1      
+ 350   1              for (segment = firstpage; segment <= lastpage; segment++) {
+ 351   2      
+ 352   2                      // check for even block boundary and that we are not near end of segment
+ 353   2                      if (0 == (segment % 8) &&
+ 354   2                              (lastpage - segment) >= 8) {
+ 355   3      
+ 356   3                              // show progress
+ 357   3                              if (showprogress) {
+ 358   4      #ifdef DISPLAY
+ 364   4      #ifdef SENSOR
+ 365   4                                              // invert LED every so often
+ 366   4                                              if (!(segment % 64)) XOR(LED1);
+ 367   4      #endif
+ 368   4                              } // if
+ 369   3      
+ 370   3                              // erase block
+ 371   3                              DataFlash_Erase_Block(segment);
+ 372   3                              segment += 7;           // will get incremented again at start of loop
+ 373   3                      } // if
+ 374   2                      else
+ 375   2                              DataFlash_Erase_Page(segment);
+ 376   2              } // for
+ 377   1      
+ 378   1      #ifdef SENSOR
+ 379   1              if (showprogress)
+ 380   1                      LO(LED1);
+ 381   1      #endif
+ 382   1      } // DataFlash_Erase_Range
+ 383          
+ 384          //-----------------------------------------------------------------------------
+ 385          // Initialization Subroutines
+ 386          //-----------------------------------------------------------------------------
+ 387          
+ 388          // This function initializes the DataFlash. Returns size of part in Mbit
+ 389          // Sets values for number of pages and bytes per page
+ 390          void DataFlash_Init(u16 *pages, u16 *pagebytes) {
+C51 COMPILER V8.02   DATAFLASH                                                             04/22/2007 00:08:14 PAGE 6   
+
+ 391   1              u08 status;
+ 392   1      
+ 393   1      #ifdef WRITEPROTECT
+ 396   1              HI(DF_WP);                                                      // write protect off (pages 0-255)
+ 397   1      #endif
+ 398   1              HI(DF_CS1);                                                     // deselect chip
+ 399   1      
+ 400   1              LO(DF_RST);                                                     // reset dataflash
+ 401   1              DFWAIT;         
+ 402   1              HI(DF_RST);
+ 403   1              DFWAIT;
+ 404   1      
+ 405   1              // check for ready and determine which type of chip it is
+ 406   1              status = DataFlash_Read_Status();
+ 407   1      
+ 408   1              switch (status & STATUS_DENSITY_MASK) {
+ 409   2                      case DENSITY_1MBIT:
+ 410   2                              *pages = NUM_PAGE_1MBIT;
+ 411   2                              *pagebytes = MAX_PAGE_1MBIT;
+ 412   2                              break;
+ 413   2                      case DENSITY_2MBIT:
+ 414   2                              *pages = NUM_PAGE_2MBIT;
+ 415   2                              *pagebytes = MAX_PAGE_2MBIT;
+ 416   2                              break;
+ 417   2                      case DENSITY_4MBIT:
+ 418   2                              *pages = NUM_PAGE_4MBIT;
+ 419   2                              *pagebytes = MAX_PAGE_4MBIT;
+ 420   2                              break;
+ 421   2                      case DENSITY_8MBIT:
+ 422   2                              *pages = NUM_PAGE_8MBIT;
+ 423   2                              *pagebytes = MAX_PAGE_8MBIT;
+ 424   2                              break;
+ 425   2                      case DENSITY_16MBIT:
+ 426   2                              *pages = NUM_PAGE_16MBIT;
+ 427   2                              *pagebytes = MAX_PAGE_16MBIT;
+ 428   2                              break;
+ 429   2                      case DENSITY_32MBIT:
+ 430   2                              *pages = NUM_PAGE_32MBIT;
+ 431   2                              *pagebytes = MAX_PAGE_32MBIT;
+ 432   2                              break;
+ 433   2                      case DENSITY_64MBIT:
+ 434   2                              *pages = NUM_PAGE_64MBIT;
+ 435   2                              *pagebytes = MAX_PAGE_64MBIT;
+ 436   2                              break;
+ 437   2              }
+ 438   1      }
+ 439          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1104    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      63
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

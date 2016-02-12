@@ -1,0 +1,508 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     14/Jul/2015  19:00:16 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\FS_MAP.c                             #
+#    Command line =  C:\DUII\TargetHW\FS\FS_MAP.c -D DEBUG=1 -D               #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\FS #
+#                    _MAP.lst                                                 #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\FS_ #
+#                    MAP.o                                                    #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\FS_MAP.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : FS_MAP.c
+     19          Purpose     : Wrapper to call the correct FS function.
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          #include "FS_Int.h"
+     24          
+     25          #if FS_SUPPORT_MULTIPLE_FS
+     26          /*********************************************************************
+     27          *
+     28          *       Static data
+     29          *
+     30          **********************************************************************
+     31          */
+     32          typedef struct {
+     33            int               FSNumber;
+     34            const FS_FS_API * pAPI;
+     35          } FS_API_TABLE;
+     36          
+     37          /*********************************************************************
+     38          *
+     39          *       Static code
+     40          *
+     41          **********************************************************************
+     42          */
+     43          static const FS_API_TABLE  _aAPI[] = {
+     44            {FS_FAT, &FS_FAT_API},
+     45            {FS_EFS, &FS_EFS_API}
+     46          };
+     47          
+     48          /*********************************************************************
+     49          *
+     50          *       Public code
+     51          *
+     52          **********************************************************************
+     53          */
+     54          
+     55          /*********************************************************************
+     56          *
+     57          *       FS_MAP_Close
+     58          *
+     59          */
+     60          void FS_MAP_Close(FS_FILE * pFile) {
+     61            FS_VOLUME * pVolume;
+     62          
+     63            pVolume = pFile->pFileObj->pVolume;
+     64            if (pVolume->pFS_API) {
+     65              pVolume->pFS_API->pfClose(pFile);
+     66            } else {
+     67              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+     68            }
+     69          }
+     70          
+     71          
+     72          /*********************************************************************
+     73          *
+     74          *       FS_MAP_Close
+     75          *
+     76          */
+     77          
+     78          int FS_MAP_CheckFS_API(FS_VOLUME * pVolume) {
+     79            unsigned i;
+     80          
+     81            for (i = 0; i < COUNTOF(_aAPI); i++) {
+     82              if (_aAPI[i].pAPI->pfCheckBootSector(pVolume) != 0) {
+     83                pVolume->pFS_API = _aAPI[i].pAPI;
+     84                return 1;
+     85              }
+     86            }
+     87            FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain an recognizable file system.\n"));
+     88            return 0;
+     89          }
+     90          
+     91          /*********************************************************************
+     92          *
+     93          *       FS_MAP_Read
+     94          *
+     95          */
+     96          U32 FS_MAP_Read(FS_FILE * pFile, void  * pData, U32 NumBytes) {
+     97            FS_VOLUME * pVolume;
+     98          
+     99            pVolume = pFile->pFileObj->pVolume;
+    100            if (pVolume->pFS_API) {
+    101              return pVolume->pFS_API->pfRead(pFile, pData, NumBytes);
+    102            } else {
+    103              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    104            }
+    105            return 0;
+    106          }
+    107          
+    108          
+    109          /*********************************************************************
+    110          *
+    111          *       FS_MAP_Write
+    112          *
+    113          */
+    114          U32 FS_MAP_Write(FS_FILE * pFile, const void  * pData, U32 NumBytes) {
+    115            FS_VOLUME * pVolume;
+    116          
+    117            pVolume = pFile->pFileObj->pVolume;
+    118            if (pVolume->pFS_API) {
+    119              return pVolume->pFS_API->pfWrite(pFile, pData, NumBytes);
+    120            } else {
+    121              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    122            }
+    123            return 0;
+    124          }
+    125          
+    126          /*********************************************************************
+    127          *
+    128          *       FS_MAP_Open
+    129          *
+    130          */
+    131          char FS_MAP_Open(const char * pFileName, FS_FILE * pFile, char DoDel, char DoOpen, char DoCreate) {
+    132            FS_VOLUME * pVolume;
+    133          
+    134            pVolume = pFile->pFileObj->pVolume;
+    135            if (pVolume->pFS_API) {
+    136              return pVolume->pFS_API->pfOpen(pFileName, pFile, DoDel, DoOpen, DoCreate);
+    137            } else {
+    138              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    139            }
+    140            return 0;
+    141          }
+    142          
+    143          /*********************************************************************
+    144          *
+    145          *       FS_MAP_Format
+    146          *
+    147          */
+    148          int FS_MAP_Format(FS_VOLUME * pVolume,   FS_FORMAT_INFO * pFormatInfo) {
+    149            if (pVolume->pFS_API) {
+    150              return pVolume->pFS_API->pfFormat(pVolume, pFormatInfo);
+    151            } else {
+    152              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    153            }
+    154            return -1;
+    155          }
+    156          
+    157          /*********************************************************************
+    158          *
+    159          *       FS_MAP_OpenDir
+    160          *
+    161          */
+    162          int FS_MAP_OpenDir(const char * pDirName,  FS__DIR * pDir) {
+    163            FS_VOLUME * pVolume;
+    164          
+    165            pVolume = pDir->pVolume;
+    166            if (pVolume->pFS_API) {
+    167              return pVolume->pFS_API->pfOpenDir(pDirName, pDir);
+    168            } else {
+    169              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    170            }
+    171            return -1;
+    172          }
+    173          
+    174          /*********************************************************************
+    175          *
+    176          *       FS_MAP_CloseDir
+    177          *
+    178          */
+    179          int FS_MAP_CloseDir(FS__DIR * pDir) {
+    180            FS_VOLUME * pVolume;
+    181          
+    182            pVolume = pDir->pVolume;
+    183            if (pVolume->pFS_API) {
+    184              return pVolume->pFS_API->pfCloseDir(pDir);
+    185            } else {
+    186              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    187            }
+    188            return -1;
+    189          }
+    190          
+    191          /*********************************************************************
+    192          *
+    193          *       FS_MAP_ReadDir
+    194          *
+    195          */
+    196          int FS_MAP_ReadDir(FS__DIR * pDir, FS_DIRENTRY_INFO * pDirEntryInfo) {
+    197            FS_VOLUME * pVolume;
+    198          
+    199            pVolume = pDir->pVolume;
+    200            if (pVolume->pFS_API) {
+    201              return pVolume->pFS_API->pfReadDir(pDir, pDirEntryInfo);
+    202            } else {
+    203              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    204            }
+    205            return -1;
+    206          }
+    207          
+    208          /*********************************************************************
+    209          *
+    210          *       FS_MAP_RemoveDir
+    211          *
+    212          */
+    213          int FS_MAP_RemoveDir(FS_VOLUME * pVolume, const char * pDirName) {
+    214            if (pVolume->pFS_API) {
+    215              return pVolume->pFS_API->pfRemoveDir(pVolume, pDirName);
+    216            } else {
+    217              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    218            }
+    219            return -1;
+    220          }
+    221          
+    222          /*********************************************************************
+    223          *
+    224          *       FS_MAP_CreateDir
+    225          *
+    226          */
+    227          int FS_MAP_CreateDir(FS_VOLUME * pVolume, const char * pDirName) {
+    228            if (pVolume->pFS_API) {
+    229              return pVolume->pFS_API->pfCreateDir(pVolume, pDirName);
+    230            } else {
+    231              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    232            }
+    233            return -1;
+    234          }
+    235          
+    236          /*********************************************************************
+    237          *
+    238          *       FS_MAP_Rename
+    239          *
+    240          */
+    241          int FS_MAP_Rename(const char * sOldName, const char * sNewName, FS_VOLUME * pVolume) {
+    242            if (pVolume->pFS_API) {
+    243              return pVolume->pFS_API->pfRename(sOldName, sNewName, pVolume);
+    244            } else {
+    245              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    246            }
+    247            return -1;
+    248          }
+    249          
+    250          /*********************************************************************
+    251          *
+    252          *       FS_MAP_Move
+    253          *
+    254          */
+    255          int FS_MAP_Move(const char * sOldName, const char * sNewName, FS_VOLUME * pVolume) {
+    256            if (pVolume->pFS_API) {
+    257              return pVolume->pFS_API->pfMove(sOldName, sNewName, pVolume);
+    258            } else {
+    259              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    260            }
+    261            return -1;
+    262          }
+    263          
+    264          /*********************************************************************
+    265          *
+    266          *       FS_MAP_SetDirEntryInfo
+    267          *
+    268          */
+    269          char FS_MAP_SetDirEntryInfo(FS_VOLUME * pVolume, const char * sName, const void * p, int Mask) {
+    270            if (pVolume->pFS_API) {
+    271              return pVolume->pFS_API->pfSetDirEntryInfo(pVolume, sName, p, Mask);
+    272            } else {
+    273              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    274            }
+    275            return (char)0xff;
+    276          }
+    277          
+    278          /*********************************************************************
+    279          *
+    280          *       FS_MAP_GetDirEntryInfo
+    281          *
+    282          */
+    283          char FS_MAP_GetDirEntryInfo(FS_VOLUME * pVolume, const char * sName, void * p, int Mask) {
+    284            if (pVolume->pFS_API) {
+    285              return pVolume->pFS_API->pfGetDirEntryInfo(pVolume, sName, p, Mask);
+    286            } else {
+    287              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    288            }
+    289            return (char)0xff;
+    290          }
+    291          
+    292          /*********************************************************************
+    293          *
+    294          *       FS_MAP_SetEndOfFile
+    295          *
+    296          */
+    297          int FS_MAP_SetEndOfFile(FS_FILE * pFile) {
+    298            FS_VOLUME * pVolume;
+    299          
+    300            pVolume = pFile->pFileObj->pVolume;
+    301            if (pVolume->pFS_API) {
+    302              return pVolume->pFS_API->pfSetEndOfFile(pFile);
+    303            } else {
+    304              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    305            }
+    306            return 0xff;
+    307          }
+    308          
+    309          /*********************************************************************
+    310          *
+    311          *       FS_MAP_Clean
+    312          *
+    313          */
+    314          void FS_MAP_Clean(FS_VOLUME * pVolume) {
+    315            if (pVolume->pFS_API) {
+    316              pVolume->pFS_API->pfUnmount(pVolume);
+    317            } else {
+    318              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    319            }
+    320          }
+    321          
+    322          /*********************************************************************
+    323          *
+    324          *       FS_MAP_GetDiskInfo
+    325          *
+    326          */
+    327          int FS_MAP_GetDiskInfo(FS_VOLUME * pVolume, FS_DISK_INFO * pDiskData, int Flags) {
+    328            if (pVolume->pFS_API) {
+    329              return pVolume->pFS_API->pfGetDiskInfo(pVolume, pDiskData, Flags);
+    330            } else {
+    331              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    332            }
+    333            return -1;
+    334          }
+    335          
+    336          /*********************************************************************
+    337          *
+    338          *       FS_MAP_GetVolumeLabel
+    339          *
+    340          */
+    341          int FS_MAP_GetVolumeLabel(FS_VOLUME * pVolume, char * pVolumeLabel, unsigned VolumeLabelSize) {
+    342            if (pVolume->pFS_API) {
+    343              return pVolume->pFS_API->pfGetVolumeLabel(pVolume, pVolumeLabel, VolumeLabelSize);
+    344            } else {
+    345              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    346            }
+    347            return -1;
+    348          }
+    349          
+    350          /*********************************************************************
+    351          *
+    352          *       FS_MAP_SetVolumeLabel
+    353          *
+    354          */
+    355          int FS_MAP_SetVolumeLabel(FS_VOLUME * pVolume, const char * pVolumeLabel) {
+    356            if (pVolume->pFS_API) {
+    357              return pVolume->pFS_API->pfSetVolumeLabel(pVolume, pVolumeLabel);
+    358            } else {
+    359              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    360            }
+    361            return -1;
+    362          }
+    363          
+    364          /*********************************************************************
+    365          *
+    366          *       FS_MAP_CreateJournalFile
+    367          *
+    368          */
+    369          int FS_MAP_CreateJournalFile(FS_VOLUME * pVolume, U32 NumBytes, U32 * pFirstSector, U32 * pNumSectors) {
+    370            if (pVolume->pFS_API) {
+    371              return pVolume->pFS_API->pfCreateJournalFile(pVolume, NumBytes, pFirstSector, pNumSectors);
+    372            } else {
+    373              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    374            }
+    375            return -1;
+    376          }
+    377          
+    378          /*********************************************************************
+    379          *
+    380          *       FS_MAP_OpenJournalFile
+    381          *
+    382          */
+    383          int FS_MAP_OpenJournalFile(FS_VOLUME * pVolume) {
+    384            if (pVolume->pFS_API) {
+    385              return pVolume->pFS_API->pfOpenJournalFile(pVolume);
+    386            } else {
+    387              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    388            }
+    389            return -1;
+    390          }
+    391          
+    392          /*********************************************************************
+    393          *
+    394          *       FS_MAP_GetIndexOfLastSector
+    395          *
+    396          */
+    397          U32 FS_MAP_GetIndexOfLastSector(FS_VOLUME * pVolume) {
+    398            if (pVolume->pFS_API) {
+    399              return pVolume->pFS_API->pfGetIndexOfLastSector(pVolume);
+    400            } else {
+    401              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    402            }
+    403            return 0;
+    404          }
+    405          
+    406          /*********************************************************************
+    407          *
+    408          *       FS_MAP_CheckDisk
+    409          *
+    410          */
+    411          int FS_MAP_CheckDisk(FS_VOLUME * pVolume, FS_DISK_INFO * pDiskInfo, void * pBuffer, U32 BufferSize, int MaxRecursionLevel, FS_QUERY_F_TYPE * pfOnError) {
+    412            if (pVolume->pFS_API) {
+    413              return pVolume->pFS_API->pfCheckDisk(pVolume, pDiskInfo, pBuffer, BufferSize, MaxRecursionLevel, pfOnError);
+    414            } else {
+    415              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    416            }
+    417            return -1;
+    418          }
+    419          
+    420          /*********************************************************************
+    421          *
+    422          *       FS_MAP_UpdateFile
+    423          *
+    424          */
+    425          void FS_MAP_UpdateFile(FS_FILE * pFile) {
+    426            FS_VOLUME * pVolume;
+    427          
+    428            pVolume = pFile->pFileObj->pVolume;
+    429            if (pVolume->pFS_API) {
+    430              pVolume->pFS_API->pfUpdateFile(pFile);
+    431            } else {
+    432              FS_DEBUG_ERROROUT((FS_MTYPE_API, "Volume does not contain a valid FS.\n"));
+    433            }
+    434          }
+    435          
+    436          
+    437          /*********************************************************************
+    438          *
+    439          *       FS_SetFSType
+    440          *
+    441          */
+    442          int FS_SetFSType(const char * sVolume, int FSType) {
+    443            FS_VOLUME * pVolume;
+    444            int         r;
+    445            FS_LOCK();
+    446            r       = -1;
+    447            pVolume = FS_FindVolume(sVolume);
+    448            if (pVolume) { 
+    449              if (pVolume->pFS_API != NULL) {
+    450                FS_DEVICE * pDevice;
+    451          
+    452                pDevice = &pVolume->Partition.Device;
+    453                FS_DEBUG_WARN((FS_MTYPE_FS, "A file system is already assigned to Volume %s:%d:.\n",  pDevice->pType->pfGetName(pDevice->Data.Unit), pDevice->Data.Unit));
+    454              }
+    455              if (FSType >= COUNTOF(_aAPI)) {
+    456                FS_DEBUG_ERROROUT((FS_MTYPE_FS, "Invalid wrong file sytem type.\n", FSType));
+    457              } else {
+    458                pVolume->pFS_API = _aAPI[FSType].pAPI;
+    459                r = 0;
+    460              }
+    461            }
+    462            FS_UNLOCK();
+    463            return r;
+    464          }
+    465          #endif
+    466          
+    467          /*************************** End of file ****************************/
+
+
+ 
+ 
+ 0 bytes of memory
+
+Errors: none
+Warnings: none

@@ -1,0 +1,2702 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     14/Jul/2015  19:00:07 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\FAT_LFN.c                            #
+#    Command line =  C:\DUII\TargetHW\FS\FAT_LFN.c -D DEBUG=1 -D              #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\FA #
+#                    T_LFN.lst                                                #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\FAT #
+#                    _LFN.o                                                   #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\FAT_LFN.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : FAT_LFN.c
+     19          Purpose     : Handling of long file names for FAT file system
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          /*********************************************************************
+     24          *
+     25          *       Fat specifications
+     26          *
+     27          *  Long file names
+     28          *    Storage of a Long-Name Within Long Directory Entries
+     29          *    A long name can consist of more characters than can fit in a single long directory entry. When this
+     30          *    occurs the name is stored in more than one long entry. Index any event, the name fields themselves
+     31          *    within the long entries are disjoint. The following example is provided to illustrate how a long name
+     32          *    is stored across several long directory entries. Names are also NUL terminated and padded with
+     33          *    0xFFFF characters in order to detect corruption of long name fields by errant disk utilities. A name
+     34          *    that fits exactly in a n long directory entries (i.e. is an integer multiple of 13) is not NUL terminated
+     35          *    and not padded with 0xFFFFs.
+     36          *
+     37          **********************************************************************
+     38          */
+     39          
+     40          
+     41          /*********************************************************************
+     42          *
+     43          *             #include Section
+     44          *
+     45          **********************************************************************
+     46          */
+     47          
+     48          #include "FAT_Intern.h"
+     49          
+     50          /*********************************************************************
+     51          *
+     52          *       Defines, configurable
+     53          *
+     54          **********************************************************************
+     55          */
+     56          
+     57          #ifndef   FS_FAT_LFN_MAX_SHORT_NAME
+     58            #define FS_FAT_LFN_MAX_SHORT_NAME  1000
+     59          #endif
+     60          
+     61          #ifndef    FS_FAT_LFN_BIT_ARRAY_SIZE
+     62            #define  FS_FAT_LFN_BIT_ARRAY_SIZE      256
+     63          #endif
+     64          
+     65          #if FS_FAT_SUPPORT_UTF8
+     66            #define GET_CHAR(c, sLongName)   {          \
+     67              U16 UnicodeChar;                          \
+     68              UnicodeChar = _UTF8_2_Unicode(sLongName); \
+     69              UnicodeChar = _ToUpper(UnicodeChar);      \
+     70              sLongName  += _GetCharSize(sLongName);    \
+     71              if (UnicodeChar <= 0x7f) {                \
+     72                c = (U8)UnicodeChar;                    \
+     73              } else {                                  \
+     74                c = '_';                                \
+     75              }                                         \
+     76            }
+     77            #define GET_CHAR_SIZE(p)     _GetCharSize(p)
+     78            #define GET_CHAR_CODE(p)     _UTF8_2_Unicode(p)
+     79            #define STRLEN(p)            _UTF8_StrLen(p)
+     80            #define STRNLEN(p, NumChars) _UTF8_StrnLen(p, NumChars)
+     81            #define WALK_2_CHAR(s, Off)  _UTF8_Walk2Char(sLongName, Off)
+     82          #else
+     83            #define GET_CHAR(c, sLongName) {         \
+     84              c = *sLongName;                        \
+     85              if ((int)c <= 0x7f) {                       \
+     86                c = FS_TOUPPER(c);                   \
+     87              } else {                               \
+     88                c = '_';                             \
+     89              }                                      \
+     90              sLongName++;                           \
+     91            }
+     92            #define GET_CHAR_SIZE(p)       1
+     93            #define GET_CHAR_CODE(p)      (*p) & 0x00ff
+     94            #define STRLEN(p)             FS_STRLEN(p)
+     95            #define STRNLEN(p, NumChars)  NumChars
+     96            #define WALK_2_CHAR(s, Off)   Off
+     97          #endif
+     98          
+     99          
+    100          
+    101          
+    102          #if FS_FAT_SUPPORT_UTF8
+    103          /*********************************************************************
+    104          *
+    105          *       Static typedefs
+    106          *
+    107          **********************************************************************
+    108          */
+    109          typedef struct {
+    110            U16 LowerCase;
+    111            U16 UpperCase;
+    112          } UNICODE_CHARTABLE;
+    113          
+    114          
+    115          /*********************************************************************
+    116          *
+    117          *       Static const
+    118          *
+    119          **********************************************************************
+    120          */
+    121          
+    122          static const UNICODE_CHARTABLE _aLower2UpperTable[] = {
+    123            /* Latin-1 Supplement */
+    124            {0x00e0, 0x00c0}, {0x00e1, 0x00c1}, {0x00e2, 0x00c2}, {0x00e3, 0x00c3}, {0x00e4, 0x00c4}, {0x00e5, 0x00c5}, {0x00e6, 0x00c6}, {0x00e7, 0x00c7},
+    125            {0x00e8, 0x00c8}, {0x00e9, 0x00c9}, {0x00ea, 0x00ca}, {0x00eb, 0x00cb}, {0x00ec, 0x00cc}, {0x00ed, 0x00cd}, {0x00ee, 0x00ce}, {0x00ef, 0x00cf},
+    126            {0x00f0, 0x00d0}, {0x00f1, 0x00d1}, {0x00f2, 0x00d2}, {0x00f3, 0x00d3}, {0x00f4, 0x00d3}, {0x00f5, 0x00d3}, {0x00f6, 0x00d3}, {0x00f7, 0x00d3},
+    127            {0x00f8, 0x00d3}, {0x00f9, 0x00d3}, {0x00fa, 0x00d3}, {0x00fb, 0x00d3}, {0x00fc, 0x00d3}, {0x00fd, 0x00d3}, {0x00fe, 0x00d3}, {0x00ff, 0x0178},
+    128          
+    129            /* Latin-1 Extended A */
+    130            {0x0101, 0x0100}, {0x0103, 0x0102}, {0x0105, 0x0104}, {0x0107, 0x0106}, {0x0109, 0x0108}, {0x010b, 0x010a}, {0x010d, 0x010c}, {0x010f, 0x010e},
+    131            {0x0111, 0x0110}, {0x0113, 0x0112}, {0x0115, 0x0114}, {0x0117, 0x0116}, {0x0119, 0x0118}, {0x011b, 0x011a}, {0x011d, 0x011c}, {0x011f, 0x011e},
+    132            {0x0121, 0x0120}, {0x0123, 0x0122}, {0x0125, 0x0124}, {0x0127, 0x0126}, {0x0129, 0x0128}, {0x012b, 0x012a}, {0x012d, 0x012c}, {0x012f, 0x012e},
+    133            {0x0131, 0x0130}, {0x0133, 0x0132}, {0x0135, 0x0134}, {0x0137, 0x0136}, {0x013a, 0x0139}, {0x013c, 0x013b}, {0x013e, 0x013d}, {0x0140, 0x013f},
+    134            {0x0142, 0x0141}, {0x0144, 0x0143}, {0x0146, 0x0145}, {0x0148, 0x0147}, {0x014b, 0x014a}, {0x014d, 0x014c}, {0x014f, 0x014e},
+    135            {0x0151, 0x0150}, {0x0153, 0x0152}, {0x0155, 0x0154}, {0x0157, 0x0156}, {0x0159, 0x0158}, {0x015b, 0x015a}, {0x015d, 0x015c}, {0x015f, 0x015e},
+    136            {0x0161, 0x0160}, {0x0163, 0x0162}, {0x0165, 0x0164}, {0x0167, 0x0166}, {0x0169, 0x0168}, {0x016b, 0x016a}, {0x016d, 0x016c}, {0x016f, 0x016e},
+    137            {0x0171, 0x0170}, {0x0173, 0x0172}, {0x0175, 0x0174}, {0x0177, 0x0176}, {0x017a, 0x0179}, {0x017c, 0x017b}, {0x017e, 0x017d},
+    138          
+    139            /* Latin-1 Extended B */
+    140            {0x0183, 0x0182}, {0x0185, 0x0184}, {0x0188, 0x0187}, {0x018c, 0x018b},
+    141            {0x0192, 0x0191}, {0x0199, 0x0198},
+    142            {0x01a1, 0x01a0}, {0x01a3, 0x01a2}, {0x01a5, 0x01a4}, {0x01a8, 0x01a7}, {0x01b0, 0x01af},
+    143            {0x01b4, 0x01b3}, {0x01b6, 0x01b5}, {0x01b9, 0x01b8},
+    144            {0x01c6, 0x01c4}, {0x01c5, 0x01c4}, {0x01c8, 0x01c7}, {0x01c9, 0x01c7}, {0x01cb, 0x01ca}, {0x01cc, 0x01ca}, {0x01ce, 0x01cd},
+    145            {0x01d0, 0x01cf}, {0x01d2, 0x01d1}, {0x01d4, 0x01d3}, {0x01d6, 0x01d5}, {0x01d8, 0x01d7}, {0x01da, 0x01d9}, {0x01dc, 0x01db}, {0x01dd, 0x018e}, {0x01df, 0x01de},
+    146            {0x01e1, 0x01e0}, {0x01e3, 0x01e2}, {0x01e5, 0x01e4}, {0x01e7, 0x01e6}, {0x01e9, 0x01e8}, {0x01eb, 0x01ea}, {0x01ed, 0x01ec}, {0x01ef, 0x01ee},
+    147            {0x01f2, 0x01f1}, {0x01f3, 0x01f1}, {0x01f5, 0x01f4}, {0x01fb, 0x01fa}, {0x01fd, 0x01fc}, {0x01ff, 0x01fe},
+    148            {0x0201, 0x0200}, {0x0203, 0x0202}, {0x0205, 0x0204}, {0x0207, 0x0206}, {0x0209, 0x0208}, {0x020b, 0x020a}, {0x020d, 0x020c}, {0x020f, 0x020e},
+    149            {0x0211, 0x0210}, {0x0213, 0x0212}, {0x0215, 0x0214}, {0x0217, 0x0216},
+    150          
+    151            /* Basic Greek */
+    152            {0x03b1, 0x0391}, {0x03b2, 0x0392}, {0x03b3, 0x0393}, {0x03b4, 0x0394}, {0x03b5, 0x0395}, {0x03b6, 0x0396}, {0x03b7, 0x0397},
+    153            {0x03b8, 0x0398}, {0x03b9, 0x0399}, {0x03ba, 0x039a}, {0x03bb, 0x039b}, {0x03bc, 0x039c}, {0x03bd, 0x039d}, {0x03be, 0x039e},
+    154            {0x03c0, 0x03a0}, {0x03c1, 0x03a1}, {0x03c2, 0x03a3}, {0x03c3, 0x03a3}, {0x03c4, 0x03a4}, {0x03c5, 0x03a5}, {0x03c6, 0x03a6}, {0x03c7, 0x03a7},
+    155            {0x03c8, 0x03a8}, {0x03c9, 0x03a9}, {0x03ca, 0x03aa}, {0x03cb, 0x03ab}, {0x03cc, 0x038c}, {0x03cd, 0x038e}, {0x03ce, 0x038f},
+    156            {0x03ac, 0x0386}, {0x03ad, 0x0388}, {0x03ae, 0x0389}, {0x03af, 0x038a},
+    157          
+    158            /* Cyrillic */
+    159            {0x0430, 0x0410}, {0x0431, 0x0411}, {0x0432, 0x0412}, {0x0433, 0x0413}, {0x0434, 0x0414}, {0x0435, 0x0415}, {0x0436, 0x0416}, {0x0437, 0x0417},
+    160            {0x0438, 0x0418}, {0x0439, 0x0419}, {0x043a, 0x041a}, {0x043b, 0x041b}, {0x043c, 0x041c}, {0x043d, 0x041d}, {0x043e, 0x041e}, {0x043f, 0x041f},
+    161            {0x0440, 0x0420}, {0x0441, 0x0421}, {0x0442, 0x0422}, {0x0443, 0x0423}, {0x0444, 0x0424}, {0x0445, 0x0425}, {0x0446, 0x0426}, {0x0447, 0x0427},
+    162            {0x0448, 0x0428}, {0x0449, 0x0429}, {0x044a, 0x042a}, {0x044b, 0x042b}, {0x044c, 0x042c}, {0x044d, 0x042d}, {0x044e, 0x042e}, {0x044f, 0x042f},
+    163            {0x0451, 0x0401}, {0x0452, 0x0402}, {0x0453, 0x0403}, {0x0454, 0x0404}, {0x0455, 0x0405}, {0x0456, 0x0406}, {0x0457, 0x0407},
+    164            {0x0458, 0x0408}, {0x0459, 0x0409}, {0x045a, 0x040a}, {0x045b, 0x040b}, {0x045c, 0x040c}, {0x045e, 0x040e}, {0x045f, 0x040f},
+    165          
+    166            {0x0461, 0x0460}, {0x0463, 0x0462}, {0x0465, 0x0464}, {0x0467, 0x0466}, {0x0469, 0x0468}, {0x046b, 0x046a}, {0x046d, 0x046c}, {0x046f, 0x046e},
+    167            {0x0471, 0x0470}, {0x0473, 0x0472}, {0x0475, 0x0474}, {0x0477, 0x0476}, {0x0479, 0x0478}, {0x047b, 0x047a}, {0x047d, 0x047c}, {0x047f, 0x047e},
+    168          
+    169            {0x0481, 0x0480},
+    170            {0x0491, 0x0490}, {0x0493, 0x0492}, {0x0495, 0x0494}, {0x0497, 0x0496}, {0x0499, 0x0498}, {0x049b, 0x049a}, {0x049d, 0x049c}, {0x049f, 0x049e},
+    171            {0x04a1, 0x04a0}, {0x04a3, 0x04a2}, {0x04a5, 0x04a4}, {0x04a7, 0x04a6}, {0x04a9, 0x04a8}, {0x04ab, 0x04aa}, {0x04ad, 0x04ac}, {0x04af, 0x04ae},
+    172            {0x04b1, 0x04b0}, {0x04b3, 0x04b2}, {0x04b5, 0x04b4}, {0x04b7, 0x04b6}, {0x04b9, 0x04b8}, {0x04bb, 0x04ba}, {0x04bd, 0x04bc}, {0x04bf, 0x04be},
+    173          
+    174            {0x04c2, 0x04c1}, {0x04c4, 0x04c3}, {0x04c8, 0x04c7}, {0x04cc, 0x04cb},
+    175          
+    176            {0x04d1, 0x04d0}, {0x04d3, 0x04d2}, {0x04d5, 0x04d4}, {0x04d7, 0x04d6}, {0x04d9, 0x04d8}, {0x04db, 0x04da}, {0x04dd, 0x04dc}, {0x04df, 0x04de},
+    177            {0x04e1, 0x04e0}, {0x04e3, 0x04e2}, {0x04e5, 0x04e4}, {0x04e7, 0x04e6}, {0x04e9, 0x04e8}, {0x04eb, 0x04ea}, {0x04ef, 0x04ee},
+    178            {0x04f1, 0x04f0}, {0x04f3, 0x04f2}, {0x04f5, 0x04f4}, {0x04f9, 0x04f8},
+    179            FS_UNICODE_UPPERCASE_EXT,
+    180            {0x0000, 0x0000}  /* End of table */
+    181          };
+    182          #endif /* FS_FAT_SUPPORT_UTF8 */
+    183          
+    184          /*********************************************************************
+    185          *
+    186          *       Static data
+    187          *
+    188          **********************************************************************
+    189          */
+    190          
+    191          /*********************************************************************
+    192          *
+    193          *       Static code
+    194          *
+    195          **********************************************************************
+    196          */
+    197          
+    198          #if FS_FAT_SUPPORT_UTF8
+    199          /*********************************************************************
+    200          *
+    201          *       _GetCharCode
+    202          *
+    203          * Purpose:
+    204          *   Return the UNICODE character code of the current character.
+    205          */
+    206          static U16 _UTF8_2_Unicode(const char * s) {
+    207            U16 r;
+    208            U8 Char = *s;
+    209            if ((Char & 0x80) == 0) {                /* Single byte (ASCII)  */
+    210              r = Char;
+    211            } else if ((Char & 0xe0) == 0xc0) {      /* Double byte sequence */
+    212              r = (Char & 0x1f) << 6;
+    213              Char = *(++s);
+    214              Char &= 0x3f;
+    215              r |= Char;
+    216            } else if ((Char & 0xf0) == 0xe0) {      /* 3 byte sequence      */
+    217              r = (Char & 0x0f) << 12;
+    218              Char = *(++s);
+    219              Char &= 0x3f;
+    220              r |= (Char << 6);
+    221              Char = *(++s);
+    222              Char &= 0x3f;
+    223              r |= Char;
+    224            } else {
+    225              FS_DEBUG_ERROROUT((FS_MTYPE_FS, "Illegal character during UTF-8 decoding!"));
+    226              r = 1;       /* Illegal character. To avoid endless loops in upper layers, we return 1 rather than 0. */
+    227            }
+    228            return r;
+    229          }
+    230          
+    231          /*********************************************************************
+    232          *
+    233          *       _CalcSizeOfChar
+    234          *
+    235          * Purpose:
+    236          *   Return the number of bytes needed for the given character.
+    237          */
+    238          static int _CalcSizeOfChar(U16 Char) {
+    239            int r;
+    240            if (Char & 0xF800) {                /* Single byte (ASCII)  */
+    241              r = 3;
+    242            } else if (Char & 0xFF80) {         /* Double byte sequence */
+    243              r = 2;
+    244            } else {                            /* 3 byte sequence      */
+    245              r = 1;
+    246            }
+    247            return r;
+    248          }
+    249          
+    250          /*********************************************************************
+    251          *
+    252          *       _Unicode_2_UTF8
+    253          *
+    254          * Purpose:
+    255          *   Encode character into 1/2/3 bytes.
+    256          */
+    257          static int _Unicode_2_UTF8(char *s, U16 Char) {
+    258            int r;
+    259            r = _CalcSizeOfChar(Char);
+    260            switch (r) {
+    261            case 1:
+    262              *s = (char)Char;
+    263              break;
+    264            case 2:
+    265              *s++ = 0xC0 | (Char >> 6);
+    266              *s   = 0x80 | (Char & 0x3F);
+    267              break;
+    268            case 3:
+    269              *s++ = 0xE0 | (Char >> 12);
+    270              *s++ = 0x80 | ((Char >> 6) & 0x3F);
+    271              *s   = 0x80 | (Char & 0x3F);
+    272              break;
+    273            }
+    274            return r;
+    275          }
+    276          
+    277          /*********************************************************************
+    278          *
+    279          *       _GetCharSize
+    280          *
+    281          * Purpose:
+    282          *   Return the number of bytes of the current character.
+    283          */
+    284          static int _GetCharSize(const char * s) {
+    285            U8 Char = *s;
+    286            if ((Char & 0x80) == 0) {
+    287              return 1;
+    288            } else if ((Char & 0xe0) == 0xc0) {
+    289              return 2;
+    290            } else if ((Char & 0xf0) == 0xe0) {
+    291              return 3;
+    292            }
+    293            FS_DEBUG_ERROROUT((FS_MTYPE_FS, "Illegal character during UTF-8 decoding!"));
+    294            return 1;       /* Illegal character. To avoid endless loops in upper layers, we return 1 rather than 0. */
+    295          }
+    296          
+    297          /*********************************************************************
+    298          *
+    299          *       _UTF8_StrLen
+    300          *
+    301          * Purpose:
+    302          *   Returns the number of characters in the UTF8 encoded string.
+    303          */
+    304          static int _UTF8_StrLen(const char* s) {
+    305            int r;
+    306            int Len;
+    307            r = 0;
+    308            while(*s) {
+    309              Len = _GetCharSize(s);
+    310              r++;
+    311              s += Len;
+    312            }
+    313            return r;
+    314          }
+    315          
+    316          /*********************************************************************
+    317          *
+    318          *       _UTF8_StrnLen
+    319          *
+    320          * Purpose:
+    321          *   Returns the number of characters in the UTF8 encoded string.
+    322          */
+    323          static int _UTF8_StrnLen(const char* s, unsigned NumChars) {
+    324            int r;
+    325            int Len;
+    326            r = 0;
+    327            while((*s) && (NumChars)) {
+    328              Len = _GetCharSize(s);
+    329              r++;
+    330              NumChars-= Len;
+    331              s += Len;
+    332          
+    333            }
+    334            return r;
+    335          }
+    336          
+    337          
+    338          /*********************************************************************
+    339          *
+    340          *       _UTF8_Walk2Char
+    341          *
+    342          * Purpose:
+    343          *   returns the offset of the desired characters to walk.
+    344          */
+    345          static int _UTF8_Walk2Char(const char* s, int NumChars) {
+    346            int r;
+    347            int Len;
+    348            r = 0;
+    349            while((NumChars--) && (*s)) {
+    350              Len = _GetCharSize(s);
+    351              r += Len;
+    352              s += Len;
+    353            }
+    354            return r;
+    355          }
+    356          #endif /* FS_FAT_SUPPORT_UTF8 */
+    357          
+    358          /*********************************************************************
+    359          *
+    360          *       _CalcNumLongEntries
+    361          *
+    362          * Returns
+    363          *   Number of directory entries for the long file name.
+    364          *   Examples:
+    365          *     "test.txt"                         -> 1
+    366          *     "FileName.txt"                     -> 1
+    367          *     "LongFileName.txt"                 -> 2
+    368          *     "Very very very LongFileName.txt"  -> 3
+    369          */
+    370          static int _CalcNumLongEntries(const char * sLongName, int Len) {
+    371            if (Len == 0) {
+    372              Len = STRLEN(sLongName);
+    373            } else {
+    374              Len = STRNLEN(sLongName, Len);
+    375            }
+    376            return (Len + 12) / 13;
+    377          }
+    378          
+    379          #if FS_FAT_SUPPORT_UTF8
+    380          /*********************************************************************
+    381          *
+    382          *       _LoadU16
+    383          *
+    384          */
+    385          static U16 _LoadU16(const U16 * pSrc) {
+    386            U16         Data16;
+    387          
+    388            if ((U32)pSrc & 1) {
+    389              const U8 * pSrc8;
+    390          
+    391              pSrc8   = (const U8 *)pSrc;
+    392              Data16  = *pSrc8;
+    393              Data16 |= (*(pSrc8 + 1) << 8);
+    394            } else {
+    395              Data16 = *pSrc;
+    396            }
+    397            return Data16;
+    398          }
+    399          
+    400          /*********************************************************************
+    401          *
+    402          *       _CopyString, UTF8 version
+    403          *
+    404          */
+    405          static int _CopyString(char * pDest,  const void * p, int MaxLen) {
+    406            int LenDest;
+    407            const U16 * pSrc;
+    408            U16         Data16;
+    409          
+    410            pSrc = (const U16 *)p;
+    411            LenDest = 0;
+    412            while (MaxLen--) {
+    413              int NumBytes;
+    414          
+    415              Data16 = _LoadU16(pSrc);
+    416              NumBytes = _Unicode_2_UTF8(pDest, Data16);
+    417              pSrc++;
+    418              Data16 = _LoadU16(pSrc);
+    419              if (Data16 == 0xffff) {
+    420                break;
+    421              }
+    422              pDest   += NumBytes;
+    423              LenDest += NumBytes;
+    424            }
+    425            return LenDest;
+    426          }
+    427          #else
+    428          /*********************************************************************
+    429          *
+    430          *       _CopyString
+    431          *
+    432          */
+    433          static int _CopyString(char * pDest,  const void * p, int MaxLen) {
+    434            int i;
+    435            const U8 * pSrc;
+    436          
+    437            pSrc = (const U8 *)p;
+    438            for (i = 0; i < MaxLen; i++) {
+    439              if (*pSrc == 0xff) {
+    440                break;
+    441              }
+    442              *pDest++ = *pSrc;
+    443              pSrc += 2;
+    444            }
+    445            return i;
+    446          }
+    447          #endif
+    448          
+    449          /*********************************************************************
+    450          *
+    451          *       _CopyLongName
+    452          *
+    453          */
+
+   \                                 In section .text, align 4, keep-with-next
+    454          static int _CopyLongName(char * pDest, const U8 * pSrc) {
+   \                     _CopyLongName:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+    455            int r;
+    456            r = 0;
+    457            r += _CopyString (pDest,  pSrc, 5);
+   \   00000004   00E0D1E5           LDRB     LR,[R1, #+0]
+   \   00000008   0030A0E1           MOV      R3,R0
+   \   0000000C   0020A0E3           MOV      R2,#+0
+   \   00000010   FF005EE3           CMP      LR,#+255
+   \   00000014   1600000A           BEQ      ??_CopyLongName_0
+   \   00000018   01E0C3E4           STRB     LR,[R3], #+1
+   \   0000001C   02C081E2           ADD      R12,R1,#+2
+   \   00000020   00E0DCE5           LDRB     LR,[R12, #+0]
+   \   00000024   0120A0E3           MOV      R2,#+1
+   \   00000028   FF005EE3           CMP      LR,#+255
+   \   0000002C   1000000A           BEQ      ??_CopyLongName_0
+   \   00000030   01E0C3E4           STRB     LR,[R3], #+1
+   \   00000034   02E0FCE5           LDRB     LR,[R12, #+2]!
+   \   00000038   0220A0E3           MOV      R2,#+2
+   \   0000003C   FF005EE3           CMP      LR,#+255
+   \   00000040   0B00000A           BEQ      ??_CopyLongName_0
+   \   00000044   01E0C3E4           STRB     LR,[R3], #+1
+   \   00000048   02E0FCE5           LDRB     LR,[R12, #+2]!
+   \   0000004C   0320A0E3           MOV      R2,#+3
+   \   00000050   FF005EE3           CMP      LR,#+255
+   \   00000054   0600000A           BEQ      ??_CopyLongName_0
+   \   00000058   01E0C3E4           STRB     LR,[R3], #+1
+   \   0000005C   02E0FCE5           LDRB     LR,[R12, #+2]!
+   \   00000060   0420A0E3           MOV      R2,#+4
+   \   00000064   FF005EE3           CMP      LR,#+255
+   \   00000068   0220DC14           LDRBNE   R2,[R12], #+2
+   \   0000006C   0020C315           STRBNE   R2,[R3, #+0]
+   \   00000070   0520A013           MOVNE    R2,#+5
+    458            r += _CopyString (pDest + r, (pSrc + 13), 6);
+   \                     ??_CopyLongName_0:
+   \   00000074   0DC081E2           ADD      R12,R1,#+13
+   \   00000078   0040DCE5           LDRB     R4,[R12, #+0]
+   \   0000007C   003082E0           ADD      R3,R2,R0
+   \   00000080   00E0A0E3           MOV      LR,#+0
+   \   00000084   FF0054E3           CMP      R4,#+255
+   \   00000088   1A00000A           BEQ      ??_CopyLongName_1
+   \   0000008C   0140C3E4           STRB     R4,[R3], #+1
+   \   00000090   0240FCE5           LDRB     R4,[R12, #+2]!
+   \   00000094   01E0A0E3           MOV      LR,#+1
+   \   00000098   FF0054E3           CMP      R4,#+255
+   \   0000009C   1500000A           BEQ      ??_CopyLongName_1
+   \   000000A0   0140C3E4           STRB     R4,[R3], #+1
+   \   000000A4   0240FCE5           LDRB     R4,[R12, #+2]!
+   \   000000A8   02E0A0E3           MOV      LR,#+2
+   \   000000AC   FF0054E3           CMP      R4,#+255
+   \   000000B0   1000000A           BEQ      ??_CopyLongName_1
+   \   000000B4   0140C3E4           STRB     R4,[R3], #+1
+   \   000000B8   0240FCE5           LDRB     R4,[R12, #+2]!
+   \   000000BC   03E0A0E3           MOV      LR,#+3
+   \   000000C0   FF0054E3           CMP      R4,#+255
+   \   000000C4   0B00000A           BEQ      ??_CopyLongName_1
+   \   000000C8   0140C3E4           STRB     R4,[R3], #+1
+   \   000000CC   0240FCE5           LDRB     R4,[R12, #+2]!
+   \   000000D0   04E0A0E3           MOV      LR,#+4
+   \   000000D4   FF0054E3           CMP      R4,#+255
+   \   000000D8   0600000A           BEQ      ??_CopyLongName_1
+   \   000000DC   0140C3E4           STRB     R4,[R3], #+1
+   \   000000E0   0240FCE5           LDRB     R4,[R12, #+2]!
+   \   000000E4   05E0A0E3           MOV      LR,#+5
+   \   000000E8   FF0054E3           CMP      R4,#+255
+   \   000000EC   02E0DC14           LDRBNE   LR,[R12], #+2
+   \   000000F0   00E0C315           STRBNE   LR,[R3, #+0]
+   \   000000F4   06E0A013           MOVNE    LR,#+6
+    459            r += _CopyString (pDest + r, (pSrc + 27), 2);
+   \                     ??_CopyLongName_1:
+   \   000000F8   1BC0F1E5           LDRB     R12,[R1, #+27]!
+   \   000000FC   02208EE0           ADD      R2,LR,R2
+   \   00000100   000082E0           ADD      R0,R2,R0
+   \   00000104   0030A0E3           MOV      R3,#+0
+   \   00000108   FF005CE3           CMP      R12,#+255
+   \   0000010C   0600000A           BEQ      ??_CopyLongName_2
+   \   00000110   01C0C0E4           STRB     R12,[R0], #+1
+   \   00000114   02C0F1E5           LDRB     R12,[R1, #+2]!
+   \   00000118   0130A0E3           MOV      R3,#+1
+   \   0000011C   FF005CE3           CMP      R12,#+255
+   \   00000120   0230D114           LDRBNE   R3,[R1], #+2
+   \   00000124   0030C015           STRBNE   R3,[R0, #+0]
+   \   00000128   0230A013           MOVNE    R3,#+2
+    460            return r;
+   \                     ??_CopyLongName_2:
+   \   0000012C   020083E0           ADD      R0,R3,R2
+   \   00000130   1080BDE8           POP      {R4,PC}          ;; return
+    461          }
+    462          
+    463          /*********************************************************************
+    464          *
+    465          *       _CalcNumChar
+    466          *
+    467          */
+    468          static U8 _CalcNumChar(const U8 * pSrc, int MaxLen) {
+    469            U8 i;
+    470            for (i = 0; i < MaxLen; i++, pSrc += 2) {
+    471              if (*pSrc == 0xff) {
+    472                break;
+    473              }
+    474            }
+    475            return i;
+    476          }
+    477          
+    478          /*********************************************************************
+    479          *
+    480          *       _GetNumCharInEntry
+    481          *
+    482          */
+    483          static int _GetNumCharInEntry(const U8 * pEntry) {
+    484            int r;
+    485            r = 0;
+    486            r += _CalcNumChar(pEntry,      5);
+    487            r += _CalcNumChar(pEntry + 13, 6);
+    488            r += _CalcNumChar(pEntry + 27, 2);
+    489            return r;
+    490          }
+    491          
+    492          /*********************************************************************
+    493          *
+    494          *       _CorrectTrail
+    495          *
+    496          */
+    497          static int _CorrectTrail(const char *pFileName, int Len) {
+    498            int i;
+    499            const char * p;
+    500          
+    501            //
+    502            //  Determine the length of the string
+    503            //
+    504            if (Len == 0) {
+    505              Len = FS_STRLEN(pFileName);
+    506            }
+    507            //
+    508            //  Set pointer to the end of the string and
+    509            //  check the string reverse from any spaces
+    510            //  that need to be removed
+    511            //
+    512            p = pFileName + Len - 1;
+    513            for (i = Len; i; i--) {
+    514              if (*p == ' ') {
+    515                Len--;
+    516              } else {
+    517                break;
+    518              }
+    519              p--;
+    520            }
+    521            return Len;
+    522          }
+    523          
+    524          /*********************************************************************
+    525          *
+    526          *       _WriteName
+    527          *
+    528          */
+    529          static int _WriteName(U8 * pDest, const char * pSrc, unsigned NumBytes, int RemBytes) {
+    530            int Len;
+    531            int NumChars;
+    532          
+    533            NumChars = 0;
+    534            Len      = 1;
+    535            do {
+    536              if (RemBytes > 0) {
+    537                U16 UnicodeChar;
+    538                Len = GET_CHAR_SIZE(pSrc);
+    539                UnicodeChar = GET_CHAR_CODE(pSrc);
+    540          
+    541                *pDest       = (U8)UnicodeChar;
+    542                *(pDest + 1) = (U8)(UnicodeChar >> 8);
+    543                pSrc += Len;
+    544                NumChars += Len;
+    545          
+    546              } else if (RemBytes < 0) {                 /* Padding ? */
+    547                *pDest       = 0xff;
+    548                *(pDest + 1) = 0xff;
+    549              } else {
+    550                Len = 1;
+    551              }
+    552              pDest    += 2;
+    553              RemBytes--;
+    554            } while (--NumBytes);
+    555            return NumChars;
+    556          }
+    557          
+    558          /*********************************************************************
+    559          *
+    560          *       _IsInvalidChar
+    561          *
+    562          *  Function description:
+    563          *    
+    564          *
+    565          */
+    566          static int _IsInvalidChar(U16 UnicodeChar) {
+    567            char c;
+    568          
+    569            c = (char)UnicodeChar;
+    570            switch(c) {
+    571            case '+':
+    572            case ',':
+    573            case ';':
+    574            case '=':
+    575            case '[':
+    576            case ']':
+    577              return 1;
+    578            default:
+    579              break;
+    580            }
+    581            return 0;
+    582          }
+    583          
+    584          
+    585          /*********************************************************************
+    586          *
+    587          *       _CheckFilename
+    588          *
+    589          *  Function description:
+    590          *    
+    591          *
+    592          */
+    593          static int _CheckFilename(const char * sFileName, unsigned Len) {
+    594            int LenChar;
+    595            do {
+    596              U16 UnicodeChar;
+    597              LenChar = GET_CHAR_SIZE(sFileName);
+    598              UnicodeChar = GET_CHAR_CODE(sFileName);
+    599              if (_IsInvalidChar(UnicodeChar)) {
+    600                return -1;
+    601              }
+    602              sFileName += LenChar;
+    603            } while (--Len);
+    604            return 0;
+    605          
+    606          }
+    607          
+    608          
+    609          /*********************************************************************
+    610          *
+    611          *       _ComputeLongDirEntry
+    612          *
+    613          *
+    614          */
+
+   \                                 In section .text, align 4, keep-with-next
+    615          static void _ComputeLongDirEntry(FS_FAT_DENTRY * pDirEntry, const char * sLongName, int Len, int CurrentIndex, U8 CheckSum) {
+   \                     _ComputeLongDirEntry:
+   \   00000000   F0432DE9           PUSH     {R4-R9,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0260A0E1           MOV      R6,R2
+   \   0000000C   0040A0E1           MOV      R4,R0
+   \   00000010   0150A0E1           MOV      R5,R1
+   \   00000014   0370A0E1           MOV      R7,R3
+   \   00000018   2080DDE5           LDRB     R8,[SP, #+32]
+    616            int NumDirEntries;
+    617            unsigned Off;
+    618            int NumChars;
+    619          
+    620            if (Len == 0) {
+   \   0000001C   000056E3           CMP      R6,#+0
+   \   00000020   0200001A           BNE      ??_ComputeLongDirEntry_0
+    621              Len = FS_STRLEN(sLongName);
+   \   00000024   0500A0E1           MOV      R0,R5
+   \   00000028   ........           BL       strlen
+   \   0000002C   0060A0E1           MOV      R6,R0
+    622            }
+    623            NumDirEntries = _CalcNumLongEntries(sLongName, Len);
+   \                     ??_ComputeLongDirEntry_0:
+   \   00000030   0690B0E1           MOVS     R9,R6
+   \   00000034   0200001A           BNE      ??_ComputeLongDirEntry_1
+   \   00000038   0500A0E1           MOV      R0,R5
+   \   0000003C   ........           BL       strlen
+   \   00000040   0090A0E1           MOV      R9,R0
+    624            FS_MEMSET(pDirEntry, 0, sizeof(FS_FAT_DENTRY));
+   \                     ??_ComputeLongDirEntry_1:
+   \   00000044   2010A0E3           MOV      R1,#+32
+   \   00000048   0400A0E1           MOV      R0,R4
+   \   0000004C   ........           BL       __aeabi_memclr
+    625            /* Ordinal. Or 0x40 for last (first) entry) */
+    626            pDirEntry->data[0] = (U8)CurrentIndex;
+    627            if (CurrentIndex == NumDirEntries) {
+   \   00000050   ........           LDR      R1,??DataTable6  ;; 0x4ec4ec4f
+   \   00000054   0C0089E2           ADD      R0,R9,#+12
+   \   00000058   9021C1E0           SMULL    R2,R1,R0,R1
+   \   0000005C   0070C4E5           STRB     R7,[R4, #+0]
+   \   00000060   4101B0E1           ASRS     R0,R1,#+2
+   \   00000064   01008042           ADDMI    R0,R0,#+1
+   \   00000068   000057E1           CMP      R7,R0
+    628              pDirEntry->data[0] |= 0x40;
+   \   0000006C   0000D405           LDRBEQ   R0,[R4, #+0]
+   \   00000070   40008003           ORREQ    R0,R0,#0x40
+   \   00000074   0000C405           STRBEQ   R0,[R4, #+0]
+    629            }
+    630          
+    631            pDirEntry->data[11] = FS_FAT_ATTR_LONGNAME;         /* Attributes. Must be long file name */
+   \   00000078   0F00A0E3           MOV      R0,#+15
+   \   0000007C   0B00C4E5           STRB     R0,[R4, #+11]
+    632            pDirEntry->data[13] = CheckSum;
+   \   00000080   0D80C4E5           STRB     R8,[R4, #+13]
+    633            if (Len == 0) {
+   \   00000084   000056E3           CMP      R6,#+0
+   \   00000088   0200001A           BNE      ??_ComputeLongDirEntry_2
+    634              Len = STRLEN(sLongName);
+   \   0000008C   0500A0E1           MOV      R0,R5
+   \   00000090   ........           BL       strlen
+   \   00000094   0060A0E1           MOV      R6,R0
+    635            } else {
+    636              Len = STRNLEN(sLongName, Len);
+    637            }
+    638            /* Write file name */
+    639            Off       = (CurrentIndex -1) * 13;
+   \                     ??_ComputeLongDirEntry_2:
+   \   00000098   010047E2           SUB      R0,R7,#+1
+   \   0000009C   0D20A0E3           MOV      R2,#+13
+   \   000000A0   920001E0           MUL      R1,R2,R0
+    640            NumChars  = WALK_2_CHAR(sLongName, Off);
+    641            NumChars += _WriteName(&pDirEntry->data[1],  sLongName + NumChars, 5, Len - Off);
+   \   000000A4   01E084E2           ADD      LR,R4,#+1
+   \   000000A8   013046E0           SUB      R3,R6,R1
+   \   000000AC   05C081E0           ADD      R12,R1,R5
+   \   000000B0   0070A0E3           MOV      R7,#+0
+   \   000000B4   0580A0E3           MOV      R8,#+5
+   \   000000B8   FF00A0E3           MOV      R0,#+255
+   \                     ??_ComputeLongDirEntry_3:
+   \   000000BC   010053E3           CMP      R3,#+1
+   \   000000C0   040000AA           BGE      ??_ComputeLongDirEntry_4
+   \   000000C4   000053E3           CMP      R3,#+0
+   \   000000C8   0700005A           BPL      ??_ComputeLongDirEntry_5
+   \   000000CC   0000CEE5           STRB     R0,[LR, #+0]
+   \   000000D0   0100CEE5           STRB     R0,[LR, #+1]
+   \   000000D4   040000EA           B        ??_ComputeLongDirEntry_5
+   \                     ??_ComputeLongDirEntry_4:
+   \   000000D8   0190DCE4           LDRB     R9,[R12], #+1
+   \   000000DC   017087E2           ADD      R7,R7,#+1
+   \   000000E0   0090CEE5           STRB     R9,[LR, #+0]
+   \   000000E4   0090A0E3           MOV      R9,#+0
+   \   000000E8   0190CEE5           STRB     R9,[LR, #+1]
+   \                     ??_ComputeLongDirEntry_5:
+   \   000000EC   02E08EE2           ADD      LR,LR,#+2
+   \   000000F0   013043E2           SUB      R3,R3,#+1
+   \   000000F4   018058E2           SUBS     R8,R8,#+1
+   \   000000F8   EFFFFF1A           BNE      ??_ComputeLongDirEntry_3
+   \   000000FC   012087E0           ADD      R2,R7,R1
+    642            NumChars += _WriteName(&pDirEntry->data[14], sLongName + NumChars, 6, Len - Off -  5);
+   \   00000100   011046E0           SUB      R1,R6,R1
+   \   00000104   053041E2           SUB      R3,R1,#+5
+   \   00000108   05C082E0           ADD      R12,R2,R5
+   \   0000010C   0EE084E2           ADD      LR,R4,#+14
+   \   00000110   0060A0E3           MOV      R6,#+0
+   \   00000114   0670A0E3           MOV      R7,#+6
+   \                     ??_ComputeLongDirEntry_6:
+   \   00000118   010053E3           CMP      R3,#+1
+   \   0000011C   040000AA           BGE      ??_ComputeLongDirEntry_7
+   \   00000120   000053E3           CMP      R3,#+0
+   \   00000124   0700005A           BPL      ??_ComputeLongDirEntry_8
+   \   00000128   0000CEE5           STRB     R0,[LR, #+0]
+   \   0000012C   0100CEE5           STRB     R0,[LR, #+1]
+   \   00000130   040000EA           B        ??_ComputeLongDirEntry_8
+   \                     ??_ComputeLongDirEntry_7:
+   \   00000134   0180DCE4           LDRB     R8,[R12], #+1
+   \   00000138   016086E2           ADD      R6,R6,#+1
+   \   0000013C   0080CEE5           STRB     R8,[LR, #+0]
+   \   00000140   0080A0E3           MOV      R8,#+0
+   \   00000144   0180CEE5           STRB     R8,[LR, #+1]
+   \                     ??_ComputeLongDirEntry_8:
+   \   00000148   02E08EE2           ADD      LR,LR,#+2
+   \   0000014C   013043E2           SUB      R3,R3,#+1
+   \   00000150   017057E2           SUBS     R7,R7,#+1
+   \   00000154   EFFFFF1A           BNE      ??_ComputeLongDirEntry_6
+    643            NumChars  = _WriteName(&pDirEntry->data[28], sLongName + NumChars, 2, Len - Off - 11);
+   \   00000158   020086E0           ADD      R0,R6,R2
+   \   0000015C   052080E0           ADD      R2,R0,R5
+   \   00000160   0B1041E2           SUB      R1,R1,#+11
+   \   00000164   1C3084E2           ADD      R3,R4,#+28
+   \   00000168   02C0A0E3           MOV      R12,#+2
+   \   0000016C   FF00A0E3           MOV      R0,#+255
+   \                     ??_ComputeLongDirEntry_9:
+   \   00000170   010051E3           CMP      R1,#+1
+   \   00000174   040000AA           BGE      ??_ComputeLongDirEntry_10
+   \   00000178   000051E3           CMP      R1,#+0
+   \   0000017C   0600005A           BPL      ??_ComputeLongDirEntry_11
+   \   00000180   0000C3E5           STRB     R0,[R3, #+0]
+   \   00000184   0100C3E5           STRB     R0,[R3, #+1]
+   \   00000188   030000EA           B        ??_ComputeLongDirEntry_11
+   \                     ??_ComputeLongDirEntry_10:
+   \   0000018C   01E0D2E4           LDRB     LR,[R2], #+1
+   \   00000190   00E0C3E5           STRB     LR,[R3, #+0]
+   \   00000194   00E0A0E3           MOV      LR,#+0
+   \   00000198   01E0C3E5           STRB     LR,[R3, #+1]
+   \                     ??_ComputeLongDirEntry_11:
+   \   0000019C   023083E2           ADD      R3,R3,#+2
+   \   000001A0   011041E2           SUB      R1,R1,#+1
+   \   000001A4   01C05CE2           SUBS     R12,R12,#+1
+   \   000001A8   F0FFFF1A           BNE      ??_ComputeLongDirEntry_9
+    644          }
+   \   000001AC   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   000001B0   F083BDE8           POP      {R4-R9,PC}       ;; return
+    645          
+    646          /*********************************************************************
+    647          *
+    648          *       _ToUpper
+    649          *
+    650          */
+    651          static U16 _ToUpper(U16 c) {
+    652            if ((c >= 'a') && (c <= 'z')) {
+    653              c &= 0xdf;
+    654            }
+    655          #if FS_FAT_SUPPORT_UTF8
+    656            else if (c > 0x7f) {
+    657              unsigned i;
+    658              for (i = 0; i < COUNTOF(_aLower2UpperTable); i++) {
+    659                if (c == _aLower2UpperTable[i].LowerCase) {
+    660                  c = _aLower2UpperTable[i].UpperCase;
+    661                  break;
+    662                };
+    663              }
+    664            }
+    665          #endif
+    666            return c;
+    667          }
+    668          
+    669          /*********************************************************************
+    670          *
+    671          *       _CompareChar
+    672          *
+    673          *  Return value
+    674          *    0        Equal
+    675          *    1        Not equal
+    676          */
+    677          static char _CompareChar(const U8 * p0, const U8 * p1, unsigned NumBytes) {
+    678            U16 c0, c1;
+    679            do {
+    680              c0  = *p0;
+    681              c0 |= (*(++p0) << 8);
+    682              c1  = *p1;
+    683              c1 |= (*(++p1) << 8);
+    684              c0 = _ToUpper(c0);
+    685              c1 = _ToUpper(c1);
+    686              if (c0 != c1) {
+    687                return 1;
+    688              }
+    689              p0++;
+    690              p1++;
+    691            } while (--NumBytes);
+    692            return 0;               /* Equal */
+    693          }
+    694          
+    695          /*********************************************************************
+    696          *
+    697          *       _CompareLongDirEntry
+    698          *
+    699          *  Function description
+    700          *    Compares the long file part which is stored in short filename.
+    701          *    These are 13 double-byte characters stored in the 32 byte directory entry.
+    702          *    The directory entry stores the filename in 3 blocks:
+    703          *    0
+    704          *
+    705          *  Return value
+    706          *    0        Equal
+    707          *    1        Not equal
+    708          */
+
+   \                                 In section .text, align 4, keep-with-next
+    709          static char _CompareLongDirEntry(FS_FAT_DENTRY * pDirEntry0, FS_FAT_DENTRY * pDirEntry1) {
+   \                     _CompareLongDirEntry:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+    710            //
+    711            // Check if the indices are not equal, we immediately return.
+    712            //
+    713            if (pDirEntry0->data[0] != pDirEntry1->data[0]) {
+   \   00000004   0020D0E5           LDRB     R2,[R0, #+0]
+   \   00000008   0030D1E5           LDRB     R3,[R1, #+0]
+   \   0000000C   030052E1           CMP      R2,R3
+   \   00000010   3500001A           BNE      ??_CompareLongDirEntry_0
+    714              return 1;
+    715            }
+    716            //
+    717            // If indices are equal, we check all the UNICODE chars in the long dir entry.(if possible upper case).
+    718            //
+    719            if (_CompareChar((U8 *)&pDirEntry0->data[1], (U8 *)&pDirEntry1->data[1], 5)) {
+   \   00000014   9F20A0E3           MOV      R2,#+159
+   \   00000018   0530A0E3           MOV      R3,#+5
+   \   0000001C   01C081E2           ADD      R12,R1,#+1
+   \   00000020   01E080E2           ADD      LR,R0,#+1
+   \   00000024   FF2C82E3           ORR      R2,R2,#0xFF00
+   \                     ??_CompareLongDirEntry_1:
+   \   00000028   0050DCE5           LDRB     R5,[R12, #+0]
+   \   0000002C   0160FCE5           LDRB     R6,[R12, #+1]!
+   \   00000030   0040DEE5           LDRB     R4,[LR, #+0]
+   \   00000034   065485E1           ORR      R5,R5,R6, LSL #+8
+   \   00000038   0160FEE5           LDRB     R6,[LR, #+1]!
+   \   0000003C   064484E1           ORR      R4,R4,R6, LSL #+8
+   \   00000040   046082E0           ADD      R6,R2,R4
+   \   00000044   0668A0E1           LSL      R6,R6,#+16
+   \   00000048   2668A0E1           LSR      R6,R6,#+16
+   \   0000004C   1A0056E3           CMP      R6,#+26
+   \   00000050   056082E0           ADD      R6,R2,R5
+   \   00000054   0668A0E1           LSL      R6,R6,#+16
+   \   00000058   DF400432           ANDCC    R4,R4,#0xDF
+   \   0000005C   2668A0E1           LSR      R6,R6,#+16
+   \   00000060   1A0056E3           CMP      R6,#+26
+   \   00000064   DF500532           ANDCC    R5,R5,#0xDF
+   \   00000068   050054E1           CMP      R4,R5
+   \   0000006C   1E00001A           BNE      ??_CompareLongDirEntry_0
+   \   00000070   01E08EE2           ADD      LR,LR,#+1
+   \   00000074   01C08CE2           ADD      R12,R12,#+1
+   \   00000078   013053E2           SUBS     R3,R3,#+1
+   \   0000007C   E9FFFF1A           BNE      ??_CompareLongDirEntry_1
+    720              return 1;                 /* Not equal */
+    721            }
+    722            return _CompareChar((U8 *)&pDirEntry0->data[14], (U8 *)&pDirEntry1->data[14], 9);
+   \   00000080   0930A0E3           MOV      R3,#+9
+   \   00000084   0E1081E2           ADD      R1,R1,#+14
+   \   00000088   0E0080E2           ADD      R0,R0,#+14
+   \                     ??_CompareLongDirEntry_2:
+   \   0000008C   00E0D1E5           LDRB     LR,[R1, #+0]
+   \   00000090   0140F1E5           LDRB     R4,[R1, #+1]!
+   \   00000094   00C0D0E5           LDRB     R12,[R0, #+0]
+   \   00000098   04E48EE1           ORR      LR,LR,R4, LSL #+8
+   \   0000009C   0140F0E5           LDRB     R4,[R0, #+1]!
+   \   000000A0   04C48CE1           ORR      R12,R12,R4, LSL #+8
+   \   000000A4   0C4082E0           ADD      R4,R2,R12
+   \   000000A8   0448A0E1           LSL      R4,R4,#+16
+   \   000000AC   2448A0E1           LSR      R4,R4,#+16
+   \   000000B0   1A0054E3           CMP      R4,#+26
+   \   000000B4   0E4082E0           ADD      R4,R2,LR
+   \   000000B8   0448A0E1           LSL      R4,R4,#+16
+   \   000000BC   DFC00C32           ANDCC    R12,R12,#0xDF
+   \   000000C0   2448A0E1           LSR      R4,R4,#+16
+   \   000000C4   1A0054E3           CMP      R4,#+26
+   \   000000C8   DFE00E32           ANDCC    LR,LR,#0xDF
+   \   000000CC   0E005CE1           CMP      R12,LR
+   \   000000D0   0500001A           BNE      ??_CompareLongDirEntry_0
+   \   000000D4   010080E2           ADD      R0,R0,#+1
+   \   000000D8   011081E2           ADD      R1,R1,#+1
+   \   000000DC   013053E2           SUBS     R3,R3,#+1
+   \   000000E0   E9FFFF1A           BNE      ??_CompareLongDirEntry_2
+   \   000000E4   0000A0E3           MOV      R0,#+0
+   \   000000E8   7080BDE8           POP      {R4-R6,PC}
+   \                     ??_CompareLongDirEntry_0:
+   \   000000EC   0100A0E3           MOV      R0,#+1
+   \   000000F0   7080BDE8           POP      {R4-R6,PC}       ;; return
+    723          }
+    724          
+    725          /*********************************************************************
+    726          *
+    727          *       _CalcCheckSum
+    728          *
+    729          *  Return value
+    730          *
+    731          */
+    732          static U8 _CalcCheckSum(FS_83NAME * pShortName) {
+    733            const char * sShortName;
+    734            U8 Sum;
+    735            int i;
+    736          
+    737            sShortName = &pShortName->ac[0];
+    738            Sum = 0;
+    739            for (i = 0; i < 11; i++) {
+    740              if (Sum & 1) {
+    741                Sum = (Sum >> 1) | 0x80;
+    742              } else {
+    743                Sum >>= 1;
+    744              }
+    745              Sum += *sShortName++;
+    746            }
+    747            return Sum;
+    748          }
+    749          
+    750          /*********************************************************************
+    751          *
+    752          *       _MarkIndexAsUsed
+    753          *
+    754          */
+    755          static void _MarkIndexAsUsed(U8 * pBase, unsigned Index) {
+    756            U8   Mask;
+    757            U8 * pData;
+    758          
+    759            Mask    = 1 << (Index & 7);
+    760            if(Index >= FS_FAT_LFN_BIT_ARRAY_SIZE) {
+    761              return;
+    762            }
+    763            pData   = pBase + (Index >> 3);
+    764            *pData |= (unsigned)Mask;    // Mark block as allocated
+    765          }
+    766          
+    767          /*********************************************************************
+    768          *
+    769          *       _IsIndexUsed
+    770          *
+    771          */
+    772          static char _IsIndexUsed(U8 * pBase, unsigned Index) {
+    773            U8   Mask;
+    774            U8 * pData;
+    775          
+    776            Mask  = 1 << (Index & 7);
+    777            pData = pBase + (Index >> 3);
+    778            return *pData & Mask;
+    779          }
+    780          
+    781          /*********************************************************************
+    782          *
+    783          *       _FindCharPos
+    784          *
+    785          */
+    786          static int _FindCharPos(const char *s, char c, int MaxNumChars2Check) {
+    787            int Pos = 0;
+    788          
+    789            do {
+    790              if (*s == c) {
+    791                return Pos;
+    792              }
+    793              Pos++;
+    794              if (Pos >= MaxNumChars2Check) {
+    795                break;
+    796              }
+    797            } while (*s++);
+    798            return -1;
+    799          }
+    800          
+    801          /*********************************************************************
+    802          *
+    803          *       _atoi
+    804          *
+    805          */
+    806          static unsigned _atoi(const char * sBase, unsigned NumDigits) {
+    807            unsigned Number = 0;
+    808            
+    809            do {
+    810              Number *= 10;
+    811              Number += (*sBase++ - '0');
+    812            } while(--NumDigits);
+    813            return Number;
+    814          }
+    815          
+    816          /*********************************************************************
+    817          *
+    818          *       _FindDirEntry83
+    819          *
+    820          *  Description:
+    821          *    Find the directory entry in the specified directory
+    822          *
+    823          *  Parameters:
+    824          *    pVolume     - Volume information
+    825          *    pEntryName  - Directory entry name; if zero, return the root directory.
+    826          *
+    827          *  Return value:
+    828          *    != NULL     - pointer to directory entry (in the smart buffer)
+    829          *    NULL        - Entry not found
+    830          */
+
+   \                                 In section .text, align 4, keep-with-next
+    831          static int _FindFreeIndex(FS_VOLUME * pVolume, FS_SB * pSB, FS_83NAME * pEntryName, U32 DirStart, U8 * paBitField, unsigned StartIndex) {
+   \                     _FindFreeIndex:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   14D04DE2           SUB      SP,SP,#+20
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0260A0E1           MOV      R6,R2
+   \   00000014   0320A0E1           MOV      R2,R3
+   \   00000018   38709DE5           LDR      R7,[SP, #+56]
+    832            FS_FAT_DENTRY * pDirEntry;
+    833            FS_DIR_POS      DirPos;
+    834            unsigned        i;
+    835            unsigned        NumDigits = 0;
+    836            unsigned        Index;
+    837            int             TildePos;
+    838          
+    839            /* Read directory */
+    840            FS_FAT_InitDirEntryScan(&pVolume->FSInfo.FATInfo, &DirPos, DirStart);
+   \   0000001C   0D10A0E1           MOV      R1,SP
+   \   00000020   1C0084E2           ADD      R0,R4,#+28
+   \   00000024   ........           BL       FS_FAT_InitDirEntryScan
+   \   00000028   0A80A0E3           MOV      R8,#+10
+   \   0000002C   240000EA           B        ??_FindFreeIndex_0
+    841            do {
+    842              pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &DirPos);
+    843              if (pDirEntry == (FS_FAT_DENTRY *)NULL) {
+    844                break;
+    845              }
+    846              if (pDirEntry->data[0] == 0) {
+    847                break;  /* No more entries. Not found. */
+    848              }
+    849              TildePos = _FindCharPos((const char *)&pDirEntry->data[0], '~', 8);
+    850              if (TildePos != -1) {
+   \                     ??_FindFreeIndex_1:
+   \   00000030   01007BE3           CMN      R11,#+1
+   \   00000034   2000000A           BEQ      ??_FindFreeIndex_2
+    851                NumDigits = 8 -TildePos - 1;
+   \   00000038   07906BE2           RSB      R9,R11,#+7
+    852                if ((FS_MEMCMP(&pDirEntry->data[0],                       &pEntryName->ac[0],                       8 - NumDigits - 1) == 0) &&
+    853                    (FS_MEMCMP(&pDirEntry->data[DIR_ENTRY_OFF_EXTENSION], &pEntryName->ac[DIR_ENTRY_OFF_EXTENSION], 3) == 0) &&
+    854                    (pDirEntry->data[TildePos] == '~')) { /* Name does match */
+   \   0000003C   072069E2           RSB      R2,R9,#+7
+   \   00000040   0610A0E1           MOV      R1,R6
+   \   00000044   0A00A0E1           MOV      R0,R10
+   \   00000048   ........           BL       memcmp
+   \   0000004C   000050E3           CMP      R0,#+0
+   \   00000050   1900001A           BNE      ??_FindFreeIndex_2
+   \   00000054   0320A0E3           MOV      R2,#+3
+   \   00000058   081086E2           ADD      R1,R6,#+8
+   \   0000005C   08008AE2           ADD      R0,R10,#+8
+   \   00000060   ........           BL       memcmp
+   \   00000064   000050E3           CMP      R0,#+0
+   \   00000068   0A00DB07           LDRBEQ   R0,[R11, +R10]
+   \   0000006C   7E005003           CMPEQ    R0,#+126
+   \   00000070   1100001A           BNE      ??_FindFreeIndex_2
+    855                  Index = _atoi((const char *)&pDirEntry->data[TildePos + 1], NumDigits) - StartIndex;
+   \   00000074   0A008BE0           ADD      R0,R11,R10
+   \   00000078   010080E2           ADD      R0,R0,#+1
+   \   0000007C   0010A0E3           MOV      R1,#+0
+   \                     ??_FindFreeIndex_3:
+   \   00000080   0120D0E4           LDRB     R2,[R0], #+1
+   \   00000084   019059E2           SUBS     R9,R9,#+1
+   \   00000088   302042E2           SUB      R2,R2,#+48
+   \   0000008C   982121E0           MLA      R1,R8,R1,R2
+   \   00000090   FAFFFF1A           BNE      ??_FindFreeIndex_3
+    856                  _MarkIndexAsUsed(paBitField, Index);
+   \   00000094   3C009DE5           LDR      R0,[SP, #+60]
+   \   00000098   000041E0           SUB      R0,R1,R0
+   \   0000009C   400F50E3           CMP      R0,#+256
+   \   000000A0   0500002A           BCS      ??_FindFreeIndex_2
+   \   000000A4   A01187E0           ADD      R1,R7,R0, LSR #+3
+   \   000000A8   0020D1E5           LDRB     R2,[R1, #+0]
+   \   000000AC   0130A0E3           MOV      R3,#+1
+   \   000000B0   070000E2           AND      R0,R0,#0x7
+   \   000000B4   130082E1           ORR      R0,R2,R3, LSL R0
+   \   000000B8   0000C1E5           STRB     R0,[R1, #+0]
+    857                }
+    858              }
+    859              FS_FAT_IncDirPos(&DirPos);
+   \                     ??_FindFreeIndex_2:
+   \   000000BC   0D00A0E1           MOV      R0,SP
+   \   000000C0   ........           BL       FS_FAT_IncDirPos
+    860            } while (1);
+   \                     ??_FindFreeIndex_0:
+   \   000000C4   0D20A0E1           MOV      R2,SP
+   \   000000C8   0510A0E1           MOV      R1,R5
+   \   000000CC   0400A0E1           MOV      R0,R4
+   \   000000D0   ........           BL       FS_FAT_GetDirEntry
+   \   000000D4   00A0B0E1           MOVS     R10,R0
+   \   000000D8   0E00000A           BEQ      ??_FindFreeIndex_4
+   \   000000DC   0000DAE5           LDRB     R0,[R10, #+0]
+   \   000000E0   000050E3           CMP      R0,#+0
+   \   000000E4   0C00000A           BEQ      ??_FindFreeIndex_5
+   \   000000E8   0A00A0E1           MOV      R0,R10
+   \   000000EC   00B0A0E3           MOV      R11,#+0
+   \                     ??_FindFreeIndex_6:
+   \   000000F0   0010D0E5           LDRB     R1,[R0, #+0]
+   \   000000F4   7E0051E3           CMP      R1,#+126
+   \   000000F8   CCFFFF0A           BEQ      ??_FindFreeIndex_1
+   \   000000FC   01B08BE2           ADD      R11,R11,#+1
+   \   00000100   08005BE3           CMP      R11,#+8
+   \   00000104   ECFFFFAA           BGE      ??_FindFreeIndex_2
+   \   00000108   0110D0E4           LDRB     R1,[R0], #+1
+   \   0000010C   000051E3           CMP      R1,#+0
+   \   00000110   F6FFFF1A           BNE      ??_FindFreeIndex_6
+   \   00000114   E8FFFFEA           B        ??_FindFreeIndex_2
+    861            for (i = 0; i < FS_FAT_LFN_BIT_ARRAY_SIZE; i++) {
+   \                     ??_FindFreeIndex_4:
+   \   00000118   0000A0E3           MOV      R0,#+0
+    862              if (_IsIndexUsed(paBitField, i) == 0){
+   \                     ??_FindFreeIndex_5:
+   \   0000011C   A011D7E7           LDRB     R1,[R7, +R0, LSR #+3]
+   \   00000120   0120A0E3           MOV      R2,#+1
+   \   00000124   073000E2           AND      R3,R0,#0x7
+   \   00000128   120311E1           TST      R1,R2, LSL R3
+    863                return i + StartIndex;
+   \   0000012C   3C109D05           LDREQ    R1,[SP, #+60]
+   \   00000130   00008100           ADDEQ    R0,R1,R0
+   \   00000134   0300000A           BEQ      ??_FindFreeIndex_7
+    864              }
+    865            }
+   \   00000138   010080E2           ADD      R0,R0,#+1
+   \   0000013C   400F50E3           CMP      R0,#+256
+   \   00000140   F5FFFF3A           BCC      ??_FindFreeIndex_5
+    866            return -1;
+   \   00000144   000062E2           RSB      R0,R2,#+0
+   \                     ??_FindFreeIndex_7:
+   \   00000148   14D08DE2           ADD      SP,SP,#+20       ;; stack cleaning
+   \   0000014C   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    867          }
+    868          
+    869          /*********************************************************************
+    870          *
+    871          *       _GenerateShortEntry
+    872          *
+    873          *  Function description
+    874          *    Generates a short directory entry from a long file name.
+    875          *
+    876          *    The conversion scheme is done acc. to
+    877          
+    878          */
+
+   \                                 In section .text, align 4, keep-with-next
+    879          static void _GenerateShortEntry(FS_83NAME * pShortName, const char * sLongName, int Index) {
+   \                     _GenerateShortEntry:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   0280A0E1           MOV      R8,R2
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0090A0E1           MOV      R9,R0
+   \   00000010   0140A0E1           MOV      R4,R1
+    880            int NumDigits;
+    881            int i;
+    882            U8    c;
+    883            const char * s;
+    884            char * sShortName;
+    885            char HasExtension;
+    886          
+    887            if (FS_FAT_Make83Name(pShortName, sLongName, 0)) {
+   \   00000014   0020A0E3           MOV      R2,#+0
+   \   00000018   ........           BL       FS_FAT_Make83Name
+   \   0000001C   000050E3           CMP      R0,#+0
+   \   00000020   4E00000A           BEQ      ??_GenerateShortEntry_0
+    888              HasExtension = 0;
+   \   00000024   0060A0E3           MOV      R6,#+0
+    889              sShortName = &pShortName->ac[0];
+    890              FS_MEMSET(sShortName, 0x20, 11);       /* Initialize with spaces */
+   \   00000028   2020A0E3           MOV      R2,#+32
+   \   0000002C   0B10A0E3           MOV      R1,#+11
+   \   00000030   0900A0E1           MOV      R0,R9
+   \   00000034   ........           BL       __aeabi_memset
+    891              /* Compute the number of characters for the trailing index */
+    892              NumDigits = 1;
+    893              i = Index;
+   \   00000038   0800A0E1           MOV      R0,R8
+   \   0000003C   0170A0E3           MOV      R7,#+1
+    894              while (i >= 10) {
+   \   00000040   0A0050E3           CMP      R0,#+10
+   \   00000044   060000BA           BLT      ??_GenerateShortEntry_1
+    895                NumDigits++;
+    896                i /= 10;
+   \                     ??_GenerateShortEntry_2:
+   \   00000048   ........           LDR      R1,??DataTable6_1  ;; 0x66666667
+   \   0000004C   017087E2           ADD      R7,R7,#+1
+   \   00000050   9021C1E0           SMULL    R2,R1,R0,R1
+   \   00000054   4101B0E1           ASRS     R0,R1,#+2
+   \   00000058   01008042           ADDMI    R0,R0,#+1
+   \   0000005C   0A0050E3           CMP      R0,#+10
+   \   00000060   F8FFFFAA           BGE      ??_GenerateShortEntry_2
+    897              }
+    898          
+    899              /* Copy name without extension */
+    900              for (i = 0; i < 8 - NumDigits -1;) {
+   \                     ??_GenerateShortEntry_1:
+   \   00000064   0050A0E3           MOV      R5,#+0
+   \   00000068   07B067E2           RSB      R11,R7,#+7
+   \   0000006C   070000EA           B        ??_GenerateShortEntry_3
+    901                GET_CHAR(c, sLongName);
+   \                     ??_GenerateShortEntry_4:
+   \   00000070   5FA0A0E3           MOV      R10,#+95
+   \   00000074   014084E2           ADD      R4,R4,#+1
+    902          
+    903                if (c == 0) {
+    904                  break;
+    905                }
+    906                if (c == '.') {
+    907                  break;
+    908                }
+    909                if (FS_FAT_IsValidShortNameChar(c)) {
+   \                     ??_GenerateShortEntry_5:
+   \   00000078   0A00A0E1           MOV      R0,R10
+   \   0000007C   ........           BL       FS_FAT_IsValidShortNameChar
+   \   00000080   000050E3           CMP      R0,#+0
+   \   00000084   0300000A           BEQ      ??_GenerateShortEntry_6
+    910                  *sShortName++ = c;
+   \   00000088   01A0C9E4           STRB     R10,[R9], #+1
+    911                  i++;
+   \   0000008C   015085E2           ADD      R5,R5,#+1
+    912                }
+   \                     ??_GenerateShortEntry_3:
+   \   00000090   0B0055E1           CMP      R5,R11
+   \   00000094   070000AA           BGE      ??_GenerateShortEntry_7
+   \                     ??_GenerateShortEntry_6:
+   \   00000098   0000D4E5           LDRB     R0,[R4, #+0]
+   \   0000009C   800050E3           CMP      R0,#+128
+   \   000000A0   F2FFFF2A           BCS      ??_GenerateShortEntry_4
+   \   000000A4   ........           BL       toupper
+   \   000000A8   FFA010E2           ANDS     R10,R0,#0xFF
+   \   000000AC   014084E2           ADD      R4,R4,#+1
+   \   000000B0   2E005A13           CMPNE    R10,#+46
+   \   000000B4   EFFFFF1A           BNE      ??_GenerateShortEntry_5
+    913              }
+    914          
+    915              /* Add index */
+    916              *sShortName++ = '~';
+   \                     ??_GenerateShortEntry_7:
+   \   000000B8   7E00A0E3           MOV      R0,#+126
+   \   000000BC   0100C9E4           STRB     R0,[R9], #+1
+    917              i = NumDigits;
+   \   000000C0   0750A0E1           MOV      R5,R7
+   \   000000C4   090085E0           ADD      R0,R5,R9
+   \   000000C8   010040E2           SUB      R0,R0,#+1
+   \   000000CC   0A30A0E3           MOV      R3,#+10
+    918              do {
+    919                c = '0' + (char)(Index % 10);
+    920                *(sShortName + i - 1) = c;
+   \                     ??_GenerateShortEntry_8:
+   \   000000D0   ........           LDR      R1,??DataTable6_1  ;; 0x66666667
+   \   000000D4   9821C1E0           SMULL    R2,R1,R8,R1
+   \   000000D8   4111B0E1           ASRS     R1,R1,#+2
+   \   000000DC   01108142           ADDMI    R1,R1,#+1
+   \   000000E0   0120A0E1           MOV      R2,R1
+   \   000000E4   820362E1           SMULBB   R2,R2,R3
+    921                Index /= 10;
+    922              } while (--i);
+   \   000000E8   015055E2           SUBS     R5,R5,#+1
+   \   000000EC   022048E0           SUB      R2,R8,R2
+   \   000000F0   302082E2           ADD      R2,R2,#+48
+   \   000000F4   012040E4           STRB     R2,[R0], #-1
+   \   000000F8   0180A0E1           MOV      R8,R1
+   \   000000FC   F3FFFF1A           BNE      ??_GenerateShortEntry_8
+    923              sShortName += NumDigits;
+   \   00000100   097087E0           ADD      R7,R7,R9
+    924              /* Copy extension */
+    925              s = sLongName;
+   \   00000104   0400A0E1           MOV      R0,R4
+   \   00000108   000000EA           B        ??_GenerateShortEntry_9
+    926              do {
+    927                sLongName = s + 1;
+    928                s = FS__strchr(sLongName, '.');
+    929                if (s) {
+    930                  HasExtension = 1;
+   \                     ??_GenerateShortEntry_10:
+   \   0000010C   0160A0E3           MOV      R6,#+1
+    931                }
+   \                     ??_GenerateShortEntry_9:
+   \   00000110   014080E2           ADD      R4,R0,#+1
+   \   00000114   2E10A0E3           MOV      R1,#+46
+   \   00000118   0400A0E1           MOV      R0,R4
+   \   0000011C   ........           BL       FS__strchr
+   \   00000120   000050E3           CMP      R0,#+0
+   \   00000124   F8FFFF1A           BNE      ??_GenerateShortEntry_10
+    932              } while (s);
+    933          
+    934              if (HasExtension) {
+   \   00000128   000056E3           CMP      R6,#+0
+   \   0000012C   0B00000A           BEQ      ??_GenerateShortEntry_0
+    935                for (i = 0; i < 3;) {
+    936                  c = *sLongName++;
+   \                     ??_GenerateShortEntry_11:
+   \   00000130   0100D4E4           LDRB     R0,[R4], #+1
+    937                  c = FS_TOUPPER(c);
+   \   00000134   ........           BL       toupper
+    938                  if (c == 0) {
+   \   00000138   FFA010E2           ANDS     R10,R0,#0xFF
+   \   0000013C   0700000A           BEQ      ??_GenerateShortEntry_0
+    939                    break;
+    940                  }
+    941                  if (FS_FAT_IsValidShortNameChar(c)) {
+   \   00000140   0A00A0E1           MOV      R0,R10
+   \   00000144   ........           BL       FS_FAT_IsValidShortNameChar
+   \   00000148   000050E3           CMP      R0,#+0
+   \   0000014C   F7FFFF0A           BEQ      ??_GenerateShortEntry_11
+    942                    *sShortName++ = c;
+    943                    i++;
+   \   00000150   015085E2           ADD      R5,R5,#+1
+   \   00000154   01A0C7E4           STRB     R10,[R7], #+1
+    944                  }
+    945                }
+   \   00000158   030055E3           CMP      R5,#+3
+   \   0000015C   F3FFFFBA           BLT      ??_GenerateShortEntry_11
+    946              }
+    947            }
+    948          }
+   \                     ??_GenerateShortEntry_0:
+   \   00000160   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000164   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    949          
+    950          /*********************************************************************
+    951          *
+    952          *       _SetDirPosIndex
+    953          *
+    954          *  Description:
+    955          *    Increments/Decrements the position of DirPos
+    956          */
+    957          static void _SetDirPosIndex(FS_DIR_POS * pDirPos, int Pos) {
+    958            pDirPos->DirEntryIndex += Pos;
+    959          }
+    960          
+    961          /*********************************************************************
+    962          *
+    963          *       _LFN_ReadDirEntryInfo
+    964          */
+
+   \                                 In section .text, align 4, keep-with-next
+    965          static int _LFN_ReadDirEntryInfo(FS__DIR * pDir, FS_DIRENTRY_INFO * pDirEntryInfo, FS_SB * pSB) {
+   \                     _LFN_ReadDirEntryInfo:
+   \   00000000   F24F2DE9           PUSH     {R1,R4-R11,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   10D04DE2           SUB      SP,SP,#+16
+    966            FS_FAT_DENTRY  * pDirEntry;
+    967            FS_FAT_INFO    * pFATInfo;
+    968            FS_VOLUME      * pVolume;
+    969            int              r;
+    970            U32              DirIndex;
+    971          
+    972            pVolume      = pDir->pVolume;
+   \   0000000C   186094E5           LDR      R6,[R4, #+24]
+    973            pFATInfo     = &pVolume->FSInfo.FATInfo;
+    974            DirIndex     = pDir->DirEntryIndex;
+    975            r            = -1;
+   \   00000010   0010E0E3           MVN      R1,#+0
+   \   00000014   04108DE5           STR      R1,[SP, #+4]
+    976            if (DirIndex == 0) {
+   \   00000018   B001D4E1           LDRH     R0,[R4, #+16]
+   \   0000001C   0250A0E1           MOV      R5,R2
+   \   00000020   000050E3           CMP      R0,#+0
+   \   00000024   0300001A           BNE      ??_LFN_ReadDirEntryInfo_0
+    977              FS_FAT_InitDirEntryScan(pFATInfo, &pDir->DirPos, pDir->FirstCluster);
+   \   00000028   142094E5           LDR      R2,[R4, #+20]
+   \   0000002C   0410A0E1           MOV      R1,R4
+   \   00000030   1C0086E2           ADD      R0,R6,#+28
+   \   00000034   ........           BL       FS_FAT_InitDirEntryScan
+    978            }
+    979          
+    980            do {
+    981              pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &pDir->DirPos);
+   \                     ??_LFN_ReadDirEntryInfo_0:
+   \   00000038   0420A0E1           MOV      R2,R4
+   \   0000003C   0510A0E1           MOV      R1,R5
+   \   00000040   0600A0E1           MOV      R0,R6
+   \   00000044   ........           BL       FS_FAT_GetDirEntry
+   \   00000048   00B0A0E1           MOV      R11,R0
+    982              FS_FAT_IncDirPos(&pDir->DirPos);
+   \   0000004C   0400A0E1           MOV      R0,R4
+   \   00000050   ........           BL       FS_FAT_IncDirPos
+    983              if (pDirEntry == 0) {
+   \   00000054   00005BE3           CMP      R11,#+0
+    984                break;
+    985              }
+    986              if (pDirEntry->data[0] == 0x00) {         /* Last entry found ? */
+   \   00000058   0000DB15           LDRBNE   R0,[R11, #+0]
+   \   0000005C   00005013           CMPNE    R0,#+0
+   \   00000060   BD00000A           BEQ      ??_LFN_ReadDirEntryInfo_1
+    987                break;
+    988              }
+    989              if (pDirEntry->data[0] != (U8)0xE5) { /* not a deleted file */
+   \   00000064   E50050E3           CMP      R0,#+229
+    990                U8 Attrib;
+    991                Attrib = pDirEntry->data[11];
+   \   00000068   0B10DB15           LDRBNE   R1,[R11, #+11]
+    992                if (Attrib != FS_FAT_ATTR_VOLUME_ID) {
+   \   0000006C   08005113           CMPNE    R1,#+8
+   \   00000070   F0FFFF0A           BEQ      ??_LFN_ReadDirEntryInfo_0
+    993                  if (Attrib != (FS_FAT_ATTR_LONGNAME)) { /* Also not a long entry, so it is a valid entry */
+   \   00000074   0F0051E3           CMP      R1,#+15
+   \   00000078   0D00000A           BEQ      ??_LFN_ReadDirEntryInfo_2
+    994                    FS_FAT_CopyShortName(pDirEntryInfo->sFileName, (const char*)&pDirEntry->data[0], pDirEntryInfo->SizeofFileName);
+   \   0000007C   10009DE5           LDR      R0,[SP, #+16]
+   \   00000080   0B10A0E1           MOV      R1,R11
+   \   00000084   182090E5           LDR      R2,[R0, #+24]
+   \   00000088   140090E5           LDR      R0,[R0, #+20]
+   \   0000008C   ........           BL       FS_FAT_CopyShortName
+    995                    FS_FAT_CopyDirEntryInfo(pDirEntry, pDirEntryInfo);
+   \   00000090   10109DE5           LDR      R1,[SP, #+16]
+   \   00000094   0B00A0E1           MOV      R0,R11
+   \   00000098   ........           BL       FS_FAT_CopyDirEntryInfo
+    996                    r = 0;
+   \   0000009C   0010A0E3           MOV      R1,#+0
+   \   000000A0   04108DE5           STR      R1,[SP, #+4]
+    997                    pDir->DirEntryIndex++;
+   \   000000A4   B001D4E1           LDRH     R0,[R4, #+16]
+   \   000000A8   010080E2           ADD      R0,R0,#+1
+   \   000000AC   B001C4E1           STRH     R0,[R4, #+16]
+    998                    break;
+   \   000000B0   A90000EA           B        ??_LFN_ReadDirEntryInfo_1
+    999                  } else {
+   1000                    int NumEntries;
+   1001                    int Index;
+   1002                    U8 CheckSum;
+   1003                    U8 CalcCheckSum;
+   1004                    char  IsDifferent;
+   1005                    NumEntries   = pDirEntry->data[0] & 0x3f;
+   \                     ??_LFN_ReadDirEntryInfo_2:
+   \   000000B4   3F0000E2           AND      R0,R0,#0x3F
+   \   000000B8   00008DE5           STR      R0,[SP, #+0]
+   1006                    Index        = NumEntries;
+   \   000000BC   00A0A0E1           MOV      R10,R0
+   1007                    CheckSum     = pDirEntry->data[13];
+   \   000000C0   0D70DBE5           LDRB     R7,[R11, #+13]
+   1008                    IsDifferent  = 0;
+   \   000000C4   0080A0E3           MOV      R8,#+0
+   \   000000C8   0090A0E3           MOV      R9,#+0
+   \   000000CC   040000EA           B        ??_LFN_ReadDirEntryInfo_3
+   1009                    while(--Index) {
+   1010                      pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &pDir->DirPos);
+   1011                      if (pDirEntry == 0) {
+   1012                        IsDifferent = 1;
+   1013                        break;
+   1014                      }
+   1015                      if (pDirEntry->data[13] != CheckSum) {
+   \                     ??_LFN_ReadDirEntryInfo_4:
+   \   000000D0   0D00D0E5           LDRB     R0,[R0, #+13]
+   \   000000D4   070050E1           CMP      R0,R7
+   1016                        IsDifferent = 1;
+   \   000000D8   0190A013           MOVNE    R9,#+1
+   1017                      }
+   1018                      FS_FAT_IncDirPos(&pDir->DirPos);
+   \   000000DC   0400A0E1           MOV      R0,R4
+   \   000000E0   ........           BL       FS_FAT_IncDirPos
+   \                     ??_LFN_ReadDirEntryInfo_3:
+   \   000000E4   01A05AE2           SUBS     R10,R10,#+1
+   \   000000E8   0600000A           BEQ      ??_LFN_ReadDirEntryInfo_5
+   \   000000EC   0420A0E1           MOV      R2,R4
+   \   000000F0   0510A0E1           MOV      R1,R5
+   \   000000F4   0600A0E1           MOV      R0,R6
+   \   000000F8   ........           BL       FS_FAT_GetDirEntry
+   \   000000FC   00B0B0E1           MOVS     R11,R0
+   \   00000100   F2FFFF1A           BNE      ??_LFN_ReadDirEntryInfo_4
+   \   00000104   0190A0E3           MOV      R9,#+1
+   1019                    }
+   1020                    pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &pDir->DirPos);
+   1021                    CalcCheckSum = _CalcCheckSum((FS_83NAME *)pDirEntry);
+   \                     ??_LFN_ReadDirEntryInfo_5:
+   \   00000108   0420A0E1           MOV      R2,R4
+   \   0000010C   0510A0E1           MOV      R1,R5
+   \   00000110   0600A0E1           MOV      R0,R6
+   \   00000114   ........           BL       FS_FAT_GetDirEntry
+   \   00000118   0010A0E3           MOV      R1,#+0
+   \   0000011C   0B20A0E3           MOV      R2,#+11
+   \   00000120   630000EA           B        ??_LFN_ReadDirEntryInfo_6
+   1022                    if ((IsDifferent == 0) && (CalcCheckSum == CheckSum)) {
+   \                     ??_LFN_ReadDirEntryInfo_7:
+   \   00000124   000059E3           CMP      R9,#+0
+   \   00000128   011CA001           MOVEQ    R1,R1, LSL #+24
+   \   0000012C   210C5701           CMPEQ    R7,R1, LSR #+24
+   \   00000130   C0FFFF1A           BNE      ??_LFN_ReadDirEntryInfo_0
+   1023                      int    NumBytesCopied;
+   1024                      int    DirEntryLen;
+   1025                      U8     UseShortName;
+   1026                      char * p;
+   1027                      Index          = NumEntries - 1;
+   \   00000134   00009DE5           LDR      R0,[SP, #+0]
+   1028                      NumBytesCopied = 0;
+   1029                      DirEntryLen    = 0;
+   1030                      UseShortName   = 0;
+   \   00000138   0880CDE5           STRB     R8,[SP, #+8]
+   \   0000013C   01A040E2           SUB      R10,R0,#+1
+   1031                      p              = pDirEntryInfo->sFileName;
+   \   00000140   10009DE5           LDR      R0,[SP, #+16]
+   \   00000144   0070A0E3           MOV      R7,#+0
+   \   00000148   149090E5           LDR      R9,[R0, #+20]
+   1032                      if (p) {
+   \   0000014C   000059E3           CMP      R9,#+0
+   \   00000150   6300000A           BEQ      ??_LFN_ReadDirEntryInfo_8
+   1033                        do {
+   1034                          _SetDirPosIndex(&pDir->DirPos, -1);
+   \                     ??_LFN_ReadDirEntryInfo_9:
+   \   00000154   080094E5           LDR      R0,[R4, #+8]
+   1035                          pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &pDir->DirPos);
+   \   00000158   0420A0E1           MOV      R2,R4
+   \   0000015C   010040E2           SUB      R0,R0,#+1
+   \   00000160   080084E5           STR      R0,[R4, #+8]
+   \   00000164   0510A0E1           MOV      R1,R5
+   \   00000168   0600A0E1           MOV      R0,R6
+   \   0000016C   ........           BL       FS_FAT_GetDirEntry
+   \   00000170   00B0A0E1           MOV      R11,R0
+   1036                          /* Check if we exceed the maximum of DirName size */
+   1037                          if ((DirEntryLen + _GetNumCharInEntry(&pDirEntry->data[1])) > (pDirEntryInfo->SizeofFileName - 1)) {
+   \   00000174   01008BE2           ADD      R0,R11,#+1
+   \   00000178   0020A0E1           MOV      R2,R0
+   \   0000017C   0030D2E5           LDRB     R3,[R2, #+0]
+   \   00000180   0010A0E3           MOV      R1,#+0
+   \   00000184   FF0053E3           CMP      R3,#+255
+   \   00000188   0F00000A           BEQ      ??_LFN_ReadDirEntryInfo_10
+   \   0000018C   0230F2E5           LDRB     R3,[R2, #+2]!
+   \   00000190   0110A0E3           MOV      R1,#+1
+   \   00000194   FF0053E3           CMP      R3,#+255
+   \   00000198   0B00000A           BEQ      ??_LFN_ReadDirEntryInfo_10
+   \   0000019C   0230F2E5           LDRB     R3,[R2, #+2]!
+   \   000001A0   0210A0E3           MOV      R1,#+2
+   \   000001A4   FF0053E3           CMP      R3,#+255
+   \   000001A8   0700000A           BEQ      ??_LFN_ReadDirEntryInfo_10
+   \   000001AC   0230F2E5           LDRB     R3,[R2, #+2]!
+   \   000001B0   0310A0E3           MOV      R1,#+3
+   \   000001B4   FF0053E3           CMP      R3,#+255
+   \   000001B8   0300000A           BEQ      ??_LFN_ReadDirEntryInfo_10
+   \   000001BC   0220D2E5           LDRB     R2,[R2, #+2]
+   \   000001C0   0410A0E3           MOV      R1,#+4
+   \   000001C4   FF0052E3           CMP      R2,#+255
+   \   000001C8   0510A013           MOVNE    R1,#+5
+   \                     ??_LFN_ReadDirEntryInfo_10:
+   \   000001CC   0D2080E2           ADD      R2,R0,#+13
+   \   000001D0   00C0D2E5           LDRB     R12,[R2, #+0]
+   \   000001D4   0030A0E3           MOV      R3,#+0
+   \   000001D8   FF005CE3           CMP      R12,#+255
+   \   000001DC   1300000A           BEQ      ??_LFN_ReadDirEntryInfo_11
+   \   000001E0   02C0F2E5           LDRB     R12,[R2, #+2]!
+   \   000001E4   0130A0E3           MOV      R3,#+1
+   \   000001E8   FF005CE3           CMP      R12,#+255
+   \   000001EC   0F00000A           BEQ      ??_LFN_ReadDirEntryInfo_11
+   \   000001F0   02C0F2E5           LDRB     R12,[R2, #+2]!
+   \   000001F4   0230A0E3           MOV      R3,#+2
+   \   000001F8   FF005CE3           CMP      R12,#+255
+   \   000001FC   0B00000A           BEQ      ??_LFN_ReadDirEntryInfo_11
+   \   00000200   02C0F2E5           LDRB     R12,[R2, #+2]!
+   \   00000204   0330A0E3           MOV      R3,#+3
+   \   00000208   FF005CE3           CMP      R12,#+255
+   \   0000020C   0700000A           BEQ      ??_LFN_ReadDirEntryInfo_11
+   \   00000210   02C0F2E5           LDRB     R12,[R2, #+2]!
+   \   00000214   0430A0E3           MOV      R3,#+4
+   \   00000218   FF005CE3           CMP      R12,#+255
+   \   0000021C   0300000A           BEQ      ??_LFN_ReadDirEntryInfo_11
+   \   00000220   0220D2E5           LDRB     R2,[R2, #+2]
+   \   00000224   0530A0E3           MOV      R3,#+5
+   \   00000228   FF0052E3           CMP      R2,#+255
+   \   0000022C   0630A013           MOVNE    R3,#+6
+   \                     ??_LFN_ReadDirEntryInfo_11:
+   \   00000230   011083E0           ADD      R1,R3,R1
+   \   00000234   1B2080E2           ADD      R2,R0,#+27
+   \   00000238   0030D2E5           LDRB     R3,[R2, #+0]
+   \   0000023C   0000A0E3           MOV      R0,#+0
+   \   00000240   FF0053E3           CMP      R3,#+255
+   \   00000244   0300000A           BEQ      ??_LFN_ReadDirEntryInfo_12
+   \   00000248   0220D2E5           LDRB     R2,[R2, #+2]
+   \   0000024C   0100A0E3           MOV      R0,#+1
+   \   00000250   FF0052E3           CMP      R2,#+255
+   \   00000254   0200A013           MOVNE    R0,#+2
+   \                     ??_LFN_ReadDirEntryInfo_12:
+   \   00000258   10209DE5           LDR      R2,[SP, #+16]
+   \   0000025C   071081E0           ADD      R1,R1,R7
+   \   00000260   182092E5           LDR      R2,[R2, #+24]
+   \   00000264   010080E0           ADD      R0,R0,R1
+   \   00000268   012042E2           SUB      R2,R2,#+1
+   \   0000026C   000052E1           CMP      R2,R0
+   \   00000270   120000AA           BGE      ??_LFN_ReadDirEntryInfo_13
+   1038                            /* We cannot process this long file name */
+   1039                            _SetDirPosIndex(&pDir->DirPos, -Index);
+   \   00000274   080094E5           LDR      R0,[R4, #+8]
+   \   00000278   00106AE2           RSB      R1,R10,#+0
+   \   0000027C   000081E0           ADD      R0,R1,R0
+   \   00000280   080084E5           STR      R0,[R4, #+8]
+   1040                            UseShortName = 1;
+   \   00000284   0110A0E3           MOV      R1,#+1
+   \   00000288   0810CDE5           STRB     R1,[SP, #+8]
+   1041                            break;
+   \   0000028C   140000EA           B        ??_LFN_ReadDirEntryInfo_8
+   1042                          }
+   \                     ??_LFN_ReadDirEntryInfo_14:
+   \   00000290   FF1001E2           AND      R1,R1,#0xFF
+   \   00000294   8030A0E3           MOV      R3,#+128
+   \   00000298   A11083E1           ORR      R1,R3,R1, LSR #+1
+   \                     ??_LFN_ReadDirEntryInfo_15:
+   \   0000029C   0130D0E4           LDRB     R3,[R0], #+1
+   \   000002A0   012052E2           SUBS     R2,R2,#+1
+   \   000002A4   011083E0           ADD      R1,R3,R1
+   \   000002A8   9DFFFF0A           BEQ      ??_LFN_ReadDirEntryInfo_7
+   \   000002AC   010011E3           TST      R1,#0x1
+   \   000002B0   F6FFFF1A           BNE      ??_LFN_ReadDirEntryInfo_14
+   \                     ??_LFN_ReadDirEntryInfo_6:
+   \   000002B4   011CA0E1           LSL      R1,R1,#+24
+   \   000002B8   A11CA0E1           LSR      R1,R1,#+25
+   \   000002BC   F6FFFFEA           B        ??_LFN_ReadDirEntryInfo_15
+   1043                          NumBytesCopied = _CopyLongName(p, &pDirEntry->data[1]);
+   \                     ??_LFN_ReadDirEntryInfo_13:
+   \   000002C0   01108BE2           ADD      R1,R11,#+1
+   \   000002C4   0900A0E1           MOV      R0,R9
+   \   000002C8   ........           BL       _CopyLongName
+   1044                          p             += NumBytesCopied;
+   \   000002CC   099080E0           ADD      R9,R0,R9
+   1045                          DirEntryLen   += NumBytesCopied;
+   \   000002D0   077080E0           ADD      R7,R0,R7
+   1046                        } while (Index--);
+   \   000002D4   0A00A0E1           MOV      R0,R10
+   \   000002D8   01A040E2           SUB      R10,R0,#+1
+   \   000002DC   000050E3           CMP      R0,#+0
+   \   000002E0   9BFFFF1A           BNE      ??_LFN_ReadDirEntryInfo_9
+   1047                      }
+   1048                      _SetDirPosIndex(&pDir->DirPos, NumEntries);
+   \                     ??_LFN_ReadDirEntryInfo_8:
+   \   000002E4   080094E5           LDR      R0,[R4, #+8]
+   \   000002E8   00109DE5           LDR      R1,[SP, #+0]
+   1049                      pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &pDir->DirPos);
+   \   000002EC   0420A0E1           MOV      R2,R4
+   \   000002F0   000081E0           ADD      R0,R1,R0
+   \   000002F4   080084E5           STR      R0,[R4, #+8]
+   \   000002F8   0510A0E1           MOV      R1,R5
+   \   000002FC   0600A0E1           MOV      R0,R6
+   \   00000300   ........           BL       FS_FAT_GetDirEntry
+   \   00000304   00B0A0E1           MOV      R11,R0
+   1050                      if (UseShortName) {
+   \   00000308   0800DDE5           LDRB     R0,[SP, #+8]
+   \   0000030C   000050E3           CMP      R0,#+0
+   \   00000310   0500000A           BEQ      ??_LFN_ReadDirEntryInfo_16
+   1051                        FS_FAT_CopyShortName(pDirEntryInfo->sFileName, (const char*)&pDirEntry->data[0], pDirEntryInfo->SizeofFileName);
+   \   00000314   10009DE5           LDR      R0,[SP, #+16]
+   \   00000318   0B10A0E1           MOV      R1,R11
+   \   0000031C   182090E5           LDR      R2,[R0, #+24]
+   \   00000320   140090E5           LDR      R0,[R0, #+20]
+   \   00000324   ........           BL       FS_FAT_CopyShortName
+   \   00000328   010000EA           B        ??_LFN_ReadDirEntryInfo_17
+   1052                      } else {
+   1053                        if (p) {
+   \                     ??_LFN_ReadDirEntryInfo_16:
+   \   0000032C   000059E3           CMP      R9,#+0
+   1054                          *p = 0;
+   \   00000330   0080C915           STRBNE   R8,[R9, #+0]
+   1055                        }
+   1056                      }
+   1057                      FS_FAT_CopyDirEntryInfo(pDirEntry, pDirEntryInfo);
+   \                     ??_LFN_ReadDirEntryInfo_17:
+   \   00000334   10109DE5           LDR      R1,[SP, #+16]
+   \   00000338   0B00A0E1           MOV      R0,R11
+   \   0000033C   ........           BL       FS_FAT_CopyDirEntryInfo
+   1058                      r = 0;
+   \   00000340   04808DE5           STR      R8,[SP, #+4]
+   1059                      pDir->DirEntryIndex++;
+   \   00000344   B001D4E1           LDRH     R0,[R4, #+16]
+   \   00000348   010080E2           ADD      R0,R0,#+1
+   \   0000034C   B001C4E1           STRH     R0,[R4, #+16]
+   1060                      _SetDirPosIndex(&pDir->DirPos, 1);
+   \   00000350   080094E5           LDR      R0,[R4, #+8]
+   \   00000354   010080E2           ADD      R0,R0,#+1
+   \   00000358   080084E5           STR      R0,[R4, #+8]
+   1061                      break;
+   1062                    }
+   1063                  }
+   1064                }
+   1065              }
+   1066            } while (1);
+   1067            return r;
+   \                     ??_LFN_ReadDirEntryInfo_1:
+   \   0000035C   04009DE5           LDR      R0,[SP, #+4]
+   \   00000360   14D08DE2           ADD      SP,SP,#+20
+   \   00000364   F08FBDE8           POP      {R4-R11,PC}      ;; return
+   1068          }
+   1069          
+   1070          /*********************************************************************
+   1071          *
+   1072          *       _LFN_FindDirEntry
+   1073          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1074          static FS_FAT_DENTRY * _LFN_FindDirEntry(FS_VOLUME * pVolume, FS_SB * pSB, const char * sLongName, int Len, U32 DirStart, U8 AttrRequired, I32 * pLongDirEntryIndex) {
+   \                     _LFN_FindDirEntry:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   0050A0E1           MOV      R5,R0
+   \   00000008   44D04DE2           SUB      SP,SP,#+68
+   \   0000000C   0160A0E1           MOV      R6,R1
+   \   00000010   0270A0E1           MOV      R7,R2
+   1075            FS_FAT_DENTRY         DirEntry;
+   1076            FS_FAT_DENTRY       * pDirEntry;
+   1077            int                   NumEntries;
+   1078            int                   CurrentIndex;
+   1079            int                   LastIndex;
+   1080            FS_FAT_INFO         * pFATInfo;
+   1081            FS_DIR_POS            DirPos;
+   1082            U8                    CheckSum;
+   1083            I32                   LongDirEntryIndex;
+   1084          
+   1085            pFATInfo = &pVolume->FSInfo.FATInfo;
+   \   00000014   1C8085E2           ADD      R8,R5,#+28
+   1086          
+   1087          
+   1088            Len                 = _CorrectTrail(sLongName, Len);
+   \   00000018   0340B0E1           MOVS     R4,R3
+   \   0000001C   0200001A           BNE      ??_LFN_FindDirEntry_0
+   \   00000020   0700A0E1           MOV      R0,R7
+   \   00000024   ........           BL       strlen
+   \   00000028   0040A0E1           MOV      R4,R0
+   \                     ??_LFN_FindDirEntry_0:
+   \   0000002C   070084E0           ADD      R0,R4,R7
+   \   00000030   010040E2           SUB      R0,R0,#+1
+   \   00000034   0410A0E1           MOV      R1,R4
+   \   00000038   010000EA           B        ??_LFN_FindDirEntry_1
+   \                     ??_LFN_FindDirEntry_2:
+   \   0000003C   014044E2           SUB      R4,R4,#+1
+   \   00000040   011041E2           SUB      R1,R1,#+1
+   \                     ??_LFN_FindDirEntry_1:
+   \   00000044   000051E3           CMP      R1,#+0
+   \   00000048   0200000A           BEQ      ??_LFN_FindDirEntry_3
+   \   0000004C   012050E4           LDRB     R2,[R0], #-1
+   \   00000050   200052E3           CMP      R2,#+32
+   \   00000054   F8FFFF0A           BEQ      ??_LFN_FindDirEntry_2
+   1089            LastIndex           = -1;     /* Invalidate */
+   \                     ??_LFN_FindDirEntry_3:
+   \   00000058   0010E0E3           MVN      R1,#+0
+   \   0000005C   00108DE5           STR      R1,[SP, #+0]
+   1090            NumEntries          = _CalcNumLongEntries(sLongName, Len);
+   \   00000060   0400B0E1           MOVS     R0,R4
+   \   00000064   0100001A           BNE      ??_LFN_FindDirEntry_4
+   \   00000068   0700A0E1           MOV      R0,R7
+   \   0000006C   ........           BL       strlen
+   \                     ??_LFN_FindDirEntry_4:
+   \   00000070   ........           LDR      R1,??DataTable6  ;; 0x4ec4ec4f
+   \   00000074   0C0080E2           ADD      R0,R0,#+12
+   \   00000078   9021C1E0           SMULL    R2,R1,R0,R1
+   1091            CurrentIndex        = NumEntries;
+   \   0000007C   00B0A0E3           MOV      R11,#+0
+   \   00000080   4191B0E1           ASRS     R9,R1,#+2
+   1092            CheckSum            = 0;
+   1093            LongDirEntryIndex   = -1;
+   \   00000084   0B10E0E1           MVN      R1,R11
+   \   00000088   01908942           ADDMI    R9,R9,#+1
+   \   0000008C   08108DE5           STR      R1,[SP, #+8]
+   \   00000090   09A0A0E1           MOV      R10,R9
+   1094            /* Read directory */
+   1095            FS_FAT_InitDirEntryScan(pFATInfo, &DirPos, DirStart);
+   \   00000094   68209DE5           LDR      R2,[SP, #+104]
+   \   00000098   10108DE2           ADD      R1,SP,#+16
+   \   0000009C   0800A0E1           MOV      R0,R8
+   \   000000A0   ........           BL       FS_FAT_InitDirEntryScan
+   \   000000A4   ........           LDR      R0,??DataTable6  ;; 0x4ec4ec4f
+   \   000000A8   9410C0E0           SMULL    R1,R0,R4,R0
+   \   000000AC   0D10A0E3           MOV      R1,#+13
+   \   000000B0   4001B0E1           ASRS     R0,R0,#+2
+   \   000000B4   01008042           ADDMI    R0,R0,#+1
+   \   000000B8   910000E0           MUL      R0,R1,R0
+   \   000000BC   6C10DDE5           LDRB     R1,[SP, #+108]
+   \   000000C0   000044E0           SUB      R0,R4,R0
+   \   000000C4   0C008DE5           STR      R0,[SP, #+12]
+   \   000000C8   04108DE5           STR      R1,[SP, #+4]
+   \   000000CC   3B0000EA           B        ??_LFN_FindDirEntry_5
+   1096            do {
+   1097              pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &DirPos);
+   1098              if (!pDirEntry) {
+   1099                break;
+   1100              }
+   1101              if (pDirEntry->data[0] == 0) {
+   1102                pDirEntry = (FS_FAT_DENTRY*)NULL;
+   1103                break;  /* No more entries. Not found. */
+   1104              }
+   1105          
+   1106              if (pDirEntry->data[0] == 0xE5) {
+   \                     ??_LFN_FindDirEntry_6:
+   \   000000D0   E50050E3           CMP      R0,#+229
+   \   000000D4   3700000A           BEQ      ??_LFN_FindDirEntry_7
+   1107                FS_FAT_IncDirPos(&DirPos);
+   1108                continue;  // Skip deleted directory entries.
+   1109              }
+   1110          
+   1111              if (CurrentIndex != LastIndex) {
+   \   000000D8   00009DE5           LDR      R0,[SP, #+0]
+   \   000000DC   00005AE1           CMP      R10,R0
+   \   000000E0   2300000A           BEQ      ??_LFN_FindDirEntry_8
+   1112                if (CurrentIndex) {
+   \   000000E4   00005AE3           CMP      R10,#+0
+   \   000000E8   4000000A           BEQ      ??_LFN_FindDirEntry_9
+   1113                  _ComputeLongDirEntry(&DirEntry, sLongName, Len, CurrentIndex, 0);
+   \   000000EC   0000A0E3           MOV      R0,#+0
+   \   000000F0   00008DE5           STR      R0,[SP, #+0]
+   \   000000F4   0A30A0E1           MOV      R3,R10
+   \   000000F8   0420A0E1           MOV      R2,R4
+   \   000000FC   0710A0E1           MOV      R1,R7
+   \   00000100   20008DE2           ADD      R0,SP,#+32
+   \   00000104   ........           BL       _ComputeLongDirEntry
+   1114                  LastIndex = CurrentIndex;
+   1115                  //
+   1116                  // If the long name len in character is a multiple of 13 (such as "1234567890.12"),
+   1117                  // The long name is not padded. This means that if we have a longer entry,
+   1118                  // we need to skip all DirEntries until after we find a short one or the last long one.
+   1119                  //
+   1120                  if (0 == (Len % 13)) {
+   \   00000108   0C009DE5           LDR      R0,[SP, #+12]
+   \   0000010C   00A08DE5           STR      R10,[SP, #+0]
+   \   00000110   000050E3           CMP      R0,#+0
+   \   00000114   1800001A           BNE      ??_LFN_FindDirEntry_10
+   1121                    if (pDirEntry->data[0] > 0x40 + NumEntries) {   // Is this entry is too long for what we are looking for ?
+   \   00000118   0010D8E5           LDRB     R1,[R8, #+0]
+   \   0000011C   400089E2           ADD      R0,R9,#+64
+   \   00000120   010050E1           CMP      R0,R1
+   \   00000124   140000AA           BGE      ??_LFN_FindDirEntry_10
+   \   00000128   050000EA           B        ??_LFN_FindDirEntry_11
+   1122                      do {
+   1123                        if (pDirEntry->data[0] == 0) {
+   1124                          return NULL;      // End of directory, file not found
+   1125                        }
+   1126                        if (pDirEntry->data[11] != 0xF) {
+   1127                          break;
+   1128                        }
+   1129                        FS_FAT_IncDirPos(&DirPos);
+   \                     ??_LFN_FindDirEntry_12:
+   \   0000012C   ........           BL       FS_FAT_IncDirPos
+   1130                        pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &DirPos);
+   \   00000130   10208DE2           ADD      R2,SP,#+16
+   \   00000134   0610A0E1           MOV      R1,R6
+   \   00000138   0500A0E1           MOV      R0,R5
+   \   0000013C   ........           BL       FS_FAT_GetDirEntry
+   \   00000140   0080A0E1           MOV      R8,R0
+   1131                      } while (1);
+   \                     ??_LFN_FindDirEntry_11:
+   \   00000144   0000D8E5           LDRB     R0,[R8, #+0]
+   \   00000148   000050E3           CMP      R0,#+0
+   \   0000014C   0100001A           BNE      ??_LFN_FindDirEntry_13
+   \                     ??_LFN_FindDirEntry_14:
+   \   00000150   0000A0E3           MOV      R0,#+0
+   \   00000154   360000EA           B        ??_LFN_FindDirEntry_15
+   \                     ??_LFN_FindDirEntry_13:
+   \   00000158   0B00D8E5           LDRB     R0,[R8, #+11]
+   \   0000015C   0F0050E3           CMP      R0,#+15
+   \   00000160   10008DE2           ADD      R0,SP,#+16
+   \   00000164   F0FFFF0A           BEQ      ??_LFN_FindDirEntry_12
+   1132                      FS_FAT_IncDirPos(&DirPos);    // Skip one more
+   \   00000168   ........           BL       FS_FAT_IncDirPos
+   1133                      CurrentIndex = NumEntries;           /* Start over */
+   \   0000016C   09A0A0E1           MOV      R10,R9
+   1134                      continue;
+   \   00000170   120000EA           B        ??_LFN_FindDirEntry_5
+   1135                    }
+   1136                  }
+   1137                }
+   1138              }
+   1139              //
+   1140              // Check if the DirEntry matches. For a long name with n characters,
+   1141              // We need to check (n +12) / 13 Long-DirEntry
+   1142              // And last one Short Entry
+   1143              //
+   1144              if (CurrentIndex) {
+   \                     ??_LFN_FindDirEntry_8:
+   \   00000174   00005AE3           CMP      R10,#+0
+   \   00000178   1C00000A           BEQ      ??_LFN_FindDirEntry_9
+   1145                //
+   1146                // Check DirEntry as part of Long name
+   1147                //
+   1148                char IsDifferent;
+   1149                IsDifferent = _CompareLongDirEntry(pDirEntry, &DirEntry);
+   \                     ??_LFN_FindDirEntry_10:
+   \   0000017C   20108DE2           ADD      R1,SP,#+32
+   \   00000180   0800A0E1           MOV      R0,R8
+   \   00000184   ........           BL       _CompareLongDirEntry
+   1150                if (CurrentIndex == NumEntries) {
+   \   00000188   0D10D8E5           LDRB     R1,[R8, #+13]
+   \   0000018C   09005AE1           CMP      R10,R9
+   \   00000190   0300001A           BNE      ??_LFN_FindDirEntry_16
+   1151                  CheckSum = pDirEntry->data[13];
+   \   00000194   01B0A0E1           MOV      R11,R1
+   1152                  LongDirEntryIndex = DirPos.DirEntryIndex;
+   \   00000198   18109DE5           LDR      R1,[SP, #+24]
+   \   0000019C   08108DE5           STR      R1,[SP, #+8]
+   \   000001A0   010000EA           B        ??_LFN_FindDirEntry_17
+   1153                } else {
+   1154                  if (CheckSum != pDirEntry->data[13]) {
+   \                     ??_LFN_FindDirEntry_16:
+   \   000001A4   01005BE1           CMP      R11,R1
+   \   000001A8   0E00001A           BNE      ??_LFN_FindDirEntry_18
+   1155                    IsDifferent = 1;
+   1156                  }
+   1157                }
+   1158                if (IsDifferent == 0) { /* Name does match */
+   \                     ??_LFN_FindDirEntry_17:
+   \   000001AC   000050E3           CMP      R0,#+0
+   \   000001B0   0C00001A           BNE      ??_LFN_FindDirEntry_18
+   1159                  CurrentIndex--;
+   \   000001B4   01A04AE2           SUB      R10,R10,#+1
+   1160                } else {
+   \                     ??_LFN_FindDirEntry_7:
+   \   000001B8   10008DE2           ADD      R0,SP,#+16
+   \   000001BC   ........           BL       FS_FAT_IncDirPos
+   \                     ??_LFN_FindDirEntry_5:
+   \   000001C0   10208DE2           ADD      R2,SP,#+16
+   \   000001C4   0610A0E1           MOV      R1,R6
+   \   000001C8   0500A0E1           MOV      R0,R5
+   \   000001CC   ........           BL       FS_FAT_GetDirEntry
+   \   000001D0   0080B0E1           MOVS     R8,R0
+   \   000001D4   DDFFFF0A           BEQ      ??_LFN_FindDirEntry_14
+   \   000001D8   0000D8E5           LDRB     R0,[R8, #+0]
+   \   000001DC   000050E3           CMP      R0,#+0
+   \   000001E0   BAFFFF1A           BNE      ??_LFN_FindDirEntry_6
+   \   000001E4   D9FFFFEA           B        ??_LFN_FindDirEntry_14
+   1161                  CurrentIndex = NumEntries;           /* Start over */
+   \                     ??_LFN_FindDirEntry_18:
+   \   000001E8   09A0A0E1           MOV      R10,R9
+   \   000001EC   F1FFFFEA           B        ??_LFN_FindDirEntry_7
+   1162                }
+   1163              } else {
+   1164                //
+   1165                // Long name O.K., now check short name as well
+   1166                //
+   1167                U8 CheckSumShort;
+   1168                CheckSumShort = _CalcCheckSum((FS_83NAME*)pDirEntry);
+   \                     ??_LFN_FindDirEntry_9:
+   \   000001F0   0800A0E1           MOV      R0,R8
+   \   000001F4   0010A0E3           MOV      R1,#+0
+   \   000001F8   0B20A0E3           MOV      R2,#+11
+   \   000001FC   170000EA           B        ??_LFN_FindDirEntry_19
+   1169                if ((CheckSumShort != CheckSum) || ((pDirEntry->data[DIR_ENTRY_OFF_ATTRIBUTES] & AttrRequired) != AttrRequired)) {
+   \                     ??_LFN_FindDirEntry_20:
+   \   00000200   011CA0E1           MOV      R1,R1, LSL #+24
+   \   00000204   210C5BE1           CMP      R11,R1, LSR #+24
+   \   00000208   F6FFFF1A           BNE      ??_LFN_FindDirEntry_18
+   \   0000020C   0B00D8E5           LDRB     R0,[R8, #+11]
+   \   00000210   04109DE5           LDR      R1,[SP, #+4]
+   \   00000214   000001E0           AND      R0,R1,R0
+   \   00000218   010050E1           CMP      R0,R1
+   \   0000021C   F1FFFF1A           BNE      ??_LFN_FindDirEntry_18
+   1170                  CurrentIndex = NumEntries;           /* Start over */
+   1171                } else {
+   1172                  /* Success ! We have found a matching long entry */
+   1173                  if (pLongDirEntryIndex) {
+   \   00000220   70009DE5           LDR      R0,[SP, #+112]
+   \   00000224   000050E3           CMP      R0,#+0
+   1174                    *pLongDirEntryIndex = LongDirEntryIndex;
+   \   00000228   08109D15           LDRNE    R1,[SP, #+8]
+   \   0000022C   00108015           STRNE    R1,[R0, #+0]
+   1175                  }
+   1176                  return pDirEntry;
+   \   00000230   0800A0E1           MOV      R0,R8
+   \                     ??_LFN_FindDirEntry_15:
+   \   00000234   44D08DE2           ADD      SP,SP,#+68       ;; stack cleaning
+   \   00000238   F08FBDE8           POP      {R4-R11,PC}      ;; return
+   \                     ??_LFN_FindDirEntry_21:
+   \   0000023C   FF1001E2           AND      R1,R1,#0xFF
+   \   00000240   8030A0E3           MOV      R3,#+128
+   \   00000244   A11083E1           ORR      R1,R3,R1, LSR #+1
+   \                     ??_LFN_FindDirEntry_22:
+   \   00000248   0130D0E4           LDRB     R3,[R0], #+1
+   \   0000024C   012052E2           SUBS     R2,R2,#+1
+   \   00000250   011083E0           ADD      R1,R3,R1
+   \   00000254   E9FFFF0A           BEQ      ??_LFN_FindDirEntry_20
+   \   00000258   010011E3           TST      R1,#0x1
+   \   0000025C   F6FFFF1A           BNE      ??_LFN_FindDirEntry_21
+   \                     ??_LFN_FindDirEntry_19:
+   \   00000260   011CA0E1           LSL      R1,R1,#+24
+   \   00000264   A11CA0E1           LSR      R1,R1,#+25
+   \   00000268   F6FFFFEA           B        ??_LFN_FindDirEntry_22
+   1177                }
+   1178              }
+   1179              FS_FAT_IncDirPos(&DirPos);
+   1180            } while (1);
+   1181            return NULL;         /* Not found */
+   1182          }
+   1183          
+   1184          /*********************************************************************
+   1185          *
+   1186          *       _LFN_DelLongEntry
+   1187          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1188          static void _LFN_DelLongEntry(FS_VOLUME * pVolume, FS_SB * pSB, U32 DirStart, I32 LongDirEntryIndex) {
+   \                     _LFN_DelLongEntry:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   10D04DE2           SUB      SP,SP,#+16
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0370B0E1           MOVS     R7,R3
+   1189            FS_DIR_POS            DirPos;
+   1190            FS_FAT_DENTRY       * pDirEntry;
+   1191            int                   NumShortEntries;
+   1192          
+   1193            if (LongDirEntryIndex >= 0) {    /* Delete only if it is a long directory entry */
+   \   00000014   1B00004A           BMI      ??_LFN_DelLongEntry_0
+   1194              /* Goto first directory entry */
+   1195              FS_FAT_InitDirEntryScan(&pVolume->FSInfo.FATInfo, &DirPos, DirStart);
+   \   00000018   0D10A0E1           MOV      R1,SP
+   \   0000001C   1C0084E2           ADD      R0,R4,#+28
+   \   00000020   ........           BL       FS_FAT_InitDirEntryScan
+   1196              do {
+   1197                pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &DirPos);
+   \                     ??_LFN_DelLongEntry_1:
+   \   00000024   0D20A0E1           MOV      R2,SP
+   \   00000028   0510A0E1           MOV      R1,R5
+   \   0000002C   0400A0E1           MOV      R0,R4
+   \   00000030   ........           BL       FS_FAT_GetDirEntry
+   \   00000034   0060A0E1           MOV      R6,R0
+   1198                FS_FAT_IncDirPos(&DirPos);
+   \   00000038   0D00A0E1           MOV      R0,SP
+   \   0000003C   ........           BL       FS_FAT_IncDirPos
+   1199              } while ((int)DirPos.DirEntryIndex <= LongDirEntryIndex);
+   \   00000040   08009DE5           LDR      R0,[SP, #+8]
+   \   00000044   000057E1           CMP      R7,R0
+   \   00000048   F5FFFFAA           BGE      ??_LFN_DelLongEntry_1
+   1200          
+   1201              /* Calc number of short entries for this long entry */
+   1202              NumShortEntries = (pDirEntry->data[0] & 0x3f);
+   \   0000004C   0000D6E5           LDRB     R0,[R6, #+0]
+   \   00000050   E580A0E3           MOV      R8,#+229
+   \   00000054   3F7000E2           AND      R7,R0,#0x3F
+   1203          
+   1204              /* Delete entries */
+   1205              do {
+   1206                pDirEntry->data[0] = 0xE5;                        /* Mark entry as deleted */
+   \                     ??_LFN_DelLongEntry_2:
+   \   00000058   0080C6E5           STRB     R8,[R6, #+0]
+   1207                FS__SB_MarkDirty(pSB);
+   \   0000005C   0500A0E1           MOV      R0,R5
+   \   00000060   ........           BL       FS__SB_MarkDirty
+   1208                pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &DirPos);
+   \   00000064   0D20A0E1           MOV      R2,SP
+   \   00000068   0510A0E1           MOV      R1,R5
+   \   0000006C   0400A0E1           MOV      R0,R4
+   \   00000070   ........           BL       FS_FAT_GetDirEntry
+   \   00000074   0060A0E1           MOV      R6,R0
+   1209                FS_FAT_IncDirPos(&DirPos);
+   \   00000078   0D00A0E1           MOV      R0,SP
+   \   0000007C   ........           BL       FS_FAT_IncDirPos
+   1210              } while (--NumShortEntries);
+   \   00000080   017057E2           SUBS     R7,R7,#+1
+   \   00000084   F3FFFF1A           BNE      ??_LFN_DelLongEntry_2
+   1211            }
+   1212          }
+   \                     ??_LFN_DelLongEntry_0:
+   \   00000088   10D08DE2           ADD      SP,SP,#+16       ;; stack cleaning
+   \   0000008C   F081BDE8           POP      {R4-R8,PC}       ;; return
+   1213          
+   1214          /*********************************************************************
+   1215          *
+   1216          *       _LFN_CreateDirEntry
+   1217          *
+   1218          *
+   1219          *  Function description
+   1220          *    Creates a long directory entry.
+   1221          *
+   1222          *  Return value:
+   1223          *    NULL      Error, could not create long file name entry
+   1224          *    != NULL   Pointer to "main" directory entry (of the short name)
+   1225          *
+   1226          *  Notes
+   1227          *    (1) Order of entries
+   1228          *        A long directory name consists of a number of entries making up the long name,
+   1229          *        immediately followed by the short name.
+   1230          *    (2) Finding a unique short name
+   1231          *        The short name needs to be unique in a directory.
+   1232          *        We can build different short names (basically by adding a number).
+   1233          *        The strategy is to try the short names until we find one that does
+   1234          *        is unique.
+   1235          *    (3) Finding an empty slot
+   1236          *        The important point is that all directory entries (n long + 1 short)
+   1237          *        are adjacent. We therefor need to look for n+1 adjacent, unused entries.
+   1238          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1239          static FS_FAT_DENTRY * _LFN_CreateDirEntry(FS_VOLUME * pVolume, FS_SB * pSB, const char * pFileName, U32 DirStart, U32 ClusterId, U8 Attribute, U32 Size, U16 Time, U16 Date) {
+   \                     _LFN_CreateDirEntry:
+   \   00000000   F84F2DE9           PUSH     {R3-R11,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   0260A0E1           MOV      R6,R2
+   \   0000000C   58D04DE2           SUB      SP,SP,#+88
+   \   00000010   0150A0E1           MOV      R5,R1
+   1240            int               NumLongEntries;   /* Number of required directory entries */
+   1241            int               FreeEntryCnt;    /* Number of empty, adjacent directory entries */
+   1242            FS_DIR_POS        DirPos;
+   1243            FS_DIR_POS        DirPosStart;     /* Remember directory position of first empty entry */
+   1244            FS_FAT_INFO     * pFATInfo;
+   1245            FS_FAT_DENTRY   * pDirEntry;
+   1246            FS_83NAME         ShortEntry;
+   1247            U8                CheckSum;
+   1248            int               Index;
+   1249            int               Len;
+   1250            int               FreeIndex;
+   1251            U8                aBitField[(FS_FAT_LFN_BIT_ARRAY_SIZE + 7) >> 3];
+   1252          
+   1253            if (STRLEN(pFileName) > FS_FAT_MAX_DIRNAME) {
+   \   00000014   0600A0E1           MOV      R0,R6
+   \   00000018   ........           BL       strlen
+   \   0000001C   400F50E3           CMP      R0,#+256
+   \   00000020   0100003A           BCC      ??_LFN_CreateDirEntry_1
+   1254              return NULL;  /* file names greater than 255 characters can not be handled by Microsoft */
+   \                     ??_LFN_CreateDirEntry_2:
+   \   00000024   0000A0E3           MOV      R0,#+0
+   \   00000028   C80000EA           B        ??_LFN_CreateDirEntry_3
+   1255            }
+   1256          
+   1257            Len = _CorrectTrail(pFileName, 0);
+   \                     ??_LFN_CreateDirEntry_1:
+   \   0000002C   0600A0E1           MOV      R0,R6
+   \   00000030   ........           BL       strlen
+   \   00000034   0070A0E1           MOV      R7,R0
+   \   00000038   060087E0           ADD      R0,R7,R6
+   \   0000003C   010040E2           SUB      R0,R0,#+1
+   \   00000040   0710A0E1           MOV      R1,R7
+   \   00000044   010000EA           B        ??_LFN_CreateDirEntry_4
+   \                     ??_LFN_CreateDirEntry_5:
+   \   00000048   017047E2           SUB      R7,R7,#+1
+   \   0000004C   011041E2           SUB      R1,R1,#+1
+   \                     ??_LFN_CreateDirEntry_4:
+   \   00000050   000051E3           CMP      R1,#+0
+   \   00000054   0200000A           BEQ      ??_LFN_CreateDirEntry_6
+   \   00000058   012050E4           LDRB     R2,[R0], #-1
+   \   0000005C   200052E3           CMP      R2,#+32
+   \   00000060   F8FFFF0A           BEQ      ??_LFN_CreateDirEntry_5
+   1258            if (_CheckFilename(pFileName, Len) == -1) {
+   \                     ??_LFN_CreateDirEntry_6:
+   \   00000064   0700A0E1           MOV      R0,R7
+   \   00000068   0610A0E1           MOV      R1,R6
+   \                     ??_LFN_CreateDirEntry_7:
+   \   0000006C   0020D1E5           LDRB     R2,[R1, #+0]
+   \   00000070   2B2042E2           SUB      R2,R2,#+43
+   \   00000074   320052E3           CMP      R2,#+50
+   \   00000078   0E00008A           BHI      ??_LFN_CreateDirEntry_8
+   \   0000007C   D2309FE1           LDRSB    R3,[PC, R2]
+   \   00000080   03F18FE0           ADD      PC,PC,R3, LSL #+2
+   \                     ??_LFN_CreateDirEntry_0:
+   \   00000084   E7E70C0C           DC8      0xE7,0xE7,0xC,0xC
+   \   00000088   0C0C0C0C           DC8      0xC,0xC,0xC,0xC
+   \   0000008C   0C0C0C0C           DC8      0xC,0xC,0xC,0xC
+   \   00000090   0C0C0C0C           DC8      0xC,0xC,0xC,0xC
+   \   00000094   E70CE70C           DC8      0xE7,0xC,0xE7,0xC
+   \   00000098   0C0C0C0C           DC8      0xC,0xC,0xC,0xC
+   \   0000009C   0C0C0C0C           DC8      0xC,0xC,0xC,0xC
+   \   000000A0   0C0C0C0C           DC8      0xC,0xC,0xC,0xC
+   \   000000A4   0C0C0C0C           DC8      0xC,0xC,0xC,0xC
+   \   000000A8   0C0C0C0C           DC8      0xC,0xC,0xC,0xC
+   \   000000AC   0C0C0C0C           DC8      0xC,0xC,0xC,0xC
+   \   000000B0   0C0C0C0C           DC8      0xC,0xC,0xC,0xC
+   \   000000B4   E70CE700           DC8      0xE7,0xC,0xE7,0x0
+   \                     ??_LFN_CreateDirEntry_8:
+   \   000000B8   011081E2           ADD      R1,R1,#+1
+   \   000000BC   010050E2           SUBS     R0,R0,#+1
+   \   000000C0   E9FFFF1A           BNE      ??_LFN_CreateDirEntry_7
+   1259              return NULL;
+   1260            }
+   1261            pFATInfo    = &pVolume->FSInfo.FATInfo;
+   \   000000C4   1C1084E2           ADD      R1,R4,#+28
+   \   000000C8   08108DE5           STR      R1,[SP, #+8]
+   1262            NumLongEntries = _CalcNumLongEntries(pFileName, Len);
+   \   000000CC   0700B0E1           MOVS     R0,R7
+   \   000000D0   0100001A           BNE      ??_LFN_CreateDirEntry_9
+   \   000000D4   0600A0E1           MOV      R0,R6
+   \   000000D8   ........           BL       strlen
+   \                     ??_LFN_CreateDirEntry_9:
+   \   000000DC   ........           LDR      R1,??DataTable6  ;; 0x4ec4ec4f
+   \   000000E0   0C0080E2           ADD      R0,R0,#+12
+   \   000000E4   9021C1E0           SMULL    R2,R1,R0,R1
+   1263            //
+   1264            // Find short directory name that has not yet been taken (Note 2)
+   1265            //
+   1266            Index = 0;
+   \   000000E8   0090A0E3           MOV      R9,#+0
+   \   000000EC   4181B0E1           ASRS     R8,R1,#+2
+   \   000000F0   01808842           ADDMI    R8,R8,#+1
+   \   000000F4   020000EA           B        ??_LFN_CreateDirEntry_10
+   1267            while (1) {
+   1268              FS_MEMSET(aBitField, 0, sizeof(aBitField));
+   1269              _GenerateShortEntry(&ShortEntry, pFileName, Index);
+   1270              //
+   1271              // Look for a free index number for the short name
+   1272              //
+   1273              FreeIndex = _FindFreeIndex(pVolume, pSB, &ShortEntry, DirStart, aBitField, Index);    
+   1274              if (FreeIndex >= 0) {
+   1275                //
+   1276                // We find an entry, generate the real short name
+   1277                //
+   1278                _GenerateShortEntry(&ShortEntry, pFileName, FreeIndex);
+   1279                break;
+   1280              }
+   1281              if (Index >= FS_FAT_LFN_MAX_SHORT_NAME) {
+   \                     ??_LFN_CreateDirEntry_11:
+   \   000000F8   FA0F59E3           CMP      R9,#+1000
+   \   000000FC   C8FFFFAA           BGE      ??_LFN_CreateDirEntry_2
+   1282                return NULL;          /* We give up. All short names seem to be taken */
+   1283              }
+   1284              Index += FS_FAT_LFN_BIT_ARRAY_SIZE;
+   \   00000100   409F89E2           ADD      R9,R9,#+256
+   \                     ??_LFN_CreateDirEntry_10:
+   \   00000104   38008DE2           ADD      R0,SP,#+56
+   \   00000108   0010A0E3           MOV      R1,#+0
+   \   0000010C   0020A0E3           MOV      R2,#+0
+   \   00000110   0030A0E3           MOV      R3,#+0
+   \   00000114   00C0A0E3           MOV      R12,#+0
+   \   00000118   0E10A0E8           STM      R0!,{R1-R3,R12}
+   \   0000011C   0E10A0E8           STM      R0!,{R1-R3,R12}
+   \   00000120   0920A0E1           MOV      R2,R9
+   \   00000124   0610A0E1           MOV      R1,R6
+   \   00000128   0C008DE2           ADD      R0,SP,#+12
+   \   0000012C   ........           BL       _GenerateShortEntry
+   \   00000130   38008DE2           ADD      R0,SP,#+56
+   \   00000134   00008DE5           STR      R0,[SP, #+0]
+   \   00000138   04908DE5           STR      R9,[SP, #+4]
+   \   0000013C   58309DE5           LDR      R3,[SP, #+88]
+   \   00000140   0C208DE2           ADD      R2,SP,#+12
+   \   00000144   0510A0E1           MOV      R1,R5
+   \   00000148   0400A0E1           MOV      R0,R4
+   \   0000014C   ........           BL       _FindFreeIndex
+   \   00000150   0020B0E1           MOVS     R2,R0
+   \   00000154   E7FFFF4A           BMI      ??_LFN_CreateDirEntry_11
+   \   00000158   0610A0E1           MOV      R1,R6
+   \   0000015C   0C008DE2           ADD      R0,SP,#+12
+   \   00000160   ........           BL       _GenerateShortEntry
+   1285            }
+   1286            /*
+   1287             * Read directory, trying to find an empty slot (Note 3)
+   1288             */
+   1289            FS_FAT_InitDirEntryScan(pFATInfo, &DirPos, DirStart);
+   \   00000164   58209DE5           LDR      R2,[SP, #+88]
+   \   00000168   18108DE2           ADD      R1,SP,#+24
+   \   0000016C   08009DE5           LDR      R0,[SP, #+8]
+   \   00000170   ........           BL       FS_FAT_InitDirEntryScan
+   1290            FreeEntryCnt = 0;
+   \   00000174   0090A0E3           MOV      R9,#+0
+   \   00000178   020000EA           B        ??_LFN_CreateDirEntry_12
+   1291            do {
+   1292              U8 c;
+   1293              pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &DirPos);
+   1294              if (pDirEntry == NULL) {
+   1295                /*
+   1296                 * Grow directory if possible
+   1297                 */
+   1298                if ((DirStart == 0) && (pFATInfo->RootEntCnt)) {
+   1299                  /* Root directory of FAT12/16 medium can not be increased */
+   1300                  FS_DEBUG_ERROROUT((FS_MTYPE_FS, "FS_FAT_LFN_CreateDirEntry: Root directory too small.\n"));
+   1301                  return NULL;                  /* Can not create, directory is full */
+   1302                } else {
+   1303                  U32 NewCluster;
+   1304                  U32 LastCluster;
+   1305                  LastCluster = FS_FAT_FindLastCluster(pVolume, pSB, DirPos.Cluster, (U32*)NULL);
+   1306                  NewCluster  = FS_FAT_AllocCluster   (pVolume, pSB, LastCluster, NULL);
+   1307                  FS__SB_Flush(pSB);
+   1308                  if (NewCluster) {
+   1309                    U32 DirSector;
+   1310                    int SectorNo;
+   1311                    /*
+   1312                     * Clean new directory cluster  (Fill with 0)
+   1313                     */
+   1314                    FS_MEMSET(pSB->pBuffer, 0x00, pFATInfo->BytesPerSec);
+   1315                    DirSector = FS_FAT_ClusterId2SectorNo(pFATInfo, NewCluster);
+   1316                    for (SectorNo = pFATInfo->SecPerClus - 1; SectorNo >= 0; SectorNo--) {
+   1317                      FS__SB_SetSector(pSB, DirSector + SectorNo, FS_SB_TYPE_DIRECTORY);
+   1318                      FS__SB_Write(pSB);
+   1319                    }
+   1320                    pDirEntry = (FS_FAT_DENTRY *)pSB->pBuffer;
+   1321                  } else {
+   1322                    FS_DEBUG_ERROROUT((FS_MTYPE_FS, "FS_FAT_LFN_CreateDirEntry: Disk is full"));
+   1323                    return NULL;
+   1324                  }
+   1325                }
+   1326              }
+   1327              c = pDirEntry->data[0];
+   1328              if ((c == 0) || (c == 0xE5)) {       /* Is this entry free ? */
+   1329                if (FreeEntryCnt == 0) {
+   1330                  DirPosStart = DirPos;
+   1331                }
+   1332                if (FreeEntryCnt++ == NumLongEntries) {
+   1333                  break;                  /* We found sufficient entries */
+   1334                }
+   1335              } else {
+   1336                FreeEntryCnt = 0;
+   \                     ??_LFN_CreateDirEntry_13:
+   \   0000017C   0090A0E3           MOV      R9,#+0
+   1337              }
+   1338              FS_FAT_IncDirPos(&DirPos);
+   \                     ??_LFN_CreateDirEntry_14:
+   \   00000180   18008DE2           ADD      R0,SP,#+24
+   \   00000184   ........           BL       FS_FAT_IncDirPos
+   1339            } while (1);
+   \                     ??_LFN_CreateDirEntry_12:
+   \   00000188   18208DE2           ADD      R2,SP,#+24
+   \   0000018C   0510A0E1           MOV      R1,R5
+   \   00000190   0400A0E1           MOV      R0,R4
+   \   00000194   ........           BL       FS_FAT_GetDirEntry
+   \   00000198   00A0B0E1           MOVS     R10,R0
+   \   0000019C   2A00001A           BNE      ??_LFN_CreateDirEntry_15
+   \   000001A0   58009DE5           LDR      R0,[SP, #+88]
+   \   000001A4   000050E3           CMP      R0,#+0
+   \   000001A8   0300001A           BNE      ??_LFN_CreateDirEntry_16
+   \   000001AC   08009DE5           LDR      R0,[SP, #+8]
+   \   000001B0   B801D0E1           LDRH     R0,[R0, #+24]
+   \   000001B4   000050E3           CMP      R0,#+0
+   \   000001B8   99FFFF1A           BNE      ??_LFN_CreateDirEntry_2
+   \                     ??_LFN_CreateDirEntry_16:
+   \   000001BC   0030A0E3           MOV      R3,#+0
+   \   000001C0   18209DE5           LDR      R2,[SP, #+24]
+   \   000001C4   0510A0E1           MOV      R1,R5
+   \   000001C8   0400A0E1           MOV      R0,R4
+   \   000001CC   ........           BL       FS_FAT_FindLastCluster
+   \   000001D0   0020A0E1           MOV      R2,R0
+   \   000001D4   0030A0E3           MOV      R3,#+0
+   \   000001D8   0510A0E1           MOV      R1,R5
+   \   000001DC   0400A0E1           MOV      R0,R4
+   \   000001E0   ........           BL       FS_FAT_AllocCluster
+   \   000001E4   00A0A0E1           MOV      R10,R0
+   \   000001E8   0500A0E1           MOV      R0,R5
+   \   000001EC   ........           BL       FS__SB_Flush
+   \   000001F0   00005AE3           CMP      R10,#+0
+   \   000001F4   8AFFFF0A           BEQ      ??_LFN_CreateDirEntry_2
+   \   000001F8   08009DE5           LDR      R0,[SP, #+8]
+   \   000001FC   B410D0E1           LDRH     R1,[R0, #+4]
+   \   00000200   080095E5           LDR      R0,[R5, #+8]
+   \   00000204   ........           BL       __aeabi_memclr
+   \   00000208   0A10A0E1           MOV      R1,R10
+   \   0000020C   08009DE5           LDR      R0,[SP, #+8]
+   \   00000210   ........           BL       FS_FAT_ClusterId2SectorNo
+   \   00000214   00A0A0E1           MOV      R10,R0
+   \   00000218   08009DE5           LDR      R0,[SP, #+8]
+   \   0000021C   1C00D0E5           LDRB     R0,[R0, #+28]
+   \   00000220   01B050E2           SUBS     R11,R0,#+1
+   \   00000224   0700004A           BMI      ??_LFN_CreateDirEntry_17
+   \                     ??_LFN_CreateDirEntry_18:
+   \   00000228   0120A0E3           MOV      R2,#+1
+   \   0000022C   0A108BE0           ADD      R1,R11,R10
+   \   00000230   0500A0E1           MOV      R0,R5
+   \   00000234   ........           BL       FS__SB_SetSector
+   \   00000238   0500A0E1           MOV      R0,R5
+   \   0000023C   ........           BL       FS__SB_Write
+   \   00000240   01B05BE2           SUBS     R11,R11,#+1
+   \   00000244   F7FFFF5A           BPL      ??_LFN_CreateDirEntry_18
+   \                     ??_LFN_CreateDirEntry_17:
+   \   00000248   08A095E5           LDR      R10,[R5, #+8]
+   \                     ??_LFN_CreateDirEntry_15:
+   \   0000024C   0000DAE5           LDRB     R0,[R10, #+0]
+   \   00000250   000050E3           CMP      R0,#+0
+   \   00000254   E5005013           CMPNE    R0,#+229
+   \   00000258   C7FFFF1A           BNE      ??_LFN_CreateDirEntry_13
+   \   0000025C   000059E3           CMP      R9,#+0
+   \   00000260   0300001A           BNE      ??_LFN_CreateDirEntry_19
+   \   00000264   18108DE2           ADD      R1,SP,#+24
+   \   00000268   0C50B1E8           LDM      R1!,{R2,R3,R12,LR}
+   \   0000026C   28008DE2           ADD      R0,SP,#+40
+   \   00000270   0C50A0E8           STM      R0!,{R2,R3,R12,LR}
+   \                     ??_LFN_CreateDirEntry_19:
+   \   00000274   080059E1           CMP      R9,R8
+   \   00000278   0300001A           BNE      ??_LFN_CreateDirEntry_20
+   1340            /*
+   1341             * Create long file name directory entry
+   1342             */
+   1343            CheckSum = _CalcCheckSum(&ShortEntry);
+   \   0000027C   0C008DE2           ADD      R0,SP,#+12
+   \   00000280   0090A0E3           MOV      R9,#+0
+   \   00000284   0B10A0E3           MOV      R1,#+11
+   \   00000288   030000EA           B        ??_LFN_CreateDirEntry_21
+   \                     ??_LFN_CreateDirEntry_20:
+   \   0000028C   019089E2           ADD      R9,R9,#+1
+   \   00000290   BAFFFFEA           B        ??_LFN_CreateDirEntry_14
+   \                     ??_LFN_CreateDirEntry_22:
+   \   00000294   010019E3           TST      R9,#0x1
+   \   00000298   0100001A           BNE      ??_LFN_CreateDirEntry_23
+   \                     ??_LFN_CreateDirEntry_21:
+   \   0000029C   A920A0E1           LSR      R2,R9,#+1
+   \   000002A0   010000EA           B        ??_LFN_CreateDirEntry_24
+   \                     ??_LFN_CreateDirEntry_23:
+   \   000002A4   8020A0E3           MOV      R2,#+128
+   \   000002A8   A92082E1           ORR      R2,R2,R9, LSR #+1
+   \                     ??_LFN_CreateDirEntry_24:
+   \   000002AC   0130D0E4           LDRB     R3,[R0], #+1
+   \   000002B0   011051E2           SUBS     R1,R1,#+1
+   \   000002B4   029083E0           ADD      R9,R3,R2
+   \   000002B8   FF9009E2           AND      R9,R9,#0xFF
+   \   000002BC   F4FFFF1A           BNE      ??_LFN_CreateDirEntry_22
+   1344            do {
+   1345              pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &DirPosStart);
+   \                     ??_LFN_CreateDirEntry_25:
+   \   000002C0   28208DE2           ADD      R2,SP,#+40
+   \   000002C4   0510A0E1           MOV      R1,R5
+   \   000002C8   0400A0E1           MOV      R0,R4
+   \   000002CC   ........           BL       FS_FAT_GetDirEntry
+   \   000002D0   00A0B0E1           MOVS     R10,R0
+   1346              if (pDirEntry == NULL) {
+   \   000002D4   52FFFF0A           BEQ      ??_LFN_CreateDirEntry_2
+   1347                return NULL;
+   1348              }
+   1349              _ComputeLongDirEntry(pDirEntry, pFileName, Len, NumLongEntries, CheckSum);
+   \   000002D8   00908DE5           STR      R9,[SP, #+0]
+   \   000002DC   0830A0E1           MOV      R3,R8
+   \   000002E0   0720A0E1           MOV      R2,R7
+   \   000002E4   0610A0E1           MOV      R1,R6
+   \   000002E8   ........           BL       _ComputeLongDirEntry
+   1350              FS__SB_MarkDirty(pSB);
+   \   000002EC   0500A0E1           MOV      R0,R5
+   \   000002F0   ........           BL       FS__SB_MarkDirty
+   1351              FS_FAT_IncDirPos(&DirPosStart);
+   \   000002F4   28008DE2           ADD      R0,SP,#+40
+   \   000002F8   ........           BL       FS_FAT_IncDirPos
+   1352            } while (--NumLongEntries);
+   \   000002FC   018058E2           SUBS     R8,R8,#+1
+   \   00000300   EEFFFF1A           BNE      ??_LFN_CreateDirEntry_25
+   1353            /*
+   1354             * Create short directory entry
+   1355             */
+   1356            pDirEntry = FS_FAT_GetDirEntry(pVolume, pSB, &DirPosStart);
+   \   00000304   28208DE2           ADD      R2,SP,#+40
+   \   00000308   0510A0E1           MOV      R1,R5
+   \   0000030C   0400A0E1           MOV      R0,R4
+   \   00000310   ........           BL       FS_FAT_GetDirEntry
+   \   00000314   00A0A0E1           MOV      R10,R0
+   1357            FS_FAT_WriteDirEntry83(pDirEntry, &ShortEntry, ClusterId, Attribute, Size, Time, Date);
+   \   00000318   B009DDE1           LDRH     R0,[SP, #+144]
+   \   0000031C   8430DDE5           LDRB     R3,[SP, #+132]
+   \   00000320   80209DE5           LDR      R2,[SP, #+128]
+   \   00000324   08008DE5           STR      R0,[SP, #+8]
+   \   00000328   BC08DDE1           LDRH     R0,[SP, #+140]
+   \   0000032C   0C108DE2           ADD      R1,SP,#+12
+   \   00000330   04008DE5           STR      R0,[SP, #+4]
+   \   00000334   88009DE5           LDR      R0,[SP, #+136]
+   \   00000338   00008DE5           STR      R0,[SP, #+0]
+   \   0000033C   0A00A0E1           MOV      R0,R10
+   \   00000340   ........           BL       FS_FAT_WriteDirEntry83
+   1358            FS__SB_MarkDirty(pSB);
+   \   00000344   0500A0E1           MOV      R0,R5
+   \   00000348   ........           BL       FS__SB_MarkDirty
+   1359            return pDirEntry;
+   \   0000034C   0A00A0E1           MOV      R0,R10
+   \                     ??_LFN_CreateDirEntry_3:
+   \   00000350   5CD08DE2           ADD      SP,SP,#+92       ;; stack cleaning
+   \   00000354   F08FBDE8           POP      {R4-R11,PC}      ;; return
+   1360          }
+   1361          
+   1362          
+   1363          /*********************************************************************
+   1364          *
+   1365          *       Public code
+   1366          *
+   1367          **********************************************************************
+   1368          */
+   1369          
+   1370          /*********************************************************************
+   1371          *
+   1372          *       FS_FAT_SupportLFN
+   1373          *
+   1374          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1375          void FS_FAT_SupportLFN(void) {
+   1376            FS_LOCK_SYS();
+   1377            FAT_pDirEntryAPI = &FAT_LFN_API;
+   \                     FS_FAT_SupportLFN:
+   \   00000000   ........           LDR      R0,??DataTable6_2
+   \   00000004   ........           ADR      R1,FAT_LFN_API
+   \   00000008   001080E5           STR      R1,[R0, #+0]
+   1378            FS_UNLOCK_SYS();
+   1379          }
+   \   0000000C   1EFF2FE1           BX       LR               ;; return
+   1380          
+   1381          
+   1382          /*********************************************************************
+   1383          *
+   1384          *       FS_FAT_SupportLFN
+   1385          *
+   1386          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1387          void FS_FAT_DisableLFN(void) {
+   1388            FS_LOCK_SYS();
+   1389            FAT_pDirEntryAPI = &FAT_SFN_API;
+   \                     FS_FAT_DisableLFN:
+   \   00000000   ........           LDR      R0,??DataTable6_2
+   \   00000004   ........           LDR      R1,??DataTable6_3
+   \   00000008   001080E5           STR      R1,[R0, #+0]
+   1390            FS_UNLOCK_SYS();
+   1391          }
+   \   0000000C   1EFF2FE1           BX       LR               ;; return
+   1392          
+   1393          /*********************************************************************
+   1394          *
+   1395          *       Public const
+   1396          *
+   1397          **********************************************************************
+   1398          */
+
+   \                                 In section .text, align 4, keep-with-next
+   1399          const FAT_DIRENTRY_API FAT_LFN_API = {
+   \                     FAT_LFN_API:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   ............       DC32 _LFN_ReadDirEntryInfo, _LFN_FindDirEntry, _LFN_CreateDirEntry, _LFN_DelLongEntry
+   \              ............
+   \              ........    
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6:
+   \   00000000   4FECC44E           DC32     0x4ec4ec4f
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_1:
+   \   00000000   67666666           DC32     0x66666667
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_2:
+   \   00000000   ........           DC32     FAT_pDirEntryAPI
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_3:
+   \   00000000   ........           DC32     FAT_SFN_API
+   1400            _LFN_ReadDirEntryInfo,
+   1401            _LFN_FindDirEntry,
+   1402            _LFN_CreateDirEntry,
+   1403            _LFN_DelLongEntry
+   1404          };
+   1405          
+   1406          
+   1407          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function              .cstack
+     --------              -------
+     FS_FAT_DisableLFN          0
+     FS_FAT_SupportLFN          0
+     _CompareLongDirEntry      16
+     _ComputeLongDirEntry      32
+     _CopyLongName              8
+     _FindFreeIndex            56
+     _GenerateShortEntry       40
+     _LFN_CreateDirEntry      128
+     _LFN_DelLongEntry         40
+     _LFN_FindDirEntry        104
+     _LFN_ReadDirEntryInfo     56
+
+
+   Section sizes:
+
+     Function/Label        Bytes
+     --------------        -----
+     _CopyLongName          308
+     _ComputeLongDirEntry   436
+     _CompareLongDirEntry   244
+     _FindFreeIndex         336
+     _GenerateShortEntry    360
+     _LFN_ReadDirEntryInfo  872
+     _LFN_FindDirEntry      620
+     _LFN_DelLongEntry      144
+     _LFN_CreateDirEntry    856
+     FS_FAT_SupportLFN       16
+     FS_FAT_DisableLFN       16
+     FAT_LFN_API             16
+     ??DataTable6             4
+     ??DataTable6_1           4
+     ??DataTable6_2           4
+     ??DataTable6_3           4
+
+ 
+ 4 240 bytes in section .text
+ 
+ 4 240 bytes of CODE memory
+
+Errors: none
+Warnings: none

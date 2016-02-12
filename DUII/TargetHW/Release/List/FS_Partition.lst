@@ -1,0 +1,530 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:12:01 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\FS_Partition.c                       #
+#    Command line =  C:\DUII\TargetHW\FS\FS_Partition.c -D DEBUG=1 -D         #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\FS_Partition.lst           #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\FS_Partition.o              #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\FS_Partition.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : API_Dev.c
+     19          Purpose     : Device and media tools
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          /*********************************************************************
+     24          *
+     25          *       #include Section
+     26          *
+     27          **********************************************************************
+     28          */
+     29          
+     30          #include "FS_ConfDefaults.h"        /* FS Configuration */
+     31          #include "FS_CLib.h"
+     32          #include "FS_Lbl.h"
+     33          #include "FS_Int.h"
+     34          
+     35          /*********************************************************************
+     36          *
+     37          *       #defines non-configurable
+     38          *
+     39          **********************************************************************
+     40          */
+     41          
+     42          /*
+     43          *   Partition table information
+     44          */
+     45          #define PART_OFF_PARTITION0         0x01BE     /* Offset of start of partition table   */
+     46          #define SIZEOF_PARTITIONENTRY       0x10       /* Size of one entry in partition table */
+     47          #define PARTENTRY_OFF_TYPE          0x04
+     48          #define PARTENTRY_OFF_STARTSECTOR   0x08
+     49          #define PARTENTRY_OFF_NUMSECTORS    0x0C
+     50          
+     51          /*********************************************************************
+     52          *
+     53          *       Static code
+     54          *
+     55          **********************************************************************
+     56          */
+     57          
+     58          /*********************************************************************
+     59          *
+     60          *       _GetPartitionNumSectors
+     61          *
+     62          *  Description:
+     63          *     Function to get the number of sectors of the partition
+     64          *
+     65          *  Parameters:
+     66          *     PartIndex          - The partition index. Valid range is 0..3.
+     67          *                          Since this is an internal function, this parameter
+     68          *                          is not checked for validity
+     69          *     pBuffer            - Data buffer
+     70          *
+     71          *  Return value:
+     72          *     <  0xFFFFFFFF      - The number of sectors
+     73          *     == 0xFFFFFFFF      - Invalid partition specified
+     74          */
+     75          static U32 _GetPartitionNumSectors(U8 PartIndex, U8 *pBuffer) {
+     76            int Off;
+     77            Off  = PART_OFF_PARTITION0 + (PartIndex * SIZEOF_PARTITIONENTRY);
+     78            Off += PARTENTRY_OFF_NUMSECTORS;
+     79            return FS_LoadU32LE(&pBuffer[Off]);
+     80          }
+     81          
+     82          /*********************************************************************
+     83          *
+     84          *       _GetPartitionStartSector
+     85          *
+     86          *  Description:
+     87          *     Function to retrieve the start sector of a given partition.
+     88          *
+     89          *  Parameters:
+     90          *     PartIndex          - The partition index. Valid range is 0..3.
+     91          *                          Since this is an internal function, this parameter
+     92          *                          is not checked for validity
+     93          *     pBuffer            - Data buffer
+     94          *
+     95          *  Return value:
+     96          *     <  0xFFFFFFFF      - The value of the start sector
+     97          *     == 0xFFFFFFFF      - Invalid partition specified
+     98          */
+     99          static U32 _GetPartitionStartSector(U8 PartIndex, U8 *pBuffer) {
+    100            int Off;
+    101            Off  = PART_OFF_PARTITION0 + (PartIndex * SIZEOF_PARTITIONENTRY);
+    102            Off += PARTENTRY_OFF_STARTSECTOR;
+    103            return FS_LoadU32LE(&pBuffer[Off]);
+    104          }
+    105          
+    106          /*********************************************************************
+    107          *
+    108          *       _GetPartitionType
+    109          *
+    110          *  Description:
+    111          *     Function to read the partition type
+    112          *
+    113          *  Parameters:
+    114          *     PartIndex          - The partition index. Valid range is 0..3.
+    115          *                          Since this is an internal function, this parameter
+    116          *                          is not checked for validity
+    117          *     pBuffer            - Data buffer
+    118          *
+    119          *  Return value:
+    120          *    The partition type
+    121          */
+    122          #if 0
+    123          static U8 _GetPartitionType(U8 PartIndex, U8 *pBuffer) {
+    124            int Off;
+    125            Off  = PART_OFF_PARTITION0 + (PartIndex * SIZEOF_PARTITIONENTRY);
+    126            Off += PARTENTRY_OFF_TYPE;
+    127            return pBuffer[Off];
+    128          }
+    129          #endif
+    130          
+    131          /*********************************************************************
+    132          *
+    133          *       _HasSignature
+    134          *
+    135          */
+    136          static char _HasSignature(const U8 *pBuffer) {
+    137            U16 Data;
+    138            Data = FS_LoadU16LE(pBuffer + 0x1FE);
+    139            if (Data == 0xAA55) {
+    140              return 1;
+    141            }
+    142            return 0;
+    143          }
+    144          
+    145          /*********************************************************************
+    146          *
+    147          *       _IsBPB
+    148          *
+    149          */
+    150          static char _IsBPB(const U8 *pBuffer) {
+    151            /*
+    152             *  Check if there is a x86 unconditional jmp instruction,
+    153             *  which indicates that there is a BootParameterBlock
+    154             */
+    155            /* Check for the 1-byte relative jump with opcode 0xe9 */
+    156            if (pBuffer[0] == 0xe9) {
+    157              return 1;
+    158            }
+    159            /* Check for the 2-byte relative jump with opcode 0xeb */
+    160            if ((pBuffer[0] == 0xeb) && (pBuffer[2] == 0x90)) {
+    161              return 1;
+    162            }
+    163            return 0;
+    164          }
+    165          
+    166          /*********************************************************************
+    167          *
+    168          *       Public code
+    169          *
+    170          **********************************************************************
+    171          */
+    172          
+    173          /*********************************************************************
+    174          *
+    175          *       FS__GetMediaStartSec
+    176          *
+    177          *  Description:
+    178          *    Get logical start sector.
+    179          *    This function is used by some older drivers and should now be
+    180          *    obsolete.
+    181          *
+    182          *  Parameters:
+    183          *    PartIndex       - partintion index
+    184          *    pBuffer         - A pointer to a buffer containing the first
+    185          *                      sector of the media. This should contain the
+    186          *                      master boot record (MBR) or Bios Parameter Block
+    187          *                      (BPB) if the device has no partition table.
+    188          *
+    189          *  Return value:
+    190          *    < 0xFFFFFFFF    - Number of the first sector of the medium.
+    191          *    ==0xFFFFFFFF    - No valid MBR/BPB found.
+    192          */
+
+   \                                 In section .text, align 4, keep-with-next
+    193          U32 FS__GetMediaStartSec(U8 PartIndex, U8 *pBuffer) {
+   \                     FS__GetMediaStartSec:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    194            U32  StartSector;
+    195          
+    196            /*
+    197             *  Check if the sector data contains a valid signature.
+    198             *  This signature is identical for MBR (master boot record) and BPB.
+    199             *  If this signature is not present, further processing does not make sense. --> Error
+    200             */
+    201            if (_HasSignature(pBuffer) == 0) {
+   \   00000008   FE00A0E3           MOV      R0,#+254
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   400F80E3           ORR      R0,R0,#0x100
+   \   00000014   04D04DE2           SUB      SP,SP,#+4
+   \   00000018   050080E0           ADD      R0,R0,R5
+   \   0000001C   ........           BL       FS_LoadU16LE
+   \   00000020   5510A0E3           MOV      R1,#+85
+   \   00000024   AA1C81E3           ORR      R1,R1,#0xAA00
+   \   00000028   010050E1           CMP      R0,R1
+    202              return 0xFFFFFFFFUL;     /* Error: This sector is neither MBR nor BPB. */
+   \   0000002C   0000E013           MVNNE    R0,#+0
+   \   00000030   0D00001A           BNE      ??FS__GetMediaStartSec_0
+    203            }
+    204            /*
+    205             *  Check if there is a x86 unconditional jmp instruction,
+    206             *  which indicates, that there is a BiosParameterBlock
+    207             */
+    208            if (_IsBPB(pBuffer) == 0) {
+   \   00000034   0000D5E5           LDRB     R0,[R5, #+0]
+   \   00000038   E90050E3           CMP      R0,#+233
+   \   0000003C   0900000A           BEQ      ??FS__GetMediaStartSec_1
+   \   00000040   EB0050E3           CMP      R0,#+235
+   \   00000044   0200D505           LDRBEQ   R0,[R5, #+2]
+   \   00000048   90005003           CMPEQ    R0,#+144
+   \   0000004C   0500000A           BEQ      ??FS__GetMediaStartSec_1
+    209              StartSector = _GetPartitionStartSector(PartIndex, pBuffer);
+   \   00000050   C600A0E3           MOV      R0,#+198
+   \   00000054   400F80E3           ORR      R0,R0,#0x100
+   \   00000058   041285E0           ADD      R1,R5,R4, LSL #+4
+   \   0000005C   010080E0           ADD      R0,R0,R1
+   \   00000060   ........           BL       FS_LoadU32LE
+   \   00000064   000000EA           B        ??FS__GetMediaStartSec_0
+    210            } else {
+    211              StartSector = 0;
+   \                     ??FS__GetMediaStartSec_1:
+   \   00000068   0000A0E3           MOV      R0,#+0
+    212            }
+    213            return StartSector;
+   \                     ??FS__GetMediaStartSec_0:
+   \   0000006C   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000070   3080BDE8           POP      {R4,R5,PC}       ;; return
+    214          }
+    215          
+    216          
+    217          /*********************************************************************
+    218          *
+    219          *       FS__GetMediaStartSecEx
+    220          *
+    221          *  Description:
+    222          *    Get logical start sector from master boot record
+    223          *    or partition table.
+    224          *
+    225          *  Parameters:
+    226          *    pVolume         - pointer to volume.
+    227          *    pBuffer         - A pointer to a buffer containing the first
+    228          *                      sector of the media. This should contain the
+    229          *                      master boot record (MBR) or Bios Parameter Block
+    230          *                      (BPB) if the device has no partition table.
+    231          *
+    232          *  Return value:
+    233          *    < 0xFFFFFFF     - Number of the first sector of the medium.
+    234          *    ==0xFFFFFFF     - No valid MBR/BPB found.
+    235          */
+
+   \                                 In section .text, align 4, keep-with-next
+    236          U32 FS__GetMediaStartSecEx(FS_VOLUME * pVolume, U32 * pNumSectors, U8 *pBuffer) {
+   \                     FS__GetMediaStartSecEx:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   0260A0E1           MOV      R6,R2
+    237            U32      StartSector;
+    238            U32      NumSectors;
+    239            FS_DEVICE * pDevice;
+    240          
+    241            if ((pVolume == NULL) || (pBuffer == NULL)) {
+   \   0000000C   000054E3           CMP      R4,#+0
+   \   00000010   10D04DE2           SUB      SP,SP,#+16
+   \   00000014   0150A0E1           MOV      R5,R1
+   \   00000018   00005613           CMPNE    R6,#+0
+   \   0000001C   0100001A           BNE      ??FS__GetMediaStartSecEx_0
+    242              return 0xFFFFFFFFUL;
+   \                     ??FS__GetMediaStartSecEx_1:
+   \   00000020   0000E0E3           MVN      R0,#+0
+   \   00000024   2F0000EA           B        ??FS__GetMediaStartSecEx_2
+    243            }
+    244            NumSectors = 0;
+   \                     ??FS__GetMediaStartSecEx_0:
+   \   00000028   0070A0E3           MOV      R7,#+0
+   \   0000002C   0080A0E3           MOV      R8,#+0
+    245            pDevice    = &pVolume->Partition.Device;
+    246            if (FS_LB_ReadDevice(pDevice, 0, pBuffer, FS_SECTOR_TYPE_DATA) < 0) {
+   \   00000030   0030A0E3           MOV      R3,#+0
+   \   00000034   0010A0E3           MOV      R1,#+0
+   \   00000038   ........           BL       FS_LB_ReadDevice
+   \   0000003C   000050E3           CMP      R0,#+0
+   \   00000040   F6FFFF4A           BMI      ??FS__GetMediaStartSecEx_1
+    247              return 0xFFFFFFFFUL;     /* Error: Sector read failed */
+    248            }
+    249          
+    250            if (_HasSignature(pBuffer) == 0) {
+   \   00000044   FE00A0E3           MOV      R0,#+254
+   \   00000048   400F80E3           ORR      R0,R0,#0x100
+   \   0000004C   060080E0           ADD      R0,R0,R6
+   \   00000050   ........           BL       FS_LoadU16LE
+   \   00000054   5510A0E3           MOV      R1,#+85
+   \   00000058   AA1C81E3           ORR      R1,R1,#0xAA00
+   \   0000005C   010050E1           CMP      R0,R1
+   \   00000060   EEFFFF1A           BNE      ??FS__GetMediaStartSecEx_1
+    251              return 0xFFFFFFFFUL;     /* Error: This sector is neither MBR nor BPB. */
+    252            }
+    253            if (_IsBPB(pBuffer) == 0) {
+   \   00000064   0000D6E5           LDRB     R0,[R6, #+0]
+   \   00000068   E90050E3           CMP      R0,#+233
+   \   0000006C   1A00000A           BEQ      ??FS__GetMediaStartSecEx_3
+   \   00000070   EB0050E3           CMP      R0,#+235
+   \   00000074   0200D605           LDRBEQ   R0,[R6, #+2]
+   \   00000078   90005003           CMPEQ    R0,#+144
+   \   0000007C   1600000A           BEQ      ??FS__GetMediaStartSecEx_3
+    254              FS_DEV_INFO DevInfo;
+    255              U32         NumTotalSectorsOfPartition;
+    256              /* Seems to not be a valid BPB.
+    257               * We now assume that it is a boot sector which contains a valid partition
+    258               * table.
+    259               */
+    260          
+    261              StartSector = _GetPartitionStartSector(0, pBuffer);
+   \   00000080   C600A0E3           MOV      R0,#+198
+   \   00000084   400F80E3           ORR      R0,R0,#0x100
+   \   00000088   060080E0           ADD      R0,R0,R6
+   \   0000008C   ........           BL       FS_LoadU32LE
+   \   00000090   0070A0E1           MOV      R7,R0
+    262              NumSectors  = _GetPartitionNumSectors(0, pBuffer);
+   \   00000094   CA00A0E3           MOV      R0,#+202
+   \   00000098   400F80E3           ORR      R0,R0,#0x100
+   \   0000009C   060080E0           ADD      R0,R0,R6
+   \   000000A0   ........           BL       FS_LoadU32LE
+   \   000000A4   0080A0E1           MOV      R8,R0
+    263              FS_LB_GetDeviceInfo(pDevice, &DevInfo);
+   \   000000A8   0D10A0E1           MOV      R1,SP
+   \   000000AC   0400A0E1           MOV      R0,R4
+   \   000000B0   ........           BL       FS_LB_GetDeviceInfo
+    264              if ((NumSectors == 0) || (StartSector == 0)) {
+   \   000000B4   000058E3           CMP      R8,#+0
+   \   000000B8   00005713           CMPNE    R7,#+0
+   \   000000BC   D7FFFF0A           BEQ      ??FS__GetMediaStartSecEx_1
+    265                return 0xFFFFFFFFUL;  /* Error, partition table entry 0 is not valid */
+    266              }
+    267              //
+    268              // Allow a tolerance of 0.4% in order of having a larger partition
+    269              // than are reported by device.
+    270              //
+    271              NumTotalSectorsOfPartition = ((StartSector + NumSectors) >> 8) / 255;
+    272              if (NumTotalSectorsOfPartition > DevInfo.NumSectors) {
+   \   000000C0   070088E0           ADD      R0,R8,R7
+   \   000000C4   ........           LDR      R2,??DataTable1  ;; 0x80808081
+   \   000000C8   2004A0E1           LSR      R0,R0,#+8
+   \   000000CC   902281E0           UMULL    R2,R1,R0,R2
+   \   000000D0   04009DE5           LDR      R0,[SP, #+4]
+   \   000000D4   A10350E1           CMP      R0,R1, LSR #+7
+   \   000000D8   D0FFFF3A           BCC      ??FS__GetMediaStartSecEx_1
+    273                FS_DEBUG_WARN((FS_MTYPE_API, "Warning: Partition 0's size is greater than the reported size by the volume"));
+    274                return 0xFFFFFFFFUL;  /* Error, partition table entry 0 is out of bounds */
+    275              }
+    276            } else {
+    277              StartSector = 0;
+    278            }
+    279            if (pNumSectors) {
+   \                     ??FS__GetMediaStartSecEx_3:
+   \   000000DC   000055E3           CMP      R5,#+0
+    280              *pNumSectors = NumSectors;
+   \   000000E0   00808515           STRNE    R8,[R5, #+0]
+    281            }
+    282            return StartSector;
+   \   000000E4   0700A0E1           MOV      R0,R7
+   \                     ??FS__GetMediaStartSecEx_2:
+   \   000000E8   10D08DE2           ADD      SP,SP,#+16       ;; stack cleaning
+   \   000000EC   F081BDE8           POP      {R4-R8,PC}       ;; return
+    283          }
+    284          
+    285          /*********************************************************************
+    286          *
+    287          *       FS__LocatePartition
+    288          *         _LocatePartition (static helper)
+    289          *
+    290          *  Return value
+    291          *    0    O.K.
+    292          *    !=0  Error
+    293          */
+    294          static signed char _LocatePartition(FS_VOLUME * pVolume, U8* pBuffer) {
+    295            U32 StartSector;
+    296            U32 NumSectors;
+    297            /* Calculate start sector of the first partition */
+    298            StartSector = FS__GetMediaStartSecEx(pVolume, &NumSectors, pBuffer);
+    299            if (StartSector == 0xFFFFFFFFUL) { /* check if MBR / BPB was invalid */
+    300              return -1;                     /* Invalid MBR / BPB */
+    301            }
+    302            pVolume->Partition.StartSector = StartSector;
+    303            pVolume->Partition.NumSectors  = NumSectors;
+    304            return 0;
+    305          }
+    306          
+
+   \                                 In section .text, align 4, keep-with-next
+    307          signed char FS__LocatePartition(FS_VOLUME * pVolume) {
+   \                     FS__LocatePartition:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   08D04DE2           SUB      SP,SP,#+8
+   \   00000008   0040A0E1           MOV      R4,R0
+    308            signed char r;
+    309            U8 * pBuffer;
+    310            U16  BytesPerSector;
+    311          
+    312            BytesPerSector = FS_GetSectorSize(&pVolume->Partition.Device);
+   \   0000000C   ........           BL       FS_GetSectorSize
+   \   00000010   0050A0E1           MOV      R5,R0
+    313            pBuffer = FS__AllocSectorBuffer();
+   \   00000014   ........           BL       FS__AllocSectorBuffer
+   \   00000018   0060A0E1           MOV      R6,R0
+    314            /*
+    315             * Check if the a sector fits into the sector buffer
+    316             */
+    317            if ((BytesPerSector > FS_Global.MaxSectorSize) || (BytesPerSector == 0)) {
+   \   0000001C   ........           LDR      R0,??DataTable1_1
+   \   00000020   B001D0E1           LDRH     R0,[R0, #+16]
+   \   00000024   050050E1           CMP      R0,R5
+   \   00000028   0C0000BA           BLT      ??FS__LocatePartition_0
+   \   0000002C   000055E3           CMP      R5,#+0
+   \   00000030   0A00000A           BEQ      ??FS__LocatePartition_0
+    318              FS_DEBUG_ERROROUT((FS_MTYPE_API, "FS_LocatePartition: Invalid BytesPerSector value: %d.\n", BytesPerSector));
+    319              r = -1;
+    320            } else {
+    321              r = _LocatePartition(pVolume, pBuffer);
+   \   00000034   0620A0E1           MOV      R2,R6
+   \   00000038   0D10A0E1           MOV      R1,SP
+   \   0000003C   0400A0E1           MOV      R0,R4
+   \   00000040   ........           BL       FS__GetMediaStartSecEx
+   \   00000044   010070E3           CMN      R0,#+1
+   \   00000048   0400000A           BEQ      ??FS__LocatePartition_0
+   \   0000004C   140084E5           STR      R0,[R4, #+20]
+   \   00000050   00009DE5           LDR      R0,[SP, #+0]
+   \   00000054   180084E5           STR      R0,[R4, #+24]
+   \   00000058   0040A0E3           MOV      R4,#+0
+   \   0000005C   000000EA           B        ??FS__LocatePartition_1
+   \                     ??FS__LocatePartition_0:
+   \   00000060   0040E0E3           MVN      R4,#+0
+    322            }
+    323            FS__FreeSectorBuffer(pBuffer);
+   \                     ??FS__LocatePartition_1:
+   \   00000064   0600A0E1           MOV      R0,R6
+   \   00000068   ........           BL       FS__FreeSectorBuffer
+    324            return r;
+   \   0000006C   0400A0E1           MOV      R0,R4
+   \   00000070   08D08DE2           ADD      SP,SP,#+8
+   \   00000074   7080BDE8           POP      {R4-R6,PC}       ;; return
+    325          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1:
+   \   00000000   81808080           DC32     0x80808081
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1_1:
+   \   00000000   ........           DC32     FS_Global
+    326          
+    327          
+    328          /*************************** End of file ****************************/
+    329          
+
+   Maximum stack usage in bytes:
+
+     Function               .cstack
+     --------               -------
+     FS__GetMediaStartSec       16
+     FS__GetMediaStartSecEx     40
+     FS__LocatePartition        24
+
+
+   Section sizes:
+
+     Function/Label         Bytes
+     --------------         -----
+     FS__GetMediaStartSec    116
+     FS__GetMediaStartSecEx  240
+     FS__LocatePartition     120
+     ??DataTable1              4
+     ??DataTable1_1            4
+
+ 
+ 484 bytes in section .text
+ 
+ 484 bytes of CODE memory
+
+Errors: none
+Warnings: none

@@ -1,0 +1,824 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     14/Jul/2015  18:59:42 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\DUII\CustomArc.c                                 #
+#    Command line =  C:\DUII\DUII\CustomArc.c -D DEBUG=1 -D SDRAM_TARGET=1    #
+#                    -D USB_IS_HIGH_SPEED -D XIGNORE_TEMPERATURE -D           #
+#                    BUILD_DEBUG_PORT -D PROFILER -lCN                        #
+#                    C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\   #
+#                    -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\ #
+#                     --debug --endian=little --cpu=ARM926EJ-S -e --fpu=None  #
+#                    --dlib_config "C:\Program Files (x86)\IAR                #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\Cu #
+#                    stomArc.lst                                              #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\Cus #
+#                    tomArc.o                                                 #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\DUII\CustomArc.c
+      1          #include "Global.h"
+      2          #include "GUI_Private.h"
+      3          #include "GUI.h"
+      4          #include "CustomArc.h"
+      5          #include <math.h>
+      6          
+      7          void GL_DrawArc2(int x0, int y0, int rx, int ry, float a0, float a1);
+      8          
+      9          /*********************************************************************
+     10          *
+     11          *       _CalcX
+     12          */
+     13          static void _CalcX(int*px, int y, U32 r2) {
+     14            int x;
+     15            U32 y2, r2y2, x2;
+     16          
+     17            x    = *px;
+     18            y2   = (U32)y * (U32)y;
+     19            r2y2 = r2 - y2;
+     20            if (y2 >= r2) {
+     21              *px = 0;
+     22              return;
+     23            }
+     24            //
+     25            // x2 = r2 - y2
+     26            //
+     27            do {
+     28              x++;
+     29              x2 = (U32)x * (U32)x;
+     30            } while (x2 < r2y2);
+     31            *px = x - 1;
+     32          }
+     33          
+     34          /*********************************************************************
+     35          *
+     36          *       _CalcInterSectLin
+     37          */
+     38          static float _CalcInterSectLin(float y, float y0, float y1, float x0, float x1) {
+     39            float Slope, r;
+     40            
+     41            if (y1 == y0) {
+     42              r = y0;
+     43            } else {
+     44              Slope = (x1 - x0) / (y1 - y0);
+     45              r     = (y - y0) * Slope + x0;
+     46            }
+     47            return r;
+     48          }
+     49          
+
+   \                                 In section .text, align 4, keep-with-next
+     50          static void _DrawArc2(int x0, int y0, int rx, int ry, float Angle0, float Angle1, int xMul, int yMul) {
+   \                     _DrawArc2:
+   \   00000000   F34F2DE9           PUSH     {R0,R1,R4-R11,LR}
+   \   00000004   ........           LDR      R0,??DataTable1
+   \   00000008   4CD04DE2           SUB      SP,SP,#+76
+   \   0000000C   0240A0E1           MOV      R4,R2
+   \   00000010   78709DE5           LDR      R7,[SP, #+120]
+   \   00000014   7C509DE5           LDR      R5,[SP, #+124]
+   \   00000018   1800D0E5           LDRB     R0,[R0, #+24]
+   \   0000001C   ........           BL       __aeabi_ui2f
+   \   00000020   FC15A0E3           MOV      R1,#+1056964608
+   \   00000024   ........           BL       __aeabi_fmul
+   \   00000028   0060A0E1           MOV      R6,R0
+   \   0000002C   0400A0E1           MOV      R0,R4
+   \   00000030   ........           BL       __aeabi_i2f
+   \   00000034   0080A0E1           MOV      R8,R0
+   \   00000038   0610A0E1           MOV      R1,R6
+   \   0000003C   ........           BL       __aeabi_fsub
+   \   00000040   0040A0E1           MOV      R4,R0
+     51            float afx[4], afy[4], ri, ro;
+     52            I32   Sin0_HQ, Sin1_HQ, Cos0_HQ, Cos1_HQ;
+     53            U32   ri2, ro2;
+     54            int   y, yMax, yMin;
+     55          
+     56            ri      = rx - ((float)GUI_Context.PenSize) / 2;
+     57            ro      = rx + ((float)GUI_Context.PenSize) / 2;
+   \   00000044   0800A0E1           MOV      R0,R8
+   \   00000048   0610A0E1           MOV      R1,R6
+   \   0000004C   ........           BL       __aeabi_fadd
+     58            Sin0_HQ = GUI__SinHQ((long)(Angle0 * (float)1000)); 
+   \   00000050   4484A0E3           MOV      R8,#+1140850688
+   \   00000054   0060A0E1           MOV      R6,R0
+   \   00000058   7A8888E3           ORR      R8,R8,#0x7A0000
+   \   0000005C   0700A0E1           MOV      R0,R7
+   \   00000060   0810A0E1           MOV      R1,R8
+   \   00000064   ........           BL       __aeabi_fmul
+   \   00000068   ........           BL       __aeabi_f2iz
+   \   0000006C   0090A0E1           MOV      R9,R0
+   \   00000070   ........           BL       GUI__SinHQ
+   \   00000074   0070A0E1           MOV      R7,R0
+   \   00000078   0500A0E1           MOV      R0,R5
+   \   0000007C   0810A0E1           MOV      R1,R8
+   \   00000080   ........           BL       __aeabi_fmul
+   \   00000084   ........           BL       __aeabi_f2iz
+   \   00000088   0080A0E1           MOV      R8,R0
+     59            Sin1_HQ = GUI__SinHQ((long)(Angle1 * (float)1000)); 
+   \   0000008C   ........           BL       GUI__SinHQ
+   \   00000090   0050A0E1           MOV      R5,R0
+     60            Cos0_HQ = GUI__CosHQ((long)(Angle0 * (float)1000)); 
+   \   00000094   0900A0E1           MOV      R0,R9
+   \   00000098   ........           BL       GUI__CosHQ
+   \   0000009C   0090A0E1           MOV      R9,R0
+     61            Cos1_HQ = GUI__CosHQ((long)(Angle1 * (float)1000)); 
+   \   000000A0   0800A0E1           MOV      R0,R8
+   \   000000A4   ........           BL       GUI__CosHQ
+   \   000000A8   0080A0E1           MOV      R8,R0
+     62            ri2     = (U32)(ri * ri);
+   \   000000AC   0400A0E1           MOV      R0,R4
+   \   000000B0   0410A0E1           MOV      R1,R4
+   \   000000B4   ........           BL       __aeabi_fmul
+   \   000000B8   ........           BL       __aeabi_f2uiz
+   \   000000BC   24008DE5           STR      R0,[SP, #+36]
+     63            ro2     = (U32)(ro * ro);
+   \   000000C0   0600A0E1           MOV      R0,R6
+   \   000000C4   0610A0E1           MOV      R1,R6
+   \   000000C8   ........           BL       __aeabi_fmul
+   \   000000CC   ........           BL       __aeabi_f2uiz
+   \   000000D0   20008DE5           STR      R0,[SP, #+32]
+     64            afy[0]  = (float)((I32)(ri * Sin0_HQ) >> 16);
+   \   000000D4   0700A0E1           MOV      R0,R7
+   \   000000D8   ........           BL       __aeabi_i2f
+   \   000000DC   0070A0E1           MOV      R7,R0
+   \   000000E0   0410A0E1           MOV      R1,R4
+   \   000000E4   ........           BL       __aeabi_fmul
+   \   000000E8   ........           BL       __aeabi_f2iz
+   \   000000EC   4008A0E1           ASR      R0,R0,#+16
+   \   000000F0   ........           BL       __aeabi_i2f
+   \   000000F4   28008DE5           STR      R0,[SP, #+40]
+     65            afy[1]  = (float)((I32)(ro * Sin0_HQ) >> 16);
+   \   000000F8   0700A0E1           MOV      R0,R7
+   \   000000FC   0610A0E1           MOV      R1,R6
+   \   00000100   ........           BL       __aeabi_fmul
+   \   00000104   ........           BL       __aeabi_f2iz
+   \   00000108   4008A0E1           ASR      R0,R0,#+16
+   \   0000010C   ........           BL       __aeabi_i2f
+   \   00000110   28708DE2           ADD      R7,SP,#+40
+   \   00000114   0C008DE5           STR      R0,[SP, #+12]
+   \   00000118   040087E5           STR      R0,[R7, #+4]
+     66            afy[2]  = (float)((I32)(ri * Sin1_HQ) >> 16);
+   \   0000011C   0500A0E1           MOV      R0,R5
+   \   00000120   ........           BL       __aeabi_i2f
+   \   00000124   00A0A0E1           MOV      R10,R0
+   \   00000128   0410A0E1           MOV      R1,R4
+   \   0000012C   ........           BL       __aeabi_fmul
+   \   00000130   ........           BL       __aeabi_f2iz
+   \   00000134   4008A0E1           ASR      R0,R0,#+16
+   \   00000138   ........           BL       __aeabi_i2f
+   \   0000013C   0050A0E1           MOV      R5,R0
+   \   00000140   085087E5           STR      R5,[R7, #+8]
+     67            afy[3]  = (float)((I32)(ro * Sin1_HQ) >> 16);
+   \   00000144   0A00A0E1           MOV      R0,R10
+   \   00000148   0610A0E1           MOV      R1,R6
+   \   0000014C   ........           BL       __aeabi_fmul
+   \   00000150   ........           BL       __aeabi_f2iz
+   \   00000154   4008A0E1           ASR      R0,R0,#+16
+   \   00000158   ........           BL       __aeabi_i2f
+   \   0000015C   1C008DE5           STR      R0,[SP, #+28]
+   \   00000160   0C0087E5           STR      R0,[R7, #+12]
+     68            afx[0]  = (float)((I32)(ri * Cos0_HQ) >> 16);
+   \   00000164   0900A0E1           MOV      R0,R9
+   \   00000168   ........           BL       __aeabi_i2f
+   \   0000016C   0090A0E1           MOV      R9,R0
+   \   00000170   0410A0E1           MOV      R1,R4
+   \   00000174   ........           BL       __aeabi_fmul
+   \   00000178   ........           BL       __aeabi_f2iz
+   \   0000017C   4008A0E1           ASR      R0,R0,#+16
+   \   00000180   ........           BL       __aeabi_i2f
+   \   00000184   38008DE5           STR      R0,[SP, #+56]
+     69            afx[1]  = (float)((I32)(ro * Cos0_HQ) >> 16);
+   \   00000188   0900A0E1           MOV      R0,R9
+   \   0000018C   0610A0E1           MOV      R1,R6
+   \   00000190   ........           BL       __aeabi_fmul
+   \   00000194   ........           BL       __aeabi_f2iz
+   \   00000198   4008A0E1           ASR      R0,R0,#+16
+   \   0000019C   ........           BL       __aeabi_i2f
+   \   000001A0   38908DE2           ADD      R9,SP,#+56
+   \   000001A4   18008DE5           STR      R0,[SP, #+24]
+   \   000001A8   040089E5           STR      R0,[R9, #+4]
+     70            afx[2]  = (float)((I32)(ri * Cos1_HQ) >> 16);
+   \   000001AC   0800A0E1           MOV      R0,R8
+   \   000001B0   ........           BL       __aeabi_i2f
+   \   000001B4   0080A0E1           MOV      R8,R0
+   \   000001B8   0410A0E1           MOV      R1,R4
+   \   000001BC   ........           BL       __aeabi_fmul
+   \   000001C0   ........           BL       __aeabi_f2iz
+   \   000001C4   4008A0E1           ASR      R0,R0,#+16
+   \   000001C8   ........           BL       __aeabi_i2f
+   \   000001CC   14008DE5           STR      R0,[SP, #+20]
+   \   000001D0   080089E5           STR      R0,[R9, #+8]
+     71            afx[3]  = (float)((I32)(ro * Cos1_HQ) >> 16);
+   \   000001D4   0800A0E1           MOV      R0,R8
+   \   000001D8   0610A0E1           MOV      R1,R6
+   \   000001DC   ........           BL       __aeabi_fmul
+   \   000001E0   ........           BL       __aeabi_f2iz
+   \   000001E4   4008A0E1           ASR      R0,R0,#+16
+   \   000001E8   ........           BL       __aeabi_i2f
+   \   000001EC   10008DE5           STR      R0,[SP, #+16]
+   \   000001F0   0C0089E5           STR      R0,[R9, #+12]
+     72            yMin    = (int)ceil(afy[0]);
+   \   000001F4   28009DE5           LDR      R0,[SP, #+40]
+   \   000001F8   ........           BL       __aeabi_f2d
+   \   000001FC   ........           BL       ceil
+   \   00000200   ........           BL       __aeabi_d2iz
+   \   00000204   08008DE5           STR      R0,[SP, #+8]
+     73            yMax    = (int)floor(afy[3]);
+   \   00000208   0C0097E5           LDR      R0,[R7, #+12]
+   \   0000020C   ........           BL       __aeabi_f2d
+   \   00000210   ........           BL       floor
+   \   00000214   ........           BL       __aeabi_d2iz
+     74            //
+     75            // Use Clipping rect to reduce calculation (if possible)
+     76            //
+     77            if (GUI_Context.pClipRect_HL) {
+   \   00000218   ........           LDR      R1,??DataTable1
+   \   0000021C   141091E5           LDR      R1,[R1, #+20]
+   \   00000220   000051E3           CMP      R1,#+0
+   \   00000224   1B00000A           BEQ      ??_DrawArc2_0
+     78              if (yMul == 1) {
+   \   00000228   84209DE5           LDR      R2,[SP, #+132]
+   \   0000022C   010052E3           CMP      R2,#+1
+   \   00000230   0B00001A           BNE      ??_DrawArc2_1
+     79                if (yMax > (GUI_Context.pClipRect_HL->y1 - y0)) {
+   \   00000234   F620D1E1           LDRSH    R2,[R1, #+6]
+   \   00000238   50309DE5           LDR      R3,[SP, #+80]
+     80                  yMax = (GUI_Context.pClipRect_HL->y1 - y0);
+     81                }
+     82                if (yMin < (GUI_Context.pClipRect_HL->y0 - y0)) {
+   \   0000023C   F210D1E1           LDRSH    R1,[R1, #+2]
+   \   00000240   032042E0           SUB      R2,R2,R3
+   \   00000244   000052E1           CMP      R2,R0
+   \   00000248   0200A0B1           MOVLT    R0,R2
+   \   0000024C   08209DE5           LDR      R2,[SP, #+8]
+   \   00000250   031041E0           SUB      R1,R1,R3
+   \   00000254   010052E1           CMP      R2,R1
+   \   00000258   0E0000AA           BGE      ??_DrawArc2_0
+     83                  yMin = (GUI_Context.pClipRect_HL->y0 - y0);
+   \   0000025C   08108DE5           STR      R1,[SP, #+8]
+   \   00000260   0C0000EA           B        ??_DrawArc2_0
+     84                }
+     85              }
+     86              if (yMul == -1) {
+   \                     ??_DrawArc2_1:
+   \   00000264   010072E3           CMN      R2,#+1
+   \   00000268   0A00001A           BNE      ??_DrawArc2_0
+     87                if (yMin > (GUI_Context.pClipRect_HL->y1 - y0)) {
+   \   0000026C   F620D1E1           LDRSH    R2,[R1, #+6]
+   \   00000270   50309DE5           LDR      R3,[SP, #+80]
+   \   00000274   032042E0           SUB      R2,R2,R3
+   \   00000278   08309DE5           LDR      R3,[SP, #+8]
+   \   0000027C   030052E1           CMP      R2,R3
+     88                  yMin = (GUI_Context.pClipRect_HL->y1 - y0);
+   \   00000280   08208DB5           STRLT    R2,[SP, #+8]
+     89                }
+     90                if (yMax < (GUI_Context.pClipRect_HL->y0 - y0)) {
+   \   00000284   F210D1E1           LDRSH    R1,[R1, #+2]
+   \   00000288   50209DE5           LDR      R2,[SP, #+80]
+   \   0000028C   021041E0           SUB      R1,R1,R2
+   \   00000290   010050E1           CMP      R0,R1
+     91                  yMax = (GUI_Context.pClipRect_HL->y0 - y0);
+   \   00000294   0100A0B1           MOVLT    R0,R1
+     92                }
+     93              }
+     94            }
+     95            //
+     96            // Start drawing lines ...
+     97            //
+     98            {
+     99            int xMinDisp, xMaxDisp, xMin = 0, xMax = 0;
+    100              for (y = yMax; y >= yMin; y--) {
+   \                     ??_DrawArc2_0:
+   \   00000298   0060A0E1           MOV      R6,R0
+   \   0000029C   08009DE5           LDR      R0,[SP, #+8]
+   \   000002A0   0070A0E3           MOV      R7,#+0
+   \   000002A4   0080A0E3           MOV      R8,#+0
+   \   000002A8   000056E1           CMP      R6,R0
+   \   000002AC   730000BA           BLT      ??_DrawArc2_2
+    101                _CalcX(&xMin, y, ri2);
+   \                     ??_DrawArc2_3:
+   \   000002B0   960600E0           MUL      R0,R6,R6
+   \   000002B4   24109DE5           LDR      R1,[SP, #+36]
+   \   000002B8   24209DE5           LDR      R2,[SP, #+36]
+   \   000002BC   001041E0           SUB      R1,R1,R0
+   \   000002C0   020050E1           CMP      R0,R2
+   \   000002C4   0500002A           BCS      ??_DrawArc2_4
+   \                     ??_DrawArc2_5:
+   \   000002C8   017087E2           ADD      R7,R7,#+1
+   \   000002CC   970702E0           MUL      R2,R7,R7
+   \   000002D0   010052E1           CMP      R2,R1
+   \   000002D4   FBFFFF3A           BCC      ??_DrawArc2_5
+   \   000002D8   017047E2           SUB      R7,R7,#+1
+   \   000002DC   000000EA           B        ??_DrawArc2_6
+   \                     ??_DrawArc2_4:
+   \   000002E0   0070A0E3           MOV      R7,#+0
+    102                _CalcX(&xMax, y, ro2);
+   \                     ??_DrawArc2_6:
+   \   000002E4   20109DE5           LDR      R1,[SP, #+32]
+   \   000002E8   20209DE5           LDR      R2,[SP, #+32]
+   \   000002EC   001041E0           SUB      R1,R1,R0
+   \   000002F0   020050E1           CMP      R0,R2
+   \   000002F4   0500002A           BCS      ??_DrawArc2_7
+   \                     ??_DrawArc2_8:
+   \   000002F8   018088E2           ADD      R8,R8,#+1
+   \   000002FC   980800E0           MUL      R0,R8,R8
+   \   00000300   010050E1           CMP      R0,R1
+   \   00000304   FBFFFF3A           BCC      ??_DrawArc2_8
+   \   00000308   018048E2           SUB      R8,R8,#+1
+   \   0000030C   000000EA           B        ??_DrawArc2_9
+   \                     ??_DrawArc2_7:
+   \   00000310   0080A0E3           MOV      R8,#+0
+    103                if ((float)y < afy[1]) {
+   \                     ??_DrawArc2_9:
+   \   00000314   0600A0E1           MOV      R0,R6
+   \   00000318   ........           BL       __aeabi_i2f
+   \   0000031C   0C109DE5           LDR      R1,[SP, #+12]
+   \   00000320   ........           BL       __aeabi_cfcmple
+   \   00000324   00B0A0E1           MOV      R11,R0
+   \   00000328   1C00002A           BCS      ??_DrawArc2_10
+    104                  xMaxDisp = (int)_CalcInterSectLin(y, afy[0], afy[1], afx[0], afx[1]);
+   \   0000032C   28A09DE5           LDR      R10,[SP, #+40]
+   \   00000330   0190A0E1           MOV      R9,R1
+   \   00000334   0900A0E1           MOV      R0,R9
+   \   00000338   0A10A0E1           MOV      R1,R10
+   \   0000033C   ........           BL       __aeabi_cfcmpeq
+   \   00000340   38409DE5           LDR      R4,[SP, #+56]
+   \   00000344   1100000A           BEQ      ??_DrawArc2_11
+   \   00000348   0B00A0E1           MOV      R0,R11
+   \   0000034C   ........           BL       __aeabi_fsub
+   \   00000350   04008DE5           STR      R0,[SP, #+4]
+   \   00000354   18009DE5           LDR      R0,[SP, #+24]
+   \   00000358   0410A0E1           MOV      R1,R4
+   \   0000035C   ........           BL       __aeabi_fsub
+   \   00000360   00008DE5           STR      R0,[SP, #+0]
+   \   00000364   0900A0E1           MOV      R0,R9
+   \   00000368   0A10A0E1           MOV      R1,R10
+   \   0000036C   ........           BL       __aeabi_fsub
+   \   00000370   0010A0E1           MOV      R1,R0
+   \   00000374   00009DE5           LDR      R0,[SP, #+0]
+   \   00000378   ........           BL       __aeabi_fdiv
+   \   0000037C   04109DE5           LDR      R1,[SP, #+4]
+   \   00000380   ........           BL       __aeabi_fmul
+   \   00000384   0410A0E1           MOV      R1,R4
+   \   00000388   ........           BL       __aeabi_fadd
+   \   0000038C   000000EA           B        ??_DrawArc2_12
+   \                     ??_DrawArc2_11:
+   \   00000390   0A00A0E1           MOV      R0,R10
+    105                } else {
+   \                     ??_DrawArc2_12:
+   \   00000394   ........           BL       __aeabi_f2iz
+   \   00000398   0090A0E1           MOV      R9,R0
+   \   0000039C   000000EA           B        ??_DrawArc2_13
+    106                  xMaxDisp = xMax;      
+   \                     ??_DrawArc2_10:
+   \   000003A0   0890A0E1           MOV      R9,R8
+    107                }
+    108                if ((float)y > afy[2]) {
+   \                     ??_DrawArc2_13:
+   \   000003A4   0500A0E1           MOV      R0,R5
+   \   000003A8   0B10A0E1           MOV      R1,R11
+   \   000003AC   ........           BL       __aeabi_cfcmple
+   \   000003B0   1B00002A           BCS      ??_DrawArc2_14
+    109                  xMinDisp = (int)_CalcInterSectLin(y, afy[2], afy[3], afx[2], afx[3]);
+   \   000003B4   14109DE5           LDR      R1,[SP, #+20]
+   \   000003B8   1CA09DE5           LDR      R10,[SP, #+28]
+   \   000003BC   04108DE5           STR      R1,[SP, #+4]
+   \   000003C0   0A00A0E1           MOV      R0,R10
+   \   000003C4   0510A0E1           MOV      R1,R5
+   \   000003C8   ........           BL       __aeabi_cfcmpeq
+   \   000003CC   1100000A           BEQ      ??_DrawArc2_15
+   \   000003D0   0B00A0E1           MOV      R0,R11
+   \   000003D4   ........           BL       __aeabi_fsub
+   \   000003D8   00008DE5           STR      R0,[SP, #+0]
+   \   000003DC   10009DE5           LDR      R0,[SP, #+16]
+   \   000003E0   04109DE5           LDR      R1,[SP, #+4]
+   \   000003E4   ........           BL       __aeabi_fsub
+   \   000003E8   00B0A0E1           MOV      R11,R0
+   \   000003EC   0A00A0E1           MOV      R0,R10
+   \   000003F0   0510A0E1           MOV      R1,R5
+   \   000003F4   ........           BL       __aeabi_fsub
+   \   000003F8   0010A0E1           MOV      R1,R0
+   \   000003FC   0B00A0E1           MOV      R0,R11
+   \   00000400   ........           BL       __aeabi_fdiv
+   \   00000404   00109DE5           LDR      R1,[SP, #+0]
+   \   00000408   ........           BL       __aeabi_fmul
+   \   0000040C   04109DE5           LDR      R1,[SP, #+4]
+   \   00000410   ........           BL       __aeabi_fadd
+   \   00000414   000000EA           B        ??_DrawArc2_16
+   \                     ??_DrawArc2_15:
+   \   00000418   0500A0E1           MOV      R0,R5
+    110                } else {
+   \                     ??_DrawArc2_16:
+   \   0000041C   ........           BL       __aeabi_f2iz
+   \   00000420   000000EA           B        ??_DrawArc2_17
+    111                  xMinDisp = xMin;      
+   \                     ??_DrawArc2_14:
+   \   00000424   0700A0E1           MOV      R0,R7
+    112                }
+    113                if (xMul > 0) {
+   \                     ??_DrawArc2_17:
+   \   00000428   ........           LDR      R1,??DataTable1
+   \   0000042C   50209DE5           LDR      R2,[SP, #+80]
+   \   00000430   941091E5           LDR      R1,[R1, #+148]
+   \   00000434   003091E5           LDR      R3,[R1, #+0]
+   \   00000438   84109DE5           LDR      R1,[SP, #+132]
+   \   0000043C   962121E0           MLA      R1,R6,R1,R2
+   \   00000440   80209DE5           LDR      R2,[SP, #+128]
+   \   00000444   010052E3           CMP      R2,#+1
+   \   00000448   4C209DE5           LDR      R2,[SP, #+76]
+   \   0000044C   030000BA           BLT      ??_DrawArc2_18
+    114                  LCD_HL_DrawHLine( xMinDisp + x0, yMul * y + y0,  xMaxDisp + x0);
+   \   00000450   4CC09DE5           LDR      R12,[SP, #+76]
+   \   00000454   092082E0           ADD      R2,R2,R9
+   \   00000458   00008CE0           ADD      R0,R12,R0
+   \   0000045C   020000EA           B        ??_DrawArc2_19
+    115                } else {
+    116                  LCD_HL_DrawHLine(-xMaxDisp + x0, yMul * y + y0, -xMinDisp + x0);
+   \                     ??_DrawArc2_18:
+   \   00000460   002042E0           SUB      R2,R2,R0
+   \   00000464   4C009DE5           LDR      R0,[SP, #+76]
+   \   00000468   090040E0           SUB      R0,R0,R9
+   \                     ??_DrawArc2_19:
+   \   0000046C   33FF2FE1           BLX      R3
+    117                }
+    118              }
+   \   00000470   08009DE5           LDR      R0,[SP, #+8]
+   \   00000474   016046E2           SUB      R6,R6,#+1
+   \   00000478   000056E1           CMP      R6,R0
+   \   0000047C   8BFFFFAA           BGE      ??_DrawArc2_3
+    119            }
+    120          
+    121          #if 0  /* Test code */
+    122          {
+    123            int i;
+    124            GUI_SetColor(GUI_WHITE); 
+    125            for (i = 0; i < 4; i++) {
+    126              LCD_HL_DrawPixel(afx[i] + x0, afy[i] + y0);
+    127            }
+    128          }
+    129          #endif
+    130          
+    131            GUI_USE_PARA(ry);
+    132          }
+   \                     ??_DrawArc2_2:
+   \   00000480   54D08DE2           ADD      SP,SP,#+84       ;; stack cleaning
+   \   00000484   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    133          
+
+   \                                 In section .text, align 4, keep-with-next
+    134          void GL_DrawArc2(int x0, int y0, int rx, int ry, float a0, float a1) {
+   \                     GL_DrawArc2:
+   \   00000000   F14F2DE9           PUSH     {R0,R4-R11,LR}
+    135            float aEnd;
+    136            a0 += 360;
+   \   00000004   4094A0E3           MOV      R9,#+1073741824
+   \   00000008   10D04DE2           SUB      SP,SP,#+16
+   \   0000000C   0140A0E1           MOV      R4,R1
+   \   00000010   ED9789E3           ORR      R9,R9,#0x3B40000
+   \   00000014   0250A0E1           MOV      R5,R2
+   \   00000018   0360A0E1           MOV      R6,R3
+   \   0000001C   38009DE5           LDR      R0,[SP, #+56]
+   \   00000020   3C809DE5           LDR      R8,[SP, #+60]
+   \   00000024   0910A0E1           MOV      R1,R9
+   \   00000028   ........           BL       __aeabi_fadd
+   \   0000002C   0070A0E1           MOV      R7,R0
+    137            a1 += 360;
+   \   00000030   0800A0E1           MOV      R0,R8
+   \   00000034   0910A0E1           MOV      R1,R9
+   \   00000038   ........           BL       __aeabi_fadd
+   \   0000003C   0080A0E1           MOV      R8,R0
+    138            while (a0 >= 360) {
+   \   00000040   0700A0E1           MOV      R0,R7
+   \   00000044   0910A0E1           MOV      R1,R9
+   \   00000048   ........           BL       __aeabi_cfrcmple
+   \   0000004C   80A489E3           ORR      R10,R9,#0x80000000
+   \   00000050   0B00008A           BHI      ??GL_DrawArc2_0
+    139              a0 -= 360;
+   \                     ??GL_DrawArc2_1:
+   \   00000054   0700A0E1           MOV      R0,R7
+   \   00000058   0A10A0E1           MOV      R1,R10
+   \   0000005C   ........           BL       __aeabi_fadd
+   \   00000060   0070A0E1           MOV      R7,R0
+    140              a1 -= 360;
+   \   00000064   0800A0E1           MOV      R0,R8
+   \   00000068   0A10A0E1           MOV      R1,R10
+   \   0000006C   ........           BL       __aeabi_fadd
+   \   00000070   0080A0E1           MOV      R8,R0
+   \   00000074   0700A0E1           MOV      R0,R7
+   \   00000078   0910A0E1           MOV      R1,R9
+   \   0000007C   ........           BL       __aeabi_cfrcmple
+   \   00000080   F3FFFF9A           BLS      ??GL_DrawArc2_1
+    141            }
+    142          /* Do first quadrant 0-90 degree */
+    143          DoFirst:
+    144            if (a1 <= 0) {
+   \                     ??GL_DrawArc2_0:
+   \   00000084   0800A0E1           MOV      R0,R8
+   \   00000088   0010A0E3           MOV      R1,#+0
+   \   0000008C   ........           BL       __aeabi_cfcmple
+   \   00000090   9500009A           BLS      ??GL_DrawArc2_2
+    145              return;
+    146            }
+    147            if (a0 < 90) {
+   \   00000094   4094A0E3           MOV      R9,#+1073741824
+   \   00000098   AD9789E3           ORR      R9,R9,#0x2B40000
+   \   0000009C   0700A0E1           MOV      R0,R7
+   \   000000A0   0910A0E1           MOV      R1,R9
+   \   000000A4   ........           BL       __aeabi_cfcmple
+   \   000000A8   1200002A           BCS      ??GL_DrawArc2_3
+    148              if (a0 < 0) {
+   \   000000AC   0010A0E3           MOV      R1,#+0
+   \   000000B0   ........           BL       __aeabi_cfcmple
+    149                a0 = 0;
+   \   000000B4   0070A033           MOVCC    R7,#+0
+    150              }
+    151              aEnd = (a1 < 90) ? a1 : 90;
+   \   000000B8   0800A0E1           MOV      R0,R8
+   \   000000BC   0910A0E1           MOV      R1,R9
+   \   000000C0   ........           BL       __aeabi_cfcmple
+    152              _DrawArc2(x0, y0, rx, ry, a0, aEnd, 1, -1);
+   \   000000C4   0000E0E3           MVN      R0,#+0
+   \   000000C8   0C008DE5           STR      R0,[SP, #+12]
+   \   000000CC   0100A0E3           MOV      R0,#+1
+   \   000000D0   08A0A031           MOVCC    R10,R8
+   \   000000D4   09A0A021           MOVCS    R10,R9
+   \   000000D8   08008DE5           STR      R0,[SP, #+8]
+   \   000000DC   04A08DE5           STR      R10,[SP, #+4]
+   \   000000E0   00708DE5           STR      R7,[SP, #+0]
+   \   000000E4   0630A0E1           MOV      R3,R6
+   \   000000E8   0520A0E1           MOV      R2,R5
+   \   000000EC   0410A0E1           MOV      R1,R4
+   \   000000F0   10009DE5           LDR      R0,[SP, #+16]
+   \   000000F4   ........           BL       _DrawArc2
+    153            }
+    154            a1 -= 90;
+   \                     ??GL_DrawArc2_3:
+   \   000000F8   80B489E3           ORR      R11,R9,#0x80000000
+   \   000000FC   0800A0E1           MOV      R0,R8
+   \   00000100   0B10A0E1           MOV      R1,R11
+   \   00000104   ........           BL       __aeabi_fadd
+   \   00000108   0080A0E1           MOV      R8,R0
+    155            a0 -= 90;
+   \   0000010C   0700A0E1           MOV      R0,R7
+   \   00000110   0B10A0E1           MOV      R1,R11
+   \   00000114   ........           BL       __aeabi_fadd
+   \   00000118   0070A0E1           MOV      R7,R0
+    156          /* Do second quadrant 90-180 degree */
+    157            if (a1 <= 0) {
+   \   0000011C   0800A0E1           MOV      R0,R8
+   \   00000120   0010A0E3           MOV      R1,#+0
+   \   00000124   ........           BL       __aeabi_cfcmple
+   \   00000128   6F00009A           BLS      ??GL_DrawArc2_2
+    158              return;
+    159            }
+    160            if (a0 < 90) {
+   \   0000012C   0700A0E1           MOV      R0,R7
+   \   00000130   0910A0E1           MOV      R1,R9
+   \   00000134   ........           BL       __aeabi_cfcmple
+   \   00000138   1700002A           BCS      ??GL_DrawArc2_4
+    161              if (a0 < 0) {
+   \   0000013C   0010A0E3           MOV      R1,#+0
+   \   00000140   ........           BL       __aeabi_cfcmple
+    162                a0 = 0;
+   \   00000144   0070A033           MOVCC    R7,#+0
+    163              }
+    164              aEnd = (a1 < 90) ? a1 : 90;
+   \   00000148   0800A0E1           MOV      R0,R8
+   \   0000014C   0910A0E1           MOV      R1,R9
+   \   00000150   ........           BL       __aeabi_cfcmple
+    165              _DrawArc2(x0, y0, rx, ry, 90 - aEnd, 90 - a0, -1, -1);
+   \   00000154   0000E0E3           MVN      R0,#+0
+   \   00000158   0C008DE5           STR      R0,[SP, #+12]
+   \   0000015C   08008DE5           STR      R0,[SP, #+8]
+   \   00000160   08A0A031           MOVCC    R10,R8
+   \   00000164   09A0A021           MOVCS    R10,R9
+   \   00000168   0900A0E1           MOV      R0,R9
+   \   0000016C   0710A0E1           MOV      R1,R7
+   \   00000170   ........           BL       __aeabi_fsub
+   \   00000174   04008DE5           STR      R0,[SP, #+4]
+   \   00000178   0900A0E1           MOV      R0,R9
+   \   0000017C   0A10A0E1           MOV      R1,R10
+   \   00000180   ........           BL       __aeabi_fsub
+   \   00000184   00008DE5           STR      R0,[SP, #+0]
+   \   00000188   0630A0E1           MOV      R3,R6
+   \   0000018C   0520A0E1           MOV      R2,R5
+   \   00000190   0410A0E1           MOV      R1,R4
+   \   00000194   10009DE5           LDR      R0,[SP, #+16]
+   \   00000198   ........           BL       _DrawArc2
+    166            }
+    167            a1 -= 90;
+   \                     ??GL_DrawArc2_4:
+   \   0000019C   0800A0E1           MOV      R0,R8
+   \   000001A0   0B10A0E1           MOV      R1,R11
+   \   000001A4   ........           BL       __aeabi_fadd
+   \   000001A8   0080A0E1           MOV      R8,R0
+    168            a0 -= 90;
+   \   000001AC   0700A0E1           MOV      R0,R7
+   \   000001B0   0B10A0E1           MOV      R1,R11
+   \   000001B4   ........           BL       __aeabi_fadd
+   \   000001B8   0070A0E1           MOV      R7,R0
+    169          /* Do third quadrant 180-270 degree */
+    170            if (a1 <= 0) {
+   \   000001BC   0800A0E1           MOV      R0,R8
+   \   000001C0   0010A0E3           MOV      R1,#+0
+   \   000001C4   ........           BL       __aeabi_cfcmple
+   \   000001C8   4700009A           BLS      ??GL_DrawArc2_2
+    171              return;
+    172            }
+    173            if (a0 < 90) {
+   \   000001CC   0700A0E1           MOV      R0,R7
+   \   000001D0   0910A0E1           MOV      R1,R9
+   \   000001D4   ........           BL       __aeabi_cfcmple
+   \   000001D8   1200002A           BCS      ??GL_DrawArc2_5
+    174              if (a0 < 0) {
+   \   000001DC   0010A0E3           MOV      R1,#+0
+   \   000001E0   ........           BL       __aeabi_cfcmple
+    175                a0 = 0;
+   \   000001E4   0070A033           MOVCC    R7,#+0
+    176              }
+    177              aEnd = (a1 < 90) ? a1 : 90;
+   \   000001E8   0800A0E1           MOV      R0,R8
+   \   000001EC   0910A0E1           MOV      R1,R9
+   \   000001F0   ........           BL       __aeabi_cfcmple
+    178              _DrawArc2(x0, y0, rx, ry, a0, aEnd, -1, 1);
+   \   000001F4   0100A0E3           MOV      R0,#+1
+   \   000001F8   0C008DE5           STR      R0,[SP, #+12]
+   \   000001FC   000060E2           RSB      R0,R0,#+0
+   \   00000200   08A0A031           MOVCC    R10,R8
+   \   00000204   09A0A021           MOVCS    R10,R9
+   \   00000208   08008DE5           STR      R0,[SP, #+8]
+   \   0000020C   04A08DE5           STR      R10,[SP, #+4]
+   \   00000210   00708DE5           STR      R7,[SP, #+0]
+   \   00000214   0630A0E1           MOV      R3,R6
+   \   00000218   0520A0E1           MOV      R2,R5
+   \   0000021C   0410A0E1           MOV      R1,R4
+   \   00000220   10009DE5           LDR      R0,[SP, #+16]
+   \   00000224   ........           BL       _DrawArc2
+    179            }
+    180            a1 -= 90;
+   \                     ??GL_DrawArc2_5:
+   \   00000228   0800A0E1           MOV      R0,R8
+   \   0000022C   0B10A0E1           MOV      R1,R11
+   \   00000230   ........           BL       __aeabi_fadd
+   \   00000234   0080A0E1           MOV      R8,R0
+    181            a0 -= 90;
+   \   00000238   0700A0E1           MOV      R0,R7
+   \   0000023C   0B10A0E1           MOV      R1,R11
+   \   00000240   ........           BL       __aeabi_fadd
+   \   00000244   0070A0E1           MOV      R7,R0
+    182          /* Do last quadrant 270-360 degree */
+    183            if (a1 <= 0) {
+   \   00000248   0800A0E1           MOV      R0,R8
+   \   0000024C   0010A0E3           MOV      R1,#+0
+   \   00000250   ........           BL       __aeabi_cfcmple
+   \   00000254   2400009A           BLS      ??GL_DrawArc2_2
+    184              return;
+    185            }
+    186            if (a0 < 90) {
+   \   00000258   0700A0E1           MOV      R0,R7
+   \   0000025C   0910A0E1           MOV      R1,R9
+   \   00000260   ........           BL       __aeabi_cfcmple
+   \   00000264   1700002A           BCS      ??GL_DrawArc2_6
+    187              if (a0 < 0) {
+   \   00000268   0010A0E3           MOV      R1,#+0
+   \   0000026C   ........           BL       __aeabi_cfcmple
+    188                a0 = 0;
+   \   00000270   0070A033           MOVCC    R7,#+0
+    189              }
+    190              aEnd = (a1 < 90) ? a1 : 90;
+   \   00000274   0800A0E1           MOV      R0,R8
+   \   00000278   0910A0E1           MOV      R1,R9
+   \   0000027C   ........           BL       __aeabi_cfcmple
+    191              _DrawArc2(x0, y0, rx, ry, 90 - aEnd, 90 - a0, 1, 1);
+   \   00000280   0100A0E3           MOV      R0,#+1
+   \   00000284   0C008DE5           STR      R0,[SP, #+12]
+   \   00000288   08008DE5           STR      R0,[SP, #+8]
+   \   0000028C   08A0A031           MOVCC    R10,R8
+   \   00000290   09A0A021           MOVCS    R10,R9
+   \   00000294   0900A0E1           MOV      R0,R9
+   \   00000298   0710A0E1           MOV      R1,R7
+   \   0000029C   ........           BL       __aeabi_fsub
+   \   000002A0   04008DE5           STR      R0,[SP, #+4]
+   \   000002A4   0900A0E1           MOV      R0,R9
+   \   000002A8   0A10A0E1           MOV      R1,R10
+   \   000002AC   ........           BL       __aeabi_fsub
+   \   000002B0   00008DE5           STR      R0,[SP, #+0]
+   \   000002B4   0630A0E1           MOV      R3,R6
+   \   000002B8   0520A0E1           MOV      R2,R5
+   \   000002BC   0410A0E1           MOV      R1,R4
+   \   000002C0   10009DE5           LDR      R0,[SP, #+16]
+   \   000002C4   ........           BL       _DrawArc2
+    192            }
+    193            a1 -= 90;
+   \                     ??GL_DrawArc2_6:
+   \   000002C8   0800A0E1           MOV      R0,R8
+   \   000002CC   0B10A0E1           MOV      R1,R11
+   \   000002D0   ........           BL       __aeabi_fadd
+   \   000002D4   0080A0E1           MOV      R8,R0
+    194            a0 -= 90;
+   \   000002D8   0700A0E1           MOV      R0,R7
+   \   000002DC   0B10A0E1           MOV      R1,R11
+   \   000002E0   ........           BL       __aeabi_fadd
+   \   000002E4   0070A0E1           MOV      R7,R0
+    195            goto DoFirst;
+   \   000002E8   65FFFFEA           B        ??GL_DrawArc2_0
+   \                     ??GL_DrawArc2_2:
+   \   000002EC   14D08DE2           ADD      SP,SP,#+20       ;; stack cleaning
+   \   000002F0   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    196          }
+    197          
+    198          /*********************************************************************
+    199          *
+    200          *       GUI_DrawArc
+    201          */
+
+   \                                 In section .text, align 4, keep-with-next
+    202          void GUI_DrawArc2(int x0, int y0, int rx, int ry, float a0, float a1) {
+   \                     GUI_DrawArc2:
+   \   00000000   F0432DE9           PUSH     {R4-R9,LR}
+   \   00000004   0CD04DE2           SUB      SP,SP,#+12
+   \   00000008   0090A0E1           MOV      R9,R0
+   \   0000000C   0180A0E1           MOV      R8,R1
+   \   00000010   0240A0E1           MOV      R4,R2
+   \   00000014   0350A0E1           MOV      R5,R3
+   \   00000018   28609DE5           LDR      R6,[SP, #+40]
+   \   0000001C   2C709DE5           LDR      R7,[SP, #+44]
+    203            GUI_LOCK();
+   \   00000020   ........           BL       GUI_Lock
+    204            #if (GUI_WINSUPPORT)
+    205              WM_ADDORG(x0,y0);
+   \   00000024   ........           LDR      R0,??DataTable1
+   \   00000028   401090E5           LDR      R1,[R0, #+64]
+   \   0000002C   440090E5           LDR      R0,[R0, #+68]
+   \   00000030   099081E0           ADD      R9,R1,R9
+   \   00000034   088080E0           ADD      R8,R0,R8
+    206              WM_ITERATE_START(NULL) {
+   \   00000038   0000A0E3           MOV      R0,#+0
+   \   0000003C   ........           BL       WM__InitIVRSearch
+   \   00000040   000050E3           CMP      R0,#+0
+   \   00000044   0900000A           BEQ      ??GUI_DrawArc2_0
+    207            #endif
+    208            GL_DrawArc2( x0, y0, rx, ry, a0, a1);
+   \                     ??GUI_DrawArc2_1:
+   \   00000048   04708DE5           STR      R7,[SP, #+4]
+   \   0000004C   00608DE5           STR      R6,[SP, #+0]
+   \   00000050   0530A0E1           MOV      R3,R5
+   \   00000054   0420A0E1           MOV      R2,R4
+   \   00000058   0810A0E1           MOV      R1,R8
+   \   0000005C   0900A0E1           MOV      R0,R9
+   \   00000060   ........           BL       GL_DrawArc2
+    209            #if (GUI_WINSUPPORT)
+    210              } WM_ITERATE_END();
+   \   00000064   ........           BL       WM__GetNextIVR
+   \   00000068   000050E3           CMP      R0,#+0
+   \   0000006C   F5FFFF1A           BNE      ??GUI_DrawArc2_1
+    211            #endif
+    212            GUI_UNLOCK();
+   \                     ??GUI_DrawArc2_0:
+   \   00000070   0CD08DE2           ADD      SP,SP,#+12
+   \   00000074   F043BDE8           POP      {R4-R9,LR}
+   \   00000078   ........           B        GUI_Unlock       ;; tailcall
+    213          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1:
+   \   00000000   ........           DC32     GUI_Context
+
+   Maximum stack usage in bytes:
+
+     Function     .cstack
+     --------     -------
+     GL_DrawArc2      56
+     GUI_DrawArc2     40
+     _DrawArc2       120
+
+
+   Section sizes:
+
+     Function/Label Bytes
+     -------------- -----
+     _DrawArc2      1160
+     GL_DrawArc2     756
+     GUI_DrawArc2    124
+     ??DataTable1      4
+
+ 
+ 2 044 bytes in section .text
+ 
+ 2 044 bytes of CODE memory
+
+Errors: none
+Warnings: none

@@ -1,0 +1,393 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     14/Jul/2015  19:00:16 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\FS_OS_Interface.c                    #
+#    Command line =  C:\DUII\TargetHW\FS\FS_OS_Interface.c -D DEBUG=1 -D      #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\FS #
+#                    _OS_Interface.lst                                        #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\FS_ #
+#                    OS_Interface.o                                           #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\FS_OS_Interface.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : FS_OS_Interface.c
+     19          Purpose     : File system OS interface
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          /*********************************************************************
+     24          *
+     25          *       #include Section
+     26          *
+     27          **********************************************************************
+     28          */
+     29          
+     30          #include <stdlib.h>
+     31          
+     32          #include "FS_Int.h"
+     33          #include "FS_OS.h"
+     34          #include "FS_Lbl.h"
+     35          #include "FS_CLib.h"
+     36          
+     37          /*********************************************************************
+     38          *
+     39          *       Static data
+     40          *
+     41          **********************************************************************
+     42          */
+
+   \                                 In section .bss, align 1
+     43          static char _IsInited = 0;
+   \                     _IsInited:
+   \   00000000                      DS8 1
+     44          
+     45          #if ((FS_OS) && (FS_OS_LOCK_PER_DRIVER))              /* One lock per driver */
+     46          
+     47          /*********************************************************************
+     48          *
+     49          *       Typedefs
+     50          *
+     51          **********************************************************************
+     52          */
+     53          typedef struct DRIVER_LOCK DRIVER_LOCK;
+     54          
+     55          
+     56          struct DRIVER_LOCK  {
+     57            DRIVER_LOCK          * pNext;
+     58            U8                     Id;
+     59            const FS_DEVICE_TYPE * pDriver;
+     60            U8                     References;
+     61          };
+     62          
+     63          /*********************************************************************
+     64          *
+     65          *       Additional static data
+     66          *
+     67          **********************************************************************
+     68          */
+     69          static int           _NumDriverLocks;
+     70          static DRIVER_LOCK * _pDriverLock;
+     71          
+     72          /*********************************************************************
+     73          *
+     74          *       Static code
+     75          *
+     76          **********************************************************************
+     77          */
+     78          /*********************************************************************
+     79          *
+     80          *       _AddDriver
+     81          *
+     82          * Function description
+     83          *   Adds a driver to the lock list.
+     84          *   If the driver is already in the list, its reference count is incremented;
+     85          *   if not, a memory block is allocated and added to the lock list as last element.
+     86          */
+     87          static void _AddDriver(const FS_DEVICE_TYPE * pDriver) {
+     88            DRIVER_LOCK * pDriverLock;
+     89            DRIVER_LOCK ** ppPrev;
+     90          
+     91            pDriverLock = _pDriverLock;
+     92            ppPrev       = &_pDriverLock;
+     93            do {
+     94              if (pDriverLock == NULL) {
+     95                pDriverLock = (DRIVER_LOCK * )FS_AllocZeroed(sizeof(DRIVER_LOCK));
+     96                pDriverLock->Id       = _NumDriverLocks++;
+     97                pDriverLock->pDriver  = pDriver;
+     98                pDriverLock->References++;
+     99                *ppPrev = pDriverLock;
+    100                break;
+    101              }
+    102          
+    103              if (pDriverLock->pDriver == pDriver) {
+    104                pDriverLock->References++;
+    105                break;
+    106              }
+    107              ppPrev      = &pDriverLock->pNext;
+    108              pDriverLock = pDriverLock->pNext;
+    109              
+    110            } while (1);
+    111          
+    112          }
+    113          
+    114          
+    115          /*********************************************************************
+    116          *
+    117          *       _RemoveDriver
+    118          *
+    119          * Function description
+    120          *   Removes a driver from the lock list, in case the reference count is zero;
+    121          *
+    122          */
+    123          static void _RemoveDriver(const FS_DEVICE_TYPE * pDriver) {
+    124            DRIVER_LOCK * pDriverLock;
+    125            DRIVER_LOCK ** ppPrev;
+    126          
+    127            pDriverLock = _pDriverLock;
+    128            ppPrev       = &_pDriverLock;
+    129          
+    130            do {
+    131              if (pDriver == pDriverLock->pDriver) {
+    132                if (--pDriverLock->References == 0) {
+    133                  (*ppPrev)= pDriverLock->pNext;
+    134                  FS_Free(pDriverLock);
+    135                  _NumDriverLocks--;
+    136                  break;
+    137                }
+    138              }
+    139              ppPrev      = &pDriverLock;
+    140              pDriverLock = pDriverLock->pNext;
+    141            } while (pDriverLock);
+    142          
+    143          }
+    144          
+    145          
+    146          /*********************************************************************
+    147          *
+    148          *       _Driver2Id
+    149          *
+    150          * Function description
+    151          *   Retrieves the lock Id of the device driver.
+    152          *   The lock Id is unique for every device driver.
+    153          */
+    154          static unsigned _Driver2Id(const FS_DEVICE_TYPE * pDriver) {
+    155            DRIVER_LOCK * pDriverLock;
+    156          
+    157            pDriverLock = _pDriverLock;
+    158            do {
+    159              if (pDriverLock->pDriver == pDriver) {
+    160                return pDriverLock->Id;
+    161              }
+    162              pDriverLock = pDriverLock->pNext;
+    163            }  while (pDriverLock);
+    164            FS_DEBUG_ERROROUT((FS_MTYPE_OS, "_Driver2Id: Driver was not in driver lock list."));
+    165            return 0;
+    166          }
+    167          
+    168          /*********************************************************************
+    169          *
+    170          *       Public code
+    171          *
+    172          **********************************************************************
+    173          */
+    174          
+    175          
+    176          /*********************************************************************
+    177          *
+    178          *       FS_OS_AddDriver
+    179          *
+    180          */
+    181          void FS_OS_AddDriver(const FS_DEVICE_TYPE * pDriver) {
+    182            _AddDriver(pDriver);
+    183          }
+    184          
+    185          /*********************************************************************
+    186          *
+    187          *       FS_OS_RemoveDriver
+    188          *
+    189          */
+    190          void FS_OS_RemoveDriver(const FS_DEVICE_TYPE * pDriver) {
+    191            _RemoveDriver(pDriver);
+    192          }
+    193          
+    194          /*********************************************************************
+    195          *
+    196          *       FS_OS_LockDriver
+    197          *
+    198          */
+    199          void  FS_OS_LockDriver(const FS_DEVICE * pDevice) {
+    200            unsigned int LockIndex;
+    201          
+    202            LockIndex = 0;
+    203            if (pDevice) {
+    204              LockIndex = _Driver2Id(pDevice->pType);
+    205            }
+    206            LockIndex += FS_LOCK_ID_DEVICE;
+    207            FS_X_OS_Lock(LockIndex);    
+    208          }
+    209          
+    210          /*********************************************************************
+    211          *
+    212          *       FS_OS_UnlockDriver
+    213          *
+    214          */
+    215          void  FS_OS_UnlockDriver(const FS_DEVICE * pDevice) {
+    216            unsigned int LockIndex;
+    217          
+    218            LockIndex = 0;
+    219            if (pDevice) {
+    220              LockIndex = _Driver2Id(pDevice->pType);
+    221            }
+    222            LockIndex += FS_LOCK_ID_DEVICE;
+    223            FS_X_OS_Unlock(LockIndex);    
+    224          }
+    225          
+    226          /*********************************************************************
+    227          *
+    228          *       FS_OS_GetNumDriverLocks
+    229          *
+    230          */
+    231          unsigned FS_OS_GetNumDriverLocks(void) {
+    232            return _NumDriverLocks;
+    233          }
+    234          
+    235          #endif
+    236          
+    237          /*********************************************************************
+    238          *
+    239          *       FS_OS_Lock
+    240          *
+    241          */
+
+   \                                 In section .text, align 4, keep-with-next
+    242          void FS_OS_Lock(unsigned LockIndex) {
+    243            if (_IsInited) {
+   \                     FS_OS_Lock:
+   \   00000000   ........           LDR      R1,??DataTable3
+   \   00000004   0010D1E5           LDRB     R1,[R1, #+0]
+   \   00000008   000051E3           CMP      R1,#+0
+   \   0000000C   0000001A           BNE      ??FS_OS_Lock_0
+    244              FS_X_OS_Lock(LockIndex);
+   \   00000010   1EFF2FE1           BX       LR
+    245            }
+   \                     ??FS_OS_Lock_0:
+   \   00000014   00402DE9           PUSH     {LR}
+   \   00000018   04D04DE2           SUB      SP,SP,#+4
+   \   0000001C   ........           BL       FS_X_OS_Lock
+    246          }
+   \   00000020   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000024   0080BDE8           POP      {PC}             ;; return
+    247          
+    248          /*********************************************************************
+    249          *
+    250          *       FS_OS_Unlock
+    251          *
+    252          */
+
+   \                                 In section .text, align 4, keep-with-next
+    253          void FS_OS_Unlock(unsigned LockIndex) {
+    254            if (_IsInited) {
+   \                     FS_OS_Unlock:
+   \   00000000   ........           LDR      R1,??DataTable3
+   \   00000004   0010D1E5           LDRB     R1,[R1, #+0]
+   \   00000008   000051E3           CMP      R1,#+0
+   \   0000000C   0000001A           BNE      ??FS_OS_Unlock_0
+    255              FS_X_OS_Unlock(LockIndex);
+   \   00000010   1EFF2FE1           BX       LR
+    256            }
+   \                     ??FS_OS_Unlock_0:
+   \   00000014   00402DE9           PUSH     {LR}
+   \   00000018   04D04DE2           SUB      SP,SP,#+4
+   \   0000001C   ........           BL       FS_X_OS_Unlock
+    257          }
+   \   00000020   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000024   0080BDE8           POP      {PC}             ;; return
+    258          
+    259          /*********************************************************************
+    260          *
+    261          *       FS_OS_Init
+    262          *
+    263          */
+
+   \                                 In section .text, align 4, keep-with-next
+    264          void FS_OS_Init(unsigned NumLocks) {
+    265            _IsInited = 1;
+   \                     FS_OS_Init:
+   \   00000000   ........           LDR      R1,??DataTable3
+   \   00000004   0120A0E3           MOV      R2,#+1
+   \   00000008   0020C1E5           STRB     R2,[R1, #+0]
+    266            FS_X_OS_Init(NumLocks);
+   \   0000000C   ........           B        FS_X_OS_Init     ;; tailcall
+    267          }
+    268          
+    269          /*********************************************************************
+    270          *
+    271          *       FS_OS_DeInit
+    272          *
+    273          */
+
+   \                                 In section .text, align 4, keep-with-next
+    274          void FS_OS_DeInit(void) {
+    275            _IsInited = 0;
+   \                     FS_OS_DeInit:
+   \   00000000   ........           LDR      R0,??DataTable3
+   \   00000004   0010A0E3           MOV      R1,#+0
+   \   00000008   0010C0E5           STRB     R1,[R0, #+0]
+    276            FS_X_OS_DeInit();
+   \   0000000C   ........           B        FS_X_OS_DeInit   ;; tailcall
+    277          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3:
+   \   00000000   ........           DC32     _IsInited
+    278          
+    279          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function     .cstack
+     --------     -------
+     FS_OS_DeInit      8
+     FS_OS_Init        8
+     FS_OS_Lock        8
+     FS_OS_Unlock      8
+
+
+   Section sizes:
+
+     Function/Label Bytes
+     -------------- -----
+     _IsInited         1
+     FS_OS_Lock       40
+     FS_OS_Unlock     40
+     FS_OS_Init       16
+     FS_OS_DeInit     16
+     ??DataTable3      4
+
+ 
+   1 byte  in section .bss
+ 116 bytes in section .text
+ 
+ 116 bytes of CODE memory
+   1 byte  of DATA memory
+
+Errors: none
+Warnings: none

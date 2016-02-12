@@ -1,0 +1,825 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:09:37 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\GUI\GUI_Timer.c                         #
+#    Command line =  C:\DUII\TargetHW\GUI\GUI_Timer.c -D DEBUG=1 -D           #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\GUI_Timer.lst              #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\GUI_Timer.o                 #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\GUI\GUI_Timer.c
+      1          /*********************************************************************
+      2          *                SEGGER Microcontroller GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 1996 - 2010  SEGGER Microcontroller GmbH & Co. KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          ** emWin V5.06 - Graphical user interface for embedded applications **
+     13          emWin is protected by international copyright laws.   Knowledge of the
+     14          source code may not be used to write a similar product.  This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : GUITimer.c
+     19          Purpose     : Supplies timers
+     20          ----------------------------------------------------------------------
+     21          ---------------------------END-OF-HEADER------------------------------
+     22          */
+     23          
+     24          #include <stddef.h>           /* needed for definition of NULL */
+     25          
+     26          #include "GUI_Private.h"
+     27          
+     28          /*********************************************************************
+     29          *
+     30          *       Defines
+     31          *
+     32          **********************************************************************
+     33          */
+     34          
+     35          #define GUI_TIMER_H2P(h) (GUI_TIMER_Obj*)GUI_ALLOC_h2p(h)
+     36          
+     37          #ifdef GUI_TIMER_MAXVALUE
+     38            #define CHECK_LIMIT(v) if (v > GUI_TIMER_MAXVALUE) v = 0
+     39          #else
+     40            #define CHECK_LIMIT(v)
+     41          #endif
+     42          
+     43          /*********************************************************************
+     44          *
+     45          *       Types
+     46          *
+     47          **********************************************************************
+     48          */
+     49          
+     50          typedef struct {
+     51            GUI_TIMER_CALLBACK* cb;
+     52            GUI_TIMER_HANDLE hNext;
+     53            int Flags;
+     54          	U32 Context;
+     55          	GUI_TIMER_TIME t0;
+     56          	GUI_TIMER_TIME Period;
+     57          } GUI_TIMER_Obj;
+     58          
+     59          /*********************************************************************
+     60          *
+     61          *       Static data
+     62          *
+     63          **********************************************************************
+     64          */
+     65          
+
+   \                                 In section .bss, align 4
+     66          GUI_TIMER_HANDLE _hFirstTimer;
+   \                     _hFirstTimer:
+   \   00000000                      DS8 4
+     67          GUI_TIMER_HANDLE _hActiveTimer;
+   \                     _hActiveTimer:
+   \   00000004                      DS8 4
+     68          
+     69          /*********************************************************************
+     70          *
+     71          *       Static code
+     72          *
+     73          **********************************************************************
+     74          */
+     75          /*********************************************************************
+     76          *
+     77          *       _Unlink
+     78          */
+     79          static void _Unlink(GUI_TIMER_HANDLE hTimer) {
+     80            GUI_TIMER_Obj * pTimer;
+     81            GUI_TIMER_Obj * pi;
+     82            GUI_TIMER_HANDLE hi;
+     83            pTimer = GUI_TIMER_H2P(hTimer);
+     84          /* Check if it is the first element */
+     85            if (_hFirstTimer == hTimer) {
+     86              _hFirstTimer = pTimer->hNext;
+     87              return;
+     88          	}
+     89            hi = _hFirstTimer;
+     90          /* Try to find it in the list ... */
+     91            while(hi) {
+     92              /* GUI_ASSERT(hi<1000,0); */
+     93              pi = GUI_TIMER_H2P(hi);
+     94              if (pi->hNext == hTimer) {
+     95                pi->hNext = pTimer->hNext;
+     96                break;
+     97          		}        
+     98              hi = pi->hNext;
+     99            }  
+    100          }
+    101          
+    102          /*********************************************************************
+    103          *
+    104          *       _Link
+    105          *
+    106          * Purpose:
+    107          *   This routine inserts the new timer (referenced by its handle) into
+    108          *	  the linked list. The linked list is sorted according to timestamps.
+    109          *	  The first element is the timer which expires first.
+    110          */
+    111          static void _Link(GUI_TIMER_HANDLE hNew) {
+    112            GUI_TIMER_Obj * pNew;
+    113            GUI_TIMER_Obj * pTimer;
+    114            GUI_TIMER_Obj * pNext;
+    115            GUI_TIMER_HANDLE hNext;
+    116            pNew = GUI_TIMER_H2P(hNew);
+    117            if (_hFirstTimer ==0) { /* List is empty, make it the only element */
+    118              _hFirstTimer = hNew;
+    119          	  pNew->hNext = 0;
+    120            } else {
+    121              GUI_TIMER_Obj* pFirstTimer      = GUI_TIMER_H2P(_hFirstTimer);
+    122          /* Check if we have to make it the first element */
+    123              if ((pNew->t0 - pFirstTimer->t0) <=0) {
+    124                pNew->hNext  = _hFirstTimer;
+    125                _hFirstTimer = hNew;
+    126          			return;
+    127          		} else {
+    128                GUI_TIMER_HANDLE hTimer = _hFirstTimer;
+    129          /* Put it into the list */
+    130                do {
+    131                  pTimer = GUI_TIMER_H2P(hTimer);
+    132                  hNext  = pTimer->hNext;
+    133                  if (hNext == 0) {
+    134          					goto Append;
+    135                  }
+    136                  pNext  = GUI_TIMER_H2P(hNext);
+    137          				if ((pNew->t0 - pNext->t0) <= 0) {
+    138                    pNew->hNext   = hNext;
+    139                    pTimer->hNext = hNew;
+    140                    return;
+    141          				}
+    142                  hTimer = pTimer->hNext; 
+    143          			} while(1);
+    144          /* Put it at the end of the list */
+    145          Append:
+    146                pNew->hNext   = hNext;
+    147                pTimer->hNext = hNew;
+    148                return;
+    149          		}
+    150            }
+    151          }
+    152          
+    153          /*********************************************************************
+    154          *
+    155          *       Private code
+    156          *
+    157          **********************************************************************
+    158          */
+    159          /*********************************************************************
+    160          *
+    161          *       GUI_TIMER__IsActive
+    162          */
+
+   \                                 In section .text, align 4, keep-with-next
+    163          int GUI_TIMER__IsActive(void) {
+   \                     GUI_TIMER__IsActive:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+    164            int r;
+    165            r = 0;
+   \   00000004   0040A0E3           MOV      R4,#+0
+    166            GUI_LOCK(); {
+   \   00000008   ........           BL       GUI_Lock
+    167              if (_hFirstTimer) {
+   \   0000000C   ........           LDR      R0,??DataTable7
+   \   00000010   000090E5           LDR      R0,[R0, #+0]
+   \   00000014   000050E3           CMP      R0,#+0
+    168                r = 1;
+   \   00000018   0140A013           MOVNE    R4,#+1
+    169              }
+    170            } GUI_UNLOCK(); 
+   \   0000001C   ........           BL       GUI_Unlock
+    171            return r;
+   \   00000020   0400A0E1           MOV      R0,R4
+   \   00000024   1080BDE8           POP      {R4,PC}          ;; return
+    172          }
+    173          
+    174          /*********************************************************************
+    175          *
+    176          *       GUI_TIMER__GetPeriod
+    177          */
+
+   \                                 In section .text, align 4, keep-with-next
+    178          GUI_TIMER_TIME GUI_TIMER__GetPeriod(void) {
+   \                     GUI_TIMER__GetPeriod:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+    179            GUI_TIMER_TIME r;
+    180            r = 0;
+   \   00000004   0040A0E3           MOV      R4,#+0
+    181            GUI_LOCK(); {
+   \   00000008   ........           BL       GUI_Lock
+    182              if (_hFirstTimer) {
+   \   0000000C   ........           LDR      R0,??DataTable7
+   \   00000010   000090E5           LDR      R0,[R0, #+0]
+   \   00000014   000050E3           CMP      R0,#+0
+   \   00000018   0400000A           BEQ      ??GUI_TIMER__GetPeriod_0
+    183                GUI_TIMER_TIME t;
+    184               	GUI_TIMER_Obj * pTimer = GUI_TIMER_H2P(_hFirstTimer);
+   \   0000001C   ........           BL       GUI_ALLOC_h2p
+    185                t = GUI_GetTime();
+    186                r = pTimer->t0 - t;
+   \   00000020   104090E5           LDR      R4,[R0, #+16]
+   \   00000024   ........           BL       GUI_GetTime
+   \   00000028   004054E0           SUBS     R4,R4,R0
+    187                if (r < 0) {
+    188                  r = 0;
+   \   0000002C   0040A043           MOVMI    R4,#+0
+    189                }
+    190              }
+    191            } GUI_UNLOCK(); 
+   \                     ??GUI_TIMER__GetPeriod_0:
+   \   00000030   ........           BL       GUI_Unlock
+    192            return r;
+   \   00000034   0400A0E1           MOV      R0,R4
+   \   00000038   1080BDE8           POP      {R4,PC}          ;; return
+    193          }
+    194          
+    195          /*********************************************************************
+    196          *
+    197          *       GUI_TIMER__GetNextTimer
+    198          */
+
+   \                                 In section .text, align 4, keep-with-next
+    199          GUI_TIMER_HANDLE GUI_TIMER__GetNextTimer(GUI_TIMER_HANDLE hTimer, U32 * pContext) {
+   \                     GUI_TIMER__GetNextTimer:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   0140A0E1           MOV      R4,R1
+    200            GUI_TIMER_Obj  * pTimer;
+    201          
+    202            *pContext = 0;
+    203            if (hTimer == 0) {
+   \   00000008   000050E3           CMP      R0,#+0
+   \   0000000C   0010A0E3           MOV      R1,#+0
+    204              hTimer = _hFirstTimer;
+   \   00000010   ........           LDREQ    R0,??DataTable7
+   \   00000014   001084E5           STR      R1,[R4, #+0]
+   \   00000018   04D04DE2           SUB      SP,SP,#+4
+   \   0000001C   00509005           LDREQ    R5,[R0, #+0]
+    205              if (hTimer) {
+   \   00000020   0100000A           BEQ      ??GUI_TIMER__GetNextTimer_0
+    206             	  pTimer = GUI_TIMER_H2P(hTimer);
+    207                *pContext = pTimer->Context;
+    208              }
+    209            } else {
+    210             	pTimer = GUI_TIMER_H2P(hTimer);
+    211              hTimer = pTimer->hNext;
+   \   00000024   ........           BL       GUI_ALLOC_h2p
+   \   00000028   045090E5           LDR      R5,[R0, #+4]
+    212              if (hTimer) {
+   \                     ??GUI_TIMER__GetNextTimer_0:
+   \   0000002C   000055E3           CMP      R5,#+0
+   \   00000030   0300000A           BEQ      ??GUI_TIMER__GetNextTimer_1
+    213             	  pTimer = GUI_TIMER_H2P(hTimer);
+    214                *pContext = pTimer->Context;
+   \   00000034   0500A0E1           MOV      R0,R5
+   \   00000038   ........           BL       GUI_ALLOC_h2p
+   \   0000003C   0C0090E5           LDR      R0,[R0, #+12]
+   \   00000040   000084E5           STR      R0,[R4, #+0]
+    215              }
+    216            }
+    217            return hTimer;
+   \                     ??GUI_TIMER__GetNextTimer_1:
+   \   00000044   0500A0E1           MOV      R0,R5
+   \   00000048   04D08DE2           ADD      SP,SP,#+4
+   \   0000004C   3080BDE8           POP      {R4,R5,PC}       ;; return
+    218          }
+    219          
+    220          /*********************************************************************
+    221          *
+    222          *       Public code
+    223          *
+    224          **********************************************************************
+    225          */
+    226          /*********************************************************************
+    227          *
+    228          *       GUI_TIMER_Exec
+    229          */
+
+   \                                 In section .text, align 4, keep-with-next
+    230          int GUI_TIMER_Exec(void) {
+   \                     GUI_TIMER_Exec:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   08D04DE2           SUB      SP,SP,#+8
+    231            int r;
+    232            r = 0;
+   \   00000008   0060A0E3           MOV      R6,#+0
+    233            GUI_LOCK(); {
+   \   0000000C   ........           BL       GUI_Lock
+   \   00000010   ........           LDR      R4,??DataTable7
+   \   00000014   0A0000EA           B        ??GUI_TIMER_Exec_0
+    234              while (_hFirstTimer) {
+    235                GUI_TIMER_TIME t;
+    236               	GUI_TIMER_Obj * pTimer = GUI_TIMER_H2P(_hFirstTimer);
+    237                t = GUI_GetTime();
+    238                if ((pTimer->t0 - t) <= 0) {
+    239                  GUI_TIMER_MESSAGE tm;
+    240                  tm.Time       = t;
+   \                     ??GUI_TIMER_Exec_1:
+   \   00000018   00008DE5           STR      R0,[SP, #+0]
+    241          				tm.Context    = pTimer->Context;
+   \   0000001C   0C1095E5           LDR      R1,[R5, #+12]
+    242                  _hActiveTimer = _hFirstTimer;
+   \   00000020   000094E5           LDR      R0,[R4, #+0]
+   \   00000024   04108DE5           STR      R1,[SP, #+4]
+   \   00000028   040084E5           STR      R0,[R4, #+4]
+    243                  _hFirstTimer  = pTimer->hNext;
+   \   0000002C   040095E5           LDR      R0,[R5, #+4]
+   \   00000030   000084E5           STR      R0,[R4, #+0]
+    244                  pTimer->cb(&tm);
+   \   00000034   0D00A0E1           MOV      R0,SP
+   \   00000038   001095E5           LDR      R1,[R5, #+0]
+   \   0000003C   31FF2FE1           BLX      R1
+    245                  r = 1;
+   \   00000040   0160A0E3           MOV      R6,#+1
+    246          			} else {
+   \                     ??GUI_TIMER_Exec_0:
+   \   00000044   000094E5           LDR      R0,[R4, #+0]
+   \   00000048   000050E3           CMP      R0,#+0
+   \   0000004C   0600000A           BEQ      ??GUI_TIMER_Exec_2
+   \   00000050   ........           BL       GUI_ALLOC_h2p
+   \   00000054   0050A0E1           MOV      R5,R0
+   \   00000058   ........           BL       GUI_GetTime
+   \   0000005C   101095E5           LDR      R1,[R5, #+16]
+   \   00000060   001041E0           SUB      R1,R1,R0
+   \   00000064   010051E3           CMP      R1,#+1
+   \   00000068   EAFFFFBA           BLT      ??GUI_TIMER_Exec_1
+    247          			  break;
+    248                }
+    249              }
+    250            } GUI_UNLOCK(); 
+   \                     ??GUI_TIMER_Exec_2:
+   \   0000006C   ........           BL       GUI_Unlock
+    251            return r;
+   \   00000070   0600A0E1           MOV      R0,R6
+   \   00000074   08D08DE2           ADD      SP,SP,#+8
+   \   00000078   7080BDE8           POP      {R4-R6,PC}       ;; return
+    252          }
+    253          
+    254          /*********************************************************************
+    255          *
+    256          *       GUI_TIMER_Create
+    257          */
+
+   \                                 In section .text, align 4, keep-with-next
+    258          GUI_TIMER_HANDLE GUI_TIMER_Create(GUI_TIMER_CALLBACK* cb, int Time, U32 Context, int Flags) {
+   \                     GUI_TIMER_Create:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0050A0E1           MOV      R5,R0
+   \   0000000C   0160A0E1           MOV      R6,R1
+   \   00000010   0270A0E1           MOV      R7,R2
+    259            GUI_TIMER_HANDLE hObj;
+    260            GUI_TIMER_Obj* pObj;
+    261            GUI_LOCK(); {
+   \   00000014   ........           BL       GUI_Lock
+    262              GUI_USE_PARA(Flags);
+    263              /* Alloc memory for obj */
+    264              hObj = GUI_ALLOC_AllocZero(sizeof(GUI_TIMER_Obj));
+   \   00000018   1800A0E3           MOV      R0,#+24
+   \   0000001C   ........           BL       GUI_ALLOC_AllocZero
+   \   00000020   0040B0E1           MOVS     R4,R0
+    265              if (hObj) {
+   \   00000024   2C00000A           BEQ      ??GUI_TIMER_Create_0
+    266                GUI_pfTimerExec = GUI_TIMER_Exec;
+   \   00000028   ........           LDR      R0,??DataTable7_1
+   \   0000002C   ........           LDR      R1,??DataTable7_2
+   \   00000030   001080E5           STR      R1,[R0, #+0]
+    267                pObj = GUI_TIMER_H2P(hObj);
+   \   00000034   0400A0E1           MOV      R0,R4
+   \   00000038   ........           BL       GUI_ALLOC_h2p
+    268                /* init member variables */
+    269                CHECK_LIMIT(Time);
+    270                pObj->t0 = Time;
+   \   0000003C   106080E5           STR      R6,[R0, #+16]
+    271                pObj->cb = cb;
+   \   00000040   005080E5           STR      R5,[R0, #+0]
+    272          	    pObj->Context = Context;
+   \   00000044   0C7080E5           STR      R7,[R0, #+12]
+    273                /* Link it */
+    274          	    _Link(hObj);
+   \   00000048   0400A0E1           MOV      R0,R4
+   \   0000004C   ........           BL       GUI_ALLOC_h2p
+   \   00000050   ........           LDR      R6,??DataTable7
+   \   00000054   0050A0E1           MOV      R5,R0
+   \   00000058   000096E5           LDR      R0,[R6, #+0]
+   \   0000005C   000050E3           CMP      R0,#+0
+   \   00000060   1B00000A           BEQ      ??GUI_TIMER_Create_1
+   \   00000064   ........           BL       GUI_ALLOC_h2p
+   \   00000068   0010A0E1           MOV      R1,R0
+   \   0000006C   102095E5           LDR      R2,[R5, #+16]
+   \   00000070   101091E5           LDR      R1,[R1, #+16]
+   \   00000074   000096E5           LDR      R0,[R6, #+0]
+   \   00000078   011042E0           SUB      R1,R2,R1
+   \   0000007C   010051E3           CMP      R1,#+1
+   \   00000080   100000BA           BLT      ??GUI_TIMER_Create_2
+   \   00000084   000000EA           B        ??GUI_TIMER_Create_3
+   \                     ??GUI_TIMER_Create_4:
+   \   00000088   040096E5           LDR      R0,[R6, #+4]
+   \                     ??GUI_TIMER_Create_3:
+   \   0000008C   ........           BL       GUI_ALLOC_h2p
+   \   00000090   0060A0E1           MOV      R6,R0
+   \   00000094   047096E5           LDR      R7,[R6, #+4]
+   \   00000098   000057E3           CMP      R7,#+0
+   \   0000009C   0600000A           BEQ      ??GUI_TIMER_Create_5
+   \   000000A0   0700A0E1           MOV      R0,R7
+   \   000000A4   ........           BL       GUI_ALLOC_h2p
+   \   000000A8   101095E5           LDR      R1,[R5, #+16]
+   \   000000AC   100090E5           LDR      R0,[R0, #+16]
+   \   000000B0   000041E0           SUB      R0,R1,R0
+   \   000000B4   010050E3           CMP      R0,#+1
+   \   000000B8   F2FFFFAA           BGE      ??GUI_TIMER_Create_4
+   \                     ??GUI_TIMER_Create_5:
+   \   000000BC   047085E5           STR      R7,[R5, #+4]
+   \   000000C0   044086E5           STR      R4,[R6, #+4]
+   \   000000C4   040000EA           B        ??GUI_TIMER_Create_0
+   \                     ??GUI_TIMER_Create_2:
+   \   000000C8   040085E5           STR      R0,[R5, #+4]
+   \   000000CC   004086E5           STR      R4,[R6, #+0]
+   \   000000D0   010000EA           B        ??GUI_TIMER_Create_0
+   \                     ??GUI_TIMER_Create_1:
+   \   000000D4   004086E5           STR      R4,[R6, #+0]
+   \   000000D8   040085E5           STR      R0,[R5, #+4]
+    275              }
+    276            } GUI_UNLOCK(); 
+   \                     ??GUI_TIMER_Create_0:
+   \   000000DC   ........           BL       GUI_Unlock
+    277            return hObj;
+   \   000000E0   0400A0E1           MOV      R0,R4
+   \   000000E4   04D08DE2           ADD      SP,SP,#+4
+   \   000000E8   F080BDE8           POP      {R4-R7,PC}       ;; return
+    278          }
+    279          
+    280          /*********************************************************************
+    281          *
+    282          *       GUI_TIMER_Delete
+    283          */
+
+   \                                 In section .text, align 4, keep-with-next
+    284          void GUI_TIMER_Delete(GUI_TIMER_HANDLE hObj) {
+   \                     GUI_TIMER_Delete:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0040A0E1           MOV      R4,R0
+    285          /* Unlink Timer */
+    286            GUI_LOCK();
+   \   0000000C   ........           BL       GUI_Lock
+    287            _Unlink(hObj);
+   \   00000010   0400A0E1           MOV      R0,R4
+   \   00000014   ........           BL       GUI_ALLOC_h2p
+   \   00000018   0050A0E1           MOV      R5,R0
+   \   0000001C   ........           LDR      R0,??DataTable7
+   \   00000020   001090E5           LDR      R1,[R0, #+0]
+   \   00000024   040051E1           CMP      R1,R4
+   \   00000028   0900000A           BEQ      ??GUI_TIMER_Delete_0
+   \                     ??GUI_TIMER_Delete_1:
+   \   0000002C   000051E3           CMP      R1,#+0
+   \   00000030   0900000A           BEQ      ??GUI_TIMER_Delete_2
+   \   00000034   0100A0E1           MOV      R0,R1
+   \   00000038   ........           BL       GUI_ALLOC_h2p
+   \   0000003C   041090E5           LDR      R1,[R0, #+4]
+   \   00000040   040051E1           CMP      R1,R4
+   \   00000044   F8FFFF1A           BNE      ??GUI_TIMER_Delete_1
+   \   00000048   041095E5           LDR      R1,[R5, #+4]
+   \   0000004C   041080E5           STR      R1,[R0, #+4]
+   \   00000050   010000EA           B        ??GUI_TIMER_Delete_2
+   \                     ??GUI_TIMER_Delete_0:
+   \   00000054   041095E5           LDR      R1,[R5, #+4]
+   \   00000058   001080E5           STR      R1,[R0, #+0]
+    288            GUI_ALLOC_Free(hObj);
+   \                     ??GUI_TIMER_Delete_2:
+   \   0000005C   0400A0E1           MOV      R0,R4
+   \   00000060   ........           BL       GUI_ALLOC_Free
+    289            GUI_UNLOCK();
+   \   00000064   04D08DE2           ADD      SP,SP,#+4
+   \   00000068   3040BDE8           POP      {R4,R5,LR}
+   \   0000006C   ........           B        GUI_Unlock       ;; tailcall
+    290          }
+    291          
+    292          /*********************************************************************
+    293          *
+    294          *       GUI_TIMER_SetPeriod
+    295          */
+
+   \                                 In section .text, align 4, keep-with-next
+    296          void GUI_TIMER_SetPeriod(GUI_TIMER_HANDLE hObj, GUI_TIMER_TIME Period) {
+   \                     GUI_TIMER_SetPeriod:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0150A0E1           MOV      R5,R1
+    297            GUI_LOCK(); {
+   \   00000010   ........           BL       GUI_Lock
+    298              GUI_TIMER_Obj* pObj = GUI_TIMER_H2P(hObj);
+    299              pObj->Period = Period;
+   \   00000014   0400A0E1           MOV      R0,R4
+   \   00000018   ........           BL       GUI_ALLOC_h2p
+   \   0000001C   145080E5           STR      R5,[R0, #+20]
+    300            } GUI_UNLOCK(); 
+   \   00000020   04D08DE2           ADD      SP,SP,#+4
+   \   00000024   3040BDE8           POP      {R4,R5,LR}
+   \   00000028   ........           B        GUI_Unlock       ;; tailcall
+    301          }
+    302          
+    303          /*********************************************************************
+    304          *
+    305          *       GUI_TIMER_SetTime
+    306          */
+
+   \                                 In section .text, align 4, keep-with-next
+    307          void GUI_TIMER_SetTime(GUI_TIMER_HANDLE hObj, GUI_TIMER_TIME Time) {
+   \                     GUI_TIMER_SetTime:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0150A0E1           MOV      R5,R1
+    308            GUI_LOCK(); {
+   \   00000010   ........           BL       GUI_Lock
+    309             	GUI_TIMER_Obj* pObj = GUI_TIMER_H2P(hObj);
+    310              pObj->t0 = Time;
+   \   00000014   0400A0E1           MOV      R0,R4
+   \   00000018   ........           BL       GUI_ALLOC_h2p
+   \   0000001C   105080E5           STR      R5,[R0, #+16]
+    311              CHECK_LIMIT(pObj->t0);
+    312            } GUI_UNLOCK(); 
+   \   00000020   04D08DE2           ADD      SP,SP,#+4
+   \   00000024   3040BDE8           POP      {R4,R5,LR}
+   \   00000028   ........           B        GUI_Unlock       ;; tailcall
+    313          }
+    314          
+    315          /*********************************************************************
+    316          *
+    317          *       GUI_TIMER_SetDelay
+    318          */
+
+   \                                 In section .text, align 4, keep-with-next
+    319          void GUI_TIMER_SetDelay(GUI_TIMER_HANDLE hObj, GUI_TIMER_TIME Delay) {
+   \                     GUI_TIMER_SetDelay:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0150A0E1           MOV      R5,R1
+    320            GUI_LOCK(); {
+   \   00000010   ........           BL       GUI_Lock
+    321             	GUI_TIMER_Obj* pObj = GUI_TIMER_H2P(hObj);
+    322              pObj->t0 = Delay;
+   \   00000014   0400A0E1           MOV      R0,R4
+   \   00000018   ........           BL       GUI_ALLOC_h2p
+   \   0000001C   105080E5           STR      R5,[R0, #+16]
+    323          		_Unlink(hObj);
+   \   00000020   0400A0E1           MOV      R0,R4
+   \   00000024   ........           BL       GUI_ALLOC_h2p
+   \   00000028   ........           LDR      R5,??DataTable7
+   \   0000002C   0060A0E1           MOV      R6,R0
+   \   00000030   001095E5           LDR      R1,[R5, #+0]
+   \   00000034   040051E1           CMP      R1,R4
+   \   00000038   0900000A           BEQ      ??GUI_TIMER_SetDelay_0
+   \                     ??GUI_TIMER_SetDelay_1:
+   \   0000003C   000051E3           CMP      R1,#+0
+   \   00000040   0900000A           BEQ      ??GUI_TIMER_SetDelay_2
+   \   00000044   0100A0E1           MOV      R0,R1
+   \   00000048   ........           BL       GUI_ALLOC_h2p
+   \   0000004C   041090E5           LDR      R1,[R0, #+4]
+   \   00000050   040051E1           CMP      R1,R4
+   \   00000054   F8FFFF1A           BNE      ??GUI_TIMER_SetDelay_1
+   \   00000058   041096E5           LDR      R1,[R6, #+4]
+   \   0000005C   041080E5           STR      R1,[R0, #+4]
+   \   00000060   010000EA           B        ??GUI_TIMER_SetDelay_2
+   \                     ??GUI_TIMER_SetDelay_0:
+   \   00000064   040096E5           LDR      R0,[R6, #+4]
+   \   00000068   000085E5           STR      R0,[R5, #+0]
+    324          		_Link(hObj);
+   \                     ??GUI_TIMER_SetDelay_2:
+   \   0000006C   0400A0E1           MOV      R0,R4
+   \   00000070   ........           BL       GUI_ALLOC_h2p
+   \   00000074   0060A0E1           MOV      R6,R0
+   \   00000078   000095E5           LDR      R0,[R5, #+0]
+   \   0000007C   000050E3           CMP      R0,#+0
+   \   00000080   1B00000A           BEQ      ??GUI_TIMER_SetDelay_3
+   \   00000084   ........           BL       GUI_ALLOC_h2p
+   \   00000088   0010A0E1           MOV      R1,R0
+   \   0000008C   102096E5           LDR      R2,[R6, #+16]
+   \   00000090   101091E5           LDR      R1,[R1, #+16]
+   \   00000094   000095E5           LDR      R0,[R5, #+0]
+   \   00000098   011042E0           SUB      R1,R2,R1
+   \   0000009C   010051E3           CMP      R1,#+1
+   \   000000A0   100000BA           BLT      ??GUI_TIMER_SetDelay_4
+   \   000000A4   000000EA           B        ??GUI_TIMER_SetDelay_5
+   \                     ??GUI_TIMER_SetDelay_6:
+   \   000000A8   040095E5           LDR      R0,[R5, #+4]
+   \                     ??GUI_TIMER_SetDelay_5:
+   \   000000AC   ........           BL       GUI_ALLOC_h2p
+   \   000000B0   0050A0E1           MOV      R5,R0
+   \   000000B4   047095E5           LDR      R7,[R5, #+4]
+   \   000000B8   000057E3           CMP      R7,#+0
+   \   000000BC   0600000A           BEQ      ??GUI_TIMER_SetDelay_7
+   \   000000C0   0700A0E1           MOV      R0,R7
+   \   000000C4   ........           BL       GUI_ALLOC_h2p
+   \   000000C8   101096E5           LDR      R1,[R6, #+16]
+   \   000000CC   100090E5           LDR      R0,[R0, #+16]
+   \   000000D0   000041E0           SUB      R0,R1,R0
+   \   000000D4   010050E3           CMP      R0,#+1
+   \   000000D8   F2FFFFAA           BGE      ??GUI_TIMER_SetDelay_6
+   \                     ??GUI_TIMER_SetDelay_7:
+   \   000000DC   047086E5           STR      R7,[R6, #+4]
+   \   000000E0   044085E5           STR      R4,[R5, #+4]
+   \   000000E4   040000EA           B        ??GUI_TIMER_SetDelay_8
+   \                     ??GUI_TIMER_SetDelay_4:
+   \   000000E8   040086E5           STR      R0,[R6, #+4]
+   \   000000EC   004085E5           STR      R4,[R5, #+0]
+   \   000000F0   010000EA           B        ??GUI_TIMER_SetDelay_8
+   \                     ??GUI_TIMER_SetDelay_3:
+   \   000000F4   004085E5           STR      R4,[R5, #+0]
+   \   000000F8   040086E5           STR      R0,[R6, #+4]
+    325            } GUI_UNLOCK(); 
+   \                     ??GUI_TIMER_SetDelay_8:
+   \   000000FC   04D08DE2           ADD      SP,SP,#+4
+   \   00000100   F040BDE8           POP      {R4-R7,LR}
+   \   00000104   ........           B        GUI_Unlock       ;; tailcall
+    326          }
+    327          
+    328          /*********************************************************************
+    329          *
+    330          *       GUI_TIMER_Restart
+    331          */
+
+   \                                 In section .text, align 4, keep-with-next
+    332          void GUI_TIMER_Restart(GUI_TIMER_HANDLE hObj) {
+   \                     GUI_TIMER_Restart:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0050A0E1           MOV      R5,R0
+    333            GUI_TIMER_Obj* pObj;
+    334            GUI_LOCK(); {
+   \   0000000C   ........           BL       GUI_Lock
+    335              if (hObj == 0) {
+   \   00000010   ........           LDR      R4,??DataTable7
+   \   00000014   000055E3           CMP      R5,#+0
+    336                hObj = _hActiveTimer;
+   \   00000018   04509405           LDREQ    R5,[R4, #+4]
+    337              }
+    338             	pObj = GUI_TIMER_H2P(hObj);
+   \   0000001C   0500A0E1           MOV      R0,R5
+   \   00000020   ........           BL       GUI_ALLOC_h2p
+   \   00000024   0060A0E1           MOV      R6,R0
+    339              pObj->t0 = GUI_GetTime() +pObj->Period;
+   \   00000028   ........           BL       GUI_GetTime
+   \   0000002C   141096E5           LDR      R1,[R6, #+20]
+   \   00000030   000081E0           ADD      R0,R1,R0
+   \   00000034   100086E5           STR      R0,[R6, #+16]
+    340              CHECK_LIMIT(pObj->t0);
+    341              _Unlink(hObj);
+   \   00000038   0500A0E1           MOV      R0,R5
+   \   0000003C   ........           BL       GUI_ALLOC_h2p
+   \   00000040   001094E5           LDR      R1,[R4, #+0]
+   \   00000044   0060A0E1           MOV      R6,R0
+   \   00000048   050051E1           CMP      R1,R5
+   \   0000004C   0900000A           BEQ      ??GUI_TIMER_Restart_0
+   \                     ??GUI_TIMER_Restart_1:
+   \   00000050   000051E3           CMP      R1,#+0
+   \   00000054   0900000A           BEQ      ??GUI_TIMER_Restart_2
+   \   00000058   0100A0E1           MOV      R0,R1
+   \   0000005C   ........           BL       GUI_ALLOC_h2p
+   \   00000060   041090E5           LDR      R1,[R0, #+4]
+   \   00000064   050051E1           CMP      R1,R5
+   \   00000068   F8FFFF1A           BNE      ??GUI_TIMER_Restart_1
+   \   0000006C   041096E5           LDR      R1,[R6, #+4]
+   \   00000070   041080E5           STR      R1,[R0, #+4]
+   \   00000074   010000EA           B        ??GUI_TIMER_Restart_2
+   \                     ??GUI_TIMER_Restart_0:
+   \   00000078   040096E5           LDR      R0,[R6, #+4]
+   \   0000007C   000084E5           STR      R0,[R4, #+0]
+    342              _Link(hObj);
+   \                     ??GUI_TIMER_Restart_2:
+   \   00000080   0500A0E1           MOV      R0,R5
+   \   00000084   ........           BL       GUI_ALLOC_h2p
+   \   00000088   0060A0E1           MOV      R6,R0
+   \   0000008C   000094E5           LDR      R0,[R4, #+0]
+   \   00000090   000050E3           CMP      R0,#+0
+   \   00000094   1B00000A           BEQ      ??GUI_TIMER_Restart_3
+   \   00000098   ........           BL       GUI_ALLOC_h2p
+   \   0000009C   0010A0E1           MOV      R1,R0
+   \   000000A0   102096E5           LDR      R2,[R6, #+16]
+   \   000000A4   101091E5           LDR      R1,[R1, #+16]
+   \   000000A8   000094E5           LDR      R0,[R4, #+0]
+   \   000000AC   011042E0           SUB      R1,R2,R1
+   \   000000B0   010051E3           CMP      R1,#+1
+   \   000000B4   100000BA           BLT      ??GUI_TIMER_Restart_4
+   \   000000B8   000000EA           B        ??GUI_TIMER_Restart_5
+   \                     ??GUI_TIMER_Restart_6:
+   \   000000BC   040094E5           LDR      R0,[R4, #+4]
+   \                     ??GUI_TIMER_Restart_5:
+   \   000000C0   ........           BL       GUI_ALLOC_h2p
+   \   000000C4   0040A0E1           MOV      R4,R0
+   \   000000C8   047094E5           LDR      R7,[R4, #+4]
+   \   000000CC   000057E3           CMP      R7,#+0
+   \   000000D0   0600000A           BEQ      ??GUI_TIMER_Restart_7
+   \   000000D4   0700A0E1           MOV      R0,R7
+   \   000000D8   ........           BL       GUI_ALLOC_h2p
+   \   000000DC   101096E5           LDR      R1,[R6, #+16]
+   \   000000E0   100090E5           LDR      R0,[R0, #+16]
+   \   000000E4   000041E0           SUB      R0,R1,R0
+   \   000000E8   010050E3           CMP      R0,#+1
+   \   000000EC   F2FFFFAA           BGE      ??GUI_TIMER_Restart_6
+   \                     ??GUI_TIMER_Restart_7:
+   \   000000F0   047086E5           STR      R7,[R6, #+4]
+   \   000000F4   045084E5           STR      R5,[R4, #+4]
+   \   000000F8   040000EA           B        ??GUI_TIMER_Restart_8
+   \                     ??GUI_TIMER_Restart_4:
+   \   000000FC   040086E5           STR      R0,[R6, #+4]
+   \   00000100   005084E5           STR      R5,[R4, #+0]
+   \   00000104   010000EA           B        ??GUI_TIMER_Restart_8
+   \                     ??GUI_TIMER_Restart_3:
+   \   00000108   005084E5           STR      R5,[R4, #+0]
+   \   0000010C   040086E5           STR      R0,[R6, #+4]
+    343            } GUI_UNLOCK(); 
+   \                     ??GUI_TIMER_Restart_8:
+   \   00000110   04D08DE2           ADD      SP,SP,#+4
+   \   00000114   F040BDE8           POP      {R4-R7,LR}
+   \   00000118   ........           B        GUI_Unlock       ;; tailcall
+    344          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable7:
+   \   00000000   ........           DC32     _hFirstTimer
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable7_1:
+   \   00000000   ........           DC32     GUI_pfTimerExec
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable7_2:
+   \   00000000   ........           DC32     GUI_TIMER_Exec
+    345          
+    346          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function                .cstack
+     --------                -------
+     GUI_TIMER_Create            24
+     GUI_TIMER_Delete            16
+     GUI_TIMER_Exec              24
+     GUI_TIMER_Restart           24
+     GUI_TIMER_SetDelay          24
+     GUI_TIMER_SetPeriod         16
+     GUI_TIMER_SetTime           16
+     GUI_TIMER__GetNextTimer     16
+     GUI_TIMER__GetPeriod         8
+     GUI_TIMER__IsActive          8
+
+
+   Section sizes:
+
+     Function/Label          Bytes
+     --------------          -----
+     _hFirstTimer               8
+     _hActiveTimer
+     GUI_TIMER__IsActive       40
+     GUI_TIMER__GetPeriod      60
+     GUI_TIMER__GetNextTimer   80
+     GUI_TIMER_Exec           124
+     GUI_TIMER_Create         236
+     GUI_TIMER_Delete         112
+     GUI_TIMER_SetPeriod       44
+     GUI_TIMER_SetTime         44
+     GUI_TIMER_SetDelay       264
+     GUI_TIMER_Restart        284
+     ??DataTable7               4
+     ??DataTable7_1             4
+     ??DataTable7_2             4
+
+ 
+     8 bytes in section .bss
+ 1 300 bytes in section .text
+ 
+ 1 300 bytes of CODE memory
+     8 bytes of DATA memory
+
+Errors: none
+Warnings: none

@@ -1,0 +1,157 @@
+C51 COMPILER V8.02   SUPERFLASH                                                            01/19/2010 13:21:36 PAGE 1   
+
+
+C51 COMPILER V8.02, COMPILATION OF MODULE SUPERFLASH
+OBJECT MODULE PLACED IN superflash.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE superflash.c OPTIMIZE(SIZE) BROWSE INCDIR(C:\Keil\C51\INC\;C:\Keil\Traqmate
+                    -\132micro\CommonFiles\;C:\Keil\Traqmate\132micro\Superflash\;C:\Keil\Traqmate\132micro\DU\;C:\Keil\Traqmate\132micro\SU)
+                    - DB OE DEFINE(DISPLAY,EXTCLK6,NODEBUG) DEBUG OBJECTEXTEND
+
+line level    source
+
+   1          // This is the main program for superflash.c, part of Traqmate
+   2          //
+   3          // Change Log:
+   4          // 1-18-2010 - created, GAStephens
+   5          //
+   6          // This Traqmate image is used during a Traqmate reflash to reload the upper memory bootloader.
+   7          // This code is not portable. It depends on 8052 byte ordering MSB..LSB.
+   8          //
+   9          // Dependent files:
+  10          //
+  11          // config page 0xF
+  12          // legacy page 0x0
+  13          
+  14          #define DU_MAIN
+  15          
+  16          #include <stdlib.h>
+  17          #include <superflash.h>
+  18          #include <dataflash.h>
+  19          
+  20          #define DFWAIT do {int q; for (q=0; q<64; q++) ; } while(0)  // longer for erase
+  21          sbit BACKLITEDS = P7 ^ 6;
+  22          
+  23          void main (     void ) {
+  24   1              char xdata* data pwrite;
+  25   1              unsigned int i, page;
+  26   1              void (*f)( void);                               // used for hyperjump to bootloader
+  27   1              xdata flashpagetype flashpage;          // structure to access one page of flash
+  28   1      
+  29   1              SFRPAGE = CONFIG_PAGE;
+  30   1              FLACL = 0x00;                                           // allow access to all pages of flash
+  31   1      
+  32   1              // disable watchdog timer
+  33   1              WDTCN = 0xde;
+  34   1              WDTCN = 0xad;
+  35   1      
+  36   1              SYSCLK_Init();                                          // initialize oscillator
+  37   1              SPIO_Init();                                            // set up the SPI
+  38   1      
+  39   1              DataFlash_Init(&numpages, &pagesize);   // set up the DataFlash
+  40   1      
+  41   1              EA = 0;                                                         // disable interrupts
+  42   1      
+  43   1      // =========== copy bootloader from Dataflash upper code segment to microprocessor flash
+  44   1      
+  45   1      
+  46   1              SFRPAGE = LEGACY_PAGE;
+  47   1              FLSCL = 0x41;                                           // set flash speed and enable flash writes/erases from user software
+  48   1      //      PSCTL = 0x03;                                           // movx writes erase flash page
+  49   1      
+  50   1              // erase code memory last 1024 page containing bootloader
+  51   1      //      pwrite = LAST_CODE_PAGE;                        // stop one page from end of codespace
+  52   1      //      *pwrite = 0x88;                                         // write any value to initiate page erase
+  53   1      
+C51 COMPILER V8.02   SUPERFLASH                                                            01/19/2010 13:21:36 PAGE 2   
+
+  54   1      //      PSCTL = 0x00;                                           // movx writes to target ram
+  55   1      //      FLSCL &= ~0x01;                                         // disable flash writes from user sw
+  56   1      
+  57   1              SFRPAGE = CONFIG_PAGE;
+  58   1      
+  59   1      //      PSW = 0;
+  60   1      
+  61   1              // for copy, start back at top code page
+  62   1              pwrite = LAST_CODE_PAGE;                        // stop one page from end of codespace
+  63   1      
+  64   1              // copy code over from dataflash to micro flash codespace 512 bytes at a time
+  65   1              for (page = 254; page <= 255; page++) {
+  66   2      
+  67   2                      SFRPAGE = CONFIG_PAGE;
+  68   2      
+  69   2      #ifdef SENSOR
+                              LED1 = ~LED1;;
+              #endif
+  72   2      #ifdef DISPLAY
+  73   2                      // toggle display backlight
+  74   2                      BACKLITEDS = ~BACKLITEDS;
+  75   2      #endif
+  76   2      
+  77   2                      // get the code from data flash 512 bytes at a time
+  78   2      //              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, page);
+  79   2      
+  80   2                      SFRPAGE = LEGACY_PAGE;
+  81   2                      PSCTL = 0x01;                                           // movx writes to codeflash
+  82   2                      FLSCL |= 0x01;                                          // enable flash writes/erases from user software
+  83   2      
+  84   2                      // copy dataflash page into micro flash
+  85   2                      for (i=0; i < CODE_DOWNLOAD_SIZE; i++)
+  86   2      //                      *pwrite++ = flashpage.bigbuff[i];
+  87   2                              *pwrite++ = 0x00;
+  88   2      
+  89   2                      PSCTL = 0x00;                                           // movx writes to target ram
+  90   2                      FLSCL &= ~0x01;                                         // disable flash writes from user sw
+  91   2              } // for
+  92   1      
+  93   1              PSCTL = 0;                                                      // movx writes target ram
+  94   1              FLSCL &= ~0x01;                                         // disable flash writes from user sw
+  95   1      
+  96   1              SFRPAGE = CONFIG_PAGE;
+  97   1      
+  98   1      // =========== copy code from upper Dataflash code segment to lower Dataflash code segment
+  99   1      
+ 100   1              // clear out lower 128 segments for copy
+ 101   1              for (i = 0; i < 128; i += 8) {
+ 102   2                      DataFlash_Erase_Block(i);
+ 103   2              } // for
+ 104   1      
+ 105   1              // copy code over from dataflash to micro flash codespace 512 bytes at a time
+ 106   1              for (page = 0; page < 128; page++) {
+ 107   2      
+ 108   2      #ifdef SENSOR
+                              LED1 = ~LED1;;
+              #endif
+ 111   2      #ifdef DISPLAY
+ 112   2                      // toggle display backlight
+ 113   2                      BACKLITEDS = ~BACKLITEDS;
+ 114   2      #endif
+ 115   2      
+C51 COMPILER V8.02   SUPERFLASH                                                            01/19/2010 13:21:36 PAGE 3   
+
+ 116   2                      // get the code from data flash 512 bytes at a time
+ 117   2                      DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, (page+128));
+ 118   2      
+ 119   2                      DataFlash_Page_Write_Erase(GENBUFFER, MAX_PAGE_SIZE, flashpage.bigbuff, page);
+ 120   2              } // for
+ 121   1      
+ 122   1      // =========== jump to CopytoCodeSpace in new bootloader placed into upper code space
+ 123   1      
+ 124   1                      f = (void *) 0xFE02;
+ 125   1                      (*f)();
+ 126   1      
+ 127   1      } // main
+ 128          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    247    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =      4     528
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----       4
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

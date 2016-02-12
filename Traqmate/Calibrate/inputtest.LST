@@ -1,0 +1,456 @@
+C51 COMPILER V7.20   INPUTTEST                                                             06/03/2005 12:02:26 PAGE 1   
+
+
+C51 COMPILER V7.20, COMPILATION OF MODULE INPUTTEST
+OBJECT MODULE PLACED IN inputtest.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE inputtest.c BROWSE DEBUG OBJECTEXTEND
+
+line level    source
+
+   1          #undef EXTERNALOSC
+   2          // This is the main program for inputtest.c
+   3          // This program will test the digital and analog inputs
+   4          // It prints the status of digital inputs and analog inputs.
+   5          //
+   6          // This version runs on the second gen SU with Cygnal 132 microprocessor
+   7          //
+   8          
+   9          #define MAIN
+  10          
+  11          #include <stdio.h>
+  12          #include <stdlib.h>
+  13          #include <string.h>
+  14          #include <c8051f120.h>
+  15          
+  16          typedef char BOOL;
+  17          
+  18          #define TRUE 1
+  19          #define FALSE 0
+  20          
+  21          sfr16 DP       = 0x82;                 // data pointer
+  22          sfr16 ADC0     = 0xbe;                 // ADC0 data
+  23          sfr16 ADC0GT   = 0xc4;                 // ADC0 greater than window
+  24          sfr16 ADC0LT   = 0xc6;                 // ADC0 less than window
+  25          sfr16 RCAP2    = 0xca;                 // Timer2 capture/reload
+  26          sfr16 RCAP3    = 0xca;                 // Timer3 capture/reload
+  27          sfr16 RCAP4    = 0xca;                 // Timer4 capture/reload
+  28          sfr16 TMR2     = 0xcc;                 // Timer2
+  29          sfr16 TMR3     = 0xcc;                 // Timer3
+  30          sfr16 TMR4     = 0xcc;                 // Timer4
+  31          sfr16 PCA0CP5  = 0xe1;                 // PCA0 Module 5 capture
+  32          sfr16 PCA0CP2  = 0xe9;                 // PCA0 Module 2 capture
+  33          sfr16 PCA0CP3  = 0xeb;                 // PCA0 Module 3 capture
+  34          sfr16 PCA0CP4  = 0xed;                 // PCA0 Module 4 capture
+  35          sfr16 PCA0     = 0xf9;                 // PCA0 counter
+  36          sfr16 PCA0CP0  = 0xfb;                 // PCA0 Module 0 capture
+  37          sfr16 PCA0CP1  = 0xfd;                 // PCA0 Module 1 capture
+  38          
+  39          #define ASCIIBAUD               38400L                  // Baud rate of UART0 in bps
+  40          #define INTCLK                  24500000L               // Internal oscillator frequency in Hz
+  41          #define EXTCLK                  24576000L
+  42          #ifdef EXTERNALOSC
+              #define SYSCLK                  (4L*EXTCLK)             // Output of PLL
+              #else
+  45          #define SYSCLK                  (4L*INTCLK)             // Output of PLL
+  46          #endif
+  47          
+  48          #define SAMPLE_RATE     160                                     // THIS AFFECTS COMM TIMEOUT!!
+  49                                                                                          // ADC record rate in hz (must be 10x INT_DEC)
+  50          #define INT_DEC         16                                      // integrate and decimate ratio (16x oversample)
+  51          #define NUM_CHAN        8                                       // x, y, 5V, temp, ai0, ai1, ai2, ai3
+  52          #define ADC_RATE        2500000                         // ADC conversion clock
+  53          
+  54          #define PWMHI           255                                     // highest PWM calibration value
+  55          #define PWMLO           0                                       // lowest PWM calibration value
+C51 COMPILER V7.20   INPUTTEST                                                             06/03/2005 12:02:26 PAGE 2   
+
+  56          #define STARTZERO       (PWMHI-PWMLO)/2         // middle of road value to start with
+  57          
+  58          #define tohex(c) (c<10? (c+'0'):(c+'A'-10))
+  59          #define MIN(q,r) ((q)<(r)? (q):(r))
+  60          #define MAX(q,r) ((q)>(r)? (q):(r))
+  61          #define AVG(q,r) (((q)+(r))/2)
+  62          #define ABS(q) ((q)>0? q:-(q))
+  63          #define WAIT(CYCLES) do {int z=CYCLES; do {z--;} while (z > 0);} while(0)
+  64          /* universal data elements */
+  65          typedef unsigned char u08;
+  66          typedef unsigned int u16;
+  67          typedef unsigned long u32;
+  68          typedef char s08;
+  69          typedef int s16;
+  70          typedef long s32;
+  71          
+  72          // function prototypes
+  73          void SYSCLK_Init (void);
+  74          void PORT_Init (void);
+  75          void ADC0_Init (void);
+  76          void UART0_Init (void);
+  77          void Timer3_Init (u16 counts);
+  78          
+  79          // Global Variables
+  80          xdata u16 result[] = {0, 0, 0, 0, 0, 0, 0, 0};          // array to hold ADC samples    
+  81          xdata u08 adcresults = FALSE;           // TRUE when samples collected
+  82          
+  83          void main (     void ) {
+  84   1              u08 mask[] = { 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01 };
+  85   1              int bitnum = 0;
+  86   1              int i;
+  87   1      
+  88   1              SFRPAGE = CONFIG_PAGE;
+  89   1              
+  90   1              // disable watchdog timer
+  91   1              WDTCN = 0xde;
+  92   1              WDTCN = 0xad;
+  93   1      
+  94   1              SYSCLK_Init();                                          // initialize oscillator
+  95   1              PORT_Init();                                            // enable ports
+  96   1              UART0_Init();                                           // enable UART to write to
+  97   1      
+  98   1              Timer3_Init ((u16) (SYSCLK/SAMPLE_RATE/12));    // initialize Timer3 to overflow at sample rate
+  99   1              ADC0_Init();                        // init ADC
+ 100   1      
+ 101   1              EA = 1;                                                         // enable global interrupts
+ 102   1      
+ 103   1              // initialize
+ 104   1              SFRPAGE = UART0_PAGE;
+ 105   1              printf( "\r\nTraqMate 132 SU, Input Test 03-15-2005\r\n");
+ 106   1              SFRPAGE = CONFIG_PAGE;
+ 107   1      
+ 108   1              while (1) {
+ 109   2                      u08 port5;
+ 110   2      
+ 111   2                      if (adcresults) {
+ 112   3                              adcresults = FALSE;
+ 113   3      
+ 114   3                              SFRPAGE = CONFIG_PAGE;
+ 115   3      
+ 116   3                              port5 = P5;
+ 117   3      
+C51 COMPILER V7.20   INPUTTEST                                                             06/03/2005 12:02:26 PAGE 3   
+
+ 118   3                              SFRPAGE = UART0_PAGE;
+ 119   3      
+ 120   3                              printf( "DIGIN: ", port5);
+ 121   3                              for (i = 1; i<8; i++)
+ 122   3                                      printf((port5 & mask[i])? "1" : "0");
+ 123   3                              printf( "\r\n");
+ 124   3      
+ 125   3                              printf( "X, Y, 5V, T: %u,%u,%u,%u\r\n", result[0], result[1], result[2], result[3]);
+ 126   3                              printf( "A0, A1, A2, A3: %u,%u,%u,%u\r\n",      result[4], result[5], result[6], result[7]);
+ 127   3                              SFRPAGE = CONFIG_PAGE;
+ 128   3                      } // if
+ 129   2              } // while
+ 130   1      
+ 131   1      } // main
+ 132          
+ 133          void SYSCLK_Init (void) {
+ 134   1      #ifdef EXTERNALOSC
+                      int i;                                                                  // software timer
+                      u08 SFRPAGE_SAVE = SFRPAGE;                             // Save Current SFR page
+              
+                      SFRPAGE = CONFIG_PAGE;                                  // set SFR page
+                      SFRPGCN = 0x01;                                                 // turn on auto SFR paging for interrupts
+              
+                      OSCXCN = 0x67;                              // 01100111 start external oscillator with
+                                                              // 22.1184MHz crystal
+              
+                      for (i=0; i < 256; i++) ;           // XTLVLD blanking interval (>1ms)
+                      
+                      while (!(OSCXCN & 0x80)) ;          // Wait for crystal osc. to settle
+              
+                      CLKSEL = 0x01;                                                  // Select the external osc. as the SYSCLK source
+              
+                      OSCICN = 0x00;                                                  // 00000000 turn off internal osc
+                      PLL0CN = 0x05;                                                  // external osc src, powered
+              
+                      SFRPAGE = LEGACY_PAGE;
+                      FLSCL   = 0x30;                                                 // Set FLASH read time for 100MHz clk
+              
+                      SFRPAGE = CONFIG_PAGE;
+                      PLL0DIV = 0x01;                                                 // Set Pre-divide value to N (N = 1)
+                      PLL0FLT = 0x01;                                                 // Set the PLL filter register for
+                                                                                                      // a reference clock from 19 - 30 MHz
+                                                                                                      // and an output clock from 65 - 100 MHz
+                      PLL0MUL = 0x04;                                                 // Multiply SYSCLK by M (M = 4)
+              
+                      for (i=0; i < 256; i++) ;                               // Wait at least 5us
+                      PLL0CN |= 0x02;                                                 // Enable the PLL
+                      while(!(PLL0CN & 0x10));                                // Wait until PLL frequency is locked
+                      CLKSEL= 0x02;                                                   // Select PLL as SYSCLK source
+              
+                      SFRPAGE = SFRPAGE_SAVE;                                 // Restore SFR page
+              #else
+ 170   1              int i;                                                                  // software timer
+ 171   1              u08 SFRPAGE_SAVE = SFRPAGE;                             // Save Current SFR page
+ 172   1      
+ 173   1              SFRPAGE = CONFIG_PAGE;                                  // set SFR page
+ 174   1              SFRPGCN = 0x01;                                                 // turn on auto SFR paging for interrupts
+ 175   1      
+ 176   1              OSCICN = 0x83;                                                  // 10000011 set internal oscillator to run at max frequency
+ 177   1              CLKSEL = 0x00;                                                  // Select the internal osc. as the SYSCLK source
+ 178   1      
+ 179   1              PLL0CN= 0x00;                                                   // Set internal osc. as PLL source
+C51 COMPILER V7.20   INPUTTEST                                                             06/03/2005 12:02:26 PAGE 4   
+
+ 180   1      
+ 181   1              SFRPAGE = LEGACY_PAGE;
+ 182   1              FLSCL   = 0x30;                                                 // Set FLASH read time for 100MHz clk
+ 183   1      
+ 184   1              SFRPAGE = CONFIG_PAGE;
+ 185   1              PLL0CN |= 0x01;                                                 // Enable Power to PLL
+ 186   1              PLL0DIV = 0x01;                                                 // Set Pre-divide value to N (N = 1)
+ 187   1              PLL0FLT = 0x01;                                                 // Set the PLL filter register for
+ 188   1                                                                                              // a reference clock from 19 - 30 MHz
+ 189   1                                                                                              // and an output clock from 45 - 80 MHz
+ 190   1              PLL0MUL = 0x04;                                                 // Multiply SYSCLK by M (M = 4)
+ 191   1      
+ 192   1              for (i=0; i < 256; i++) ;                               // Wait at least 5us
+ 193   1              PLL0CN |= 0x02;                                                 // Enable the PLL
+ 194   1              while(!(PLL0CN & 0x10));                                // Wait until PLL frequency is locked
+ 195   1              CLKSEL= 0x02;                                                   // Select PLL as SYSCLK source
+ 196   1      
+ 197   1              SFRPAGE = SFRPAGE_SAVE;                                 // Restore SFR page
+ 198   1      #endif
+ 199   1      }
+ 200          
+ 201          void PORT_Init (void) {
+ 202   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 203   1      
+ 204   1              SFRPAGE = CONFIG_PAGE;                          // set SFR page
+ 205   1      
+ 206   1              XBR0    = 0xEF;                                         // 11101111 Enable all but CEX5
+ 207   1              XBR1    = 0x07;                                         // Turn on INT0, T0, CP1
+ 208   1              XBR2    = 0xC4;                     // Enable crossbar, no weak pull-ups, UART1
+ 209   1      
+ 210   1              P0MDOUT = 0x15;                                         // 00010101 enable TX0, SI, SCK, as push-pulls
+ 211   1              P0 = 0xEA;                                                      // set all open drain pins to 1
+ 212   1      
+ 213   1              P1MDIN  = 0xFF;                                         // set all digital i/o points (no analog)
+ 214   1              P1MDOUT = 0x0D;                                         // 00001101 enable tx1, pwmx,y as push-pull
+ 215   1              P1 = 0x01;                                                      // set rx1 to impedance
+ 216   1      
+ 217   1              P2MDOUT = 0x00;                                         // all pins open drain
+ 218   1              P2 = 0xFF;                                                      // high impedance
+ 219   1      
+ 220   1              P3MDOUT = 0xF8;                                         // 11111000 upper 5 bits push-pull
+ 221   1              P3 = 0x7F;                                                      // lower 3 bits high impedance, LEDs on
+ 222   1      
+ 223   1              P4MDOUT = 0xFF;                                         // all pins push-pull
+ 224   1              P4 = 0x00;                                                      // initialize to one (inverting)
+ 225   1      
+ 226   1              P5MDOUT = 0x00;                                         // all pins open drain
+ 227   1              P5 = 0xFF;                                                      // high impedance
+ 228   1      
+ 229   1              P6MDOUT = 0x00;                                         // all pins open drain
+ 230   1              P6 = 0xFF;                                                      // high impedance
+ 231   1      
+ 232   1              P7MDOUT = 0xFF;                                         // all pins push-pull
+ 233   1              P7 = 0xF7;                                                      // 11110111 gps reset low
+ 234   1      
+ 235   1              SFRPAGE = SFRPAGE_SAVE;                         // Restore SFR page
+ 236   1      }
+ 237          
+ 238          void ADC0_Init (void) {
+ 239   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 240   1      
+ 241   1              // configure the PCA for PWM operation
+C51 COMPILER V7.20   INPUTTEST                                                             06/03/2005 12:02:26 PAGE 5   
+
+ 242   1              SFRPAGE = PCA0_PAGE;
+ 243   1              PCA0MD =        0x80;                                   // 1000000 suspend with microp, SYSCLK / 12
+ 244   1              PCA0CN =        0x40;                                   // 01000000 PCA0 enabled
+ 245   1              PCA0CPM0 =      0x42;                                   // CCM0 in 8-bit PWM mode
+ 246   1              PCA0CPM1 =      0x42;                                   // CCM1 in 8-bit PWM mode
+ 247   1      
+ 248   1              PCA0CPL0 =      STARTZERO;              // initialize PCA PWM value
+ 249   1              PCA0CPH0 =      STARTZERO;
+ 250   1              PCA0CPL1 =      STARTZERO;              // initialize PCA PWM value                     
+ 251   1              PCA0CPH1 =      STARTZERO;
+ 252   1      
+ 253   1              // set up the ADC
+ 254   1              SFRPAGE = ADC0_PAGE;
+ 255   1              ADC0CN = 0xC0;                                          // 11000001 ADC0 enabled; special tracking
+ 256   1                                                                                      // ADC0 conversions are initiated 
+ 257   1                                                                                      // on AD0BUSY=1; ADC0 data is right-justified
+ 258   1      
+ 259   1              REF0CN = 0x07;                      // enable temp sensor, on-chip VREF,
+ 260   1                                                                                      // and VREF output buffer
+ 261   1              AMX0CF = 0x00;                                          // all non-differential inputs, no gain
+ 262   1              AMX0SL = 0x00;                      // Select AIN0 external input on mux
+ 263   1              ADC0CF = ((SYSCLK/2/ADC_RATE - 1) << 3) | 0x00; // ** ADC conv clock = 2.5MHz, Gain = 1
+ 264   1      
+ 265   1              EIE2 |= 0x02;                                           // enable ADC interrupts
+ 266   1      
+ 267   1              SFRPAGE = SFRPAGE_SAVE;
+ 268   1      }
+ 269          
+ 270          //-----------------------------------------------------------------------------
+ 271          // Timer3_Init
+ 272          //-----------------------------------------------------------------------------
+ 273          //
+ 274          // Configure Timer3 to auto-reload at interval specified by <counts> and generate
+ 275          // an interrupt which will start a sample sycle. Uses SYSCLK as its time base.
+ 276          //
+ 277          void Timer3_Init (u16 counts) {
+ 278   1              u08 SFRPAGE_SAVE = SFRPAGE;                     // Save Current SFR page
+ 279   1      
+ 280   1              SFRPAGE = TMR3_PAGE;
+ 281   1      
+ 282   1              TMR3CN = 0x00;                                          // Stop Timer3; Clear TF3;
+ 283   1              TMR3CF = 0x01;                                          // use SYSCLK/12 as timebase, count up
+ 284   1      
+ 285   1              RCAP3 = - (int) counts;                         // Init reload values
+ 286   1      
+ 287   1              TMR3 = 0xFFFF;                                          // set to reload immediately
+ 288   1              EIE2 |= 0x01;                                           // enable Timer3 interrupts
+ 289   1              TMR3CN |= 0x04;                                         // start Timer3
+ 290   1      
+ 291   1              SFRPAGE = SFRPAGE_SAVE;                         // Restore SFR page
+ 292   1      }
+ 293          //-----------------------------------------------------------------------------
+ 294          // UART0_Init
+ 295          //-----------------------------------------------------------------------------
+ 296          //
+ 297          // Configure the UART0 using Timer2, for <baudrate> and 8-N-1.
+ 298          //
+ 299          void UART0_Init (void) {
+ 300   1         char SFRPAGE_SAVE = SFRPAGE;        // Save Current SFR page
+ 301   1      
+ 302   1              SFRPAGE = UART0_PAGE;
+ 303   1              SSTA0 = 0x15;                                           // 00010101 no doubler, use timer 2
+C51 COMPILER V7.20   INPUTTEST                                                             06/03/2005 12:02:26 PAGE 6   
+
+ 304   1      
+ 305   1              SCON0 = 0x50;                                           // SCON0: mode 1, 8-bit UART, enable RX
+ 306   1      
+ 307   1              SFRPAGE = TMR2_PAGE;
+ 308   1              TMR2CN = 0x04;                                          // 00000100 no ext trig, enabled, timer, auto reload
+ 309   1              TMR2CF = 0x08;                                          // 00001000 sysclk source, count up
+ 310   1      
+ 311   1              RCAP2 = -(SYSCLK/ASCIIBAUD/16);         // set timer 2 reload value
+ 312   1              TMR2 = 0xFFFF;
+ 313   1              TR2 = 1;                                                        // start timer 2
+ 314   1      
+ 315   1              SFRPAGE = UART0_PAGE;
+ 316   1              TI0 = 1;                            // Indicate TX0 ready
+ 317   1      
+ 318   1              SFRPAGE = SFRPAGE_SAVE;             // Restore SFR page
+ 319   1      }
+ 320          
+ 321          //-----------------------------------------------------------------------------
+ 322          // Interrupt Service Routines
+ 323          //-----------------------------------------------------------------------------
+ 324          
+ 325          //-----------------------------------------------------------------------------
+ 326          // ADC0_ISR
+ 327          //-----------------------------------------------------------------------------
+ 328          //
+ 329          // ADC0 end-of-conversion ISR 
+ 330          // Here we take the ADC0 sample, add it to a running total <accumulator>, and
+ 331          // decrement our local decimation counter <int_dec>.  When <int_dec> reaches
+ 332          // zero, we post the decimated result in the global variable <result>.
+ 333          //
+ 334          void ADC0_ISR (void) interrupt 15
+ 335          {
+ 336   1              static u08 channel = 0;                         // which ADC channel are we sampling
+ 337   1              static u16 int_dec=INT_DEC*NUM_CHAN;    // integrate/decimate counter
+ 338   1                                             // post results when int_dec = 0
+ 339   1              static xdata u16 accumulator[NUM_CHAN] = { 0 }; // ** here's where we integrate ADC samples             
+ 340   1              int i;
+ 341   1      
+ 342   1              // don't do anything unless the last set was used
+ 343   1              if (!adcresults) {
+ 344   2      
+ 345   2                      SFRPAGE = ADC0_PAGE;
+ 346   2      
+ 347   2                      AD0INT = 0;                                                     // clear ADC conversion complete indicator
+ 348   2      
+ 349   2                      accumulator[channel] += ADC0;           // read ADC value and add to running total
+ 350   2      
+ 351   2                      // reprogram mux to select next channel
+ 352   2                      switch (channel) {
+ 353   3                              case 0:                                                                                                                 
+ 354   3                                      AMX0SL = 0x01;                                  // AIN0 moving to AIN1
+ 355   3                                      channel = 1;
+ 356   3                                      break;
+ 357   3                              case 1:                                                         // AIN1 moving to AIN2 (5V)
+ 358   3                                      AMX0SL = 0x02;
+ 359   3                                      channel = 2;
+ 360   3                                      break;
+ 361   3                              case 2:                                                         // AIN2 moving to TEMP
+ 362   3                                      AMX0SL = 0x08;
+ 363   3                                      channel = 3;
+ 364   3                                      break;
+ 365   3                              case 3:                                                                                                                 
+C51 COMPILER V7.20   INPUTTEST                                                             06/03/2005 12:02:26 PAGE 7   
+
+ 366   3                                      AMX0SL = 0x03;                                  // TEMP moving to AIN3
+ 367   3                                      channel = 4;
+ 368   3                                      break;
+ 369   3                              case 4:                                                         // AIN3 moving to AIN4
+ 370   3                                      AMX0SL = 0x04;
+ 371   3                                      channel = 5;
+ 372   3                                      break;
+ 373   3                              case 5:                                                         // AIN4 moving to AIN5
+ 374   3                                      AMX0SL = 0x05;
+ 375   3                                      channel = 6;
+ 376   3                                      break;
+ 377   3                              case 6:                                                                                                                 
+ 378   3                                      AMX0SL = 0x06;                                  // AIN5 moving to AIN6
+ 379   3                                      channel = 7;
+ 380   3                                      break;
+ 381   3                              case 7:                                                                                                                 
+ 382   3                                      AMX0SL = 0x00;                                  // AIN6 moving to AIN0
+ 383   3                                      channel = 0;
+ 384   3                                      break;
+ 385   3                      }
+ 386   2      
+ 387   2                      // if all channels sampled and all samples taken then post results
+ 388   2                      if (0 == --int_dec) {
+ 389   3      
+ 390   3                              for (i=0; i<NUM_CHAN; i++) {
+ 391   4                                      result[i] = accumulator[i] >> 4;                // ** note value is x16
+ 392   4                                      accumulator[i] = 0;                             // reset accumulator
+ 393   4                              }
+ 394   3                              int_dec = INT_DEC*NUM_CHAN;             // reset counter
+ 395   3                              adcresults = TRUE;                              // set semaphore
+ 396   3                      }
+ 397   2                      if (!(0 == channel)) {
+ 398   3                              AD0BUSY = 1;    
+ 399   3                      }
+ 400   2              } // if
+ 401   1      }
+ 402          
+ 403          // Timer 3 Interrupt
+ 404          //
+ 405          // When T3 expires, start a series of ADC conversions and flash LED as required
+ 406          void T3_ISR (void) interrupt 14 {
+ 407   1              SFRPAGE = TMR3_PAGE;
+ 408   1      
+ 409   1              // clear Timer 3 interrupt
+ 410   1              TMR3CN &= 0x7F;
+ 411   1      
+ 412   1              SFRPAGE = ADC0_PAGE;
+ 413   1              // added 3/30/04 set mux back to first sample
+ 414   1              AMX0SL = 0x00;
+ 415   1      
+ 416   1              AD0INT = 0;
+ 417   1              // start ADC conversion
+ 418   1              AD0BUSY = 1;
+ 419   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    825    ----
+   CONSTANT SIZE    =    123    ----
+   XDATA SIZE       =     33    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =      3      13
+C51 COMPILER V7.20   INPUTTEST                                                             06/03/2005 12:02:26 PAGE 8   
+
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

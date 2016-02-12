@@ -1,0 +1,509 @@
+C51 COMPILER V9.51   DISPLAYUNIT                                                           11/30/2014 18:01:38 PAGE 1   
+
+
+C51 COMPILER V9.51, COMPILATION OF MODULE DISPLAYUNIT
+OBJECT MODULE PLACED IN displayunit.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE displayunit.c OPTIMIZE(9,SIZE) BROWSE MDU_F120 INCDIR(..\..\C51\INC\;..\Com
+                    -monFiles\) DB DEFINE(DISPLAY,EXTCLK6,NODEBUG,PACKMEM)
+
+line level    source
+
+   1          // This is the main program for displayunit.c
+   2          // This program runs the display for the Traqmate Product
+   3          //
+   4          // Change Log:
+   5          // Jan 2004 - created, GAStephens
+   6          // 7-15-2004 - converted to display unit
+   7          // 8-17-2004 - fixed flashpage overwrite
+   8          // 9-6-2004 - implemented menu system
+   9          // 9-16-2004 - implemented dual UART messaging
+  10          // 12-01-2004 - converted to 132 microprocessor
+  11          // 01-18-2005 - converted to new memory format (5)
+  12          // 01-27-2005 - final first release menu structure
+  13          // 11-25-2005 - added I/O
+  14          // 2006,2007 - added menu functions, autocross mode
+  15          // 2007,2008 - added predictive lap timing, segement timing mode
+  16          // 2009,2010 - added support for chasecam and lanc devices
+  17          //
+  18          // This version runs on the display circuit board with Dataflash
+  19          // This code is not portable. It depends on 8052 byte ordering MSB..LSB.
+  20          //
+  21          // Dependent files:
+  22          // display.h                    contains all DEFINES, typedefs, and global variable declarations
+  23          // tmtypes.h                    contains all DEFINES, typedefs, and global variable declarations
+  24          // message.h
+  25          // opcode.h
+  26          // cygfx120.c                   contains 8051 setup and operations functions
+  27          // dataflash.c                  contains functions for ATMEL dataflash serial flash memory
+  28          // message.c                    implements messaging packet protocol
+  29          // session.c                    data collection session control and indexing
+  30          // timer.c                              display timer stuff
+  31          // crc16table.c                 polynomial definitions for crc-16
+  32          // formatgps.c                  formats a gps position in text
+  33          // menu.c                               contains the menu system
+  34          // fonts.c                              has fonts and icons
+  35          // cygnalflash.c                read/write the microprocessor scratchpad memory
+  36          // crc.c                                calculates crc
+  37          // fdl.c                                allows self-reprogramming
+  38          // factorytest.c                internal routines for factory testing
+  39          // roadblock.c                  prevents runaway code
+  40          // copyright.c                  copyright notice
+  41          //
+  42          // for V2.20 and later, compile with Level 9 Optimazation, except for fdl.c, dataflash.c, and cygfx120.c
+  43          
+  44          #define DU_MAIN
+  45          
+  46          // Copyright (C) 2005-2013 Track Systems Technologies, LLC
+  47          
+  48          #include <stdlib.h>
+  49          #include <display.h>
+  50          #include <fonts.c>
+  51          #include <crc16table.c>
+  52          
+  53          void Swallow_Message( void );
+  54          
+C51 COMPILER V9.51   DISPLAYUNIT                                                           11/30/2014 18:01:38 PAGE 2   
+
+  55          sbit TX1OUT = P1 ^ 0;
+  56          
+  57          void main (     void ) {
+  58   1              xdata BOOL collecting = FALSE;                  // TRUE when collecting data
+  59   1              xdata int i;                                                    // general purpose small loop counter
+  60   1              xdata char tempstring[21];
+  61   1              xdata BOOL firstpulse = TRUE;                   // used to get synched up
+  62   1              xdata BOOL menuinitialized = FALSE;                     // for camera not ready screen
+  63   1      
+  64   1              SFRPAGE = CONFIG_PAGE;
+  65   1      
+  66   1              // disable watchdog timer
+  67   1              WDTCN = 0xde;
+  68   1              WDTCN = 0xad;
+  69   1      
+  70   1              SYSCLK_Init();                                          // initialize oscillator
+  71   1              PORT_Init_DU();                                         // enable ports
+  72   1      
+  73   1              // create com ports
+  74   1              com[0].use = com[1].use = MESSAGING;    // on DU both ports used for messaging
+  75   1              com[0].port = 0;
+  76   1              com[1].port = 1;
+  77   1              com[0].txbytes = com[1].txbytes = 0;    // initialize
+  78   1              com[0].rxnextidx = com[1].rxnextidx = 0;        // initialize
+  79   1              com[0].parity = com[1].parity = 'N';    // parity = NONE
+  80   1              com[0].rxptr = com[0].txptr =                   // initialize semaphores
+  81   1              com[1].rxptr = com[1].txptr = NULL;
+  82   1              com[0].rxbuff = msgrxbuff[0];                   // point to buffers
+  83   1              com[1].rxbuff = msgrxbuff[1];
+  84   1              com[0].txbuff = msgtxbuff[0];
+  85   1              com[1].txbuff = msgtxbuff[1];
+  86   1      
+  87   1              // initialize com ports
+  88   1              UART_Init(&(com[0]), DUMSGBAUD);                        // su port
+  89   1              UART_Init(&(com[1]), PCUSBMSGBAUD);                     // pc port (USB)
+  90   1              Timer3_Init ((u16) (SYSCLK/SAMPLE_RATE/12));    // initialize Timer3 to overflow at sample rate
+  91   1              SPIO_Init();                                            // set up the SPI
+  92   1      
+  93   1              DataFlash_Init(&numpages, &pagesize);   // set up the DataFlash
+  94   1              Repair_Sessions();                                      // fix any power loss problems
+  95   1              Init_Tables();                                          // initialize driver tables
+  96   1      
+  97   1              EA = 1;                                                         // enable global interrupts
+  98   1      
+  99   1              Display_Init();
+ 100   1      
+ 101   1              // turn on display backlight
+ 102   1              BACKLITEDS = 1;
+ 103   1      
+ 104   1              // announce our arrival
+ 105   1              Clear_Screen();
+ 106   1      
+ 107   1              if (LITE_SW)
+ 108   1                      // V2.00 slide from right
+ 109   1      //              for (i=120; i>=4; i--) {
+ 110   1      //                      // Traqmate Logo
+ 111   1      //                      Write_Icon(i-1, 9, 113, 15, (u08 *) traqmateicon, '-');
+ 112   1              
+ 113   1      //                      DELAY_MS(3);
+ 114   1      //              } // for
+ 115   1      
+ 116   1      //      Clear_Screen();
+C51 COMPILER V9.51   DISPLAYUNIT                                                           11/30/2014 18:01:38 PAGE 3   
+
+ 117   1              Write_Icon(3, 9, 113, 15, (u08 *) traqmateicon, '-');
+ 118   1      
+ 119   1              if (LITE_SW)
+ 120   1                      DELAY_MS(1600);
+ 121   1      
+ 122   1      //      Draw_Rect(2, 6, 118, 26, '^');
+ 123   1      
+ 124   1              // try 3 times to reset the sensor unit
+ 125   1              for (i=0; i<3; i++) {
+ 126   2                      // Reset the sensor unit
+ 127   2                      com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START] = WAITING;
+ 128   2                      SendMessage((u08) DISPLAY_UNIT, (u08) SENSOR_UNIT, (u08) MODE_CHANGE, 1);
+ 129   2      
+ 130   2                      Swallow_Message();
+ 131   2      
+ 132   2                      if (su_present) break;
+ 133   2              } // for
+ 134   1      
+ 135   1              if (su_present) {
+ 136   2                      // Get config data from SU
+ 137   2                      SendMessage((u08) DISPLAY_UNIT, (u08) SENSOR_UNIT, (u08) READ_UNIT_INFO, 0);
+ 138   2      
+ 139   2                      Swallow_Message();
+ 140   2              }  // if
+ 141   1      
+ 142   1              // remember su's sw, hw, and data revs before it goes away
+ 143   1              su_sw = scratch.calibrate.swrev;
+ 144   1              su_data = scratch.calibrate.datarev;
+ 145   1              su_hw = scratch.calibrate.hwrev;
+ 146   1              su_week = scratch.calibrate.week;
+ 147   1              su_year = scratch.calibrate.year;
+ 148   1      
+ 149   1              // if backlight switch pressed, go faster
+ 150   1      //      if (LITE_SW)
+ 151   1      //              DELAY_MS(700);
+ 152   1      
+ 153   1              Clear_Screen();
+ 154   1      
+ 155   1              // check for incompatibility between SU and DU data formats
+ 156   1              if (!InitDUScratchpad(su_present)) {
+ 157   2                      Write_Big_Line(0, "SW MISMATCH", FALSE, '-');
+ 158   2                      Write_Big_Line(2, " Reload SW", FALSE, '-');
+ 159   2                      DELAY_MS(5000);
+ 160   2              }
+ 161   1              Clear_Screen();
+ 162   1      
+ 163   1              Write_Big_Line(0, "DRIVE SAFELY", FALSE, '-');
+ 164   1              sprintf(tempstring, "DU1 SW %d.%02d BD %02d/%02d", ((int) SWREV)/100, ((int) SWREV) % 100, (int) (1.0+(((
+             -float)(scratch.calibrate.week-1)/4.3))), (int) scratch.calibrate.year);
+ 165   1              Write_Line(2, tempstring, FALSE, '-');
+ 166   1              if (su_present) {
+ 167   2                      sprintf(tempstring, "SU%d SW %d.%02d BD %02d/%02d", (int) su_hw/100, su_sw/100, su_sw % 100, (int) (1.0+
+             -(((float)(su_week-1)/4.3))), (int) su_year);
+ 168   2                      Write_Line(3, tempstring, FALSE, '-');
+ 169   2              } // if
+ 170   1              else
+ 171   1                      Write_Line(3, "* SU NOT CONNECTED *", FALSE, '-');
+ 172   1      
+ 173   1              if (LITE_SW)
+ 174   1                      DELAY_MS(2500);
+ 175   1      
+ 176   1              Clear_Screen();
+C51 COMPILER V9.51   DISPLAYUNIT                                                           11/30/2014 18:01:38 PAGE 4   
+
+ 177   1              Write_Line(0, "This unit belongs to", FALSE, '-');
+ 178   1              Write_Line(2, scratch.calibrate.owner, FALSE, '-');
+ 179   1              Write_Line(3, scratch.calibrate.phone, FALSE, '-');
+ 180   1      
+ 181   1              // Set up input scaling
+ 182   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, IODEFPAGE);
+ 183   1              
+ 184   1              // is sensor unit attached and camera enabled?
+ 185   1              waitforcam = (su_present && (0x03 == (flashpage.io.digouts[0] & 0x0F)));
+ 186   1      
+ 187   1              if (su_present) {
+ 188   2                      // put in the write address
+ 189   2                      com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START] = 0;
+ 190   2                      com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+1] = IODEFPAGE & 0xFF;
+ 191   2              
+ 192   2                      // copy segment into output buffer
+ 193   2                      for (i=0; i < MAX_PAGE_SIZE; i++)
+ 194   2                              com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START+2+i] = flashpage.bigbuff[i];
+ 195   2              
+ 196   2                      // send io defs to SU for use in digital outputs
+ 197   2                      SendMessage((u08) DISPLAY_UNIT, (u08) SENSOR_UNIT, (u08) WRITE_SEGMENT, MSGDATA);
+ 198   2      
+ 199   2                      Swallow_Message();
+ 200   2      
+ 201   2                      if (su_hw >= 200) {     // SU 2
+ 202   3                              // Send AutoOn status to SU
+ 203   3                              com[msgrouting[SENSOR_UNIT]].txbuff[DATA_START] = AUTOONENABLED;
+ 204   3                              SendMessage((u08) DISPLAY_UNIT, (u08) SENSOR_UNIT, (u08) AUTO_ON, 1);
+ 205   3              
+ 206   3                              Swallow_Message();
+ 207   3                      } // if
+ 208   2              } // if
+ 209   1      
+ 210   1              for (i=0; i<NUMANALOGS; i++)
+ 211   1                      analogscaling[i] = flashpage.io.analogs[i];
+ 212   1              for (i=0; i<NUMTDDIGITALS; i++)
+ 213   1                      digitalscaling[i] = flashpage.io.digitals[i+4];
+ 214   1      
+ 215   1              // hold user id screen for a moment
+ 216   1              if (LITE_SW)
+ 217   1                      DELAY_MS(1700);
+ 218   1              else    // button held, invert BACKLIGHT so it will stay on when button released
+ 219   1                      BACKLITEDS = 0; 
+ 220   1      
+ 221   1              Clear_Screen();
+ 222   1      
+ 223   1              // initialize memory pointers
+ 224   1              Init_Session(&pagecnt, &iopagecnt);
+ 225   1      
+ 226   1              // set up the sampling rate
+ 227   1              DataFlash_Page_Read(MAX_PAGE_SIZE, flashpage.bigbuff, USERPAGE);
+ 228   1      
+ 229   1              switch (flashpage.user.modesample & 0x0F) {
+ 230   2                      case 2:
+ 231   2                              samps_per_sec = 20;
+ 232   2                              break;
+ 233   2                      case 4:
+ 234   2                              samps_per_sec = 40;
+ 235   2                              break;
+ 236   2                      case 0:
+ 237   2                      default:
+ 238   2                              samps_per_sec = 10;
+C51 COMPILER V9.51   DISPLAYUNIT                                                           11/30/2014 18:01:38 PAGE 5   
+
+ 239   2              } // switch
+ 240   1      
+ 241   1              // set up the I/O collection
+ 242   1              iocollect = flashpage.user.iodata;
+ 243   1      
+ 244   1              // clear the io buffer
+ 245   1              DataFlash_Buffer_Clear(IOBUFFER, pagesize);
+ 246   1              // if 16 bit mode selected, turn on all the frequency lines
+ 247   1              if (iocollect & 0x80)
+ 248   1                      iocollect |= 0x03;
+ 249   1      
+ 250   1              // clear the buffer
+ 251   1              for (i=0; i < MAX_PAGE_SIZE; i++) flashpage.bigbuff[i] = 0;
+ 252   1      
+ 253   1              // go live
+ 254   1              tm_state = WAITING;
+ 255   1      
+ 256   1      //      camreadytick = clocktick + (160 * 7);   // 6.5 seconds to wait for camera ready
+ 257   1              camreadytick = clocktick + (160 * 15);  // 15 seconds to wait for camera ready
+ 258   1              camlancstatus = UNKNOWNSTATUS;
+ 259   1              
+ 260   1              if (waitforcam) {
+ 261   2                      // tell user we are waiting for camera
+ 262   2                      Write_Screen((u08 *) waitforcamera, '-');
+ 263   2              } // if
+ 264   1              
+ 265   1              menuinitialized = FALSE;
+ 266   1              
+ 267   1              while (1) {
+ 268   2                      xdata displaybutton b;
+ 269   2      
+ 270   2                      // see if we have waited long enough for camera to get ready
+ 271   2                      if (waitforcam) {
+ 272   3                              // if we find out there is not traqdata/sync device or if timeout expires or if camera goes ready
+ 273   3                              if ((CAMLANCNOTCONNECTED == camlancstatus) || (CAMLANCREADY == camlancstatus) || (clocktick >= camready
+             -tick))
+ 274   3                                      waitforcam = FALSE;
+ 275   3                      } // if
+ 276   2                      else {
+ 277   3                              if (!menuinitialized) { // waiting for camera is over
+ 278   4                                      menuinitialized = TRUE;
+ 279   4                                      
+ 280   4                                      // start up the menu system
+ 281   4                                      Menu_Op(INIT, BACK);
+ 282   4      
+ 283   4                                      if (su_present) {               // don't try to auto-start if no su connected
+ 284   5                                              // NOTE: The following depends on the menu structure and must be revised if menus are changed!!
+ 285   5                                              // check to see if Autostart is set
+ 286   5                                              switch (scratch.calibrate.menustart) {
+ 287   6                                                      case 0xFF:              // main menu - do nothing
+ 288   6                                                              break;
+ 289   6                                                      case 0x01:              // Laps - Recording
+ 290   6                                                              Menu_Op(BUTTONPRESS, SEL);
+ 291   6                                                              Menu_Op(BUTTONPRESS, SEL);
+ 292   6                                                              break;  
+ 293   6                                                      case 0x02:              // Qual - Recording
+ 294   6                                                              Menu_Op(BUTTONPRESS, SEL);
+ 295   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 296   6                                                              Menu_Op(BUTTONPRESS, SEL);
+ 297   6                                                              break;
+ 298   6                                                      case 0x03:              // Drive - Recording
+ 299   6                                                              Menu_Op(BUTTONPRESS, SEL);
+C51 COMPILER V9.51   DISPLAYUNIT                                                           11/30/2014 18:01:38 PAGE 6   
+
+ 300   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 301   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 302   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 303   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 304   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 305   6                                                              Menu_Op(BUTTONPRESS, SEL);
+ 306   6                                                              break;
+ 307   6                                                      case 0x04:              // Tach - Recording
+ 308   6                                                              Menu_Op(BUTTONPRESS, SEL);
+ 309   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 310   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 311   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 312   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 313   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 314   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 315   6                                                              Menu_Op(BUTTONPRESS, SEL);
+ 316   6                                                              break;
+ 317   6                                                      case 0x05:              // Gauges - Recording
+ 318   6                                                              Menu_Op(BUTTONPRESS, SEL);
+ 319   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 320   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 321   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 322   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 323   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 324   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 325   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 326   6                                                              Menu_Op(BUTTONPRESS, SEL);
+ 327   6                                                              break;
+ 328   6                                                      case 0x06:              // GPS Compass - Not Recording
+ 329   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 330   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 331   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 332   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 333   6                                                              Menu_Op(BUTTONPRESS, SEL);
+ 334   6                                                              Menu_Op(BUTTONPRESS, SEL);
+ 335   6                                                              break;
+ 336   6                                                      case 0x07:              // Instrument - Not Recording
+ 337   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 338   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 339   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 340   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 341   6                                                              Menu_Op(BUTTONPRESS, SEL);
+ 342   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 343   6                                                              Menu_Op(BUTTONPRESS, SEL);
+ 344   6                                                              break;                          
+ 345   6                                                      case 0x08:              // GPS Location - Not Recording
+ 346   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 347   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 348   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 349   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 350   6                                                              Menu_Op(BUTTONPRESS, SEL);      
+ 351   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 352   6                                                              Menu_Op(BUTTONPRESS, DN);
+ 353   6                                                              Menu_Op(BUTTONPRESS, SEL);                      
+ 354   6                                                              break;
+ 355   6                                              } // switch
+ 356   5                                      } // if
+ 357   4                              } // if
+ 358   3      
+ 359   3                              // now check the buttons
+ 360   3                              if (!AUTOONENABLED) {                   // disable DU power switch if AutoOn is enabled
+ 361   4                                      // power off if switch was held more than ON/OFF period
+C51 COMPILER V9.51   DISPLAYUNIT                                                           11/30/2014 18:01:38 PAGE 7   
+
+ 362   4                                      if (debounce[ONOFF] >= DEBOUNCE_ONOFF) {
+ 363   5                                              // advance menu
+ 364   5                                              Menu_Op(BUTTONPRESS, ONOFF);
+ 365   5                                      } // if
+ 366   4                      
+ 367   4                                      // if button not pressed, reset ONOFF counter
+ 368   4                                      if (ONOFF_SW)
+ 369   4                                              debounce[ONOFF] = 0;
+ 370   4                              } // if
+ 371   3      
+ 372   3                              // check all the buttons except ONOFF
+ 373   3                              for (b = 0; b < ONOFF; b++) {
+ 374   4                                      // only act if button not pressed
+ 375   4                                      if ((P5 & (1<<b))) {
+ 376   5              
+ 377   5                                              // check to see if button was held more than debounce period
+ 378   5                                              if (debounce[b] >= DEBOUNCE_NORMAL)
+ 379   5                                                      // advance menu
+ 380   5                                                      Menu_Op(BUTTONPRESS, b);
+ 381   5              
+ 382   5                                              // button no longer pressed so reset counter
+ 383   5                                              debounce[b] = 0;
+ 384   5                                      } // if
+ 385   4                              } // for
+ 386   3                      } // else
+ 387   2      
+ 388   2                      // check for incoming sensor unit message
+ 389   2                      if (NULL != com[0].rxptr) {
+ 390   3                              xdata u08 *tmpptr = com[0].rxptr;
+ 391   3      
+ 392   3                              // clear the semaphore to signal buffer free
+ 393   3                              com[0].rxptr = NULL;
+ 394   3      
+ 395   3                              // process the message
+ 396   3                              Parse_Message((u08) 0, tmpptr);
+ 397   3                      } // if
+ 398   2      
+ 399   2                      // check for incoming PC message
+ 400   2                      if (NULL != com[1].rxptr) {
+ 401   3                              xdata u08 *tmpptr = com[1].rxptr;
+ 402   3      
+ 403   3                              // clear the semaphore to signal buffer free
+ 404   3                              com[1].rxptr = NULL;
+ 405   3      
+ 406   3                              // process the message
+ 407   3                              Parse_Message((u08) 1, tmpptr);
+ 408   3                      } // if
+ 409   2      
+ 410   2                      // check to see if we are being reprogrammed
+ 411   2                      if (mode_change) {                              // check the semaphore
+ 412   3                              mode_change = FALSE;
+ 413   3      
+ 414   3                              // check for reprogramming
+ 415   3                              if (START_DOWNLOAD == new_mode) {
+ 416   4                                      tm_state = new_mode;
+ 417   4      
+ 418   4                                      // use flash for temporary storage
+ 419   4                                      pagecnt = 0;
+ 420   4                                      // use variable session to count the cksum
+ 421   4                                      session = 0xFF;
+ 422   4      
+ 423   4                                      Info_Screen("Loading");
+C51 COMPILER V9.51   DISPLAYUNIT                                                           11/30/2014 18:01:38 PAGE 8   
+
+ 424   4      
+ 425   4                                      new_mode = WAITING;
+ 426   4                              } // if
+ 427   3                              else if (DOWNLOAD_COMPLETE == new_mode) {
+ 428   4                                      tm_state = new_mode;
+ 429   4      
+ 430   4                                      Info_Screen("Storing");
+ 431   4      
+ 432   4                                      new_mode = WAITING;
+ 433   4                              } // if
+ 434   3                              else if (CANCEL_DOWNLOAD == new_mode) {
+ 435   4                                      tm_state = new_mode;
+ 436   4      
+ 437   4                                      Info_Screen("Canceling");
+ 438   4      
+ 439   4                                      // wipe out everything and show progress
+ 440   4                                      DataFlash_Erase_Range(0, LASTLAPPAGE, TRUE);
+ 441   4      
+ 442   4                                      // reset the unit
+ 443   4                                      SFRPAGE = LEGACY_PAGE;
+ 444   4      
+ 445   4                                      // pull the reset line to restart everything
+ 446   4                                      RSTSRC = RSTSRC | 0x01;
+ 447   4                              } // if
+ 448   3                      } // if
+ 449   2              } // while
+ 450   1      } // main
+ 451          
+ 452          void Swallow_Message( void ) {
+ 453   1              // wait for ACK or timeout from SU
+ 454   1              while (0 != CTS[SENSOR_UNIT-1]);
+ 455   1      
+ 456   1              // check for incoming sensor unit message
+ 457   1              if (NULL != com[0].rxptr) {
+ 458   2                      xdata u08 *tmpptr = com[0].rxptr;
+ 459   2      
+ 460   2                      su_present = TRUE;
+ 461   2                      
+ 462   2                      // clear the semaphore to signal buffer free
+ 463   2                      com[0].rxptr = NULL;
+ 464   2      
+ 465   2                      // process the message
+ 466   2                      Parse_Message((u08) 0, tmpptr);
+ 467   2              } // if
+ 468   1      } // Swallow_Message
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   2140    ----
+   CONSTANT SIZE    =  11526    ----
+   XDATA SIZE       =   6195      52
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

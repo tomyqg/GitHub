@@ -1,0 +1,614 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     14/Jul/2015  19:00:48 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\GUI\GUI_Device.c                        #
+#    Command line =  C:\DUII\TargetHW\GUI\GUI_Device.c -D DEBUG=1 -D          #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\GU #
+#                    I_Device.lst                                             #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\GUI #
+#                    _Device.o                                                #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\GUI\GUI_Device.c
+      1          /*********************************************************************
+      2          *                SEGGER Microcontroller GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 1996 - 2010  SEGGER Microcontroller GmbH & Co. KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          ** emWin V5.06 - Graphical user interface for embedded applications **
+     13          emWin is protected by international copyright laws.   Knowledge of the
+     14          source code may not be used to write a similar product.  This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : GUI_Device.c
+     19          Purpose     : Implementation of device related functions
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          #include "GUI_Private.h"
+     24          
+     25          /*********************************************************************
+     26          *
+     27          *       Static code
+     28          *
+     29          **********************************************************************
+     30          */
+     31          /*********************************************************************
+     32          *
+     33          *       _LinkDevice
+     34          *
+     35          * Purpose:
+     36          *   Link the given device into the device chain
+     37          */
+     38          static void _LinkDevice(GUI_DEVICE * pDeviceNew, GUI_DEVICE * pDeviceCur) {
+     39            int LayerIndex;
+     40          
+     41            LayerIndex = pDeviceNew->LayerIndex;
+     42            if (pDeviceCur->pPrev) {
+     43              pDeviceCur->pPrev->pNext = pDeviceNew;
+     44              pDeviceNew->pPrev = pDeviceCur->pPrev;
+     45            } else {
+     46              GUI_Context.apDevice[LayerIndex] = pDeviceNew;
+     47            }
+     48            pDeviceCur->pPrev = pDeviceNew;
+     49            pDeviceNew->pNext = pDeviceCur;
+     50          }
+     51          
+     52          /*********************************************************************
+     53          *
+     54          *       _UnlinkDevice
+     55          *
+     56          * Purpose:
+     57          *   Unlink the given device from the device chain
+     58          */
+     59          static void _UnlinkDevice(GUI_DEVICE * pDevice) {
+     60            int LayerIndex;
+     61          
+     62            LayerIndex = pDevice->LayerIndex;
+     63            if (GUI_Context.apDevice[LayerIndex] == pDevice) {
+     64              GUI_Context.apDevice[LayerIndex] = pDevice->pNext;
+     65            }
+     66            if (pDevice->pPrev) {
+     67              pDevice->pPrev->pNext = pDevice->pNext;
+     68            }
+     69            if (pDevice->pNext) {
+     70              pDevice->pNext->pPrev = pDevice->pPrev;
+     71            }
+     72            pDevice->pNext = NULL;
+     73            pDevice->pPrev = NULL;
+     74          }
+     75          
+     76          /*********************************************************************
+     77          *
+     78          *       _SetColorConv
+     79          *
+     80          * Purpose:
+     81          *   Sets the color conversion API table for the given device.
+     82          *
+     83          * Parameter:
+     84          *   pDeviceAPI    - Device object to be modified
+     85          *   pColorConvAPI - Pointer to LCD_API_COLOR_CONV. If NULL, the display driver color conversion is used.
+     86          */
+     87          static void _SetColorConv(GUI_DEVICE * pDevice, const LCD_API_COLOR_CONV * pColorConvAPI, int LayerIndex) {
+     88            GUI_DEVICE * pDeviceCur;
+     89          
+     90            if (pColorConvAPI) {
+     91              pDevice->pColorConvAPI = pColorConvAPI;
+     92            } else {
+     93              pDeviceCur = GUI_Context.apDevice[LayerIndex];
+     94              if (pDeviceCur) {
+     95                while (pDeviceCur->pNext) {
+     96                  pDeviceCur = pDeviceCur->pNext;
+     97                }
+     98                pDevice->pColorConvAPI = pDeviceCur->pColorConvAPI;
+     99              }
+    100            }
+    101          }
+    102          
+    103          /*********************************************************************
+    104          *
+    105          *       Private code
+    106          *
+    107          **********************************************************************
+    108          */
+    109          /*********************************************************************
+    110          *
+    111          *       GUI_DEVICE__GetpDevice
+    112          *
+    113          * Purpose:
+    114          *   Returns the first device of the given chain of the given device class
+    115          */
+
+   \                                 In section .text, align 4, keep-with-next
+    116          GUI_DEVICE * GUI_DEVICE__GetpDevice(int LayerIndex, int DeviceClass) {
+    117            GUI_DEVICE * pDevice = NULL;
+    118          
+    119            //
+    120            // Check on legal range
+    121            //
+    122            if (LayerIndex >= GUI_NUM_LAYERS) {
+   \                     GUI_DEVICE__GetpDevice:
+   \   00000000   100050E3           CMP      R0,#+16
+   \   00000004   010000BA           BLT      ??GUI_DEVICE__GetpDevice_0
+    123              return NULL; // Error
+   \   00000008   0000A0E3           MOV      R0,#+0
+   \   0000000C   1EFF2FE1           BX       LR
+    124            }
+    125            //
+    126            // Go to the last device
+    127            //
+    128            pDevice = GUI_Context.apDevice[LayerIndex];
+   \                     ??GUI_DEVICE__GetpDevice_0:
+   \   00000010   ........           LDR      R2,??DataTable5
+   \   00000014   000182E0           ADD      R0,R2,R0, LSL #+2
+   \   00000018   480090E5           LDR      R0,[R0, #+72]
+   \   0000001C   000000EA           B        ??GUI_DEVICE__GetpDevice_1
+    129            while (pDevice) {
+    130              if (pDevice->pDeviceAPI->DeviceClassIndex == DeviceClass) {
+    131                return pDevice;
+    132              }
+    133              pDevice = pDevice->pNext;
+   \                     ??GUI_DEVICE__GetpDevice_2:
+   \   00000020   000090E5           LDR      R0,[R0, #+0]
+   \                     ??GUI_DEVICE__GetpDevice_1:
+   \   00000024   000050E3           CMP      R0,#+0
+   \   00000028   0C209015           LDRNE    R2,[R0, #+12]
+   \   0000002C   00209215           LDRNE    R2,[R2, #+0]
+   \   00000030   01005211           CMPNE    R2,R1
+   \   00000034   F9FFFF1A           BNE      ??GUI_DEVICE__GetpDevice_2
+   \   00000038   1EFF2FE1           BX       LR               ;; return
+    134            }
+    135            return NULL;
+    136          }
+    137          
+    138          /*********************************************************************
+    139          *
+    140          *       GUI_DEVICE__GetpDriver
+    141          *
+    142          * Purpose:
+    143          *   Returns the first display driver of the device chain. If there is
+    144          *   no driver (should not occur) the function returns NULL.
+    145          */
+
+   \                                 In section .text, align 4, keep-with-next
+    146          GUI_DEVICE * GUI_DEVICE__GetpDriver(int LayerIndex) {
+    147            GUI_DEVICE * pDevice = NULL;
+    148          
+    149            //
+    150            // Check on legal range
+    151            //
+    152            if (LayerIndex >= GUI_NUM_LAYERS) {
+   \                     GUI_DEVICE__GetpDriver:
+   \   00000000   100050E3           CMP      R0,#+16
+   \   00000004   010000BA           BLT      ??GUI_DEVICE__GetpDriver_0
+    153              return NULL; // Error
+   \   00000008   0000A0E3           MOV      R0,#+0
+   \   0000000C   1EFF2FE1           BX       LR
+    154            }
+    155            //
+    156            // Get the first display driver
+    157            //
+    158            pDevice = GUI_Context.apDevice[LayerIndex];
+   \                     ??GUI_DEVICE__GetpDriver_0:
+   \   00000010   ........           LDR      R1,??DataTable5
+   \   00000014   000181E0           ADD      R0,R1,R0, LSL #+2
+   \   00000018   480090E5           LDR      R0,[R0, #+72]
+   \   0000001C   000000EA           B        ??GUI_DEVICE__GetpDriver_1
+    159            while (pDevice) {
+    160              if (pDevice->pDeviceAPI->DeviceClassIndex == DEVICE_CLASS_DRIVER) {
+    161                break;
+    162              }
+    163              pDevice = pDevice->pNext;
+   \                     ??GUI_DEVICE__GetpDriver_2:
+   \   00000020   000090E5           LDR      R0,[R0, #+0]
+   \                     ??GUI_DEVICE__GetpDriver_1:
+   \   00000024   000050E3           CMP      R0,#+0
+   \   00000028   0C109015           LDRNE    R1,[R0, #+12]
+   \   0000002C   00109115           LDRNE    R1,[R1, #+0]
+   \   00000030   00005113           CMPNE    R1,#+0
+   \   00000034   F9FFFF1A           BNE      ??GUI_DEVICE__GetpDriver_2
+    164            }
+    165            return pDevice;
+   \   00000038   1EFF2FE1           BX       LR               ;; return
+    166          }
+    167          
+    168          /*********************************************************************
+    169          *
+    170          *       Public code
+    171          *
+    172          **********************************************************************
+    173          */
+    174          /*********************************************************************
+    175          *
+    176          *       GUI_DEVICE_Delete
+    177          */
+
+   \                                 In section .text, align 4, keep-with-next
+    178          void GUI_DEVICE_Delete(GUI_DEVICE * pDevice) {
+    179            GUI_ALLOC_FreeFixedBlock(pDevice);
+   \                     GUI_DEVICE_Delete:
+   \   00000000   ........           B        GUI_ALLOC_FreeFixedBlock  ;; tailcall
+    180          }
+    181          
+    182          /*********************************************************************
+    183          *
+    184          *       GUI_DEVICE_Create
+    185          */
+
+   \                                 In section .text, align 4, keep-with-next
+    186          GUI_DEVICE * GUI_DEVICE_Create(const GUI_DEVICE_API * pDeviceAPI, const LCD_API_COLOR_CONV * pColorConvAPI, U16 Flags, int LayerIndex) {
+   \                     GUI_DEVICE_Create:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   0360A0E1           MOV      R6,R3
+   \   00000008   0040A0E1           MOV      R4,R0
+    187            GUI_DEVICE * pDevice;
+    188          
+    189            //
+    190            // Check on legal range
+    191            //
+    192            if (LayerIndex >= GUI_NUM_LAYERS) {
+   \   0000000C   100056E3           CMP      R6,#+16
+   \   00000010   04D04DE2           SUB      SP,SP,#+4
+   \   00000014   0170A0E1           MOV      R7,R1
+   \   00000018   0250A0E1           MOV      R5,R2
+    193              return NULL; // Error
+   \   0000001C   0000A0A3           MOVGE    R0,#+0
+   \   00000020   1A0000AA           BGE      ??GUI_DEVICE_Create_0
+    194            }
+    195            //
+    196            // Create new device
+    197            //
+    198            pDevice = (GUI_DEVICE *)GUI_ALLOC_GetFixedBlock(sizeof(GUI_DEVICE));
+   \   00000024   1C00A0E3           MOV      R0,#+28
+   \   00000028   ........           BL       GUI_ALLOC_GetFixedBlock
+    199            if (pDevice == NULL) {
+   \   0000002C   000050E3           CMP      R0,#+0
+   \   00000030   1600000A           BEQ      ??GUI_DEVICE_Create_0
+    200              return NULL; // Error
+    201            }
+    202            //
+    203            // Initialize members
+    204            //
+    205            _SetColorConv(pDevice, pColorConvAPI, LayerIndex);
+   \   00000034   000057E3           CMP      R7,#+0
+   \   00000038   0C00001A           BNE      ??GUI_DEVICE_Create_1
+   \   0000003C   ........           LDR      R1,??DataTable5
+   \   00000040   061181E0           ADD      R1,R1,R6, LSL #+2
+   \   00000044   481091E5           LDR      R1,[R1, #+72]
+   \   00000048   000051E3           CMP      R1,#+0
+   \   0000004C   0800000A           BEQ      ??GUI_DEVICE_Create_2
+   \   00000050   000000EA           B        ??GUI_DEVICE_Create_3
+   \                     ??GUI_DEVICE_Create_4:
+   \   00000054   0210A0E1           MOV      R1,R2
+   \                     ??GUI_DEVICE_Create_3:
+   \   00000058   002091E5           LDR      R2,[R1, #+0]
+   \   0000005C   000052E3           CMP      R2,#+0
+   \   00000060   FBFFFF1A           BNE      ??GUI_DEVICE_Create_4
+   \   00000064   101091E5           LDR      R1,[R1, #+16]
+   \   00000068   101080E5           STR      R1,[R0, #+16]
+   \   0000006C   000000EA           B        ??GUI_DEVICE_Create_2
+   \                     ??GUI_DEVICE_Create_1:
+   \   00000070   107080E5           STR      R7,[R0, #+16]
+    206            pDevice->LayerIndex = LayerIndex;
+   \                     ??GUI_DEVICE_Create_2:
+   \   00000074   186080E5           STR      R6,[R0, #+24]
+    207            pDevice->Flags      = Flags;
+   \   00000078   B451C0E1           STRH     R5,[R0, #+20]
+    208            pDevice->pDeviceAPI = pDeviceAPI;
+   \   0000007C   0C4080E5           STR      R4,[R0, #+12]
+    209            pDevice->pNext      = NULL;
+   \   00000080   0010A0E3           MOV      R1,#+0
+   \   00000084   001080E5           STR      R1,[R0, #+0]
+    210            pDevice->pPrev      = NULL;
+   \   00000088   041080E5           STR      R1,[R0, #+4]
+    211            pDevice->u.pContext = NULL;
+   \   0000008C   081080E5           STR      R1,[R0, #+8]
+    212            return pDevice;
+   \                     ??GUI_DEVICE_Create_0:
+   \   00000090   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000094   F080BDE8           POP      {R4-R7,PC}       ;; return
+    213          }
+    214          
+    215          /*********************************************************************
+    216          *
+    217          *       GUI_DEVICE_Unlink
+    218          */
+
+   \                                 In section .text, align 4, keep-with-next
+    219          void GUI_DEVICE_Unlink(GUI_DEVICE * pDevice) {
+    220            _UnlinkDevice(pDevice);
+   \                     GUI_DEVICE_Unlink:
+   \   00000000   181090E5           LDR      R1,[R0, #+24]
+   \   00000004   ........           LDR      R2,??DataTable5
+   \   00000008   011182E0           ADD      R1,R2,R1, LSL #+2
+   \   0000000C   482091E5           LDR      R2,[R1, #+72]
+   \   00000010   000052E1           CMP      R2,R0
+   \   00000014   00209005           LDREQ    R2,[R0, #+0]
+   \   00000018   48208105           STREQ    R2,[R1, #+72]
+   \   0000001C   041090E5           LDR      R1,[R0, #+4]
+   \   00000020   000051E3           CMP      R1,#+0
+   \   00000024   00209015           LDRNE    R2,[R0, #+0]
+   \   00000028   00208115           STRNE    R2,[R1, #+0]
+   \   0000002C   001090E5           LDR      R1,[R0, #+0]
+   \   00000030   000051E3           CMP      R1,#+0
+   \   00000034   04209015           LDRNE    R2,[R0, #+4]
+   \   00000038   04208115           STRNE    R2,[R1, #+4]
+   \   0000003C   0010A013           MOVNE    R1,#+0
+   \   00000040   001080E5           STR      R1,[R0, #+0]
+   \   00000044   041080E5           STR      R1,[R0, #+4]
+    221          }
+   \   00000048   1EFF2FE1           BX       LR               ;; return
+    222          
+    223          /*********************************************************************
+    224          *
+    225          *       GUI_DEVICE_Link
+    226          *
+    227          * Purpose:
+    228          *   Find the right position in the device chain
+    229          */
+
+   \                                 In section .text, align 4, keep-with-next
+    230          int GUI_DEVICE_Link(GUI_DEVICE * pDeviceNew) {
+   \                     GUI_DEVICE_Link:
+   \   00000000   00402DE9           PUSH     {LR}
+    231            GUI_DEVICE * pDeviceCur;
+    232            int LayerIndex;
+    233          
+    234            if (pDeviceNew == NULL) {
+   \   00000004   000050E3           CMP      R0,#+0
+   \   00000008   0100001A           BNE      ??GUI_DEVICE_Link_0
+    235              return 1; // Error, obvious
+   \                     ??GUI_DEVICE_Link_1:
+   \   0000000C   0100A0E3           MOV      R0,#+1
+   \   00000010   0080BDE8           POP      {PC}
+    236            }
+   \                     ??GUI_DEVICE_Link_0:
+   \   00000014   181090E5           LDR      R1,[R0, #+24]
+    237            //
+    238            // Check on legal range
+    239            //
+    240            LayerIndex = pDeviceNew->LayerIndex;
+    241            if (LayerIndex >= GUI_NUM_LAYERS) {
+   \   00000018   100051E3           CMP      R1,#+16
+   \   0000001C   FAFFFFAA           BGE      ??GUI_DEVICE_Link_1
+    242              return 1; // Error
+    243            }
+    244            pDeviceNew->LayerIndex = LayerIndex;
+    245            pDeviceCur = GUI_Context.apDevice[LayerIndex];
+   \   00000020   ........           LDR      R2,??DataTable5
+   \   00000024   011182E0           ADD      R1,R2,R1, LSL #+2
+   \   00000028   482091E5           LDR      R2,[R1, #+72]
+    246            if (pDeviceCur == NULL) {
+   \   0000002C   000052E3           CMP      R2,#+0
+   \   00000030   0200001A           BNE      ??GUI_DEVICE_Link_2
+    247              GUI_Context.apDevice[LayerIndex] = pDeviceNew;
+   \   00000034   480081E5           STR      R0,[R1, #+72]
+    248              return 0; // Ok, nothing else to do, because only one device exists
+   \   00000038   220000EA           B        ??GUI_DEVICE_Link_3
+    249            }
+    250            //
+    251            // Start from the first device...
+    252            //
+    253            while (pDeviceCur->pPrev) {
+    254              pDeviceCur = pDeviceCur->pPrev;
+   \                     ??GUI_DEVICE_Link_4:
+   \   0000003C   0320A0E1           MOV      R2,R3
+    255            }
+   \                     ??GUI_DEVICE_Link_2:
+   \   00000040   043092E5           LDR      R3,[R2, #+4]
+   \   00000044   000053E3           CMP      R3,#+0
+   \   00000048   FBFFFF1A           BNE      ??GUI_DEVICE_Link_4
+    256            //
+    257            // Find right position in dependence of 'DeviceClass'
+    258            //
+    259            while (pDeviceCur) {
+   \                     ??GUI_DEVICE_Link_5:
+   \   0000004C   000052E3           CMP      R2,#+0
+   \   00000050   EDFFFF0A           BEQ      ??GUI_DEVICE_Link_1
+    260              if (pDeviceCur->pDeviceAPI->DeviceClassIndex <= pDeviceNew->pDeviceAPI->DeviceClassIndex) {
+   \   00000054   0C3090E5           LDR      R3,[R0, #+12]
+   \   00000058   0CE092E5           LDR      LR,[R2, #+12]
+   \   0000005C   00C093E5           LDR      R12,[R3, #+0]
+   \   00000060   00E09EE5           LDR      LR,[LR, #+0]
+   \   00000064   0E005CE1           CMP      R12,LR
+    261                break;
+    262              }
+    263              pDeviceCur = pDeviceCur->pNext;
+   \   00000068   002092B5           LDRLT    R2,[R2, #+0]
+   \   0000006C   F6FFFFBA           BLT      ??GUI_DEVICE_Link_5
+    264            }
+    265            //
+    266            // Manage 'stay-on-top' flag
+    267            //
+    268            if (pDeviceCur) {
+    269              if (pDeviceCur->pDeviceAPI->DeviceClassIndex == pDeviceNew->pDeviceAPI->DeviceClassIndex) {
+   \   00000070   0EC0A0E1           MOV      R12,LR
+   \   00000074   00E093E5           LDR      LR,[R3, #+0]
+   \   00000078   0E005CE1           CMP      R12,LR
+    270                if (pDeviceNew->Flags == GUI_DEVICE_STAYONTOP) {
+   \   0000007C   B4C1D001           LDRHEQ   R12,[R0, #+20]
+   \   00000080   01005C03           CMPEQ    R12,#+1
+   \   00000084   0700001A           BNE      ??GUI_DEVICE_Link_6
+    271                  while (pDeviceCur) {
+    272                    if (pDeviceCur->pNext) {
+   \                     ??GUI_DEVICE_Link_7:
+   \   00000088   00C092E5           LDR      R12,[R2, #+0]
+   \   0000008C   00005CE3           CMP      R12,#+0
+   \   00000090   0400000A           BEQ      ??GUI_DEVICE_Link_6
+    273                      pDeviceCur = pDeviceCur->pNext;
+   \   00000094   0C20A0E1           MOV      R2,R12
+    274                      if (pDeviceCur->pDeviceAPI->DeviceClassIndex < pDeviceNew->pDeviceAPI->DeviceClassIndex) {
+   \   00000098   0CC092E5           LDR      R12,[R2, #+12]
+   \   0000009C   00C09CE5           LDR      R12,[R12, #+0]
+   \   000000A0   0E005CE1           CMP      R12,LR
+   \   000000A4   F7FFFFAA           BGE      ??GUI_DEVICE_Link_7
+    275                        break;
+    276                      }
+    277                    } else {
+    278                      break;
+    279                    }
+    280                  }
+    281                }
+    282              }
+    283            }
+    284            //
+    285            // At least a driver should always exist
+    286            //
+    287            if (pDeviceCur == NULL) {
+    288              return 1;
+    289            }
+    290            //
+    291            // Link in new device
+    292            //
+    293            _LinkDevice(pDeviceNew, pDeviceCur);
+   \                     ??GUI_DEVICE_Link_6:
+   \   000000A8   043092E5           LDR      R3,[R2, #+4]
+   \   000000AC   000053E3           CMP      R3,#+0
+   \   000000B0   00008315           STRNE    R0,[R3, #+0]
+   \   000000B4   04109215           LDRNE    R1,[R2, #+4]
+   \   000000B8   48008105           STREQ    R0,[R1, #+72]
+   \   000000BC   04108015           STRNE    R1,[R0, #+4]
+   \   000000C0   040082E5           STR      R0,[R2, #+4]
+   \   000000C4   002080E5           STR      R2,[R0, #+0]
+    294            return 0;
+   \                     ??GUI_DEVICE_Link_3:
+   \   000000C8   0000A0E3           MOV      R0,#+0
+   \   000000CC   0080BDE8           POP      {PC}             ;; return
+    295          }
+    296          
+    297          /*********************************************************************
+    298          *
+    299          *       GUI_DEVICE_CreateAndLink
+    300          */
+
+   \                                 In section .text, align 4, keep-with-next
+    301          GUI_DEVICE * GUI_DEVICE_CreateAndLink(const GUI_DEVICE_API * pDeviceAPI, const LCD_API_COLOR_CONV * pColorConvAPI, U16 Flags, int LayerIndex) {
+   \                     GUI_DEVICE_CreateAndLink:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0370A0E1           MOV      R7,R3
+   \   00000008   0050A0E1           MOV      R5,R0
+   \   0000000C   0180A0E1           MOV      R8,R1
+   \   00000010   0260A0E1           MOV      R6,R2
+    302            GUI_DEVICE * pDevice;
+    303            
+    304            //
+    305            // Create device
+    306            //
+    307            pDevice = GUI_DEVICE_Create(pDeviceAPI, pColorConvAPI, Flags, LayerIndex);
+   \   00000014   100057E3           CMP      R7,#+16
+   \   00000018   1D0000AA           BGE      ??GUI_DEVICE_CreateAndLink_0
+   \   0000001C   1C00A0E3           MOV      R0,#+28
+   \   00000020   ........           BL       GUI_ALLOC_GetFixedBlock
+   \   00000024   0040B0E1           MOVS     R4,R0
+   \   00000028   1A00000A           BEQ      ??GUI_DEVICE_CreateAndLink_1
+   \   0000002C   000058E3           CMP      R8,#+0
+   \   00000030   0C00001A           BNE      ??GUI_DEVICE_CreateAndLink_2
+   \   00000034   ........           LDR      R0,??DataTable5
+   \   00000038   070180E0           ADD      R0,R0,R7, LSL #+2
+   \   0000003C   480090E5           LDR      R0,[R0, #+72]
+   \   00000040   000050E3           CMP      R0,#+0
+   \   00000044   0800000A           BEQ      ??GUI_DEVICE_CreateAndLink_3
+   \   00000048   000000EA           B        ??GUI_DEVICE_CreateAndLink_4
+   \                     ??GUI_DEVICE_CreateAndLink_5:
+   \   0000004C   0100A0E1           MOV      R0,R1
+   \                     ??GUI_DEVICE_CreateAndLink_4:
+   \   00000050   001090E5           LDR      R1,[R0, #+0]
+   \   00000054   000051E3           CMP      R1,#+0
+   \   00000058   FBFFFF1A           BNE      ??GUI_DEVICE_CreateAndLink_5
+   \   0000005C   100090E5           LDR      R0,[R0, #+16]
+   \   00000060   100084E5           STR      R0,[R4, #+16]
+   \   00000064   000000EA           B        ??GUI_DEVICE_CreateAndLink_3
+   \                     ??GUI_DEVICE_CreateAndLink_2:
+   \   00000068   108084E5           STR      R8,[R4, #+16]
+   \                     ??GUI_DEVICE_CreateAndLink_3:
+   \   0000006C   187084E5           STR      R7,[R4, #+24]
+   \   00000070   B461C4E1           STRH     R6,[R4, #+20]
+   \   00000074   0C5084E5           STR      R5,[R4, #+12]
+   \   00000078   0000A0E3           MOV      R0,#+0
+   \   0000007C   000084E5           STR      R0,[R4, #+0]
+   \   00000080   040084E5           STR      R0,[R4, #+4]
+   \   00000084   080084E5           STR      R0,[R4, #+8]
+    308            //
+    309            // Link it into device list
+    310            //
+    311            if (pDevice) {
+    312              GUI_DEVICE_Link(pDevice);
+   \   00000088   0400A0E1           MOV      R0,R4
+   \   0000008C   ........           BL       GUI_DEVICE_Link
+   \   00000090   000000EA           B        ??GUI_DEVICE_CreateAndLink_1
+    313            }
+   \                     ??GUI_DEVICE_CreateAndLink_0:
+   \   00000094   0040A0E3           MOV      R4,#+0
+    314            return pDevice;
+   \                     ??GUI_DEVICE_CreateAndLink_1:
+   \   00000098   0400A0E1           MOV      R0,R4
+   \   0000009C   F081BDE8           POP      {R4-R8,PC}       ;; return
+    315          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable5:
+   \   00000000   ........           DC32     GUI_Context
+    316          
+    317          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function                 .cstack
+     --------                 -------
+     GUI_DEVICE_Create            24
+     GUI_DEVICE_CreateAndLink     24
+     GUI_DEVICE_Delete             8
+     GUI_DEVICE_Link               4
+     GUI_DEVICE_Unlink             0
+     GUI_DEVICE__GetpDevice        0
+     GUI_DEVICE__GetpDriver        0
+
+
+   Section sizes:
+
+     Function/Label           Bytes
+     --------------           -----
+     GUI_DEVICE__GetpDevice     60
+     GUI_DEVICE__GetpDriver     60
+     GUI_DEVICE_Delete           4
+     GUI_DEVICE_Create         152
+     GUI_DEVICE_Unlink          76
+     GUI_DEVICE_Link           208
+     GUI_DEVICE_CreateAndLink  160
+     ??DataTable5                4
+
+ 
+ 724 bytes in section .text
+ 
+ 724 bytes of CODE memory
+
+Errors: none
+Warnings: none

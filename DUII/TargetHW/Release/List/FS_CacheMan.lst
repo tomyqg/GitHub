@@ -1,0 +1,618 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:14:56 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\FS_CacheMan.c                        #
+#    Command line =  C:\DUII\TargetHW\FS\FS_CacheMan.c -D DEBUG=1 -D          #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\FS_CacheMan.lst            #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\FS_CacheMan.o               #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\FS_CacheMan.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : FS_CacheMan.c
+     19          Purpose     : Logical Block Layer, Cache module
+     20                        Cache Strategy:
+     21                          Pure read cache, caching management sectors only.
+     22                          Which sectors are management sectors is determined
+     23                          by the File system. In case of FAT, only FAT sectors
+     24                          are considered management sectors.
+     25                        Limitations:
+     26                          None.
+     27                          This cache module can be used on any device with any
+     28                          file system.
+     29          ---------------------------END-OF-HEADER------------------------------
+     30          */
+     31          
+     32          /*********************************************************************
+     33          *
+     34          *       #include Section
+     35          *
+     36          **********************************************************************
+     37          */
+     38          
+     39          #include "FS_ConfDefaults.h"
+     40          #include "FS_Int.h"
+     41          
+     42          #if FS_SUPPORT_CACHE
+     43          /*********************************************************************
+     44          *
+     45          *       Defines, configurable
+     46          *
+     47          **********************************************************************
+     48          */
+     49          
+     50          /*********************************************************************
+     51          *
+     52          *       Defines, fixed
+     53          *
+     54          **********************************************************************
+     55          */
+     56          
+     57          #define SECTOR_INDEX_INVALID   0xFFFFFFFFUL
+     58          
+     59          /*********************************************************************
+     60          *
+     61          *       Types
+     62          *
+     63          **********************************************************************
+     64          */
+     65          
+     66          /* Block info. One instance per block.
+     67             Every cache block can cache a single sector.
+     68             It starts with CACHE_BLOCK_INFO_MAN, followed by the cached data. */
+     69          typedef struct {
+     70            U32 SectorNo;
+     71          } CACHE_BLOCK_INFO_MAN;
+     72          
+     73          /* Cache data. Once instance per cache.
+     74             Size needs to be a multiple of 4 */
+     75          typedef struct {
+     76            U32 NumSectors;
+     77            U32 SectorSize;
+     78            U32 NumBytesCache;
+     79          } CACHE_DATA_MAN;
+     80          
+     81          
+     82          /*********************************************************************
+     83          *
+     84          *       Static code
+     85          *
+     86          **********************************************************************
+     87          */
+     88          
+     89          static U32 _GetHashCode(U32 SectorNo, U32 NumSectorIndices) {
+     90            return SectorNo % NumSectorIndices;
+     91          }
+     92          
+     93          /*********************************************************************
+     94          *
+     95          *       _InvalidateCache
+     96          *
+     97          *  Description:
+     98          *    Invalidates all data in cache
+     99          */
+    100          static void _InvalidateCache(CACHE_DATA_MAN * pCacheData) {
+    101            U32             i;
+    102            U32             NumSectors;
+    103            CACHE_BLOCK_INFO_MAN * pBlockInfo;
+    104            U32             SectorSize;
+    105          
+    106            NumSectors = pCacheData->NumSectors;
+    107            SectorSize = pCacheData->SectorSize;
+    108            pBlockInfo = (CACHE_BLOCK_INFO_MAN *)(pCacheData + 1);
+    109            /* Init Cache entries */
+    110            for (i = 0; i < NumSectors; i++) {
+    111              pBlockInfo->SectorNo = SECTOR_INDEX_INVALID;
+    112              pBlockInfo = (CACHE_BLOCK_INFO_MAN*)(((U8*)(pBlockInfo + 1)) + SectorSize);
+    113            }
+    114          }
+    115          
+    116          /*********************************************************************
+    117          *
+    118          *       _ComputeNumSectors
+    119          *
+    120          */
+    121          static U32 _ComputeNumSectors(FS_DEVICE * pDevice, CACHE_DATA_MAN * pCacheData) {
+    122            U32 NumSectors;
+    123            U16 SectorSize;
+    124            U32 NumBytes;
+    125          
+    126            if (pCacheData->SectorSize) {
+    127              return pCacheData->NumSectors;
+    128            }
+    129            NumBytes   = pCacheData->NumBytesCache;
+    130            SectorSize = FS_GetSectorSize(pDevice);
+    131            if ((SectorSize == 0) || (NumBytes < sizeof(CACHE_DATA_MAN))) {
+    132              return 0;
+    133            }
+    134            /* Compute number of sectors in cache */
+    135            NumSectors = (NumBytes - sizeof(CACHE_DATA_MAN)) / (sizeof(CACHE_BLOCK_INFO_MAN) + SectorSize);
+    136            if (NumSectors > 0) {
+    137              pCacheData->NumSectors    = NumSectors;
+    138              pCacheData->SectorSize    = SectorSize;
+    139              _InvalidateCache(pCacheData);
+    140            }
+    141            return NumSectors;
+    142          }
+    143          
+    144          
+    145          /*********************************************************************
+    146          *
+    147          *       Static code (callbacks)
+    148          *
+    149          **********************************************************************
+    150          */
+    151          
+    152          /*********************************************************************
+    153          *
+    154          *       _CacheMan_ReadFromCache
+    155          *
+    156          *  Description:
+    157          *    Read sector from cache if possible
+    158          *
+    159          *  Return value
+    160          *    1    Sector not found
+    161          *    0    Sector found
+    162          */
+
+   \                                 In section .text, align 4, keep-with-next
+    163          static char _CacheMan_ReadFromCache(FS_DEVICE * pDevice, U32 SectorNo, void * pData, U8 SectorType) {
+   \                     _CacheMan_ReadFromCache:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+    164            U32             Off;
+    165            CACHE_DATA_MAN       * pCacheData;
+    166            CACHE_BLOCK_INFO_MAN * pBlockInfo;
+    167            U32             SectorSize;
+    168          
+    169            FS_USE_PARA(SectorType);
+    170            pCacheData  = (CACHE_DATA_MAN *)pDevice->Data.pCacheData;
+   \   00000004   0C6090E5           LDR      R6,[R0, #+12]
+   \   00000008   0140A0E1           MOV      R4,R1
+    171            if (_ComputeNumSectors(pDevice, pCacheData) == 0) {
+   \   0000000C   041096E5           LDR      R1,[R6, #+4]
+   \   00000010   0250A0E1           MOV      R5,R2
+   \   00000014   000051E3           CMP      R1,#+0
+   \   00000018   00109615           LDRNE    R1,[R6, #+0]
+   \   0000001C   1300001A           BNE      ??_CacheMan_ReadFromCache_0
+   \   00000020   087096E5           LDR      R7,[R6, #+8]
+   \   00000024   ........           BL       FS_GetSectorSize
+   \   00000028   0080B0E1           MOVS     R8,R0
+   \   0000002C   2100000A           BEQ      ??_CacheMan_ReadFromCache_1
+   \   00000030   0C0057E3           CMP      R7,#+12
+   \   00000034   1F00003A           BCC      ??_CacheMan_ReadFromCache_1
+   \   00000038   0C0047E2           SUB      R0,R7,#+12
+   \   0000003C   041088E2           ADD      R1,R8,#+4
+   \   00000040   ........           BL       __aeabi_uidiv
+   \   00000044   0010B0E1           MOVS     R1,R0
+   \   00000048   0800000A           BEQ      ??_CacheMan_ReadFromCache_0
+   \   0000004C   001086E5           STR      R1,[R6, #+0]
+   \   00000050   048086E5           STR      R8,[R6, #+4]
+   \   00000054   0C3086E2           ADD      R3,R6,#+12
+   \   00000058   00C0E0E3           MVN      R12,#+0
+   \                     ??_CacheMan_ReadFromCache_2:
+   \   0000005C   00C083E5           STR      R12,[R3, #+0]
+   \   00000060   033088E0           ADD      R3,R8,R3
+   \   00000064   043083E2           ADD      R3,R3,#+4
+   \   00000068   010050E2           SUBS     R0,R0,#+1
+   \   0000006C   FAFFFF1A           BNE      ??_CacheMan_ReadFromCache_2
+   \                     ??_CacheMan_ReadFromCache_0:
+   \   00000070   000051E3           CMP      R1,#+0
+   \   00000074   0F00000A           BEQ      ??_CacheMan_ReadFromCache_1
+    172              return 1;                          /* Device is not available */
+    173            }
+    174            SectorSize  = pCacheData->SectorSize;
+    175            Off         = _GetHashCode(SectorNo, pCacheData->NumSectors) * (sizeof(CACHE_BLOCK_INFO_MAN) + SectorSize);
+    176            pBlockInfo  = (CACHE_BLOCK_INFO_MAN *) (((U8 *)(pCacheData + 1)) + Off);
+   \   00000078   0400A0E1           MOV      R0,R4
+   \   0000007C   001096E5           LDR      R1,[R6, #+0]
+   \   00000080   ........           BL       __aeabi_uidivmod
+   \   00000084   047096E5           LDR      R7,[R6, #+4]
+   \   00000088   040087E2           ADD      R0,R7,#+4
+   \   0000008C   906121E0           MLA      R1,R0,R1,R6
+   \   00000090   0C0081E2           ADD      R0,R1,#+12
+    177            if (pBlockInfo->SectorNo == SectorNo) {
+   \   00000094   001090E5           LDR      R1,[R0, #+0]
+   \   00000098   040051E1           CMP      R1,R4
+   \   0000009C   0500001A           BNE      ??_CacheMan_ReadFromCache_1
+    178              FS_MEMCPY(pData, pBlockInfo + 1, SectorSize);
+   \   000000A0   041080E2           ADD      R1,R0,#+4
+   \   000000A4   0720A0E1           MOV      R2,R7
+   \   000000A8   0500A0E1           MOV      R0,R5
+   \   000000AC   ........           BL       FS_memcpy
+    179              return 0;                         /* Sector found */
+   \   000000B0   0000A0E3           MOV      R0,#+0
+   \   000000B4   F081BDE8           POP      {R4-R8,PC}
+    180            }
+    181            return 1;                         /* Sector not found */
+   \                     ??_CacheMan_ReadFromCache_1:
+   \   000000B8   0100A0E3           MOV      R0,#+1
+   \   000000BC   F081BDE8           POP      {R4-R8,PC}       ;; return
+    182          }
+    183          
+    184          /*********************************************************************
+    185          *
+    186          *       _WriteIntoCache
+    187          *
+    188          *  Description:
+    189          *    Writes a sector in cache.
+    190          */
+    191          static void _WriteIntoCache(CACHE_BLOCK_INFO_MAN  * pBlockInfo, U32 SectorNo, const void * pData, U32 SectorSize) {
+    192            pBlockInfo->SectorNo = SectorNo;
+    193            FS_MEMCPY(pBlockInfo + 1, pData, SectorSize);
+    194          }
+    195          
+    196          /*********************************************************************
+    197          *
+    198          *       _CacheMan_WriteCache
+    199          *
+    200          *  Description:
+    201          *    Write sector into cache
+    202          *
+    203          *  Return value
+    204          *    0    Not in write cache, the physical write operation still needs to be performed (Since this cache is a pure read-cache).
+    205          */
+
+   \                                 In section .text, align 4, keep-with-next
+    206          static char _CacheMan_WriteCache(FS_DEVICE * pDevice, U32 SectorNo, const void * pData, U8 SectorType) {
+   \                     _CacheMan_WriteCache:
+   \   00000000   F0432DE9           PUSH     {R4-R9,LR}
+    207            U32             Off;
+    208            CACHE_DATA_MAN       * pCacheData;
+    209            CACHE_BLOCK_INFO_MAN * pBlockInfo;
+    210            U32             SectorSize;
+    211          
+    212            pCacheData  = (CACHE_DATA_MAN *)pDevice->Data.pCacheData;
+   \   00000004   0C7090E5           LDR      R7,[R0, #+12]
+   \   00000008   0140A0E1           MOV      R4,R1
+    213            if (_ComputeNumSectors(pDevice, pCacheData) == 0) {
+   \   0000000C   041097E5           LDR      R1,[R7, #+4]
+   \   00000010   04D04DE2           SUB      SP,SP,#+4
+   \   00000014   000051E3           CMP      R1,#+0
+   \   00000018   0250A0E1           MOV      R5,R2
+   \   0000001C   0360A0E1           MOV      R6,R3
+   \   00000020   00109715           LDRNE    R1,[R7, #+0]
+   \   00000024   1300001A           BNE      ??_CacheMan_WriteCache_0
+   \   00000028   088097E5           LDR      R8,[R7, #+8]
+   \   0000002C   ........           BL       FS_GetSectorSize
+   \   00000030   0090B0E1           MOVS     R9,R0
+   \   00000034   1100000A           BEQ      ??_CacheMan_WriteCache_1
+   \   00000038   0C0058E3           CMP      R8,#+12
+   \   0000003C   0F00003A           BCC      ??_CacheMan_WriteCache_1
+   \   00000040   0C0048E2           SUB      R0,R8,#+12
+   \   00000044   041089E2           ADD      R1,R9,#+4
+   \   00000048   ........           BL       __aeabi_uidiv
+   \   0000004C   0010B0E1           MOVS     R1,R0
+   \   00000050   0800000A           BEQ      ??_CacheMan_WriteCache_0
+   \   00000054   001087E5           STR      R1,[R7, #+0]
+   \   00000058   049087E5           STR      R9,[R7, #+4]
+   \   0000005C   0C3087E2           ADD      R3,R7,#+12
+   \   00000060   00C0E0E3           MVN      R12,#+0
+   \                     ??_CacheMan_WriteCache_2:
+   \   00000064   00C083E5           STR      R12,[R3, #+0]
+   \   00000068   033089E0           ADD      R3,R9,R3
+   \   0000006C   043083E2           ADD      R3,R3,#+4
+   \   00000070   010050E2           SUBS     R0,R0,#+1
+   \   00000074   FAFFFF1A           BNE      ??_CacheMan_WriteCache_2
+   \                     ??_CacheMan_WriteCache_0:
+   \   00000078   000051E3           CMP      R1,#+0
+   \   0000007C   0200001A           BNE      ??_CacheMan_WriteCache_3
+    214              return 0;                          /* Device is not available */
+   \                     ??_CacheMan_WriteCache_1:
+   \   00000080   0000A0E3           MOV      R0,#+0
+   \   00000084   04D08DE2           ADD      SP,SP,#+4
+   \   00000088   F083BDE8           POP      {R4-R9,PC}       ;; return
+    215            }
+    216            if (SectorType == FS_SECTOR_TYPE_MAN) {
+   \                     ??_CacheMan_WriteCache_3:
+   \   0000008C   020056E3           CMP      R6,#+2
+   \   00000090   FAFFFF1A           BNE      ??_CacheMan_WriteCache_1
+    217              SectorSize  = pCacheData->SectorSize;
+    218              Off         = _GetHashCode(SectorNo, pCacheData->NumSectors) * (sizeof(CACHE_BLOCK_INFO_MAN) + SectorSize);
+    219              pBlockInfo  = (CACHE_BLOCK_INFO_MAN *) (((U8 *)(pCacheData + 1)) + Off);
+    220              _WriteIntoCache(pBlockInfo, SectorNo, pData, SectorSize);
+   \   00000094   0400A0E1           MOV      R0,R4
+   \   00000098   001097E5           LDR      R1,[R7, #+0]
+   \   0000009C   ........           BL       __aeabi_uidivmod
+   \   000000A0   046097E5           LDR      R6,[R7, #+4]
+   \   000000A4   040086E2           ADD      R0,R6,#+4
+   \   000000A8   907121E0           MLA      R1,R0,R1,R7
+   \   000000AC   0620A0E1           MOV      R2,R6
+   \   000000B0   0C0081E2           ADD      R0,R1,#+12
+   \   000000B4   044080E4           STR      R4,[R0], #+4
+   \   000000B8   0510A0E1           MOV      R1,R5
+   \   000000BC   ........           BL       FS_memcpy
+    221            }
+   \   000000C0   EEFFFFEA           B        ??_CacheMan_WriteCache_1
+    222            return 0;
+    223          }
+    224          
+    225          /*********************************************************************
+    226          *
+    227          *       _CacheMan_InvalidateCache
+    228          *
+    229          *  Description:
+    230          *    Invalidates all data in cache
+    231          */
+
+   \                                 In section .text, align 4, keep-with-next
+    232          static void _CacheMan_InvalidateCache(void * p) {
+    233            CACHE_DATA_MAN *       pCacheData;
+    234          
+    235            pCacheData = (CACHE_DATA_MAN *)p;
+    236            _InvalidateCache(pCacheData);
+   \                     _CacheMan_InvalidateCache:
+   \   00000000   001090E5           LDR      R1,[R0, #+0]
+   \   00000004   042090E5           LDR      R2,[R0, #+4]
+   \   00000008   0C3080E2           ADD      R3,R0,#+12
+   \   0000000C   000051E3           CMP      R1,#+0
+   \   00000010   0600000A           BEQ      ??_CacheMan_InvalidateCache_0
+   \   00000014   00C0E0E3           MVN      R12,#+0
+   \                     ??_CacheMan_InvalidateCache_1:
+   \   00000018   00C083E5           STR      R12,[R3, #+0]
+   \   0000001C   033082E0           ADD      R3,R2,R3
+   \   00000020   043083E2           ADD      R3,R3,#+4
+   \   00000024   011051E2           SUBS     R1,R1,#+1
+   \   00000028   FAFFFF1A           BNE      ??_CacheMan_InvalidateCache_1
+    237            pCacheData->NumSectors = 0;
+   \   0000002C   0010A0E3           MOV      R1,#+0
+   \                     ??_CacheMan_InvalidateCache_0:
+   \   00000030   001080E5           STR      R1,[R0, #+0]
+    238            pCacheData->SectorSize = 0;
+   \   00000034   041080E5           STR      R1,[R0, #+4]
+    239          }
+   \   00000038   1EFF2FE1           BX       LR               ;; return
+    240          
+    241          /*********************************************************************
+    242          *
+    243          *       _CacheMan_Command
+    244          *
+    245          *  Description:
+    246          *    Execute commands on the cache
+    247          *
+    248          *  Return value:
+    249          *    Unsupported command:    -1
+    250          *    Supported commands:     <0: Error. Precise value depends on command
+    251          */
+
+   \                                 In section .text, align 4, keep-with-next
+    252          static int _CacheMan_Command(FS_DEVICE * pDevice, int Cmd, void *p) {
+    253            int r;
+    254          
+    255            FS_USE_PARA(pDevice);
+    256            r  = -1;
+    257            switch (Cmd) {
+   \                     _CacheMan_Command:
+   \   00000000   7430A0E3           MOV      R3,#+116
+   \   00000004   5C3D83E3           ORR      R3,R3,#0x1700
+   \   00000008   0000E0E3           MVN      R0,#+0
+   \   0000000C   030051E1           CMP      R1,R3
+   \   00000010   0E00001A           BNE      ??_CacheMan_Command_0
+    258            case FS_CMD_CACHE_INVALIDATE:
+    259              _CacheMan_InvalidateCache(p);
+   \   00000014   000092E5           LDR      R0,[R2, #+0]
+   \   00000018   041092E5           LDR      R1,[R2, #+4]
+   \   0000001C   0C3082E2           ADD      R3,R2,#+12
+   \   00000020   000050E3           CMP      R0,#+0
+   \   00000024   00C0E0E3           MVN      R12,#+0
+   \   00000028   0500000A           BEQ      ??_CacheMan_Command_1
+   \                     ??_CacheMan_Command_2:
+   \   0000002C   00C083E5           STR      R12,[R3, #+0]
+   \   00000030   033081E0           ADD      R3,R1,R3
+   \   00000034   043083E2           ADD      R3,R3,#+4
+   \   00000038   010050E2           SUBS     R0,R0,#+1
+   \   0000003C   FAFFFF1A           BNE      ??_CacheMan_Command_2
+   \   00000040   0000A0E3           MOV      R0,#+0
+   \                     ??_CacheMan_Command_1:
+   \   00000044   000082E5           STR      R0,[R2, #+0]
+   \   00000048   040082E5           STR      R0,[R2, #+4]
+    260              r = 0;
+   \   0000004C   0000A0E3           MOV      R0,#+0
+    261              break;
+    262            }
+    263            return r;
+   \                     ??_CacheMan_Command_0:
+   \   00000050   1EFF2FE1           BX       LR               ;; return
+    264          }
+    265          
+    266          /*********************************************************************
+    267          *
+    268          *       _CacheAPI
+    269          *
+    270          */
+
+   \                                 In section .text, align 4, keep-with-next
+    271          static const FS_CACHE_API _CacheManAPI = {
+   \                     _CacheManAPI:
+   \   00000000                      ; Initializer data, 20 bytes
+   \   00000000   ............       DC32 _CacheMan_ReadFromCache, _CacheMan_WriteCache, _CacheMan_InvalidateCache, _CacheMan_Command, _CacheMan_WriteCache
+   \              ............
+   \              ............
+   \              ....        
+    272            _CacheMan_ReadFromCache,
+    273            _CacheMan_WriteCache,
+    274            _CacheMan_InvalidateCache,
+    275            _CacheMan_Command,
+    276            _CacheMan_WriteCache,
+    277          };
+    278          
+    279          /*********************************************************************
+    280          *
+    281          *       Public data
+    282          *
+    283          **********************************************************************
+    284          */
+    285          
+    286          
+    287          /*********************************************************************
+    288          *
+    289          *       FS_CacheMan_Init
+    290          *
+    291          *  Description:
+    292          *    Initializes the cache
+    293          */
+
+   \                                 In section .text, align 4, keep-with-next
+    294          U32 FS_CacheMan_Init(FS_DEVICE * pDevice, void * pData, I32 NumBytes) {
+   \                     FS_CacheMan_Init:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   0050A0E1           MOV      R5,R0
+   \   00000008   0140A0E1           MOV      R4,R1
+   \   0000000C   04D04DE2           SUB      SP,SP,#+4
+   \   00000010   0270A0E1           MOV      R7,R2
+    295            FS_DEVICE_DATA * pDevData;
+    296            U32              NumSectors;
+    297            CACHE_DATA_MAN * pCacheData;
+    298            U8             * pData8;
+    299          
+    300            NumSectors = 0;
+    301            pDevData   = &pDevice->Data;
+   \   00000014   046085E2           ADD      R6,R5,#+4
+    302            pData8     = (U8 *)pData;
+    303            //
+    304            // Align pointer to a 32bit boundary
+    305            //
+    306            if ((U32)pData8 & 3) {
+   \   00000018   030014E3           TST      R4,#0x3
+   \   0000001C   0500000A           BEQ      ??FS_CacheMan_Init_0
+    307              NumBytes  -= (4 - (((U32)pData8) & 3));
+   \   00000020   030004E2           AND      R0,R4,#0x3
+   \   00000024   071080E0           ADD      R1,R0,R7
+    308              pData8    += (4 - (((U32)pData8) & 3));
+   \   00000028   000060E2           RSB      R0,R0,#+0
+   \   0000002C   040080E0           ADD      R0,R0,R4
+   \   00000030   047041E2           SUB      R7,R1,#+4
+   \   00000034   044080E2           ADD      R4,R0,#+4
+    309            }
+    310            //
+    311            // If less memory is available as we need to hold the
+    312            // management structure, we leave everything as it is.
+    313            // A cache module is then not attached to the device.
+    314            //
+    315            if ((U32)NumBytes < sizeof(CACHE_DATA_MAN)) {
+   \                     ??FS_CacheMan_Init_0:
+   \   00000038   0C0057E3           CMP      R7,#+12
+   \   0000003C   2200003A           BCC      ??FS_CacheMan_Init_1
+    316              return 0;
+    317            }
+    318            pCacheData = (CACHE_DATA_MAN *)pData8;
+    319            FS_MEMSET(pCacheData, 0, sizeof(CACHE_DATA_MAN));
+   \   00000040   0C10A0E3           MOV      R1,#+12
+   \   00000044   0400A0E1           MOV      R0,R4
+   \   00000048   ........           BL       __aeabi_memclr
+    320            pDevData->pCacheAPI       = &_CacheManAPI;
+   \   0000004C   ........           ADR      R0,_CacheManAPI
+   \   00000050   040086E5           STR      R0,[R6, #+4]
+    321            pDevData->pCacheData      = pCacheData;
+   \   00000054   084086E5           STR      R4,[R6, #+8]
+    322            pCacheData->NumBytesCache = NumBytes;
+   \   00000058   087084E5           STR      R7,[R4, #+8]
+    323            NumSectors = _ComputeNumSectors(pDevice, pCacheData);
+   \   0000005C   040094E5           LDR      R0,[R4, #+4]
+   \   00000060   000050E3           CMP      R0,#+0
+   \   00000064   00009415           LDRNE    R0,[R4, #+0]
+   \   00000068   1800001A           BNE      ??FS_CacheMan_Init_2
+   \   0000006C   0500A0E1           MOV      R0,R5
+   \   00000070   ........           BL       FS_GetSectorSize
+   \   00000074   0050B0E1           MOVS     R5,R0
+   \   00000078   1300000A           BEQ      ??FS_CacheMan_Init_1
+   \   0000007C   0C0057E3           CMP      R7,#+12
+   \   00000080   1100003A           BCC      ??FS_CacheMan_Init_1
+   \   00000084   0C0047E2           SUB      R0,R7,#+12
+   \   00000088   041085E2           ADD      R1,R5,#+4
+   \   0000008C   ........           BL       __aeabi_uidiv
+   \   00000090   000050E3           CMP      R0,#+0
+   \   00000094   0D00000A           BEQ      ??FS_CacheMan_Init_2
+   \   00000098   000084E5           STR      R0,[R4, #+0]
+   \   0000009C   045084E5           STR      R5,[R4, #+4]
+   \   000000A0   001094E5           LDR      R1,[R4, #+0]
+   \   000000A4   0C3084E2           ADD      R3,R4,#+12
+   \   000000A8   000051E3           CMP      R1,#+0
+   \   000000AC   0700000A           BEQ      ??FS_CacheMan_Init_2
+   \   000000B0   00C0E0E3           MVN      R12,#+0
+   \                     ??FS_CacheMan_Init_3:
+   \   000000B4   00C083E5           STR      R12,[R3, #+0]
+   \   000000B8   033085E0           ADD      R3,R5,R3
+   \   000000BC   043083E2           ADD      R3,R3,#+4
+   \   000000C0   011051E2           SUBS     R1,R1,#+1
+   \   000000C4   FAFFFF1A           BNE      ??FS_CacheMan_Init_3
+   \   000000C8   000000EA           B        ??FS_CacheMan_Init_2
+   \                     ??FS_CacheMan_Init_1:
+   \   000000CC   0000A0E3           MOV      R0,#+0
+    324            return NumSectors;
+   \                     ??FS_CacheMan_Init_2:
+   \   000000D0   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   000000D4   F080BDE8           POP      {R4-R7,PC}       ;; return
+    325          }
+    326          #else 
+    327           void CacheMan_c(void);
+    328           void CacheMan_c(void) {}
+    329          
+    330          #endif /* FS_SUPPORT_CACHE */
+    331          
+    332          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function                  .cstack
+     --------                  -------
+     FS_CacheMan_Init              24
+     _CacheMan_Command              0
+     _CacheMan_InvalidateCache      0
+     _CacheMan_ReadFromCache       24
+     _CacheMan_WriteCache          32
+
+
+   Section sizes:
+
+     Function/Label            Bytes
+     --------------            -----
+     _CacheMan_ReadFromCache    192
+     _CacheMan_WriteCache       196
+     _CacheMan_InvalidateCache   60
+     _CacheMan_Command           84
+     _CacheManAPI                20
+     FS_CacheMan_Init           216
+
+ 
+ 768 bytes in section .text
+ 
+ 768 bytes of CODE memory
+
+Errors: none
+Warnings: none

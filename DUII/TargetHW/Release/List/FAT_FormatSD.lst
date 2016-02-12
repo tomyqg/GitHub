@@ -1,0 +1,872 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:10:59 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\FS\FAT_FormatSD.c                       #
+#    Command line =  C:\DUII\TargetHW\FS\FAT_FormatSD.c -D DEBUG=1 -D         #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\FAT_FormatSD.lst           #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\FAT_FormatSD.o              #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\FS\FAT_FormatSD.c
+      1          /*********************************************************************
+      2          *                SEGGER MICROCONTROLLER GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 2003-2010     SEGGER Microcontroller GmbH & Co KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          **** emFile file system for embedded applications ****
+     13          emFile is protected by international copyright laws. Knowledge of the
+     14          source code may not be used to write a similar product. This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : FAT_FormatSD.c
+     19          Purpose     : Implementation of the SD FS Format spec. V2.00.
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          /*********************************************************************
+     24          *
+     25          *       #include Section
+     26          *
+     27          **********************************************************************
+     28          */
+     29          
+     30          
+     31          #include "FS_Int.h"
+     32          #include "FAT_Intern.h"
+     33          
+     34          #if FS_SUPPORT_FAT
+     35          /*********************************************************************
+     36          *
+     37          *       Defines, non-configurable
+     38          *
+     39          **********************************************************************
+     40          */
+     41          #define PART_OFF_PARTITION0         0x01BE     /* Offset of start of partition table   */
+     42          #define SIZEOF_PARTITIONENTRY       0x10       /* Size of one entry in partition table */
+     43          
+     44          /*********************************************************************
+     45          *
+     46          *       Types
+     47          *
+     48          **********************************************************************
+     49          */
+     50          typedef struct {
+     51            U32 NumSectors;
+     52            U16 SectorsPerCluster;
+     53            U32 BoundaryUnit;
+     54          } SIZE_INFO;
+     55          
+     56          typedef struct {
+     57            U32 NumSectors;
+     58            U8  NumHeads;
+     59            U8  SectorsPerTrack;
+     60          } CHS_INFO;
+     61          
+     62          typedef struct {
+     63            U32 NumSectors4Part;
+     64            U32 PartStartSector;
+     65            U8  FSType;
+     66            U8  StartHead;
+     67            U8  StartSector;
+     68            U16 StartCylinder;
+     69            U8  EndHead;
+     70            U8  EndSector;
+     71            U16 EndCylinder;
+     72          
+     73          } PART_INFO;
+     74          
+     75          typedef struct {
+     76            FS_DEV_INFO       DevInfo;
+     77            FS_FORMAT_INFO_EX FormatInfoEx; 
+     78            PART_INFO         PartInfo;
+     79            const SIZE_INFO * pSizeInfo;
+     80          } VOLUME_FORMAT_INFO;
+     81          
+     82          /*********************************************************************
+     83          *
+     84          *       Static const
+     85          *
+     86          **********************************************************************
+     87          */
+
+   \                                 In section .text, align 4, keep-with-next
+     88          static const SIZE_INFO _aSizeInfo[] = {
+   \                     _aSizeInfo:
+   \   00000000                      ; Initializer data, 72 bytes
+   \   00000000   FF3F0000           DC32 16383
+   \   00000004   1000               DC16 16
+   \   00000006   0000               DC8 0, 0
+   \   00000008   10000000FFFF       DC32 16, 131071
+   \              0100        
+   \   00000010   2000               DC16 32
+   \   00000012   0000               DC8 0, 0
+   \   00000014   20000000FFFF       DC32 32, 524287
+   \              0700        
+   \   0000001C   2000               DC16 32
+   \   0000001E   0000               DC8 0, 0
+   \   00000020   40000000FFFF       DC32 64, 2097151
+   \              1F00        
+   \   00000028   2000               DC16 32
+   \   0000002A   0000               DC8 0, 0
+   \   0000002C   80000000FFFF       DC32 128, 4194303
+   \              3F00        
+   \   00000034   4000               DC16 64
+   \   00000036   0000               DC8 0, 0
+   \   00000038   80000000FFFF       DC32 128, 67108863
+   \              FF03        
+   \   00000040   4000               DC16 64
+   \   00000042   0000               DC8 0, 0
+   \   00000044   00200000           DC32 8192
+     89            {0x0003FFFUL, 16,   16},  // Up to     8 MBytes
+     90            {0x001FFFFUL, 32,   32},  // Up to    64 MBytes
+     91            {0x007FFFFUL, 32,   64},  // Up to   256 MBytes
+     92            {0x01FFFFFUL, 32,  128},  // Up to  1024 MBytes
+     93            {0x03FFFFFUL, 64,  128},  // Up to  2048 MBytes
+     94            {0x3FFFFFFUL, 64, 8192}   // Up to 32768 MBytes
+     95          };
+     96          
+     97          
+
+   \                                 In section .text, align 4, keep-with-next
+     98          static const CHS_INFO _aCHSInfo[] = {
+   \                     _aCHSInfo:
+   \   00000000                      ; Initializer data, 80 bytes
+   \   00000000   FF0F0000           DC32 4095
+   \   00000004   02100000           DC8 2, 16, 0, 0
+   \   00000008   FF7F0000           DC32 32767
+   \   0000000C   02200000           DC8 2, 32, 0, 0
+   \   00000010   FFFF0000           DC32 65535
+   \   00000014   04200000           DC8 4, 32, 0, 0
+   \   00000018   FFFF0300           DC32 262143
+   \   0000001C   08200000           DC8 8, 32, 0, 0
+   \   00000020   FFFF0700           DC32 524287
+   \   00000024   10200000           DC8 16, 32, 0, 0
+   \   00000028   FFBF0F00           DC32 1032191
+   \   0000002C   103F0000           DC8 16, 63, 0, 0
+   \   00000030   FF7F1F00           DC32 2064383
+   \   00000034   203F0000           DC8 32, 63, 0, 0
+   \   00000038   FFFF3E00           DC32 4128767
+   \   0000003C   403F0000           DC8 64, 63, 0, 0
+   \   00000040   FFFF7D00           DC32 8257535
+   \   00000044   803F0000           DC8 128, 63, 0, 0
+   \   00000048   FFFF7D00           DC32 8257535
+   \   0000004C   FF3F0000           DC8 255, 63, 0, 0
+     99            {0x0000FFFUL,   2,   16},  // Up to     2 MBytes
+    100            {0x0007FFFUL,   2,   32},  // Up to    16 MBytes
+    101            {0x000FFFFUL,   4,   32},  // Up to    32 MBytes
+    102            {0x003FFFFUL,   8,   32},  // Up to   128 MBytes
+    103            {0x007FFFFUL,  16,   32},  // Up to   256 MBytes
+    104            {0x00FBFFFUL,  16,   63},  // Up to   504 MBytes
+    105            {0x01F7FFFUL,  32,   63},  // Up to  1008 MBytes
+    106            {0x03EFFFFUL,  64,   63},  // Up to  2016 MBytes
+    107            {0x07DFFFFUL, 128,   63},  // Up to  4032 MBytes
+    108            {0x07DFFFFUL, 255,   63},  // Up to 32768 MBytes
+    109          };
+    110          
+    111          /*********************************************************************
+    112          *
+    113          *       Static data
+    114          *
+    115          **********************************************************************
+    116          */
+    117          
+    118          /*********************************************************************
+    119          *
+    120          *       Static code
+    121          *
+    122          **********************************************************************
+    123          */
+    124          
+    125          
+    126          
+
+   \                                 In section .text, align 4, keep-with-next
+    127          static int _CreatePartition(FS_VOLUME * pVolume, int PartIndex, PART_INFO * pPartInfo) {
+   \                     _CreatePartition:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   0180A0E1           MOV      R8,R1
+   \   0000000C   0250A0E1           MOV      R5,R2
+    128            U8 * pBuffer;
+    129            U8 * pPart;
+    130            FS_DEVICE * pDevice;
+    131            int r;
+    132            unsigned Off;
+    133          
+    134            pBuffer = FS__AllocSectorBuffer();
+   \   00000010   ........           BL       FS__AllocSectorBuffer
+   \   00000014   0060B0E1           MOVS     R6,R0
+    135          
+    136            r = -1;
+   \   00000018   0070E0E3           MVN      R7,#+0
+    137            if (pBuffer == (U8 *)NULL) {
+   \   0000001C   3600000A           BEQ      ??_CreatePartition_0
+    138              return -1;
+    139            }
+    140            pDevice = &pVolume->Partition.Device;
+    141            FS_MEMSET(pBuffer, 0x00, FS_Global.MaxSectorSize);
+   \   00000020   ........           LDR      R0,??DataTable2
+   \   00000024   B011D0E1           LDRH     R1,[R0, #+16]
+   \   00000028   0600A0E1           MOV      R0,R6
+   \   0000002C   ........           BL       __aeabi_memclr
+    142            Off   = PART_OFF_PARTITION0 + (PartIndex * SIZEOF_PARTITIONENTRY);
+    143            pPart = pBuffer + Off;
+   \   00000030   BE00A0E3           MOV      R0,#+190
+   \   00000034   400F80E3           ORR      R0,R0,#0x100
+   \   00000038   081286E0           ADD      R1,R6,R8, LSL #+4
+   \   0000003C   018080E0           ADD      R8,R0,R1
+    144            *pPart++ = 0x00;                                       // Boot Indicator
+   \   00000040   0000A0E3           MOV      R0,#+0
+   \   00000044   0000C8E5           STRB     R0,[R8, #+0]
+    145            *pPart++ = pPartInfo->StartHead;                       // Starting head
+   \   00000048   0900D5E5           LDRB     R0,[R5, #+9]
+    146            *pPart++ =  (pPartInfo->StartSector   & 0x3f)          // Starting sector
+    147                     | ((pPartInfo->StartCylinder & 0x300) >> 2);  // Higher bits of Starting cylinder
+   \   0000004C   C020A0E3           MOV      R2,#+192
+   \   00000050   0100E8E5           STRB     R0,[R8, #+1]!
+   \   00000054   0A00D5E5           LDRB     R0,[R5, #+10]
+   \   00000058   BC10D5E1           LDRH     R1,[R5, #+12]
+   \   0000005C   3F0000E2           AND      R0,R0,#0x3F
+   \   00000060   211102E0           AND      R1,R2,R1, LSR #+2
+   \   00000064   000081E1           ORR      R0,R1,R0
+   \   00000068   0100E8E5           STRB     R0,[R8, #+1]!
+    148            *pPart++ = pPartInfo->StartCylinder & 0xff;            // Lower bits of starting cylinder
+   \   0000006C   BC00D5E1           LDRH     R0,[R5, #+12]
+   \   00000070   0100E8E5           STRB     R0,[R8, #+1]!
+    149            *pPart++ = pPartInfo->FSType;                          // File system id
+   \   00000074   0800D5E5           LDRB     R0,[R5, #+8]
+   \   00000078   0100E8E5           STRB     R0,[R8, #+1]!
+    150            *pPart++ = pPartInfo->EndHead;                         // Ending head
+   \   0000007C   0E00D5E5           LDRB     R0,[R5, #+14]
+   \   00000080   0100E8E5           STRB     R0,[R8, #+1]!
+    151            *pPart++ =  (pPartInfo->EndSector   & 0x3f)            // Ending sector 
+    152                     | ((pPartInfo->EndCylinder & 0x300) >> 2);    // Higher bits of ending cylinder
+   \   00000084   0F00D5E5           LDRB     R0,[R5, #+15]
+   \   00000088   B011D5E1           LDRH     R1,[R5, #+16]
+   \   0000008C   3F0000E2           AND      R0,R0,#0x3F
+   \   00000090   211102E0           AND      R1,R2,R1, LSR #+2
+   \   00000094   000081E1           ORR      R0,R1,R0
+   \   00000098   0100E8E5           STRB     R0,[R8, #+1]!
+    153            *pPart++ = pPartInfo->EndCylinder & 0xff;              // Lower  bits of ending cylinder
+   \   0000009C   B001D5E1           LDRH     R0,[R5, #+16]
+   \   000000A0   0100E8E5           STRB     R0,[R8, #+1]!
+    154            FS_StoreU32LE(pPart, pPartInfo->PartStartSector);       // Relative sector
+   \   000000A4   018088E2           ADD      R8,R8,#+1
+   \   000000A8   041095E5           LDR      R1,[R5, #+4]
+   \   000000AC   0800A0E1           MOV      R0,R8
+   \   000000B0   ........           BL       FS_StoreU32LE
+    155            pPart += 4;
+    156            FS_StoreU32LE(pPart, pPartInfo->NumSectors4Part);       // Total sectors
+   \   000000B4   001095E5           LDR      R1,[R5, #+0]
+   \   000000B8   040088E2           ADD      R0,R8,#+4
+   \   000000BC   ........           BL       FS_StoreU32LE
+    157            FS_StoreU16LE(pBuffer + 0x1fe, 0xAA55);                 // Boot signature
+   \   000000C0   FE00A0E3           MOV      R0,#+254
+   \   000000C4   5510A0E3           MOV      R1,#+85
+   \   000000C8   400F80E3           ORR      R0,R0,#0x100
+   \   000000CC   AA1C81E3           ORR      R1,R1,#0xAA00
+   \   000000D0   060080E0           ADD      R0,R0,R6
+   \   000000D4   ........           BL       FS_StoreU16LE
+    158            if (FS_LB_WriteDevice(pDevice, 0, pBuffer, FS_SECTOR_TYPE_DATA) == 0) {
+   \   000000D8   0030A0E3           MOV      R3,#+0
+   \   000000DC   0620A0E1           MOV      R2,R6
+   \   000000E0   0010A0E3           MOV      R1,#+0
+   \   000000E4   0400A0E1           MOV      R0,R4
+   \   000000E8   ........           BL       FS_LB_WriteDevice
+   \   000000EC   000050E3           CMP      R0,#+0
+    159              r = 0;
+   \   000000F0   0070A003           MOVEQ    R7,#+0
+    160            }
+    161            FS__FreeSectorBuffer(pBuffer);
+   \   000000F4   0600A0E1           MOV      R0,R6
+   \   000000F8   ........           BL       FS__FreeSectorBuffer
+    162            return r;
+   \                     ??_CreatePartition_0:
+   \   000000FC   0700A0E1           MOV      R0,R7
+   \   00000100   F081BDE8           POP      {R4-R8,PC}       ;; return
+    163          }
+    164          
+    165          /*********************************************************************
+    166          *
+    167          *       _CalcCHSInfo
+    168          */
+
+   \                                 In section .text, align 4, keep-with-next
+    169          static void _CalcCHSInfo(PART_INFO * pPartInfo, FS_DEV_INFO * pDevInfo) {
+   \                     _CalcCHSInfo:
+   \   00000000   F0432DE9           PUSH     {R4-R9,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   0150A0E1           MOV      R5,R1
+    170            unsigned          i;
+    171            const CHS_INFO  * pCHSInfo;
+    172            U32               PartFirstSector;
+    173            U32               PartLastSector;
+    174            U32		            Data;
+    175            
+    176            //
+    177            //  Get CHS info
+    178            //
+    179            for (i = 0; i <  COUNTOF(_aCHSInfo); i++) {
+   \   0000000C   0000A0E3           MOV      R0,#+0
+   \   00000010   ............       ADRL     R1,_aCHSInfo
+   \              ....        
+   \   00000018   042095E5           LDR      R2,[R5, #+4]
+    180              pCHSInfo = &_aCHSInfo[i];
+   \                     ??_CalcCHSInfo_0:
+   \   0000001C   0160A0E1           MOV      R6,R1
+    181              if (pCHSInfo->NumSectors > pDevInfo->NumSectors) {
+   \   00000020   003096E5           LDR      R3,[R6, #+0]
+   \   00000024   030052E1           CMP      R2,R3
+   \   00000028   08608122           ADDCS    R6,R1,#+8
+   \   0000002C   00309625           LDRCS    R3,[R6, #+0]
+   \   00000030   03005221           CMPCS    R2,R3
+   \   00000034   10608122           ADDCS    R6,R1,#+16
+   \   00000038   00309625           LDRCS    R3,[R6, #+0]
+   \   0000003C   03005221           CMPCS    R2,R3
+   \   00000040   0B00003A           BCC      ??_CalcCHSInfo_1
+   \   00000044   186081E2           ADD      R6,R1,#+24
+   \   00000048   003096E5           LDR      R3,[R6, #+0]
+   \   0000004C   030052E1           CMP      R2,R3
+   \   00000050   0700003A           BCC      ??_CalcCHSInfo_1
+   \   00000054   206081E2           ADD      R6,R1,#+32
+   \   00000058   003096E5           LDR      R3,[R6, #+0]
+   \   0000005C   030052E1           CMP      R2,R3
+   \   00000060   0300003A           BCC      ??_CalcCHSInfo_1
+    182                break;
+    183              }
+    184            }
+   \   00000064   050080E2           ADD      R0,R0,#+5
+   \   00000068   281081E2           ADD      R1,R1,#+40
+   \   0000006C   0A0050E3           CMP      R0,#+10
+   \   00000070   E9FFFF3A           BCC      ??_CalcCHSInfo_0
+    185            PartFirstSector            = pPartInfo->PartStartSector;
+   \                     ??_CalcCHSInfo_1:
+   \   00000074   047094E5           LDR      R7,[R4, #+4]
+    186            PartLastSector             = pPartInfo->PartStartSector + pPartInfo->NumSectors4Part - 1;
+   \   00000078   000094E5           LDR      R0,[R4, #+0]
+    187            Data                       = PartFirstSector % (pCHSInfo->NumHeads * pCHSInfo->SectorsPerTrack);
+    188            Data                      /= pCHSInfo->SectorsPerTrack;
+    189            pPartInfo->StartHead       = (U8)Data;
+   \   0000007C   0590D6E5           LDRB     R9,[R6, #+5]
+   \   00000080   0410D6E5           LDRB     R1,[R6, #+4]
+   \   00000084   070080E0           ADD      R0,R0,R7
+   \   00000088   018040E2           SUB      R8,R0,#+1
+   \   0000008C   0700A0E1           MOV      R0,R7
+   \   00000090   890161E1           SMULBB   R1,R9,R1
+   \   00000094   ........           BL       __aeabi_uidivmod
+   \   00000098   0100A0E1           MOV      R0,R1
+   \   0000009C   0910A0E1           MOV      R1,R9
+   \   000000A0   ........           BL       __aeabi_uidiv
+   \   000000A4   0900C4E5           STRB     R0,[R4, #+9]
+    190          
+    191            Data                       = (PartFirstSector % pCHSInfo->SectorsPerTrack) + 1;
+    192            pPartInfo->StartSector     = (U8)Data;
+   \   000000A8   0700A0E1           MOV      R0,R7
+   \   000000AC   0510D6E5           LDRB     R1,[R6, #+5]
+   \   000000B0   ........           BL       __aeabi_uidivmod
+   \   000000B4   010081E2           ADD      R0,R1,#+1
+   \   000000B8   0A00C4E5           STRB     R0,[R4, #+10]
+    193          
+    194            Data                       = PartFirstSector / (pCHSInfo->NumHeads * pCHSInfo->SectorsPerTrack);
+    195            pPartInfo->StartCylinder   = (U16)Data;
+   \   000000BC   0410D6E5           LDRB     R1,[R6, #+4]
+   \   000000C0   0520D6E5           LDRB     R2,[R6, #+5]
+   \   000000C4   0700A0E1           MOV      R0,R7
+   \   000000C8   820161E1           SMULBB   R1,R2,R1
+   \   000000CC   ........           BL       __aeabi_uidiv
+   \   000000D0   BC00C4E1           STRH     R0,[R4, #+12]
+    196          
+    197            Data                       = PartLastSector % (pCHSInfo->NumHeads * pCHSInfo->SectorsPerTrack);
+    198            Data                      /= pCHSInfo->SectorsPerTrack;
+    199            pPartInfo->EndHead         = (U8)Data;
+   \   000000D4   0570D6E5           LDRB     R7,[R6, #+5]
+   \   000000D8   0410D6E5           LDRB     R1,[R6, #+4]
+   \   000000DC   0800A0E1           MOV      R0,R8
+   \   000000E0   870161E1           SMULBB   R1,R7,R1
+   \   000000E4   ........           BL       __aeabi_uidivmod
+   \   000000E8   0100A0E1           MOV      R0,R1
+   \   000000EC   0710A0E1           MOV      R1,R7
+   \   000000F0   ........           BL       __aeabi_uidiv
+   \   000000F4   0E00C4E5           STRB     R0,[R4, #+14]
+    200          
+    201            Data                       = (PartLastSector % pCHSInfo->SectorsPerTrack) + 1;
+    202            pPartInfo->EndSector       = (U8)Data;
+   \   000000F8   0800A0E1           MOV      R0,R8
+   \   000000FC   0510D6E5           LDRB     R1,[R6, #+5]
+   \   00000100   ........           BL       __aeabi_uidivmod
+   \   00000104   010081E2           ADD      R0,R1,#+1
+   \   00000108   0F00C4E5           STRB     R0,[R4, #+15]
+    203          
+    204            Data                       = PartLastSector / (pCHSInfo->NumHeads * pCHSInfo->SectorsPerTrack);
+    205            pPartInfo->EndCylinder     = (U16)Data;
+   \   0000010C   0410D6E5           LDRB     R1,[R6, #+4]
+   \   00000110   0520D6E5           LDRB     R2,[R6, #+5]
+   \   00000114   0800A0E1           MOV      R0,R8
+   \   00000118   820161E1           SMULBB   R1,R2,R1
+   \   0000011C   ........           BL       __aeabi_uidiv
+   \   00000120   B001C4E1           STRH     R0,[R4, #+16]
+    206          
+    207            pDevInfo->SectorsPerTrack  = pCHSInfo->SectorsPerTrack;
+   \   00000124   0500D6E5           LDRB     R0,[R6, #+5]
+   \   00000128   B200C5E1           STRH     R0,[R5, #+2]
+    208            pDevInfo->NumHeads         = pCHSInfo->NumHeads;
+   \   0000012C   0400D6E5           LDRB     R0,[R6, #+4]
+   \   00000130   B000C5E1           STRH     R0,[R5, #+0]
+    209          
+    210          }
+   \   00000134   F083BDE8           POP      {R4-R9,PC}       ;; return
+    211          
+    212          /*********************************************************************
+    213          *
+    214          *       _CalcSizeInfo
+    215          */
+
+   \                                 In section .text, align 4, keep-with-next
+    216          static int _CalcFormatInfo(VOLUME_FORMAT_INFO * pVolumeFormatInfo) {
+   \                     _CalcFormatInfo:
+   \   00000000   F0472DE9           PUSH     {R4-R10,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    217            unsigned          i;
+    218            U32               NumClusters;
+    219            U32               NumSectorsPerFAT;
+    220            U32               NumSectors4SystemArea;
+    221            U32               PartStartSector;
+    222            U32               ReservedSectorCount;
+    223            char              FATType;
+    224            U8                FSType;
+    225            const SIZE_INFO * pSizeInfo;
+    226            FS_DEV_INFO     * pDevInfo;
+    227            PART_INFO       * pPartInfo;
+    228            
+    229            pDevInfo  = &pVolumeFormatInfo->DevInfo;
+    230            pPartInfo = &pVolumeFormatInfo->PartInfo;
+   \   00000008   185084E2           ADD      R5,R4,#+24
+    231            for (i = 0; i <  COUNTOF(_aSizeInfo); i++) {
+   \   0000000C   0010A0E3           MOV      R1,#+0
+   \   00000010   ........           ADR      R2,_aSizeInfo
+    232              pSizeInfo = &_aSizeInfo[i];
+   \                     ??_CalcFormatInfo_0:
+   \   00000014   0260A0E1           MOV      R6,R2
+    233              if (pSizeInfo->NumSectors > pDevInfo->NumSectors) {
+   \   00000018   040094E5           LDR      R0,[R4, #+4]
+   \   0000001C   003096E5           LDR      R3,[R6, #+0]
+   \   00000020   030050E1           CMP      R0,R3
+   \   00000024   0C608222           ADDCS    R6,R2,#+12
+   \   00000028   00309625           LDRCS    R3,[R6, #+0]
+   \   0000002C   03005021           CMPCS    R0,R3
+   \   00000030   18608222           ADDCS    R6,R2,#+24
+   \   00000034   00309625           LDRCS    R3,[R6, #+0]
+   \   00000038   03005021           CMPCS    R0,R3
+   \   0000003C   0300003A           BCC      ??_CalcFormatInfo_1
+    234                break;
+    235              }
+    236            }
+   \   00000040   031081E2           ADD      R1,R1,#+3
+   \   00000044   242082E2           ADD      R2,R2,#+36
+   \   00000048   060051E3           CMP      R1,#+6
+   \   0000004C   F0FFFF3A           BCC      ??_CalcFormatInfo_0
+    237            pVolumeFormatInfo->pSizeInfo = pSizeInfo;
+   \                     ??_CalcFormatInfo_1:
+   \   00000050   2C6084E5           STR      R6,[R4, #+44]
+    238            NumClusters                  = pDevInfo->NumSectors / pSizeInfo->SectorsPerCluster;
+   \   00000054   B410D6E1           LDRH     R1,[R6, #+4]
+   \   00000058   ........           BL       __aeabi_uidiv
+   \   0000005C   0080A0E1           MOV      R8,R0
+    239            FATType                      = FS_FAT_GetFATType(NumClusters);
+   \   00000060   ........           BL       FS_FAT_GetFATType
+   \   00000064   0070A0E1           MOV      R7,R0
+    240            NumSectorsPerFAT             = FS__DivideU32Up(NumClusters * FATType, pDevInfo->BytesPerSector * 8);
+   \   00000068   B800D4E1           LDRH     R0,[R4, #+8]
+   \   0000006C   8011A0E1           LSL      R1,R0,#+3
+   \   00000070   970800E0           MUL      R0,R7,R8
+   \   00000074   ........           BL       FS__DivideU32Up
+    241            //
+    242            //  Calc partition start sector
+    243            //
+    244            if (FATType != FS_FAT_TYPE_FAT32) {
+   \   00000078   082096E5           LDR      R2,[R6, #+8]
+   \   0000007C   8000A0E1           LSL      R0,R0,#+1
+   \   00000080   200057E3           CMP      R7,#+32
+   \   00000084   0F00000A           BEQ      ??_CalcFormatInfo_2
+    245              NumSectors4SystemArea        = 2 * NumSectorsPerFAT + 33;  // 33 =  1 Sector for boot parameter block +
+   \   00000088   210080E2           ADD      R0,R0,#+33
+    246                                                                         //      32 sectors for root directory [512 entries]
+    247              //
+    248              //  Find the correct multiplicator
+    249              //
+    250              i = 1;
+   \   0000008C   0190A0E3           MOV      R9,#+1
+    251              do {
+    252                if (i * pSizeInfo->BoundaryUnit > NumSectors4SystemArea) {
+   \   00000090   020050E1           CMP      R0,R2
+   \   00000094   0600002A           BCS      ??_CalcFormatInfo_3
+    253                  break;
+    254                }
+    255                i++;
+    256              } while(1);
+    257              PartStartSector = i * pSizeInfo->BoundaryUnit - NumSectors4SystemArea;
+   \                     ??_CalcFormatInfo_4:
+   \   00000098   920901E0           MUL      R1,R2,R9
+   \   0000009C   008041E0           SUB      R8,R1,R0
+    258              if (PartStartSector & (pSizeInfo->BoundaryUnit -1)) {
+   \   000000A0   010042E2           SUB      R0,R2,#+1
+   \   000000A4   080010E1           TST      R0,R8
+   \   000000A8   1E00000A           BEQ      ??_CalcFormatInfo_5
+    259                PartStartSector += pSizeInfo->BoundaryUnit;
+   \   000000AC   088082E0           ADD      R8,R2,R8
+   \   000000B0   1C0000EA           B        ??_CalcFormatInfo_5
+    260              }
+   \                     ??_CalcFormatInfo_3:
+   \   000000B4   019089E2           ADD      R9,R9,#+1
+   \   000000B8   920901E0           MUL      R1,R2,R9
+   \   000000BC   010050E1           CMP      R0,R1
+   \   000000C0   FBFFFF2A           BCS      ??_CalcFormatInfo_3
+   \   000000C4   F3FFFFEA           B        ??_CalcFormatInfo_4
+    261            } else {    
+    262              PartStartSector     = pSizeInfo->BoundaryUnit;
+    263              ReservedSectorCount = 2 * NumSectorsPerFAT + 1;
+   \                     ??_CalcFormatInfo_2:
+   \   000000C8   010080E2           ADD      R0,R0,#+1
+   \   000000CC   0280A0E1           MOV      R8,R2
+    264              //
+    265              //  Find the correct multiplicator
+    266              //
+    267              i = 1;
+   \   000000D0   0190A0E3           MOV      R9,#+1
+    268              do {
+    269                if (i * pSizeInfo->BoundaryUnit > ReservedSectorCount) {
+   \   000000D4   020050E1           CMP      R0,R2
+   \   000000D8   0300003A           BCC      ??_CalcFormatInfo_6
+    270                  break;
+    271                }
+    272                i++;
+   \                     ??_CalcFormatInfo_7:
+   \   000000DC   019089E2           ADD      R9,R9,#+1
+    273              } while(1);
+   \   000000E0   920901E0           MUL      R1,R2,R9
+   \   000000E4   010050E1           CMP      R0,R1
+   \   000000E8   FBFFFF2A           BCS      ??_CalcFormatInfo_7
+    274              if (ReservedSectorCount < 9) {
+    275                ReservedSectorCount += pSizeInfo->BoundaryUnit;
+    276              }
+    277              //
+    278              // Values need to be recalculated
+    279              //    
+    280              NumClusters                  = (pDevInfo->NumSectors - PartStartSector - (i * pSizeInfo->BoundaryUnit)) / pSizeInfo->SectorsPerCluster;
+    281              NumSectorsPerFAT             = FS__DivideU32Up(NumClusters * FATType, pDevInfo->BytesPerSector * 8);
+   \                     ??_CalcFormatInfo_6:
+   \   000000EC   B800D4E1           LDRH     R0,[R4, #+8]
+   \   000000F0   920901E0           MUL      R1,R2,R9
+   \   000000F4   80A1A0E1           LSL      R10,R0,#+3
+   \   000000F8   040094E5           LDR      R0,[R4, #+4]
+   \   000000FC   080040E0           SUB      R0,R0,R8
+   \   00000100   010040E0           SUB      R0,R0,R1
+   \   00000104   B410D6E1           LDRH     R1,[R6, #+4]
+   \   00000108   ........           BL       __aeabi_uidiv
+   \   0000010C   970000E0           MUL      R0,R7,R0
+   \   00000110   0A10A0E1           MOV      R1,R10
+   \   00000114   ........           BL       FS__DivideU32Up
+    282              ReservedSectorCount          = (i * pSizeInfo->BoundaryUnit) - 2 * NumSectorsPerFAT;
+    283              pVolumeFormatInfo->FormatInfoEx.NumReservedSectors = (U16)ReservedSectorCount;
+   \   00000118   081096E5           LDR      R1,[R6, #+8]
+   \   0000011C   910902E0           MUL      R2,R1,R9
+   \   00000120   800042E0           SUB      R0,R2,R0, LSL #+1
+   \   00000124   B001C4E1           STRH     R0,[R4, #+16]
+    284          
+    285            }
+    286          
+    287            
+    288            //
+    289            //  Store info into PartInfo
+    290            //
+    291            pPartInfo->NumSectors4Part = pDevInfo->NumSectors - PartStartSector;
+   \                     ??_CalcFormatInfo_5:
+   \   00000128   040094E5           LDR      R0,[R4, #+4]
+    292            pPartInfo->PartStartSector = PartStartSector;
+    293            if (pPartInfo->NumSectors4Part < 0x7FA8) {
+   \   0000012C   A810A0E3           MOV      R1,#+168
+   \   00000130   080040E0           SUB      R0,R0,R8
+   \   00000134   000085E5           STR      R0,[R5, #+0]
+   \   00000138   048085E5           STR      R8,[R5, #+4]
+   \   0000013C   000095E5           LDR      R0,[R5, #+0]
+   \   00000140   7F1C81E3           ORR      R1,R1,#0x7F00
+   \   00000144   010050E1           CMP      R0,R1
+    294              FSType = 0x01;
+   \   00000148   0100A033           MOVCC    R0,#+1
+   \   0000014C   0A00003A           BCC      ??_CalcFormatInfo_8
+    295            } else if (pPartInfo->NumSectors4Part < 0x010000UL) {
+   \   00000150   400B50E3           CMP      R0,#+65536
+    296              FSType = 0x04;
+   \   00000154   0400A033           MOVCC    R0,#+4
+   \   00000158   0700003A           BCC      ??_CalcFormatInfo_8
+    297            } else if (pPartInfo->NumSectors4Part < 0x400000UL) {
+   \   0000015C   400850E3           CMP      R0,#+4194304
+    298              FSType = 0x06;
+   \   00000160   0600A033           MOVCC    R0,#+6
+   \   00000164   0400003A           BCC      ??_CalcFormatInfo_8
+    299            } else if (pPartInfo->NumSectors4Part < 0xFB0400UL) {
+   \   00000168   F818A0E3           MOV      R1,#+16252928
+   \   0000016C   C11B81E3           ORR      R1,R1,#0x30400
+   \   00000170   010050E1           CMP      R0,R1
+    300              FSType = 0x0B;
+   \   00000174   0B00A033           MOVCC    R0,#+11
+    301            } else {
+    302              FSType = 0x0C;
+   \   00000178   0C00A023           MOVCS    R0,#+12
+    303            }    
+    304            pPartInfo->FSType = FSType;
+   \                     ??_CalcFormatInfo_8:
+   \   0000017C   0800C5E5           STRB     R0,[R5, #+8]
+    305            _CalcCHSInfo(pPartInfo, pDevInfo);
+   \   00000180   0410A0E1           MOV      R1,R4
+   \   00000184   0500A0E1           MOV      R0,R5
+   \   00000188   ........           BL       _CalcCHSInfo
+    306            //
+    307            // Create partition on device
+    308            //
+    309            return 0;
+   \   0000018C   0000A0E3           MOV      R0,#+0
+   \   00000190   F087BDE8           POP      {R4-R10,PC}      ;; return
+    310          }
+    311          
+    312          
+    313          /*********************************************************************
+    314          *
+    315          *       _CalcSizeInfo
+    316          */
+    317          static void _InitFormatInfo(VOLUME_FORMAT_INFO * pVolFormatInfo) {
+    318            FS_MEMSET(&pVolFormatInfo->DevInfo,      0, sizeof(FS_DEV_INFO));
+    319            FS_MEMSET(&pVolFormatInfo->FormatInfoEx, 0, sizeof(FS_FORMAT_INFO_EX));
+    320            FS_MEMSET(&pVolFormatInfo->PartInfo,     0, sizeof(PART_INFO));
+    321            pVolFormatInfo->pSizeInfo = NULL;
+    322          }
+    323          
+    324          
+    325          /*********************************************************************
+    326          *
+    327          *       Public code, internal
+    328          *
+    329          **********************************************************************
+    330          */
+    331          
+    332          /*********************************************************************
+    333          *
+    334          *       FS__SD_Format
+    335          *
+    336          *  Function description:
+    337          *    Internal version of FS_Format.
+    338          *    Format the medium as specified in FS specification.
+    339          *
+    340          *  Parameters:
+    341          *    pVolume       Volume to format. NULL is permitted, but returns an error.
+    342          *  
+    343          *  Return value:
+    344          *    ==0         - File system has been started.
+    345          *    !=0         - An error has occurred.
+    346          */
+
+   \                                 In section .text, align 4, keep-with-next
+    347          int FS__SD_Format(FS_VOLUME  * pVolume) {
+   \                     FS__SD_Format:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   34D04DE2           SUB      SP,SP,#+52
+   \   00000008   0040B0E1           MOVS     R4,R0
+    348            int                 r;
+    349            int                 Status;
+    350            FS_DEVICE         * pDevice;
+    351            VOLUME_FORMAT_INFO  VolFormatInfo;
+    352          
+    353            r = -1;
+   \   0000000C   0050E0E3           MVN      R5,#+0
+    354            if (pVolume) {
+   \   00000010   2700000A           BEQ      ??FS__SD_Format_0
+    355              _InitFormatInfo(&VolFormatInfo);
+   \   00000014   0D00A0E1           MOV      R0,SP
+   \   00000018   0010A0E3           MOV      R1,#+0
+   \   0000001C   0020A0E3           MOV      R2,#+0
+   \   00000020   0030A0E3           MOV      R3,#+0
+   \   00000024   0E00A0E8           STM      R0!,{R1-R3}
+   \   00000028   0E00A0E8           STM      R0!,{R1-R3}
+   \   0000002C   0E00A0E8           STM      R0!,{R1-R3}
+   \   00000030   0600A0E8           STM      R0!,{R1,R2}
+   \   00000034   2C108DE5           STR      R1,[SP, #+44]
+    356              pDevice = &pVolume->Partition.Device;
+    357              Status = FS_LB_GetStatus(pDevice);
+    358              if (Status >= 0) {
+   \   00000038   0400A0E1           MOV      R0,R4
+   \   0000003C   ........           BL       FS_LB_GetStatus
+   \   00000040   000050E3           CMP      R0,#+0
+   \   00000044   1A00004A           BMI      ??FS__SD_Format_0
+    359                FS_LB_InitMediumIfRequired(pDevice);
+   \   00000048   0400A0E1           MOV      R0,R4
+   \   0000004C   ........           BL       FS_LB_InitMediumIfRequired
+    360                //
+    361                //  Retrieve the information from card
+    362                //
+    363                if (FS_LB_GetDeviceInfo(pDevice, &VolFormatInfo.DevInfo) < 0) {
+   \   00000050   0D10A0E1           MOV      R1,SP
+   \   00000054   0400A0E1           MOV      R0,R4
+   \   00000058   ........           BL       FS_LB_GetDeviceInfo
+   \   0000005C   000050E3           CMP      R0,#+0
+   \   00000060   1300004A           BMI      ??FS__SD_Format_0
+    364                  return -1;  // Error, device information can not be retrieved.
+    365                }
+    366                if (_CalcFormatInfo(&VolFormatInfo)) {
+   \   00000064   0D00A0E1           MOV      R0,SP
+   \   00000068   ........           BL       _CalcFormatInfo
+   \   0000006C   000050E3           CMP      R0,#+0
+   \   00000070   0F00001A           BNE      ??FS__SD_Format_0
+    367                  return -1;
+    368                }
+    369                r = _CreatePartition(pVolume, 0, &VolFormatInfo.PartInfo);
+   \   00000074   18208DE2           ADD      R2,SP,#+24
+   \   00000078   0010A0E3           MOV      R1,#+0
+   \   0000007C   0400A0E1           MOV      R0,R4
+   \   00000080   ........           BL       _CreatePartition
+   \   00000084   0050B0E1           MOVS     R5,R0
+    370                if (r == 0) {
+   \   00000088   0900001A           BNE      ??FS__SD_Format_0
+    371                  FS_FORMAT_INFO_EX * pFormatInfoEx;
+    372          
+    373                  pFormatInfoEx                     = &VolFormatInfo.FormatInfoEx;
+    374                  pFormatInfoEx->NumRootDirEntries  = 512;
+   \   0000008C   801FA0E3           MOV      R1,#+512
+    375                  pFormatInfoEx->pDevInfo           = &VolFormatInfo.DevInfo;
+    376                  pFormatInfoEx->SectorsPerCluster  = VolFormatInfo.pSizeInfo->SectorsPerCluster;
+   \   00000090   2C009DE5           LDR      R0,[SP, #+44]
+   \   00000094   BE10CDE1           STRH     R1,[SP, #+14]
+   \   00000098   14D08DE5           STR      SP,[SP, #+20]
+   \   0000009C   B400D0E1           LDRH     R0,[R0, #+4]
+    377                  r = FS_FAT_FormatEx(pVolume, pFormatInfoEx);
+   \   000000A0   0C108DE2           ADD      R1,SP,#+12
+   \   000000A4   BC00CDE1           STRH     R0,[SP, #+12]
+   \   000000A8   0400A0E1           MOV      R0,R4
+   \   000000AC   ........           BL       FS_FAT_FormatEx
+   \   000000B0   0050A0E1           MOV      R5,R0
+    378                }
+    379              }
+    380            }
+    381            return r;
+   \                     ??FS__SD_Format_0:
+   \   000000B4   0500A0E1           MOV      R0,R5
+   \   000000B8   34D08DE2           ADD      SP,SP,#+52
+   \   000000BC   3080BDE8           POP      {R4,R5,PC}       ;; return
+    382          }
+    383          
+    384          /*********************************************************************
+    385          *
+    386          *       Public code
+    387          *
+    388          **********************************************************************
+    389          */
+    390          
+    391          /*********************************************************************
+    392          *
+    393          *       FS_FormatSD
+    394          *
+    395          *  Function description:
+    396          *    Format the medium according to specification published by the SD-Card
+    397          *    organisation. This includes the following steps:
+    398          *    - Writes partion entry into the MBR
+    399          *    - Formats the partition
+    400          *
+    401          *  Parameters:
+    402          *    pDevice       Device specifier (string). "" refers to the first device.
+    403          *  
+    404          *  Return value:
+    405          *    ==0         - O.K., format successful
+    406          *    !=0         - An error has occurred.
+    407          */
+
+   \                                 In section .text, align 4, keep-with-next
+    408          int FS_FormatSD(const char *sVolumeName) {
+   \                     FS_FormatSD:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    409            int r;
+    410            FS_VOLUME  * pVolume;
+    411          
+    412            FS_LOCK();
+   \   00000008   0000A0E3           MOV      R0,#+0
+   \   0000000C   ........           BL       FS_OS_Lock
+    413            pVolume = FS__FindVolume(sVolumeName, NULL);
+   \   00000010   0010A0E3           MOV      R1,#+0
+   \   00000014   0400A0E1           MOV      R0,R4
+   \   00000018   ........           BL       FS__FindVolume
+    414            r = FS__SD_Format(pVolume);
+   \   0000001C   ........           BL       FS__SD_Format
+   \   00000020   0040A0E1           MOV      R4,R0
+    415            FS_UNLOCK();
+   \   00000024   0000A0E3           MOV      R0,#+0
+   \   00000028   ........           BL       FS_OS_Unlock
+    416            return r;
+   \   0000002C   0400A0E1           MOV      R0,R4
+   \   00000030   1080BDE8           POP      {R4,PC}          ;; return
+    417          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable2:
+   \   00000000   ........           DC32     FS_Global
+    418          
+    419          #endif
+    420          
+    421          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function         .cstack
+     --------         -------
+     FS_FormatSD           8
+     FS__SD_Format        64
+     _CalcCHSInfo         28
+     _CalcFormatInfo      32
+     _CreatePartition     24
+
+
+   Section sizes:
+
+     Function/Label   Bytes
+     --------------   -----
+     _aSizeInfo         72
+     _aCHSInfo          80
+     _CreatePartition  260
+     _CalcCHSInfo      312
+     _CalcFormatInfo   404
+     FS__SD_Format     192
+     FS_FormatSD        52
+     ??DataTable2        4
+
+ 
+ 1 376 bytes in section .text
+ 
+ 1 376 bytes of CODE memory
+
+Errors: none
+Warnings: none

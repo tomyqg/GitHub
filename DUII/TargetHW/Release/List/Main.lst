@@ -1,0 +1,753 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     02/Feb/2016  18:29:12 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\OS\Main.c                               #
+#    Command line =  C:\DUII\TargetHW\OS\Main.c -D DEBUG=1 -D SDRAM_TARGET=1  #
+#                    -D USB_IS_HIGH_SPEED -D NOPROFILER -D OS_TRACE=0 -D      #
+#                    OS_VIEW_ENABLE=0 -lCN C:\DUII\TargetHW\Release\List\ -o  #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\Main.lst                   #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\Main.o                      #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\OS\Main.c
+      1          /*********************************************************************
+      2          *          SEGGER MICROCONTROLLER SYSTEME GmbH
+      3          *   Solutions for real time microcontroller applications
+      4          **********************************************************************
+      5          File    : Main.c
+      6          Purpose :
+      7          --------- END-OF-HEADER --------------------------------------------*/
+      8          
+      9          #define MAIN_C
+     10          
+     11          #include <ctype.h>
+     12          #include <stdio.h>
+     13          #include "RTOS.H"
+     14          #include "BSP.h"
+     15          #include "DUII.h"
+     16          #include "FlashReadWrite.h"
+     17          #include "DataHandler.h"
+     18          #include "SDCardManager.h"
+     19          #include "SDCardRW.h"
+     20          #include "adc.h"
+     21          #include "commondefs.h"
+     22          #include "dataflash.h"
+     23          #include "LEDHandler.h"
+     24          
+     25          void SPIInit(void);
+     26          
+     27          // *** TEST #define TQM_Q_SIZE		(512 * 8)			// tqm file queue. enough memory for 8 SD card sectors
+     28          #define TQM_Q_SIZE		(1024 * 2)			// tqm file queue. enough memory for 4 SD card sectors
+     29          
+     30          void MainTask(void);
+     31          
+
+   \                                 In section .bss, align 4
+     32          static OS_STACKPTR int mainStack[4096]; /* Task stacks         */
+   \                     mainStack:
+   \   00000000                      DS8 16384
+     33          OS_TASK mainTCB;                 /* Task-control-blocks */
+   \                     mainTCB:
+   \   00004000                      DS8 68
+   \   00004044                      DS8 4096
+     34          
+     35          void SDCardRWTask(void);
+     36          
+     37          static OS_STACKPTR int SDcardRWStack[1024]; /* Task stacks         */
+     38          OS_TASK SDcardRWTCB;                 /* Task-control-blocks */
+   \                     SDcardRWTCB:
+   \   00005044                      DS8 68
+     39          
+     40          void CommSimulatorTask(void);
+     41          #ifndef _WINDOWS
+     42          void CommTask(void);
+     43          #endif
+     44          
+     45          OS_STACKPTR int commStack[2048];  /* Task stacks         */
+   \                     commStack:
+   \   00005088                      DS8 8192
+     46          OS_TASK commTCB;                 /* Task-control-blocks */
+   \                     commTCB:
+   \   00007088                      DS8 68
+   \   000070CC                      DS8 2048
+   \   000078CC                      DS8 68
+   \   00007910                      DS8 2048
+     47          
+     48          static OS_STACKPTR int LEDStack[512];  /* Task stacks         */
+     49          static OS_TASK LEDTCB;                 /* Task-control-blocks */
+     50          
+     51          void TQMWriteTask(void);
+     52          
+     53          static OS_STACKPTR int TQMStack[512]; /* Task stacks  -- combine with SDcardRW if works  */
+     54          OS_TASK TQMWriteTCB;                 /* Task-control-blocks */
+   \                     TQMWriteTCB:
+   \   00008110                      DS8 68
+   \   00008154                      DS8 2048
+     55          
+     56          void LapTimerTask(void);
+     57          
+     58          static OS_STACKPTR int lapTimerStack[512];  /* Task stacks         */
+     59          OS_TASK lapTimerTCB;                 /* Task-control-blocks */
+   \                     lapTimerTCB:
+   \   00008954                      DS8 68
+   \   00008998                      DS8 2048
+     60          
+     61          static OS_STACKPTR int sdCardManagerStack[512];
+     62          OS_TASK sdCardManagerTCB;
+   \                     sdCardManagerTCB:
+   \   00009198                      DS8 68
+     63          
+     64          // Mailboxes
+     65          OS_MAILBOX MB_SDcardRW;				// mailbox to SD card write task
+   \                     MB_SDcardRW:
+   \   000091DC                      DS8 28
+     66          
+     67          // Semaphores
+     68          OS_RSEMA SEMA_GlobalData;			// resource semaphore around global data
+   \                     SEMA_GlobalData:
+   \   000091F8                      DS8 20
+     69          
+     70          // Queues
+     71          OS_Q Queue_tqm;						// queue of data to be written to .tqm file
+   \                     Queue_tqm:
+   \   0000920C                      DS8 40
+     72          char tqmQMem[TQM_Q_SIZE];			// where to get memory for queue
+   \                     tqmQMem:
+   \   00009234                      DS8 2048
+     73          	
+     74          // OS Events
+     75          
+     76          // Global Data Declarations
+     77          
+     78          #define	NUM_USER_SETTINGS_MSGS	5
+     79          //char UserSettingsMessageBuffer[NUM_USER_SETTINGS_MSGS * sizeof(GLB_DATA_STRUCTURE)];
+     80          char UserSettingsMessageBuffer[NUM_USER_SETTINGS_MSGS * sizeof(int)];
+   \                     UserSettingsMessageBuffer:
+   \   00009A34                      DS8 20
+     81          
+     82          void App_COM_Init(void);
+     83          
+     84          /*********************************************************************
+     85          *
+     86          *       main
+     87          */
+
+   \                                 In section .text, align 4, keep-with-next
+     88          void main(void) {
+   \                     main:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+     89          	u16 numpages, bytesperpage;
+     90          	int callwrite = false;
+     91          	unsigned int featureVal;
+     92          
+     93          	OS_IncDI();                      /* Initially disable interrupts  */
+   \   00000004   ........           LDR      R4,??DataTable10
+   \   00000008   14D04DE2           SUB      SP,SP,#+20
+   \   0000000C   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000010   0050A0E3           MOV      R5,#+0
+   \   00000014   F00010E3           TST      R0,#0xF0
+   \   00000018   0100000A           BEQ      ??main_0
+   \   0000001C   9900A0E3           MOV      R0,#+153
+   \   00000020   ........           BL       OS_Error
+   \                     ??main_0:
+   \   00000024   00000FE1           MRS      R0,CPSR
+   \   00000028   800080E3           ORR      R0,R0,#0x80
+   \   0000002C   00F021E1           MSR      CPSR_c,R0
+   \   00000030   0100D4E5           LDRB     R0,[R4, #+1]
+   \   00000034   010080E2           ADD      R0,R0,#+1
+   \   00000038   0100C4E5           STRB     R0,[R4, #+1]
+     94          	OS_InitKern();                   /* Initialize OS                 */
+   \   0000003C   ........           BL       OS_InitKern
+     95          	OS_InitHW();                     /* Initialize Hardware for OS    */
+   \   00000040   ........           BL       OS_InitHW
+     96          
+     97          	InitializeCriticalVariables();	/* Initialize application critical variables */
+   \   00000044   ........           BL       InitializeCriticalVariables
+     98          
+     99          	App_COM_Init();                  /* Initialize Serial port for application */
+   \   00000048   ........           BL       App_COM_Init
+    100          	InitADC();                       /* Turn on A-D converter */
+   \   0000004C   ........           BL       InitADC
+    101          	SPIInit();
+   \   00000050   ........           BL       SPIInit
+    102          	DataFlash_Init((u08) 0, &numpages, &bytesperpage);
+   \   00000054   0C208DE2           ADD      R2,SP,#+12
+   \   00000058   0E108DE2           ADD      R1,SP,#+14
+   \   0000005C   0000A0E3           MOV      R0,#+0
+   \   00000060   ........           BL       DataFlash_Init
+    103          	unsavedSysData.dataflash[0].numPages = numpages;
+   \   00000064   BE00DDE1           LDRH     R0,[SP, #+14]
+   \   00000068   ........           LDR      R4,??DataTable10_1
+    104          	unsavedSysData.dataflash[0].bytesPerPage = bytesperpage;
+    105          	DataFlash_Init((u08) 1, &numpages, &bytesperpage);
+   \   0000006C   0C208DE2           ADD      R2,SP,#+12
+   \   00000070   B008C4E1           STRH     R0,[R4, #+128]
+   \   00000074   BC00DDE1           LDRH     R0,[SP, #+12]
+   \   00000078   0E108DE2           ADD      R1,SP,#+14
+   \   0000007C   B208C4E1           STRH     R0,[R4, #+130]
+   \   00000080   0100A0E3           MOV      R0,#+1
+   \   00000084   ........           BL       DataFlash_Init
+    106          	unsavedSysData.dataflash[1].numPages = numpages;
+   \   00000088   BE00DDE1           LDRH     R0,[SP, #+14]
+   \   0000008C   B408C4E1           STRH     R0,[R4, #+132]
+    107          	unsavedSysData.dataflash[1].bytesPerPage = bytesperpage;
+   \   00000090   BC00DDE1           LDRH     R0,[SP, #+12]
+   \   00000094   B608C4E1           STRH     R0,[R4, #+134]
+    108          
+    109          	// Initialize LED structures before flashing starts
+    110          	InitializeLEDStructures();
+   \   00000098   ........           BL       InitializeLEDStructures
+    111          	
+    112          	// read the user configuration from flash
+    113          	ReadUserData();
+   \   0000009C   ........           BL       ReadUserData
+    114          	
+    115          	// check for unprogrammed user data
+    116          	if (0xFF == unsavedSysData.unitInfo.owner[0]) {
+   \   000000A0   0800D4E5           LDRB     R0,[R4, #+8]
+   \   000000A4   FF0050E3           CMP      R0,#+255
+    117          		unsavedSysData.unitInfo.owner[0] = '\0';
+    118          		unsavedSysData.unitInfo.phone[0] = '\0';
+    119          		callwrite = true;
+    120          	} // if
+    121          	// Validate data - particularly wifiPass as that may have been uninitialized data  
+    122          	// since it may have been past the end of the old "name" field string.
+    123          	if (!(isalnum(unsavedSysData.unitInfo.wifiName[0]))) {
+   \   000000A8   3000D4E5           LDRB     R0,[R4, #+48]
+   \   000000AC   0850C405           STRBEQ   R5,[R4, #+8]
+   \   000000B0   1C50C405           STRBEQ   R5,[R4, #+28]
+   \   000000B4   0150A003           MOVEQ    R5,#+1
+   \   000000B8   611040E2           SUB      R1,R0,#+97
+   \   000000BC   1A0051E3           CMP      R1,#+26
+   \   000000C0   41104022           SUBCS    R1,R0,#+65
+   \   000000C4   1A005123           CMPCS    R1,#+26
+   \   000000C8   30004022           SUBCS    R0,R0,#+48
+   \   000000CC   0A005023           CMPCS    R0,#+10
+   \   000000D0   1200003A           BCC      ??main_1
+    124          		strcpy (unsavedSysData.unitInfo.wifiName, DEFAULT_WIFI_NAME);
+   \   000000D4   0D20A0E3           MOV      R2,#+13
+   \   000000D8   ........           ADR      R1,`?<Constant "TraqDashWiFi">`
+   \   000000DC   300084E2           ADD      R0,R4,#+48
+   \   000000E0   ........           BL       __aeabi_memcpy4
+    125          		sprintf (unsavedSysData.unitInfo.wifiName + strlen(unsavedSysData.unitInfo.wifiName), "%04d", unsavedSysData.unitInfo.serno % 10000);
+   \   000000E4   605094E5           LDR      R5,[R4, #+96]
+   \   000000E8   300084E2           ADD      R0,R4,#+48
+   \   000000EC   ........           BL       strlen
+   \   000000F0   ........           LDR      R2,??DataTable10_2  ;; 0xd1b71759
+   \   000000F4   040080E0           ADD      R0,R0,R4
+   \   000000F8   952281E0           UMULL    R2,R1,R5,R2
+   \   000000FC   1020A0E3           MOV      R2,#+16
+   \   00000100   A116A0E1           LSR      R1,R1,#+13
+   \   00000104   9C2D82E3           ORR      R2,R2,#0x2700
+   \   00000108   920101E0           MUL      R1,R2,R1
+   \   0000010C   300080E2           ADD      R0,R0,#+48
+   \   00000110   012045E0           SUB      R2,R5,R1
+   \   00000114   ........           ADR      R1,`?<Constant "%04d">`
+   \   00000118   ........           BL       sprintf
+    126          		callwrite = true;
+   \   0000011C   0150A0E3           MOV      R5,#+1
+    127          	} // if
+    128          	if (!(isalnum(unsavedSysData.unitInfo.wifiPass[0]))) {
+   \                     ??main_1:
+   \   00000120   4400D4E5           LDRB     R0,[R4, #+68]
+   \   00000124   611040E2           SUB      R1,R0,#+97
+   \   00000128   1A0051E3           CMP      R1,#+26
+   \   0000012C   41104022           SUBCS    R1,R0,#+65
+   \   00000130   1A005123           CMPCS    R1,#+26
+   \   00000134   30004022           SUBCS    R0,R0,#+48
+   \   00000138   0A005023           CMPCS    R0,#+10
+   \   0000013C   0400003A           BCC      ??main_2
+    129          		strcpy (unsavedSysData.unitInfo.wifiPass, DEFAULT_WIFI_PASS);
+   \   00000140   0920A0E3           MOV      R2,#+9
+   \   00000144   ........           ADR      R1,`?<Constant "traqmate">`
+   \   00000148   440084E2           ADD      R0,R4,#+68
+   \   0000014C   ........           BL       __aeabi_memcpy4
+    130          		callwrite = true;
+   \   00000150   0150A0E3           MOV      R5,#+1
+    131          	} // if
+    132          	if (0xFFFFFFFF == unsavedSysData.unitInfo.serno) {
+   \                     ??main_2:
+   \   00000154   601094E5           LDR      R1,[R4, #+96]
+   \   00000158   0000E0E3           MVN      R0,#+0
+   \   0000015C   000051E1           CMP      R1,R0
+    133          		unsavedSysData.unitInfo.serno = DEFAULT_SERIAL_NUMBER;
+   \   00000160   ........           LDREQ    R1,??DataTable10_3  ;; 0x61a7f
+    134          		callwrite = true;
+   \   00000164   0150A003           MOVEQ    R5,#+1
+   \   00000168   60108405           STREQ    R1,[R4, #+96]
+    135          	} // if
+    136          	if (0xFFFFFFFF == unsavedSysData.unitInfo.week) {
+   \   0000016C   641094E5           LDR      R1,[R4, #+100]
+   \   00000170   000051E1           CMP      R1,R0
+    137          		unsavedSysData.unitInfo.week = DEFAULT_BUILD_WEEK;
+   \   00000174   0210A003           MOVEQ    R1,#+2
+   \   00000178   64108405           STREQ    R1,[R4, #+100]
+    138          		callwrite = true;
+    139          	} // if
+    140          	if (0xFFFFFFFF == unsavedSysData.unitInfo.year) {
+   \   0000017C   681094E5           LDR      R1,[R4, #+104]
+   \   00000180   0150A003           MOVEQ    R5,#+1
+   \   00000184   000051E1           CMP      R1,R0
+    141          		unsavedSysData.unitInfo.year = DEFAULT_BUILD_YEAR;
+   \   00000188   1010A003           MOVEQ    R1,#+16
+   \   0000018C   68108405           STREQ    R1,[R4, #+104]
+    142          		callwrite = true;
+    143          	} // if
+    144          	// allows bootloaders up to V9.98. Anything else is invalid and will be set back to default
+    145          	if ((0xFFFFFFFF == unsavedSysData.unitInfo.bootloaderSwRev) || (0 == unsavedSysData.unitInfo.bootloaderSwRev) || (unsavedSysData.unitInfo.bootloaderSwRev > 998)) {
+   \   00000190   6C1094E5           LDR      R1,[R4, #+108]
+   \   00000194   0150A003           MOVEQ    R5,#+1
+   \   00000198   000051E1           CMP      R1,R0
+   \   0000019C   00005113           CMPNE    R1,#+0
+   \   000001A0   0300000A           BEQ      ??main_3
+   \   000001A4   E720A0E3           MOV      R2,#+231
+   \   000001A8   C02F82E3           ORR      R2,R2,#0x300
+   \   000001AC   020051E1           CMP      R1,R2
+   \   000001B0   0200003A           BCC      ??main_4
+    146          		unsavedSysData.unitInfo.bootloaderSwRev = DEFAULT_BOOTLOADER_REV;		// original bootloader does not identify itself
+   \                     ??main_3:
+   \   000001B4   8710A0E3           MOV      R1,#+135
+   \   000001B8   6C1084E5           STR      R1,[R4, #+108]
+    147          		callwrite = true;
+   \   000001BC   0150A0E3           MOV      R5,#+1
+    148          	} // if
+    149          	if (0xFFFFFF57 != (unsavedSysData.unitInfo.feature1)) 	{	// clear lower byte of feature1 (used for WiFi)
+   \                     ??main_4:
+   \   000001C0   701094E5           LDR      R1,[R4, #+112]
+   \   000001C4   A820C0E3           BIC      R2,R0,#0xA8
+   \   000001C8   020051E1           CMP      R1,R2
+    150          		unsavedSysData.unitInfo.feature1 = 0xFFFFFFFF;
+    151          		callwrite = true;
+    152          	} // if
+    153          	if (0xFFFFFFFF != unsavedSysData.unitInfo.feature2) {		// clear feature bitmaps for future use
+   \   000001CC   741094E5           LDR      R1,[R4, #+116]
+   \   000001D0   70008415           STRNE    R0,[R4, #+112]
+   \   000001D4   0150A013           MOVNE    R5,#+1
+   \   000001D8   000051E1           CMP      R1,R0
+    154          		unsavedSysData.unitInfo.feature2 = 0xFFFFFFFF;
+    155          		callwrite = true;
+    156          	} // if
+    157          	if (0xFFFFFFFF != unsavedSysData.unitInfo.feature3) {
+   \   000001DC   781094E5           LDR      R1,[R4, #+120]
+   \   000001E0   74008415           STRNE    R0,[R4, #+116]
+   \   000001E4   0150A013           MOVNE    R5,#+1
+   \   000001E8   000051E1           CMP      R1,R0
+    158          		unsavedSysData.unitInfo.feature3 = 0xFFFFFFFF;
+    159          		callwrite = true;
+    160          	} // if
+    161          	if (0xFFFFFFFF != unsavedSysData.unitInfo.feature4) {
+   \   000001EC   7C1094E5           LDR      R1,[R4, #+124]
+   \   000001F0   78008415           STRNE    R0,[R4, #+120]
+   \   000001F4   0150A013           MOVNE    R5,#+1
+   \   000001F8   000051E1           CMP      R1,R0
+    162          		unsavedSysData.unitInfo.feature4 = 0xFFFFFFFF;
+   \   000001FC   7C008415           STRNE    R0,[R4, #+124]
+    163          		callwrite = true;
+    164          	} // if
+    165          
+    166          	if (callwrite)
+   \   00000200   00005503           CMPEQ    R5,#+0
+   \   00000204   0000000A           BEQ      ??main_5
+    167          		WriteUserData();
+   \   00000208   ........           BL       WriteUserData
+    168          
+    169          // *** This forces WiFi Enable. Use bootloader V1.80 instead.
+    170          //	unsavedSysData.unitInfo.feature1 = 0xFFFFFF57;
+    171          //	WriteUserData();
+    172          // ***
+    173          	
+    174          	// check for wifi enabled
+    175          	featureVal = (unsavedSysData.unitInfo.feature1 & 0x000000FF);
+    176          	if (0x00000057 == featureVal)			// 'W'
+   \                     ??main_5:
+   \   0000020C   7000D4E5           LDRB     R0,[R4, #+112]
+    177          		unsavedSysData.wifiEnabled = 1;
+    178          	
+    179          // create mailboxes and semaphores and queues, oh my
+    180          	OS_CREATEMB(&MB_SDcardRW, sizeof(int), NUM_USER_SETTINGS_MSGS, UserSettingsMessageBuffer);
+   \   00000210   ........           LDR      R5,??DataTable10_4
+   \   00000214   0520A0E3           MOV      R2,#+5
+   \   00000218   570050E3           CMP      R0,#+87
+   \   0000021C   0100A003           MOVEQ    R0,#+1
+   \   00000220   D0008405           STREQ    R0,[R4, #+208]
+   \   00000224   3400A0E3           MOV      R0,#+52
+   \   00000228   9A0C80E3           ORR      R0,R0,#0x9A00
+   \   0000022C   053080E0           ADD      R3,R0,R5
+   \   00000230   DC00A0E3           MOV      R0,#+220
+   \   00000234   910C80E3           ORR      R0,R0,#0x9100
+   \   00000238   0410A0E3           MOV      R1,#+4
+   \   0000023C   050080E0           ADD      R0,R0,R5
+   \   00000240   ........           BL       OS_CreateMB
+    181          	OS_CREATERSEMA(&SEMA_GlobalData);
+   \   00000244   F800A0E3           MOV      R0,#+248
+   \   00000248   910C80E3           ORR      R0,R0,#0x9100
+   \   0000024C   050080E0           ADD      R0,R0,R5
+   \   00000250   ........           BL       OS_CreateRSema
+    182          	OS_Q_Create (&Queue_tqm, &tqmQMem, TQM_Q_SIZE);
+   \   00000254   3400A0E3           MOV      R0,#+52
+   \   00000258   920C80E3           ORR      R0,R0,#0x9200
+   \   0000025C   051080E0           ADD      R1,R0,R5
+   \   00000260   280040E2           SUB      R0,R0,#+40
+   \   00000264   802EA0E3           MOV      R2,#+2048
+   \   00000268   050080E0           ADD      R0,R0,R5
+   \   0000026C   ........           BL       OS_Q_Create
+    183          
+    184          	// these initializations are here because decisions are made on startup that need suPresent, etc.
+    185          	suData.suPresent = FALSE;					// TRUE if su is connected and initialized
+   \   00000270   ........           LDR      R1,??DataTable10_5
+   \   00000274   0000A0E3           MOV      R0,#+0
+   \   00000278   0C00C1E5           STRB     R0,[R1, #+12]
+    186          	suData.tmState = STARTUP;					// where in the state machine
+    187          	suData.traqDataConnected = 0;				// whether io interface is present
+   \   0000027C   0D00C1E5           STRB     R0,[R1, #+13]
+    188          	suData.suSwRev = 0;							// software rev from SU * 100
+   \   00000280   100081E5           STR      R0,[R1, #+16]
+    189          	suData.suDataRev = 0;						// data rev from SU
+    190          	suData.suHwRev = 0;							// hardware rev from SU * 100
+   \   00000284   1400C1E5           STRB     R0,[R1, #+20]
+    191          	if (unsavedSysData.unitInfo.bootloaderSwRev <= FIRST_GEN_BOOTLOADER)	// if old bootloader, turn off usb camera support
+   \   00000288   6C0094E5           LDR      R0,[R4, #+108]
+   \   0000028C   FE20A0E3           MOV      R2,#+254
+   \   00000290   0E20C1E5           STRB     R2,[R1, #+14]
+   \   00000294   880050E3           CMP      R0,#+136
+   \   00000298   0300002A           BCS      ??main_6
+    192          		(vehicleData.usbCameraDelay &= 0x7F);
+   \   0000029C   ........           LDR      R0,??DataTable10_6
+   \   000002A0   0C10D0E5           LDRB     R1,[R0, #+12]
+   \   000002A4   7F1001E2           AND      R1,R1,#0x7F
+   \   000002A8   0C10C0E5           STRB     R1,[R0, #+12]
+    193          
+    194          	// create tasks
+    195          	OS_CREATETASK(&mainTCB, "MainTask", MainTask, 100, mainStack);					// main loop with gui, changes to priority 5 later
+   \                     ??main_6:
+   \   000002AC   0200A0E3           MOV      R0,#+2
+   \   000002B0   08008DE5           STR      R0,[SP, #+8]
+   \   000002B4   400CA0E3           MOV      R0,#+16384
+   \   000002B8   04008DE5           STR      R0,[SP, #+4]
+   \   000002BC   00508DE5           STR      R5,[SP, #+0]
+   \   000002C0   ........           LDR      R3,??DataTable10_7
+   \   000002C4   6420A0E3           MOV      R2,#+100
+   \   000002C8   ........           ADR      R1,`?<Constant "MainTask">`
+   \   000002CC   400C85E2           ADD      R0,R5,#+16384
+   \   000002D0   ........           BL       OS_CreateTask_DP
+    196          	OS_CREATETASK(&SDcardRWTCB, "SDCardRWTask", SDCardRWTask, 80, SDcardRWStack);	// writes out config files, etc.
+   \   000002D4   0200A0E3           MOV      R0,#+2
+   \   000002D8   08008DE5           STR      R0,[SP, #+8]
+   \   000002DC   400DA0E3           MOV      R0,#+4096
+   \   000002E0   04008DE5           STR      R0,[SP, #+4]
+   \   000002E4   4400A0E3           MOV      R0,#+68
+   \   000002E8   400C80E3           ORR      R0,R0,#0x4000
+   \   000002EC   050080E0           ADD      R0,R0,R5
+   \   000002F0   00008DE5           STR      R0,[SP, #+0]
+   \   000002F4   4400A0E3           MOV      R0,#+68
+   \   000002F8   500C80E3           ORR      R0,R0,#0x5000
+   \   000002FC   ........           LDR      R3,??DataTable10_8
+   \   00000300   5020A0E3           MOV      R2,#+80
+   \   00000304   ........           ADR      R1,`?<Constant "SDCardRWTask">`
+   \   00000308   050080E0           ADD      R0,R0,R5
+   \   0000030C   ........           BL       OS_CreateTask_DP
+    197          	OS_CREATETASK(&commTCB, "CommTask", CommTask, 120, commStack);					// communicates with su and creates data for writing
+   \   00000310   0200A0E3           MOV      R0,#+2
+   \   00000314   08008DE5           STR      R0,[SP, #+8]
+   \   00000318   800DA0E3           MOV      R0,#+8192
+   \   0000031C   04008DE5           STR      R0,[SP, #+4]
+   \   00000320   8800A0E3           MOV      R0,#+136
+   \   00000324   500C80E3           ORR      R0,R0,#0x5000
+   \   00000328   050080E0           ADD      R0,R0,R5
+   \   0000032C   00008DE5           STR      R0,[SP, #+0]
+   \   00000330   8800A0E3           MOV      R0,#+136
+   \   00000334   700C80E3           ORR      R0,R0,#0x7000
+   \   00000338   ........           LDR      R3,??DataTable10_9
+   \   0000033C   7820A0E3           MOV      R2,#+120
+   \   00000340   ........           ADR      R1,`?<Constant "CommTask">`
+   \   00000344   050080E0           ADD      R0,R0,R5
+   \   00000348   ........           BL       OS_CreateTask_DP
+    198          	OS_CREATETASK(&lapTimerTCB, "LapTimerTask", LapTimerTask, 110, lapTimerStack);	// times the laps
+   \   0000034C   0200A0E3           MOV      R0,#+2
+   \   00000350   08008DE5           STR      R0,[SP, #+8]
+   \   00000354   800EA0E3           MOV      R0,#+2048
+   \   00000358   04008DE5           STR      R0,[SP, #+4]
+   \   0000035C   5400A0E3           MOV      R0,#+84
+   \   00000360   810C80E3           ORR      R0,R0,#0x8100
+   \   00000364   050080E0           ADD      R0,R0,R5
+   \   00000368   00008DE5           STR      R0,[SP, #+0]
+   \   0000036C   5400A0E3           MOV      R0,#+84
+   \   00000370   890C80E3           ORR      R0,R0,#0x8900
+   \   00000374   ........           LDR      R3,??DataTable10_10
+   \   00000378   6E20A0E3           MOV      R2,#+110
+   \   0000037C   ........           ADR      R1,`?<Constant "LapTimerTask">`
+   \   00000380   050080E0           ADD      R0,R0,R5
+   \   00000384   ........           BL       OS_CreateTask_DP
+    199          	OS_CREATETASK(&TQMWriteTCB, "TQMWriteTask", TQMWriteTask, 10, TQMStack);		// low priority file write task just for tqm files
+   \   00000388   0200A0E3           MOV      R0,#+2
+   \   0000038C   08008DE5           STR      R0,[SP, #+8]
+   \   00000390   800EA0E3           MOV      R0,#+2048
+   \   00000394   04008DE5           STR      R0,[SP, #+4]
+   \   00000398   1000A0E3           MOV      R0,#+16
+   \   0000039C   790C80E3           ORR      R0,R0,#0x7900
+   \   000003A0   050080E0           ADD      R0,R0,R5
+   \   000003A4   00008DE5           STR      R0,[SP, #+0]
+   \   000003A8   1000A0E3           MOV      R0,#+16
+   \   000003AC   810C80E3           ORR      R0,R0,#0x8100
+   \   000003B0   ........           LDR      R3,??DataTable10_11
+   \   000003B4   0A20A0E3           MOV      R2,#+10
+   \   000003B8   ........           ADR      R1,`?<Constant "TQMWriteTask">`
+   \   000003BC   050080E0           ADD      R0,R0,R5
+   \   000003C0   ........           BL       OS_CreateTask_DP
+    200          	OS_CREATETASK(&LEDTCB, "LEDHandlerTask", LEDHandlerTask, 20, LEDStack);			// Low priority LED monitor task
+   \   000003C4   0200A0E3           MOV      R0,#+2
+   \   000003C8   08008DE5           STR      R0,[SP, #+8]
+   \   000003CC   800EA0E3           MOV      R0,#+2048
+   \   000003D0   04008DE5           STR      R0,[SP, #+4]
+   \   000003D4   CC00A0E3           MOV      R0,#+204
+   \   000003D8   700C80E3           ORR      R0,R0,#0x7000
+   \   000003DC   050080E0           ADD      R0,R0,R5
+   \   000003E0   00008DE5           STR      R0,[SP, #+0]
+   \   000003E4   CC00A0E3           MOV      R0,#+204
+   \   000003E8   780C80E3           ORR      R0,R0,#0x7800
+   \   000003EC   ........           LDR      R3,??DataTable10_12
+   \   000003F0   1420A0E3           MOV      R2,#+20
+   \   000003F4   ........           ADR      R1,`?<Constant "LEDHandlerTask">`
+   \   000003F8   050080E0           ADD      R0,R0,R5
+   \   000003FC   ........           BL       OS_CreateTask_DP
+    201          	OS_CREATETASK(&sdCardManagerTCB, "SDCardManagerTask", SDCardManagerTask, 50, sdCardManagerStack);	// watches for card inserts/removals
+   \   00000400   0200A0E3           MOV      R0,#+2
+   \   00000404   08008DE5           STR      R0,[SP, #+8]
+   \   00000408   800EA0E3           MOV      R0,#+2048
+   \   0000040C   04008DE5           STR      R0,[SP, #+4]
+   \   00000410   9800A0E3           MOV      R0,#+152
+   \   00000414   890C80E3           ORR      R0,R0,#0x8900
+   \   00000418   050080E0           ADD      R0,R0,R5
+   \   0000041C   00008DE5           STR      R0,[SP, #+0]
+   \   00000420   9800A0E3           MOV      R0,#+152
+   \   00000424   910C80E3           ORR      R0,R0,#0x9100
+   \   00000428   ........           LDR      R3,??DataTable10_13
+   \   0000042C   3220A0E3           MOV      R2,#+50
+   \   00000430   ........           ADR      R1,`?<Constant "SDCardManagerTask">`
+   \   00000434   050080E0           ADD      R0,R0,R5
+   \   00000438   ........           BL       OS_CreateTask_DP
+    202          
+    203          //    _WDT_MR &= ~(1 << 15);                    // Enable watchdog ??
+    204          
+    205          	OS_Start();
+   \   0000043C   ........           LDR      R0,??DataTable10_14
+   \   00000440   0110A0E3           MOV      R1,#+1
+   \   00000444   0010C0E5           STRB     R1,[R0, #+0]
+   \   00000448   ........           BL       OS_StartASM
+    206          }
+   \   0000044C   14D08DE2           ADD      SP,SP,#+20       ;; stack cleaning
+   \   00000450   3080BDE8           POP      {R4,R5,PC}       ;; return
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10:
+   \   00000000   ........           DC32     OS_Global
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10_1:
+   \   00000000   ........           DC32     unsavedSysData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10_2:
+   \   00000000   5917B7D1           DC32     0xd1b71759
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10_3:
+   \   00000000   7F1A0600           DC32     0x61a7f
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10_4:
+   \   00000000   ........           DC32     mainStack
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10_5:
+   \   00000000   ........           DC32     suData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10_6:
+   \   00000000   ........           DC32     vehicleData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10_7:
+   \   00000000   ........           DC32     MainTask
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10_8:
+   \   00000000   ........           DC32     SDCardRWTask
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10_9:
+   \   00000000   ........           DC32     CommTask
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10_10:
+   \   00000000   ........           DC32     LapTimerTask
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10_11:
+   \   00000000   ........           DC32     TQMWriteTask
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10_12:
+   \   00000000   ........           DC32     LEDHandlerTask
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10_13:
+   \   00000000   ........           DC32     SDCardManagerTask
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10_14:
+   \   00000000   ........           DC32     OS_Running
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "TraqDashWiFi">`:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   547261714461       DC8 84, 114, 97, 113, 68, 97, 115, 104, 87, 105
+   \              73685769    
+   \   0000000A   466900000000       DC8 70, 105, 0, 0, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "%04d">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   253034640000       DC8 37, 48, 52, 100, 0, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "traqmate">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   747261716D61       DC8 116, 114, 97, 113, 109, 97, 116, 101, 0, 0
+   \              74650000    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "MainTask">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   4D61696E5461       DC8 77, 97, 105, 110, 84, 97, 115, 107, 0, 0
+   \              736B0000    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "SDCardRWTask">`:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   534443617264       DC8 83, 68, 67, 97, 114, 100, 82, 87, 84, 97
+   \              52575461    
+   \   0000000A   736B00000000       DC8 115, 107, 0, 0, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "CommTask">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   436F6D6D5461       DC8 67, 111, 109, 109, 84, 97, 115, 107, 0, 0
+   \              736B0000    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "LapTimerTask">`:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   4C617054696D       DC8 76, 97, 112, 84, 105, 109, 101, 114, 84, 97
+   \              65725461    
+   \   0000000A   736B00000000       DC8 115, 107, 0, 0, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "TQMWriteTask">`:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   54514D577269       DC8 84, 81, 77, 87, 114, 105, 116, 101, 84, 97
+   \              74655461    
+   \   0000000A   736B00000000       DC8 115, 107, 0, 0, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "LEDHandlerTask">`:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   4C454448616E       DC8 76, 69, 68, 72, 97, 110, 100, 108, 101, 114
+   \              646C6572    
+   \   0000000A   5461736B0000       DC8 84, 97, 115, 107, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "SDCardManagerTask">`:
+   \   00000000                      ; Initializer data, 20 bytes
+   \   00000000   534443617264       DC8 83, 68, 67, 97, 114, 100, 77, 97, 110, 97
+   \              4D616E61    
+   \   0000000A   676572546173       DC8 103, 101, 114, 84, 97, 115, 107, 0, 0, 0
+   \              6B000000    
+
+   Maximum stack usage in bytes:
+
+     Function .cstack
+     -------- -------
+     main         32
+
+
+   Section sizes:
+
+     Function/Label                  Bytes
+     --------------                  -----
+     mainStack                       39496
+     mainTCB
+     SDcardRWStack
+     SDcardRWTCB
+     commStack
+     commTCB
+     LEDStack
+     LEDTCB
+     TQMStack
+     TQMWriteTCB
+     lapTimerStack
+     lapTimerTCB
+     sdCardManagerStack
+     sdCardManagerTCB
+     MB_SDcardRW
+     SEMA_GlobalData
+     Queue_tqm
+     tqmQMem
+     UserSettingsMessageBuffer
+     main                             1108
+     ??DataTable10                       4
+     ??DataTable10_1                     4
+     ??DataTable10_2                     4
+     ??DataTable10_3                     4
+     ??DataTable10_4                     4
+     ??DataTable10_5                     4
+     ??DataTable10_6                     4
+     ??DataTable10_7                     4
+     ??DataTable10_8                     4
+     ??DataTable10_9                     4
+     ??DataTable10_10                    4
+     ??DataTable10_11                    4
+     ??DataTable10_12                    4
+     ??DataTable10_13                    4
+     ??DataTable10_14                    4
+     ?<Constant "TraqDashWiFi">         16
+     ?<Constant "%04d">                  8
+     ?<Constant "traqmate">             12
+     ?<Constant "MainTask">             12
+     ?<Constant "SDCardRWTask">         16
+     ?<Constant "CommTask">             12
+     ?<Constant "LapTimerTask">         16
+     ?<Constant "TQMWriteTask">         16
+     ?<Constant "LEDHandlerTask">       16
+     ?<Constant "SDCardManagerTask">    20
+
+ 
+ 39 496 bytes in section .bss
+  1 312 bytes in section .text
+ 
+  1 312 bytes of CODE memory
+ 39 496 bytes of DATA memory
+
+Errors: none
+Warnings: none

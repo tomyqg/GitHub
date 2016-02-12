@@ -1,0 +1,911 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:13:31 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\GUI\GUI_Stream.c                        #
+#    Command line =  C:\DUII\TargetHW\GUI\GUI_Stream.c -D DEBUG=1 -D          #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\GUI_Stream.lst             #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\GUI_Stream.o                #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\GUI\GUI_Stream.c
+      1          /*********************************************************************
+      2          *                SEGGER Microcontroller GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 1996 - 2010  SEGGER Microcontroller GmbH & Co. KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          ** emWin V5.06 - Graphical user interface for embedded applications **
+     13          emWin is protected by international copyright laws.   Knowledge of the
+     14          source code may not be used to write a similar product.  This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : GUIStream.c
+     19          Purpose     : Support for streamed bitmaps
+     20          ----------------------------------------------------------------------
+     21          */
+     22          
+     23          #include "GUI_Private.h"
+     24          
+     25          /*********************************************************************
+     26          *
+     27          *       Static data
+     28          *
+     29          **********************************************************************
+     30          */
+
+   \                                 In section .bss, align 4
+     31          static GUI_BITMAPSTREAM_CALLBACK _pfStreamedBitmapHook;
+   \                     _pfStreamedBitmapHook:
+   \   00000000                      DS8 4
+     32          
+     33          /*********************************************************************
+     34          *
+     35          *       Static code
+     36          *
+     37          **********************************************************************
+     38          */
+     39          /*********************************************************************
+     40          *
+     41          *       _GetData
+     42          */
+     43          static int _GetData(GUI_GET_DATA_FUNC * pfGetData, const void * p, const U8 ** ppData, int NumBytes, U32 * pOff) {
+     44            int NumBytesRead;
+     45          
+     46            NumBytesRead = pfGetData((void *)p, ppData, NumBytes, *pOff);
+     47            if (NumBytesRead != NumBytes) {
+     48              return 1;
+     49            }
+     50            *pOff += NumBytesRead;
+     51            return 0;
+     52          }
+     53          
+     54          /*********************************************************************
+     55          *
+     56          *       _FillInfo
+     57          */
+     58          static void _FillInfo(GUI_BITMAP_STREAM * pHeader, GUI_BITMAPSTREAM_INFO * pInfo) {
+     59            pInfo->BitsPerPixel = pHeader->BitsPerPixel;
+     60            pInfo->HasTrans     = pHeader->HasTrans;
+     61            pInfo->NumColors    = pHeader->NumColors;
+     62            pInfo->XSize        = pHeader->XSize;
+     63            pInfo->YSize        = pHeader->YSize;
+     64          }
+     65          
+     66          /*********************************************************************
+     67          *
+     68          *       Private code
+     69          *
+     70          **********************************************************************
+     71          */
+     72          /*********************************************************************
+     73          *
+     74          *       GUI__ReadHeaderFromStream
+     75          */
+
+   \                                 In section .text, align 4, keep-with-next
+     76          void GUI__ReadHeaderFromStream(GUI_BITMAP_STREAM * pBitmapHeader, const U8 * pData) {
+   \                     GUI__ReadHeaderFromStream:
+   \   00000000   12402DE9           PUSH     {R1,R4,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0040A0E1           MOV      R4,R0
+     77            pBitmapHeader->ID           = GUI__Read16(&pData);
+   \   0000000C   04008DE2           ADD      R0,SP,#+4
+   \   00000010   ........           BL       GUI__Read16
+   \   00000014   B000C4E1           STRH     R0,[R4, #+0]
+     78            pBitmapHeader->Format       = GUI__Read16(&pData);
+   \   00000018   04008DE2           ADD      R0,SP,#+4
+   \   0000001C   ........           BL       GUI__Read16
+   \   00000020   B200C4E1           STRH     R0,[R4, #+2]
+     79            pBitmapHeader->XSize        = GUI__Read16(&pData);
+   \   00000024   04008DE2           ADD      R0,SP,#+4
+   \   00000028   ........           BL       GUI__Read16
+   \   0000002C   B400C4E1           STRH     R0,[R4, #+4]
+     80            pBitmapHeader->YSize        = GUI__Read16(&pData);
+   \   00000030   04008DE2           ADD      R0,SP,#+4
+   \   00000034   ........           BL       GUI__Read16
+   \   00000038   B600C4E1           STRH     R0,[R4, #+6]
+     81            pBitmapHeader->BytesPerLine = GUI__Read16(&pData);
+   \   0000003C   04008DE2           ADD      R0,SP,#+4
+   \   00000040   ........           BL       GUI__Read16
+   \   00000044   B800C4E1           STRH     R0,[R4, #+8]
+     82            pBitmapHeader->BitsPerPixel = GUI__Read16(&pData);
+   \   00000048   04008DE2           ADD      R0,SP,#+4
+   \   0000004C   ........           BL       GUI__Read16
+   \   00000050   BA00C4E1           STRH     R0,[R4, #+10]
+     83            pBitmapHeader->NumColors    = GUI__Read16(&pData);
+   \   00000054   04008DE2           ADD      R0,SP,#+4
+   \   00000058   ........           BL       GUI__Read16
+   \   0000005C   BC00C4E1           STRH     R0,[R4, #+12]
+     84            pBitmapHeader->HasTrans     = GUI__Read16(&pData);
+   \   00000060   04008DE2           ADD      R0,SP,#+4
+   \   00000064   ........           BL       GUI__Read16
+   \   00000068   BE00C4E1           STRH     R0,[R4, #+14]
+     85          }
+   \   0000006C   08D08DE2           ADD      SP,SP,#+8
+   \   00000070   1080BDE8           POP      {R4,PC}          ;; return
+     86          
+     87          /*********************************************************************
+     88          *
+     89          *       GUI__CreateBitmapFromStream
+     90          */
+
+   \                                 In section .text, align 4, keep-with-next
+     91          void GUI__CreateBitmapFromStream(GUI_BITMAP_STREAM * pBitmapHeader, const U8 * pData, GUI_BITMAP * pBMP, GUI_LOGPALETTE * pPAL, const GUI_BITMAP_METHODS * pMethods) {
+   \                     GUI__CreateBitmapFromStream:
+   \   00000000   00402DE9           PUSH     {LR}
+     92            //
+     93            // Initialize bitmap structure
+     94            //
+     95            pBMP->BitsPerPixel = pBitmapHeader->BitsPerPixel;
+   \   00000004   BAE0D0E1           LDRH     LR,[R0, #+10]
+   \   00000008   04C09DE5           LDR      R12,[SP, #+4]
+     96            pBMP->BytesPerLine = pBitmapHeader->BytesPerLine;
+     97            pBMP->pData        = pData + 16 + 4 * pBitmapHeader->NumColors;
+     98            pBMP->pPal         = pPAL;
+     99            pBMP->XSize        = pBitmapHeader->XSize;
+    100            pBMP->YSize        = pBitmapHeader->YSize;
+    101            pBMP->pMethods     = pMethods;
+    102            //
+    103            // Initialize palette structure
+    104            //
+    105            if (pPAL) {
+   \   0000000C   000053E3           CMP      R3,#+0
+   \   00000010   B6E0C2E1           STRH     LR,[R2, #+6]
+   \   00000014   B8E0D0E1           LDRH     LR,[R0, #+8]
+   \   00000018   B4E0C2E1           STRH     LR,[R2, #+4]
+   \   0000001C   BCE0D0E1           LDRH     LR,[R0, #+12]
+   \   00000020   0EE181E0           ADD      LR,R1,LR, LSL #+2
+   \   00000024   10E08EE2           ADD      LR,LR,#+16
+   \   00000028   08E082E5           STR      LR,[R2, #+8]
+   \   0000002C   0C3082E5           STR      R3,[R2, #+12]
+   \   00000030   B4E0D0E1           LDRH     LR,[R0, #+4]
+   \   00000034   B0E0C2E1           STRH     LR,[R2, #+0]
+   \   00000038   B6E0D0E1           LDRH     LR,[R0, #+6]
+   \   0000003C   B2E0C2E1           STRH     LR,[R2, #+2]
+   \   00000040   10C082E5           STR      R12,[R2, #+16]
+   \   00000044   0500000A           BEQ      ??GUI__CreateBitmapFromStream_0
+    106              pPAL->HasTrans    = pBitmapHeader->HasTrans;
+   \   00000048   BE20D0E1           LDRH     R2,[R0, #+14]
+   \   0000004C   0420C3E5           STRB     R2,[R3, #+4]
+    107              pPAL->NumEntries  = pBitmapHeader->NumColors;
+   \   00000050   BC00D0E1           LDRH     R0,[R0, #+12]
+   \   00000054   000083E5           STR      R0,[R3, #+0]
+    108              pPAL->pPalEntries = (const LCD_COLOR *)(pData + 16);
+   \   00000058   100081E2           ADD      R0,R1,#+16
+   \   0000005C   080083E5           STR      R0,[R3, #+8]
+    109            }
+    110          }
+   \                     ??GUI__CreateBitmapFromStream_0:
+   \   00000060   0080BDE8           POP      {PC}             ;; return
+    111          
+    112          /*********************************************************************
+    113          *
+    114          *       Public code
+    115          *
+    116          **********************************************************************
+    117          */
+    118          /*********************************************************************
+    119          *
+    120          *       GUI_CreateBitmapFromStream
+    121          */
+    122          /*
+    123          void GUI_CreateBitmapFromStream(const void * p, GUI_BITMAP * pBMP, GUI_LOGPALETTE * pPAL) {
+    124            GUI_BITMAP_STREAM BitmapHeader;
+    125          
+    126            //
+    127            // Read header data
+    128            //
+    129            GUI__ReadHeaderFromStream(&BitmapHeader, (const U8 *)p);
+    130            if (BitmapHeader.Format == GUI_STREAM_FORMAT_INDEXED) {
+    131              //
+    132              // Initialize bitmap (and palette) structure
+    133              //
+    134              GUI__CreateBitmapFromStream(&BitmapHeader, (const U8 *)p, pBMP, pPAL, NULL);
+    135            } else {
+    136              //
+    137              // Error in case of wrong bitmap format
+    138              //
+    139              GUI_DEBUG_ERROROUT(__FILE__": Format of streamed bitmap does not match!");
+    140            }
+    141          }
+    142          */
+    143          
+    144          /*********************************************************************
+    145          *
+    146          *       GUI_DrawStreamedBitmap
+    147          */
+
+   \                                 In section .text, align 4, keep-with-next
+    148          void GUI_DrawStreamedBitmap(const void * p, int x, int y) {
+   \                     GUI_DrawStreamedBitmap:
+   \   00000000   F24F2DE9           PUSH     {R1,R4-R11,LR}
+   \   00000004   28D04DE2           SUB      SP,SP,#+40
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0250A0E1           MOV      R5,R2
+    149            GUI_BITMAP        Bitmap;
+    150            GUI_LOGPALETTE    Palette;
+    151            GUI_BITMAP_STREAM BitmapHeader;
+    152            
+    153            GUI_LOCK();
+   \   00000010   ........           BL       GUI_Lock
+    154            //
+    155            // Read header data
+    156            //
+    157            GUI__ReadHeaderFromStream(&BitmapHeader, (const U8 *)p);
+   \   00000014   00408DE5           STR      R4,[SP, #+0]
+   \   00000018   0D00A0E1           MOV      R0,SP
+   \   0000001C   ........           BL       GUI__Read16
+   \   00000020   0D00A0E1           MOV      R0,SP
+   \   00000024   ........           BL       GUI__Read16
+   \   00000028   0060A0E1           MOV      R6,R0
+   \   0000002C   0D00A0E1           MOV      R0,SP
+   \   00000030   ........           BL       GUI__Read16
+   \   00000034   0070A0E1           MOV      R7,R0
+   \   00000038   0D00A0E1           MOV      R0,SP
+   \   0000003C   ........           BL       GUI__Read16
+   \   00000040   0080A0E1           MOV      R8,R0
+   \   00000044   0D00A0E1           MOV      R0,SP
+   \   00000048   ........           BL       GUI__Read16
+   \   0000004C   0090A0E1           MOV      R9,R0
+   \   00000050   0D00A0E1           MOV      R0,SP
+   \   00000054   ........           BL       GUI__Read16
+   \   00000058   00A0A0E1           MOV      R10,R0
+   \   0000005C   0D00A0E1           MOV      R0,SP
+   \   00000060   ........           BL       GUI__Read16
+   \   00000064   00B0A0E1           MOV      R11,R0
+   \   00000068   0D00A0E1           MOV      R0,SP
+   \   0000006C   ........           BL       GUI__Read16
+    158            if (BitmapHeader.Format == GUI_STREAM_FORMAT_INDEXED) {
+   \   00000070   640056E3           CMP      R6,#+100
+   \   00000074   1200001A           BNE      ??GUI_DrawStreamedBitmap_0
+    159              //
+    160              // Initialize bitmap (and palette) structure
+    161              //
+    162              GUI__CreateBitmapFromStream(&BitmapHeader, (const U8 *)p, &Bitmap, &Palette, NULL);
+   \   00000078   0B1184E0           ADD      R1,R4,R11, LSL #+2
+   \   0000007C   101081E2           ADD      R1,R1,#+16
+   \   00000080   04208DE2           ADD      R2,SP,#+4
+   \   00000084   18108DE5           STR      R1,[SP, #+24]
+   \   00000088   1C208DE5           STR      R2,[SP, #+28]
+   \   0000008C   0020A0E3           MOV      R2,#+0
+   \   00000090   101084E2           ADD      R1,R4,#+16
+   \   00000094   20208DE5           STR      R2,[SP, #+32]
+   \   00000098   0800CDE5           STRB     R0,[SP, #+8]
+   \   0000009C   0C108DE5           STR      R1,[SP, #+12]
+   \   000000A0   B6A1CDE1           STRH     R10,[SP, #+22]
+   \   000000A4   B491CDE1           STRH     R9,[SP, #+20]
+   \   000000A8   B071CDE1           STRH     R7,[SP, #+16]
+   \   000000AC   B281CDE1           STRH     R8,[SP, #+18]
+   \   000000B0   04B08DE5           STR      R11,[SP, #+4]
+    163              //
+    164              // Draw bitmap
+    165              //
+    166              GUI_DrawBitmap(&Bitmap, x, y);
+   \   000000B4   0520A0E1           MOV      R2,R5
+   \   000000B8   28109DE5           LDR      R1,[SP, #+40]
+   \   000000BC   10008DE2           ADD      R0,SP,#+16
+   \   000000C0   ........           BL       GUI_DrawBitmap
+    167            } else {
+    168              //
+    169              // Error in case of wrong bitmap format
+    170              //
+    171              GUI_DEBUG_ERROROUT(__FILE__": Format of streamed bitmap does not match!");
+    172            }
+    173            GUI_UNLOCK();
+   \                     ??GUI_DrawStreamedBitmap_0:
+   \   000000C4   ........           BL       GUI_Unlock
+    174          }
+   \   000000C8   2CD08DE2           ADD      SP,SP,#+44       ;; stack cleaning
+   \   000000CC   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    175          
+    176          /*********************************************************************
+    177          *
+    178          *       GUI_SetStreamedBitmapHook
+    179          */
+
+   \                                 In section .text, align 4, keep-with-next
+    180          void GUI_SetStreamedBitmapHook(GUI_BITMAPSTREAM_CALLBACK pfStreamedBitmapHook) {
+    181            _pfStreamedBitmapHook = pfStreamedBitmapHook;
+   \                     GUI_SetStreamedBitmapHook:
+   \   00000000   ........           LDR      R1,??DataTable2
+   \   00000004   000081E5           STR      R0,[R1, #+0]
+    182          }
+   \   00000008   1EFF2FE1           BX       LR               ;; return
+    183          
+    184          /*********************************************************************
+    185          *
+    186          *       GUI_DrawStreamedBitmapEx
+    187          */
+
+   \                                 In section .text, align 4, keep-with-next
+    188          int GUI_DrawStreamedBitmapEx(GUI_GET_DATA_FUNC * pfGetData, const void * p, int x, int y) {
+   \                     GUI_DrawStreamedBitmapEx:
+   \   00000000   F54F2DE9           PUSH     {R0,R2,R4-R11,LR}
+   \   00000004   54D04DE2           SUB      SP,SP,#+84
+   \   00000008   0160A0E1           MOV      R6,R1
+   \   0000000C   0390A0E1           MOV      R9,R3
+    189            GUI_BITMAP        Bitmap = {0};
+   \   00000010   30008DE2           ADD      R0,SP,#+48
+   \   00000014   0010A0E3           MOV      R1,#+0
+   \   00000018   0020A0E3           MOV      R2,#+0
+   \   0000001C   0030A0E3           MOV      R3,#+0
+   \   00000020   0E00A0E8           STM      R0!,{R1-R3}
+   \   00000024   0600A0E8           STM      R0!,{R1,R2}
+    190            GUI_LOGPALETTE    Palette;
+    191            GUI_BITMAP_STREAM BitmapHeader;
+    192            U8                acBuffer[sizeof(GUI_BITMAP_STREAM)];
+    193            U8              * pBuffer;
+    194            U8              * pData;
+    195            U8              * pPalette;
+    196            GUI_HMEM          hPalette, hData;
+    197            int               SizeOfPalette, i, r;
+    198            U32               Off, Color, NumFreeBytes, NumDataBytes, SizeOfDataBuffer, RemBytes, BytesInBuffer;
+    199            GUI_BITMAPSTREAM_PARAM Param;
+    200          
+    201            GUI_LOCK();
+   \   00000028   ........           BL       GUI_Lock
+    202            pBuffer  = acBuffer;
+   \   0000002C   44108DE2           ADD      R1,SP,#+68
+   \   00000030   0C108DE5           STR      R1,[SP, #+12]
+    203            hPalette = 0;
+   \   00000034   0050A0E3           MOV      R5,#+0
+   \   00000038   00508DE5           STR      R5,[SP, #+0]
+    204            pPalette = NULL;
+    205            Off      = 0;
+    206            r        = 0;
+   \   0000003C   14508DE5           STR      R5,[SP, #+20]
+    207            if (_GetData(pfGetData, p, (const U8 **)&pBuffer, 16, &Off) == 0) {
+   \   00000040   0030A0E3           MOV      R3,#+0
+   \   00000044   1020A0E3           MOV      R2,#+16
+   \   00000048   0C108DE2           ADD      R1,SP,#+12
+   \   0000004C   0600A0E1           MOV      R0,R6
+   \   00000050   54C09DE5           LDR      R12,[SP, #+84]
+   \   00000054   3CFF2FE1           BLX      R12
+   \   00000058   100050E3           CMP      R0,#+16
+   \   0000005C   A900001A           BNE      ??GUI_DrawStreamedBitmapEx_0
+    208              //
+    209              // Read header data
+    210              //
+    211              GUI__ReadHeaderFromStream(&BitmapHeader, acBuffer);
+   \   00000060   44108DE2           ADD      R1,SP,#+68
+   \   00000064   04108DE5           STR      R1,[SP, #+4]
+   \   00000068   04008DE2           ADD      R0,SP,#+4
+   \   0000006C   ........           BL       GUI__Read16
+   \   00000070   04008DE2           ADD      R0,SP,#+4
+   \   00000074   ........           BL       GUI__Read16
+   \   00000078   04008DE2           ADD      R0,SP,#+4
+   \   0000007C   ........           BL       GUI__Read16
+   \   00000080   B201CDE1           STRH     R0,[SP, #+18]
+   \   00000084   04008DE2           ADD      R0,SP,#+4
+   \   00000088   ........           BL       GUI__Read16
+   \   0000008C   B001CDE1           STRH     R0,[SP, #+16]
+   \   00000090   04008DE2           ADD      R0,SP,#+4
+   \   00000094   ........           BL       GUI__Read16
+   \   00000098   0070A0E1           MOV      R7,R0
+   \   0000009C   04008DE2           ADD      R0,SP,#+4
+   \   000000A0   ........           BL       GUI__Read16
+   \   000000A4   00B0A0E1           MOV      R11,R0
+   \   000000A8   04008DE2           ADD      R0,SP,#+4
+   \   000000AC   ........           BL       GUI__Read16
+   \   000000B0   0040A0E1           MOV      R4,R0
+   \   000000B4   04008DE2           ADD      R0,SP,#+4
+   \   000000B8   ........           BL       GUI__Read16
+    212              //
+    213              // Calculate number of bytes for palette data
+    214              //
+    215              SizeOfPalette = BitmapHeader.NumColors * 4;
+    216              //
+    217              // Fill bitmap structure except pointer to pixel data and ySize
+    218              //
+    219              Bitmap.BitsPerPixel = BitmapHeader.BitsPerPixel;
+    220              Bitmap.BytesPerLine = BitmapHeader.BytesPerLine;
+    221              Bitmap.pPal         = &Palette;
+   \   000000BC   24208DE2           ADD      R2,SP,#+36
+    222              Bitmap.XSize        = BitmapHeader.XSize;
+    223              //
+    224              // Fill palette structure except pointer to palette data
+    225              //
+    226              Palette.HasTrans    = BitmapHeader.HasTrans;
+   \   000000C0   2800CDE5           STRB     R0,[SP, #+40]
+    227              Palette.NumEntries  = BitmapHeader.NumColors;
+    228              Palette.pPalEntries = (const LCD_COLOR *)pPalette;
+   \   000000C4   00109DE5           LDR      R1,[SP, #+0]
+   \   000000C8   3C208DE5           STR      R2,[SP, #+60]
+   \   000000CC   ........           LDR      R0,??DataTable2
+   \   000000D0   B221DDE1           LDRH     R2,[SP, #+18]
+   \   000000D4   2C108DE5           STR      R1,[SP, #+44]
+   \   000000D8   001090E5           LDR      R1,[R0, #+0]
+   \   000000DC   0481A0E1           LSL      R8,R4,#+2
+   \   000000E0   B6B3CDE1           STRH     R11,[SP, #+54]
+   \   000000E4   B473CDE1           STRH     R7,[SP, #+52]
+   \   000000E8   B023CDE1           STRH     R2,[SP, #+48]
+   \   000000EC   24408DE5           STR      R4,[SP, #+36]
+   \   000000F0   000051E3           CMP      R1,#+0
+   \   000000F4   0500000A           BEQ      ??GUI_DrawStreamedBitmapEx_1
+    229              //
+    230              // Allocate palette buffer
+    231              //
+    232              if (_pfStreamedBitmapHook) {
+    233                //
+    234                // In case of having a callback function the application can spend a memory area for the palette data
+    235                //
+    236                Param.Cmd = GUI_BITMAPSTREAM_GET_BUFFER;   // Command
+   \   000000F8   0120A0E3           MOV      R2,#+1
+   \   000000FC   18208DE5           STR      R2,[SP, #+24]
+    237                Param.v   = SizeOfPalette;                 // Number of bytes requested
+   \   00000100   1C808DE5           STR      R8,[SP, #+28]
+    238                pPalette  = (U8 *)_pfStreamedBitmapHook(&Param); // Call hook function
+   \   00000104   18008DE2           ADD      R0,SP,#+24
+   \   00000108   31FF2FE1           BLX      R1
+   \   0000010C   00008DE5           STR      R0,[SP, #+0]
+    239              }
+    240              if (pPalette == NULL) {
+   \                     ??GUI_DrawStreamedBitmapEx_1:
+   \   00000110   00009DE5           LDR      R0,[SP, #+0]
+   \   00000114   000050E3           CMP      R0,#+0
+   \   00000118   0500001A           BNE      ??GUI_DrawStreamedBitmapEx_2
+    241                //
+    242                // If there is no buffer use the emWin memory manager to get a buffer
+    243                //
+    244                hPalette = GUI_ALLOC_AllocNoInit(SizeOfPalette);
+   \   0000011C   0800A0E1           MOV      R0,R8
+   \   00000120   ........           BL       GUI_ALLOC_AllocNoInit
+   \   00000124   0050B0E1           MOVS     R5,R0
+    245                if (hPalette) {
+   \   00000128   0100000A           BEQ      ??GUI_DrawStreamedBitmapEx_2
+    246                  pPalette = (U8 *)GUI_LOCK_H(hPalette);
+   \   0000012C   ........           BL       GUI_ALLOC_LockH
+   \   00000130   00008DE5           STR      R0,[SP, #+0]
+    247                }
+    248              }
+    249              if (pPalette) {
+   \                     ??GUI_DrawStreamedBitmapEx_2:
+   \   00000134   00009DE5           LDR      R0,[SP, #+0]
+   \   00000138   000050E3           CMP      R0,#+0
+   \   0000013C   7100000A           BEQ      ??GUI_DrawStreamedBitmapEx_0
+    250                if (_GetData(pfGetData, p, (const U8 **)&pPalette, SizeOfPalette, &Off) == 0) {
+   \   00000140   1030A0E3           MOV      R3,#+16
+   \   00000144   0820A0E1           MOV      R2,R8
+   \   00000148   0D10A0E1           MOV      R1,SP
+   \   0000014C   0600A0E1           MOV      R0,R6
+   \   00000150   54C09DE5           LDR      R12,[SP, #+84]
+   \   00000154   3CFF2FE1           BLX      R12
+   \   00000158   080050E1           CMP      R0,R8
+   \   0000015C   2600001A           BNE      ??GUI_DrawStreamedBitmapEx_3
+    251                  pBuffer = pPalette;
+   \   00000160   00109DE5           LDR      R1,[SP, #+0]
+   \   00000164   108080E2           ADD      R8,R0,#+16
+   \   00000168   0C108DE5           STR      R1,[SP, #+12]
+    252                  for (i = 0; i < BitmapHeader.NumColors; i++) {
+   \   0000016C   00B0A0E3           MOV      R11,#+0
+   \   00000170   000054E3           CMP      R4,#+0
+   \   00000174   0600000A           BEQ      ??GUI_DrawStreamedBitmapEx_4
+    253                    Color = GUI__Read32((const U8 **)&pBuffer);
+   \                     ??GUI_DrawStreamedBitmapEx_5:
+   \   00000178   0C008DE2           ADD      R0,SP,#+12
+   \   0000017C   ........           BL       GUI__Read32
+    254                    *((U32 *)pPalette + i) = Color;
+   \   00000180   00109DE5           LDR      R1,[SP, #+0]
+   \   00000184   0B0181E7           STR      R0,[R1, +R11, LSL #+2]
+    255                  }
+   \   00000188   01B08BE2           ADD      R11,R11,#+1
+   \   0000018C   04005BE1           CMP      R11,R4
+   \   00000190   F8FFFFBA           BLT      ??GUI_DrawStreamedBitmapEx_5
+    256                  if (_pfStreamedBitmapHook) {
+   \                     ??GUI_DrawStreamedBitmapEx_4:
+   \   00000194   ........           LDR      R0,??DataTable2
+   \   00000198   001090E5           LDR      R1,[R0, #+0]
+   \   0000019C   000051E3           CMP      R1,#+0
+   \   000001A0   0600000A           BEQ      ??GUI_DrawStreamedBitmapEx_6
+    257                    //
+    258                    // Call hook function to be able to change the palette by the application
+    259                    //
+    260                    Param.Cmd = GUI_BITMAPSTREAM_MODIFY_PALETTE; // Command
+   \   000001A4   0320A0E3           MOV      R2,#+3
+   \   000001A8   18208DE5           STR      R2,[SP, #+24]
+    261                    Param.p   = pPalette;                        // Pointer to palette data
+   \   000001AC   00209DE5           LDR      R2,[SP, #+0]
+    262                    Param.v   = BitmapHeader.NumColors;          // Number of colors
+   \   000001B0   1C408DE5           STR      R4,[SP, #+28]
+   \   000001B4   20208DE5           STR      R2,[SP, #+32]
+    263                    _pfStreamedBitmapHook(&Param);               // Call hook function
+   \   000001B8   18008DE2           ADD      R0,SP,#+24
+   \   000001BC   31FF2FE1           BLX      R1
+    264                  }
+    265                  if (hPalette) {
+   \                     ??GUI_DrawStreamedBitmapEx_6:
+   \   000001C0   000055E3           CMP      R5,#+0
+   \   000001C4   0200000A           BEQ      ??GUI_DrawStreamedBitmapEx_7
+    266                    GUI_UNLOCK_H(pPalette);
+   \   000001C8   ........           BL       GUI_ALLOC_UnlockH
+   \   000001CC   0010A0E3           MOV      R1,#+0
+   \   000001D0   00108DE5           STR      R1,[SP, #+0]
+    267                  }
+    268                  //
+    269                  // Get buffer for at least one line of data
+    270                  //
+    271                  NumFreeBytes = GUI_ALLOC_GetNumFreeBytes();
+   \                     ??GUI_DrawStreamedBitmapEx_7:
+   \   000001D4   ........           BL       GUI_ALLOC_GetNumFreeBytes
+    272                  NumDataBytes = BitmapHeader.BytesPerLine * BitmapHeader.YSize;
+   \   000001D8   B021DDE1           LDRH     R2,[SP, #+16]
+   \   000001DC   0710A0E1           MOV      R1,R7
+    273                  if (NumFreeBytes >= BitmapHeader.BytesPerLine) {
+   \   000001E0   070050E1           CMP      R0,R7
+   \   000001E4   92010AE0           MUL      R10,R2,R1
+   \   000001E8   3500003A           BCC      ??GUI_DrawStreamedBitmapEx_8
+    274                    //
+    275                    // Calculate size of data buffer
+    276                    //
+    277                    if (NumFreeBytes >= NumDataBytes) {
+   \   000001EC   0A0050E1           CMP      R0,R10
+   \   000001F0   0400003A           BCC      ??GUI_DrawStreamedBitmapEx_9
+    278                      SizeOfDataBuffer = NumDataBytes;
+   \   000001F4   0AB0A0E1           MOV      R11,R10
+   \   000001F8   040000EA           B        ??GUI_DrawStreamedBitmapEx_10
+    279                    } else {
+    280                      SizeOfDataBuffer = (NumFreeBytes / BitmapHeader.BytesPerLine) * BitmapHeader.BytesPerLine;
+    281                    }
+    282                    //
+    283                    // Get data buffer
+    284                    //
+    285                    hData = GUI_ALLOC_AllocNoInit(SizeOfDataBuffer);
+    286                    pData = (U8 *)GUI_LOCK_H(hData);
+    287                    if (hPalette) {
+    288                      pPalette = (U8 *)GUI_LOCK_H(hPalette);
+    289                    }
+    290                    //
+    291                    // Set palette and pixel data pointer of bitmap structure
+    292                    //
+    293                    Bitmap.pData        = (const U8 *)pData;
+    294                    Palette.pPalEntries = (const LCD_COLOR *)pPalette;
+    295                    //
+    296                    // Draw bitmap
+    297                    //
+    298                    for (RemBytes = NumDataBytes; RemBytes; RemBytes -= BytesInBuffer) {
+    299                      if (RemBytes >= SizeOfDataBuffer) {
+    300                        BytesInBuffer = SizeOfDataBuffer;
+    301                      } else {
+    302                        BytesInBuffer = RemBytes;
+    303                      }
+    304                      if (_GetData(pfGetData, p, (const U8 **)&pData, BytesInBuffer, &Off)) {
+    305                        break;
+    306                      }
+    307                      //
+    308                      // Draw all lines which are currently in the buffer
+    309                      //
+    310                      Bitmap.YSize = BytesInBuffer / BitmapHeader.BytesPerLine;
+    311                      GUI_DrawBitmap(&Bitmap, x, y);
+    312                      y += Bitmap.YSize;
+    313                    }
+    314                    //
+    315                    // Release data buffer
+    316                    //
+    317                    GUI_UNLOCK_H(pData);
+    318                    GUI_ALLOC_Free(hData);
+    319                  }
+    320                } else {
+    321                  r = 1;
+   \                     ??GUI_DrawStreamedBitmapEx_3:
+   \   000001FC   0110A0E3           MOV      R1,#+1
+   \   00000200   14108DE5           STR      R1,[SP, #+20]
+   \   00000204   2E0000EA           B        ??GUI_DrawStreamedBitmapEx_8
+    322                }
+   \                     ??GUI_DrawStreamedBitmapEx_9:
+   \   00000208   ........           BL       __aeabi_uidiv
+   \   0000020C   97000BE0           MUL      R11,R7,R0
+   \                     ??GUI_DrawStreamedBitmapEx_10:
+   \   00000210   0B00A0E1           MOV      R0,R11
+   \   00000214   ........           BL       GUI_ALLOC_AllocNoInit
+   \   00000218   04008DE5           STR      R0,[SP, #+4]
+   \   0000021C   ........           BL       GUI_ALLOC_LockH
+   \   00000220   08008DE5           STR      R0,[SP, #+8]
+   \   00000224   000055E3           CMP      R5,#+0
+   \   00000228   0200000A           BEQ      ??GUI_DrawStreamedBitmapEx_11
+   \   0000022C   0500A0E1           MOV      R0,R5
+   \   00000230   ........           BL       GUI_ALLOC_LockH
+   \   00000234   00008DE5           STR      R0,[SP, #+0]
+   \                     ??GUI_DrawStreamedBitmapEx_11:
+   \   00000238   08109DE5           LDR      R1,[SP, #+8]
+   \   0000023C   38108DE5           STR      R1,[SP, #+56]
+   \   00000240   00109DE5           LDR      R1,[SP, #+0]
+   \   00000244   2C108DE5           STR      R1,[SP, #+44]
+   \   00000248   0B0000EA           B        ??GUI_DrawStreamedBitmapEx_12
+   \                     ??GUI_DrawStreamedBitmapEx_13:
+   \   0000024C   088080E0           ADD      R8,R0,R8
+   \   00000250   0400A0E1           MOV      R0,R4
+   \   00000254   0710A0E1           MOV      R1,R7
+   \   00000258   ........           BL       __aeabi_uidiv
+   \   0000025C   B203CDE1           STRH     R0,[SP, #+50]
+   \   00000260   0920A0E1           MOV      R2,R9
+   \   00000264   58109DE5           LDR      R1,[SP, #+88]
+   \   00000268   30008DE2           ADD      R0,SP,#+48
+   \   0000026C   ........           BL       GUI_DrawBitmap
+   \   00000270   B203DDE1           LDRH     R0,[SP, #+50]
+   \   00000274   04A04AE0           SUB      R10,R10,R4
+   \   00000278   099080E0           ADD      R9,R0,R9
+   \                     ??GUI_DrawStreamedBitmapEx_12:
+   \   0000027C   00005AE3           CMP      R10,#+0
+   \   00000280   0A00000A           BEQ      ??GUI_DrawStreamedBitmapEx_14
+   \   00000284   0A40A0E1           MOV      R4,R10
+   \   00000288   0B005AE1           CMP      R10,R11
+   \   0000028C   0B40A081           MOVHI    R4,R11
+   \   00000290   0830A0E1           MOV      R3,R8
+   \   00000294   0420A0E1           MOV      R2,R4
+   \   00000298   08108DE2           ADD      R1,SP,#+8
+   \   0000029C   0600A0E1           MOV      R0,R6
+   \   000002A0   54C09DE5           LDR      R12,[SP, #+84]
+   \   000002A4   3CFF2FE1           BLX      R12
+   \   000002A8   040050E1           CMP      R0,R4
+   \   000002AC   E6FFFF0A           BEQ      ??GUI_DrawStreamedBitmapEx_13
+   \                     ??GUI_DrawStreamedBitmapEx_14:
+   \   000002B0   ........           BL       GUI_ALLOC_UnlockH
+   \   000002B4   0010A0E3           MOV      R1,#+0
+   \   000002B8   08108DE5           STR      R1,[SP, #+8]
+   \   000002BC   04009DE5           LDR      R0,[SP, #+4]
+   \   000002C0   ........           BL       GUI_ALLOC_Free
+    323                //
+    324                // Release palette buffer
+    325                //
+    326                if (hPalette == 0) {
+   \                     ??GUI_DrawStreamedBitmapEx_8:
+   \   000002C4   000055E3           CMP      R5,#+0
+   \   000002C8   0800001A           BNE      ??GUI_DrawStreamedBitmapEx_15
+    327                  //
+    328                  // Tell the application to release the buffer
+    329                  //
+    330                  Param.Cmd = GUI_BITMAPSTREAM_RELEASE_BUFFER; // Command
+   \   000002CC   0210A0E3           MOV      R1,#+2
+   \   000002D0   18108DE5           STR      R1,[SP, #+24]
+    331                  Param.p   = pPalette;                        // Pointer to palette data
+   \   000002D4   00109DE5           LDR      R1,[SP, #+0]
+    332                  _pfStreamedBitmapHook(&Param);               // Call hook function
+   \   000002D8   18008DE2           ADD      R0,SP,#+24
+   \   000002DC   20108DE5           STR      R1,[SP, #+32]
+   \   000002E0   ........           LDR      R1,??DataTable2
+   \   000002E4   001091E5           LDR      R1,[R1, #+0]
+   \   000002E8   31FF2FE1           BLX      R1
+   \   000002EC   070000EA           B        ??GUI_DrawStreamedBitmapEx_16
+    333                } else {
+    334                  //
+    335                  // Release memory
+    336                  //
+    337                  GUI_UNLOCK_H(pPalette);
+   \                     ??GUI_DrawStreamedBitmapEx_15:
+   \   000002F0   ........           BL       GUI_ALLOC_UnlockH
+   \   000002F4   0010A0E3           MOV      R1,#+0
+   \   000002F8   00108DE5           STR      R1,[SP, #+0]
+    338                  GUI_ALLOC_Free(hPalette);
+   \   000002FC   0500A0E1           MOV      R0,R5
+   \   00000300   ........           BL       GUI_ALLOC_Free
+   \   00000304   010000EA           B        ??GUI_DrawStreamedBitmapEx_16
+    339                }
+    340              } else {
+    341                r = 1;
+   \                     ??GUI_DrawStreamedBitmapEx_0:
+   \   00000308   0110A0E3           MOV      R1,#+1
+   \   0000030C   14108DE5           STR      R1,[SP, #+20]
+    342              }
+    343            } else {
+    344              r = 1;
+    345            }
+    346            GUI_UNLOCK();
+   \                     ??GUI_DrawStreamedBitmapEx_16:
+   \   00000310   ........           BL       GUI_Unlock
+    347            return r;
+   \   00000314   14009DE5           LDR      R0,[SP, #+20]
+   \   00000318   5CD08DE2           ADD      SP,SP,#+92
+   \   0000031C   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    348          }
+    349          
+    350          /*********************************************************************
+    351          *
+    352          *       GUI_GetStreamedBitmapInfo
+    353          */
+
+   \                                 In section .text, align 4, keep-with-next
+    354          void GUI_GetStreamedBitmapInfo(const void * p, GUI_BITMAPSTREAM_INFO * pInfo) {
+   \                     GUI_GetStreamedBitmapInfo:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   08D04DE2           SUB      SP,SP,#+8
+    355            GUI_BITMAP_STREAM BitmapHeader;
+    356            
+    357            //
+    358            // Read header data
+    359            //
+    360            GUI__ReadHeaderFromStream(&BitmapHeader, (const U8 *)p);
+   \   00000008   00008DE5           STR      R0,[SP, #+0]
+   \   0000000C   0140A0E1           MOV      R4,R1
+   \   00000010   0D00A0E1           MOV      R0,SP
+   \   00000014   ........           BL       GUI__Read16
+   \   00000018   0D00A0E1           MOV      R0,SP
+   \   0000001C   ........           BL       GUI__Read16
+   \   00000020   0D00A0E1           MOV      R0,SP
+   \   00000024   ........           BL       GUI__Read16
+   \   00000028   0050A0E1           MOV      R5,R0
+   \   0000002C   0D00A0E1           MOV      R0,SP
+   \   00000030   ........           BL       GUI__Read16
+   \   00000034   0060A0E1           MOV      R6,R0
+   \   00000038   0D00A0E1           MOV      R0,SP
+   \   0000003C   ........           BL       GUI__Read16
+   \   00000040   0D00A0E1           MOV      R0,SP
+   \   00000044   ........           BL       GUI__Read16
+   \   00000048   0070A0E1           MOV      R7,R0
+   \   0000004C   0D00A0E1           MOV      R0,SP
+   \   00000050   ........           BL       GUI__Read16
+   \   00000054   0080A0E1           MOV      R8,R0
+   \   00000058   0D00A0E1           MOV      R0,SP
+   \   0000005C   ........           BL       GUI__Read16
+    361            //
+    362            // Fill info structure
+    363            //
+    364            _FillInfo(&BitmapHeader, pInfo);
+   \   00000060   087084E5           STR      R7,[R4, #+8]
+   \   00000064   100084E5           STR      R0,[R4, #+16]
+   \   00000068   0C8084E5           STR      R8,[R4, #+12]
+   \   0000006C   005084E5           STR      R5,[R4, #+0]
+   \   00000070   046084E5           STR      R6,[R4, #+4]
+    365          }
+   \   00000074   08D08DE2           ADD      SP,SP,#+8
+   \   00000078   F081BDE8           POP      {R4-R8,PC}       ;; return
+    366          
+    367          /*********************************************************************
+    368          *
+    369          *       GUI_GetStreamedBitmapInfoEx
+    370          */
+
+   \                                 In section .text, align 4, keep-with-next
+    371          int GUI_GetStreamedBitmapInfoEx(GUI_GET_DATA_FUNC * pfGetData, const void * p, GUI_BITMAPSTREAM_INFO * pInfo) {
+   \                     GUI_GetStreamedBitmapInfoEx:
+   \   00000000   F0432DE9           PUSH     {R4-R9,LR}
+   \   00000004   1CD04DE2           SUB      SP,SP,#+28
+   \   00000008   0050A0E1           MOV      R5,R0
+   \   0000000C   0160A0E1           MOV      R6,R1
+   \   00000010   0240A0E1           MOV      R4,R2
+    372            GUI_BITMAP_STREAM BitmapHeader;
+    373            U8                acBuffer[sizeof(GUI_BITMAP_STREAM)];
+    374            U8              * pBuffer;
+    375            U32               Off;
+    376            int               r;
+    377          
+    378            GUI_LOCK();
+   \   00000014   ........           BL       GUI_Lock
+    379            pBuffer = acBuffer;
+   \   00000018   08108DE2           ADD      R1,SP,#+8
+   \   0000001C   04108DE5           STR      R1,[SP, #+4]
+    380            Off     = 0;
+    381            if ((r = _GetData(pfGetData, p, (const U8 **)&pBuffer, 16, &Off)) == 0) {
+   \   00000020   0030A0E3           MOV      R3,#+0
+   \   00000024   1020A0E3           MOV      R2,#+16
+   \   00000028   04108DE2           ADD      R1,SP,#+4
+   \   0000002C   0600A0E1           MOV      R0,R6
+   \   00000030   35FF2FE1           BLX      R5
+   \   00000034   100050E3           CMP      R0,#+16
+   \   00000038   1C00001A           BNE      ??GUI_GetStreamedBitmapInfoEx_0
+    382              //
+    383              // Read header data
+    384              //
+    385              GUI__ReadHeaderFromStream(&BitmapHeader, pBuffer);
+   \   0000003C   04109DE5           LDR      R1,[SP, #+4]
+   \   00000040   0050A0E3           MOV      R5,#+0
+   \   00000044   00108DE5           STR      R1,[SP, #+0]
+   \   00000048   0D00A0E1           MOV      R0,SP
+   \   0000004C   ........           BL       GUI__Read16
+   \   00000050   0D00A0E1           MOV      R0,SP
+   \   00000054   ........           BL       GUI__Read16
+   \   00000058   0D00A0E1           MOV      R0,SP
+   \   0000005C   ........           BL       GUI__Read16
+   \   00000060   0060A0E1           MOV      R6,R0
+   \   00000064   0D00A0E1           MOV      R0,SP
+   \   00000068   ........           BL       GUI__Read16
+   \   0000006C   0070A0E1           MOV      R7,R0
+   \   00000070   0D00A0E1           MOV      R0,SP
+   \   00000074   ........           BL       GUI__Read16
+   \   00000078   0D00A0E1           MOV      R0,SP
+   \   0000007C   ........           BL       GUI__Read16
+   \   00000080   0080A0E1           MOV      R8,R0
+   \   00000084   0D00A0E1           MOV      R0,SP
+   \   00000088   ........           BL       GUI__Read16
+   \   0000008C   0090A0E1           MOV      R9,R0
+   \   00000090   0D00A0E1           MOV      R0,SP
+   \   00000094   ........           BL       GUI__Read16
+    386              //
+    387              // Fill info structure
+    388              //
+    389              _FillInfo(&BitmapHeader, pInfo);
+   \   00000098   088084E5           STR      R8,[R4, #+8]
+   \   0000009C   100084E5           STR      R0,[R4, #+16]
+   \   000000A0   0C9084E5           STR      R9,[R4, #+12]
+   \   000000A4   006084E5           STR      R6,[R4, #+0]
+   \   000000A8   047084E5           STR      R7,[R4, #+4]
+    390            }
+   \   000000AC   000000EA           B        ??GUI_GetStreamedBitmapInfoEx_1
+   \                     ??GUI_GetStreamedBitmapInfoEx_0:
+   \   000000B0   0150A0E3           MOV      R5,#+1
+    391            return r;
+   \                     ??GUI_GetStreamedBitmapInfoEx_1:
+   \   000000B4   0500A0E1           MOV      R0,R5
+   \   000000B8   1CD08DE2           ADD      SP,SP,#+28
+   \   000000BC   F083BDE8           POP      {R4-R9,PC}       ;; return
+    392          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable2:
+   \   00000000   ........           DC32     _pfStreamedBitmapHook
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant {0}>`:
+   \   00000000                      ; Initializer data, 20 bytes
+   \   00000000   0000               DC16 0
+   \   00000002   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              00000000    
+   \   0000000C   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0
+   \              0000        
+    393          
+    394          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function                    .cstack
+     --------                    -------
+     GUI_DrawStreamedBitmap          80
+     GUI_DrawStreamedBitmapEx       128
+     GUI_GetStreamedBitmapInfo       32
+     GUI_GetStreamedBitmapInfoEx     56
+     GUI_SetStreamedBitmapHook        0
+     GUI__CreateBitmapFromStream      4
+     GUI__ReadHeaderFromStream       16
+
+
+   Section sizes:
+
+     Function/Label              Bytes
+     --------------              -----
+     _pfStreamedBitmapHook          4
+     GUI__ReadHeaderFromStream    116
+     GUI__CreateBitmapFromStream  100
+     GUI_DrawStreamedBitmap       208
+     GUI_SetStreamedBitmapHook     12
+     GUI_DrawStreamedBitmapEx     800
+     GUI_GetStreamedBitmapInfo    124
+     GUI_GetStreamedBitmapInfoEx  192
+     ??DataTable2                   4
+     ?<Constant {0}>               20
+
+ 
+     4 bytes in section .bss
+    20 bytes in section .rodata
+ 1 556 bytes in section .text
+ 
+ 1 556 bytes of CODE  memory
+    20 bytes of CONST memory
+     4 bytes of DATA  memory
+
+Errors: none
+Warnings: none

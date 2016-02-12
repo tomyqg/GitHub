@@ -1,0 +1,637 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     02/Feb/2016  18:31:49 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\DUII\GMeterScreen.cpp                            #
+#    Command line =  C:\DUII\DUII\GMeterScreen.cpp -D DEBUG=1 -D              #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --eec++                              #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\GM #
+#                    eterScreen.lst                                           #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\GMe #
+#                    terScreen.o                                              #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\DUII\GMeterScreen.cpp
+      1          
+      2          /*********************************************************************
+      3          *                SEGGER Microcontroller GmbH & Co. KG                *
+      4          *        Solutions for real time microcontroller applications        *
+      5          **********************************************************************
+      6          *                                                                    *
+      7          *        (c) 1996 - 2009  SEGGER Microcontroller GmbH & Co. KG       *
+      8          *                                                                    *
+      9          *        Internet: www.segger.com    Support:  support@segger.com    *
+     10          *                                                                    *
+     11          **********************************************************************
+     12          
+     13          ** emWin V5.00 - Graphical user interface for embedded applications **
+     14          emWin is protected by international copyright laws.   Knowledge of the
+     15          source code may not be used to write a similar product.  This file may
+     16          only be used in accordance with a license and should not be re-
+     17          distributed in any way. We appreciate your understanding and fairness.
+     18          ----------------------------------------------------------------------
+     19          File        : MainTask.C
+     20          Purpose     : Main program, called from after main after initialisation
+     21          ---------------------------END-OF-HEADER------------------------------
+     22          */
+     23          
+     24          #include <stdio.h>
+     25          #include <stdlib.h>
+     26          #include "DUII.h"
+     27          #include "GUI.h"
+     28          #include "GeneralConfig.h"
+     29          #include "commondefs.h"
+     30          #include "ConfigScreens.h"
+     31          #include "GMeterScreen.h"
+     32          #include "GMeter.hpp"
+     33          #include "RunningGauges.h"
+     34          #include "DataHandler.h"
+     35          #include "ConfigurableGaugeCommon.h"
+     36          #include "LEDHandler.h"
+     37          
+     38          
+     39          /*********************************************************************
+     40          *
+     41          *       External data and code
+     42          *
+     43          **********************************************************************
+     44          */
+     45          #ifdef __cplusplus
+     46          extern "C" {
+     47          extern char lockupSemaphore;
+     48          }
+     49          #endif
+     50          
+     51          /*********************************************************************
+     52          *
+     53          *       Public code
+     54          *
+     55          **********************************************************************
+     56          */
+     57          
+     58          /*********************************************************************
+     59          *
+     60          *       Local Prototypes
+     61          *
+     62          **********************************************************************
+     63          */
+     64          void GMDrawConfigRect(void);
+     65          
+     66          
+     67          /*********************************************************************
+     68          *
+     69          *		Public Variables
+     70          *
+     71          **********************************************************************
+     72          */
+
+   \                                 In section .bss, align 4
+     73          WM_HWIN hGMeterScreen;
+   \                     hGMeterScreen:
+   \   00000000                      DS8 4
+   \   00000004                      DS8 4
+     74          
+     75          /*********************************************************************
+     76          *
+     77          *       Local Variables
+     78          *
+     79          **********************************************************************
+     80          */
+     81          static WM_HTIMER hScreenTimer;
+     82          GMeter *pGM = 0;
+   \                     pGM:
+   \   00000008                      DS8 4
+     83          static bool firsttimethrough;
+     84          int errorCounter;
+   \                     errorCounter:
+   \   0000000C                      DS8 4
+     85          GUI_MEMDEV_Handle memDev;
+   \                     memDev:
+   \   00000010                      DS8 4
+   \   00000014                      DS8 1
+     86          
+     87          /*********************************************************************
+     88          *
+     89          *       Local Defines
+     90          *
+     91          **********************************************************************
+     92          */
+     93          #define	CONFIGURABLE_COLOR	GUI_ORANGE
+     94          const GUI_RECT configurableItemRect = { 0, 0, 140, 88 };
+     95          
+     96          //const GUI_RECT DataElementRect = { 0, 8,  150, 40 };
+     97          //const GUI_RECT NameRect =		 { 0, 41, 120, 64 };
+     98          //const GUI_RECT UnitsRect =		 { 0, 64, 120, 88 };
+
+   \                                 In section .text, align 4, keep-with-next
+     99          const GUI_RECT DataElementRect = { 0, 5,  150, 37 };
+   \                     DataElementRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   000005009600       DC16 0, 5, 150, 37
+   \              2500        
+
+   \                                 In section .text, align 4, keep-with-next
+    100          const GUI_RECT NameRect =		 { 0, 38, 120, 61 };
+   \                     NameRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   000026007800       DC16 0, 38, 120, 61
+   \              3D00        
+
+   \                                 In section .text, align 4, keep-with-next
+    101          const GUI_RECT UnitsRect =		 { 0, 61, 120, 85 };
+   \                     UnitsRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   00003D007800       DC16 0, 61, 120, 85
+   \              5500        
+    102          
+
+   \                                 In section .data, align 4
+    103          static const DISPLAY_ELEMENT pData =	{ DataElementRect,	GUI_TA_LEFT,	CONFIGURABLE_COLOR,	&GUI_FontD32 };
+   \                     pData:
+   \   00000000   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0
+   \              0000        
+   \   00000008   00000000FF80       DC32 0, 33023, GUI_FontD32
+   \              0000........
+    104          static const DISPLAY_ELEMENT pName =	{ NameRect,			GUI_TA_LEFT,	GUI_LIGHTGRAY,		&GUI_Font24B_ASCII };
+   \                     pName:
+   \   00000014   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0
+   \              0000        
+   \   0000001C   00000000D3D3       DC32 0, 13882323, GUI_Font24B_ASCII
+   \              D300........
+    105          static const DISPLAY_ELEMENT pUnits =	{ UnitsRect,		GUI_TA_LEFT,	GUI_LIGHTGRAY,		&GUI_Font24B_ASCII };
+   \                     pUnits:
+   \   00000028   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0
+   \              0000        
+   \   00000030   00000000D3D3       DC32 0, 13882323, GUI_Font24B_ASCII
+   \              D300........
+    106          
+
+   \                                 In section .text, align 4, keep-with-next
+    107          const CONFIG_ARGS config = { (DISPLAY_ELEMENT *)&pData, (DISPLAY_ELEMENT *)&pName, (DISPLAY_ELEMENT *)&pUnits };
+   \                     config:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   ............       DC32 pData, pName, pUnits
+   \              ............
+    108          
+    109          
+
+   \                                 In section .text, align 4, keep-with-next
+    110          void _cbGMeterCallback(WM_MESSAGE * pMsg) {
+   \                     _cbGMeterCallback:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+    111          
+    112          	switch(pMsg->MsgId)
+   \   00000004   001090E5           LDR      R1,[R0, #+0]
+   \   00000008   14D04DE2           SUB      SP,SP,#+20
+   \   0000000C   0B1051E2           SUBS     R1,R1,#+11
+   \   00000010   5A00000A           BEQ      ??_cbGMeterCallback_0
+   \   00000014   041051E2           SUBS     R1,R1,#+4
+   \   00000018   2600000A           BEQ      ??_cbGMeterCallback_1
+   \   0000001C   411F51E2           SUBS     R1,R1,#+260
+   \   00000020   6100001A           BNE      ??_cbGMeterCallback_2
+    113          	{
+    114          	case WM_TIMER:
+    115          		if (pMsg->Data.v == hScreenTimer)
+   \   00000024   ........           LDR      R4,??DataTable6_1
+   \   00000028   0C0090E5           LDR      R0,[R0, #+12]
+   \   0000002C   042094E5           LDR      R2,[R4, #+4]
+   \   00000030   020050E1           CMP      R0,R2
+   \   00000034   5D00001A           BNE      ??_cbGMeterCallback_3
+    116          		{
+    117          			WM_RestartTimer(hScreenTimer, G_METER_SCREEN_REFRESH_TIME);
+   \   00000038   3210A0E3           MOV      R1,#+50
+   \   0000003C   0200A0E1           MOV      R0,R2
+   \   00000040   ........           BL       WM_RestartTimer
+    118          
+    119          			// Check "box timer" if running
+    120          			if (drawFlag)
+   \   00000044   ........           LDR      R5,??DataTable6_2
+   \   00000048   0000D5E5           LDRB     R0,[R5, #+0]
+   \   0000004C   000050E3           CMP      R0,#+0
+   \   00000050   0B00000A           BEQ      ??_cbGMeterCallback_4
+    121          			{
+    122          				if ((GUI_GetTime() - boxStartTime) > BOX_PERSIST_TIME)
+   \   00000054   ........           BL       GUI_GetTime
+   \   00000058   ........           LDR      R1,??DataTable6_3
+   \   0000005C   001091E5           LDR      R1,[R1, #+0]
+   \   00000060   010040E0           SUB      R0,R0,R1
+   \   00000064   8910A0E3           MOV      R1,#+137
+   \   00000068   4C1D81E3           ORR      R1,R1,#0x1300
+   \   0000006C   010050E1           CMP      R0,R1
+   \   00000070   030000BA           BLT      ??_cbGMeterCallback_4
+    123          				{
+    124          					configureGaugeMode = false;
+   \   00000074   ........           LDR      R1,??DataTable6_4
+   \   00000078   0000A0E3           MOV      R0,#+0
+   \   0000007C   0000C1E5           STRB     R0,[R1, #+0]
+    125          					drawFlag = false;
+   \   00000080   0000C5E5           STRB     R0,[R5, #+0]
+    126          				}
+    127          			}
+    128          
+    129          			// Try setting value here to split processing load
+    130          			pGM->SetValue(GetValue(X_G_DAMPED).fVal, GetValue(Y_G_DAMPED).fVal);
+   \                     ??_cbGMeterCallback_4:
+   \   00000084   0A10A0E3           MOV      R1,#+10
+   \   00000088   08008DE2           ADD      R0,SP,#+8
+   \   0000008C   ........           BL       GetValue
+   \   00000090   0910A0E3           MOV      R1,#+9
+   \   00000094   0D00A0E1           MOV      R0,SP
+   \   00000098   ........           BL       GetValue
+   \   0000009C   08209DE5           LDR      R2,[SP, #+8]
+   \   000000A0   00109DE5           LDR      R1,[SP, #+0]
+   \   000000A4   080094E5           LDR      R0,[R4, #+8]
+   \   000000A8   ........           BL       _ZN6GMeter8SetValueEff
+    131          
+    132          			WM_InvalidateWindow(hGMeterScreen);
+   \   000000AC   000094E5           LDR      R0,[R4, #+0]
+   \   000000B0   ........           BL       WM_InvalidateWindow
+   \   000000B4   3D0000EA           B        ??_cbGMeterCallback_3
+    133          		}
+    134          		break;
+    135          
+    136          	case WM_PAINT:
+    137          		if (CS_IsVisible(GMETER) || firsttimethrough)
+   \                     ??_cbGMeterCallback_1:
+   \   000000B8   ........           LDR      R4,??DataTable6_1
+   \   000000BC   0000A0E3           MOV      R0,#+0
+   \   000000C0   ........           BL       CS_IsVisible
+   \   000000C4   000050E3           CMP      R0,#+0
+   \   000000C8   1400D405           LDRBEQ   R0,[R4, #+20]
+   \   000000CC   00005003           CMPEQ    R0,#+0
+   \   000000D0   3600000A           BEQ      ??_cbGMeterCallback_3
+    138          		{
+    139          			firsttimethrough = false;
+   \   000000D4   0000A0E3           MOV      R0,#+0
+   \   000000D8   1400C4E5           STRB     R0,[R4, #+20]
+    140          
+    141          			if (lockupSemaphore)			// If main has not run since our last paint - exit!
+   \   000000DC   ........           LDR      R0,??DataTable6_5
+   \   000000E0   0010D0E5           LDRB     R1,[R0, #+0]
+   \   000000E4   000051E3           CMP      R1,#+0
+   \   000000E8   0300000A           BEQ      ??_cbGMeterCallback_5
+    142          			{
+    143          				errorCounter++;
+   \   000000EC   0C0094E5           LDR      R0,[R4, #+12]
+   \   000000F0   010080E2           ADD      R0,R0,#+1
+   \   000000F4   0C0084E5           STR      R0,[R4, #+12]
+    144          				break;
+   \   000000F8   2C0000EA           B        ??_cbGMeterCallback_3
+    145          			}
+    146          			else lockupSemaphore = true;
+   \                     ??_cbGMeterCallback_5:
+   \   000000FC   0110A0E3           MOV      R1,#+1
+   \   00000100   0010C0E5           STRB     R1,[R0, #+0]
+    147          			
+    148          			GUI_MEMDEV_Select(memDev);
+   \   00000104   100094E5           LDR      R0,[R4, #+16]
+   \   00000108   ........           BL       GUI_MEMDEV_Select
+    149          
+    150          			pGM->DrawControl();
+   \   0000010C   080094E5           LDR      R0,[R4, #+8]
+   \   00000110   ........           BL       _ZN6GMeter11DrawControlEv
+    151          
+    152          			// Display the selected configurable gauge item
+    153          			DisplayConfigurableItem( &config );
+   \   00000114   ........           ADR      R0,config
+   \   00000118   ........           BL       DisplayConfigurableItem
+    154          
+    155          			// Draw box around programmable gauge member(s) if requested
+    156          #ifdef	INCLUDE_RACE_HELP
+    157          			if (drawFlag || raceTimerActive)
+    158          #else
+    159          			if (drawFlag)
+   \   0000011C   ........           LDR      R0,??DataTable6_2
+   \   00000120   0000D0E5           LDRB     R0,[R0, #+0]
+   \   00000124   000050E3           CMP      R0,#+0
+   \   00000128   0B00000A           BEQ      ??_cbGMeterCallback_6
+    160          #endif
+    161          				GMDrawConfigRect();
+   \   0000012C   FF00A0E3           MOV      R0,#+255
+   \   00000130   ........           BL       GUI_SetColor
+   \   00000134   5830A0E3           MOV      R3,#+88
+   \   00000138   8C20A0E3           MOV      R2,#+140
+   \   0000013C   0010A0E3           MOV      R1,#+0
+   \   00000140   0000A0E3           MOV      R0,#+0
+   \   00000144   ........           BL       GUI_DrawRect
+   \   00000148   5730A0E3           MOV      R3,#+87
+   \   0000014C   8B20A0E3           MOV      R2,#+139
+   \   00000150   0110A0E3           MOV      R1,#+1
+   \   00000154   0100A0E3           MOV      R0,#+1
+   \   00000158   ........           BL       GUI_DrawRect
+    162          
+    163          			if (SlideOutVisible())
+   \                     ??_cbGMeterCallback_6:
+   \   0000015C   ........           BL       SlideOutVisible
+   \   00000160   000050E3           CMP      R0,#+0
+   \   00000164   0000000A           BEQ      ??_cbGMeterCallback_7
+    164          				DrawSignalStrength();
+   \   00000168   ........           BL       DrawSignalStrength
+    165          
+    166          			CheckWarningPopups();
+   \                     ??_cbGMeterCallback_7:
+   \   0000016C   ........           BL       CheckWarningPopups
+    167          
+    168          			GUI_MEMDEV_CopyToLCD(memDev);
+   \   00000170   100094E5           LDR      R0,[R4, #+16]
+   \   00000174   ........           BL       GUI_MEMDEV_CopyToLCD
+    169          			GUI_SelectLCD();
+   \   00000178   ........           BL       GUI_SelectLCD
+   \   0000017C   0B0000EA           B        ??_cbGMeterCallback_3
+    170          		}
+    171          		break;
+    172          
+    173          	case WM_DELETE:
+    174          		if (pGM)
+   \                     ??_cbGMeterCallback_0:
+   \   00000180   ........           LDR      R4,??DataTable6_1
+   \   00000184   080094E5           LDR      R0,[R4, #+8]
+   \   00000188   000050E3           CMP      R0,#+0
+   \   0000018C   0700000A           BEQ      ??_cbGMeterCallback_3
+    175          		{
+    176          			delete pGM;
+   \   00000190   ........           BL       _ZN6GMeterD1Ev
+   \   00000194   ........           BL       _ZdlPv
+    177          			pGM = 0;
+   \   00000198   0000A0E3           MOV      R0,#+0
+   \   0000019C   080084E5           STR      R0,[R4, #+8]
+    178          			GUI_MEMDEV_Delete(memDev);
+   \   000001A0   100094E5           LDR      R0,[R4, #+16]
+   \   000001A4   ........           BL       GUI_MEMDEV_Delete
+   \   000001A8   000000EA           B        ??_cbGMeterCallback_3
+    179          		}
+    180          		break;
+    181          
+    182          	default:
+    183          		  WM_DefaultProc(pMsg);
+   \                     ??_cbGMeterCallback_2:
+   \   000001AC   ........           BL       WM_DefaultProc
+    184          	};
+    185          }
+   \                     ??_cbGMeterCallback_3:
+   \   000001B0   14D08DE2           ADD      SP,SP,#+20       ;; stack cleaning
+   \   000001B4   3080BDE8           POP      {R4,R5,PC}       ;; return
+    186          
+    187          //
+    188          // Draw rectangle around configurable item
+    189          //
+
+   \                                 In section .text, align 4, keep-with-next
+    190          void GMDrawConfigRect(void)
+    191          {
+   \                     _Z16GMDrawConfigRectv:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+    192          	GUI_SetColor(GUI_RED);
+   \   00000008   FF00A0E3           MOV      R0,#+255
+   \   0000000C   ........           BL       GUI_SetColor
+    193          	GUI_DrawRect(configurableItemRect.x0, configurableItemRect.y0, configurableItemRect.x1, configurableItemRect.y1);
+   \   00000010   5830A0E3           MOV      R3,#+88
+   \   00000014   8C20A0E3           MOV      R2,#+140
+   \   00000018   0010A0E3           MOV      R1,#+0
+   \   0000001C   0000A0E3           MOV      R0,#+0
+   \   00000020   ........           BL       GUI_DrawRect
+    194          	// Draw second rect one pixel inside first to make box two pixels wide
+    195          	GUI_DrawRect(configurableItemRect.x0 + 1, configurableItemRect.y0 + 1, configurableItemRect.x1 - 1, configurableItemRect.y1 - 1);
+   \   00000024   04D08DE2           ADD      SP,SP,#+4
+   \   00000028   0040BDE8           POP      {LR}
+   \   0000002C   5730A0E3           MOV      R3,#+87
+   \   00000030   8B20A0E3           MOV      R2,#+139
+   \   00000034   0110A0E3           MOV      R1,#+1
+   \   00000038   0100A0E3           MOV      R0,#+1
+   \   0000003C   ........           B        GUI_DrawRect     ;; tailcall
+    196          }
+    197          
+    198          /*********************************************************************
+    199          *
+    200          *       G-Meter Screen
+    201          */
+    202          
+
+   \                                 In section .text, align 4, keep-with-next
+    203          WM_HWIN Display_GMeterScreen(WM_HWIN hParent)
+    204          {
+   \                     Display_GMeterScreen:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+   \   00000004   0050A0E1           MOV      R5,R0
+    205          	firsttimethrough = true;
+   \   00000008   ........           LDR      R4,??DataTable6_1
+   \   0000000C   0100A0E3           MOV      R0,#+1
+   \   00000010   1400C4E5           STRB     R0,[R4, #+20]
+    206          	errorCounter = 0;
+   \   00000014   0060A0E3           MOV      R6,#+0
+   \   00000018   10D04DE2           SUB      SP,SP,#+16
+   \   0000001C   0C6084E5           STR      R6,[R4, #+12]
+    207          
+    208          	memDev = GUI_MEMDEV_Create(0, 0, XSIZE_PHYS, YSIZE_PHYS);
+   \   00000020   443FA0E3           MOV      R3,#+272
+   \   00000024   782FA0E3           MOV      R2,#+480
+   \   00000028   0010A0E3           MOV      R1,#+0
+   \   0000002C   0000A0E3           MOV      R0,#+0
+   \   00000030   ........           BL       GUI_MEMDEV_Create
+   \   00000034   100084E5           STR      R0,[R4, #+16]
+    209          
+    210          	if ((hGMeterScreen = WM_CreateWindowAsChild(0, 0, XSIZE_PHYS, YSIZE_PHYS, hParent, WM_CF_SHOW, _cbGMeterCallback, 0)) <= 0)
+   \   00000038   ........           LDR      R0,??DataTable6_6
+   \   0000003C   0C608DE5           STR      R6,[SP, #+12]
+   \   00000040   08008DE5           STR      R0,[SP, #+8]
+   \   00000044   0200A0E3           MOV      R0,#+2
+   \   00000048   04008DE5           STR      R0,[SP, #+4]
+   \   0000004C   00508DE5           STR      R5,[SP, #+0]
+   \   00000050   443FA0E3           MOV      R3,#+272
+   \   00000054   782FA0E3           MOV      R2,#+480
+   \   00000058   0010A0E3           MOV      R1,#+0
+   \   0000005C   0000A0E3           MOV      R0,#+0
+   \   00000060   ........           BL       WM_CreateWindowAsChild
+   \   00000064   000084E5           STR      R0,[R4, #+0]
+   \   00000068   010050E3           CMP      R0,#+1
+   \   0000006C   000000AA           BGE      ??Display_GMeterScreen_0
+    211          		SystemError();
+   \   00000070   ........           BL       SystemError
+    212          
+    213          	// KMC NOTE - Create the GMeter BEFORE creating the window.  The callback function is called DURING the CreateWindow call
+    214          	// so the GMeter has to be ready to start receiving messages
+    215          	if ((pGM = new GMeter(2)) <= 0)
+   \                     ??Display_GMeterScreen_0:
+   \   00000074   4800A0E3           MOV      R0,#+72
+   \   00000078   ........           BL       _Znwj
+   \   0000007C   000050E3           CMP      R0,#+0
+   \   00000080   0500000A           BEQ      ??Display_GMeterScreen_1
+   \   00000084   0210A0E3           MOV      R1,#+2
+   \   00000088   ........           BL       _ZN6GMeterC1Ei
+   \   0000008C   080084E5           STR      R0,[R4, #+8]
+   \   00000090   000050E3           CMP      R0,#+0
+   \   00000094   0200001A           BNE      ??Display_GMeterScreen_2
+   \   00000098   000000EA           B        ??Display_GMeterScreen_3
+   \                     ??Display_GMeterScreen_1:
+   \   0000009C   086084E5           STR      R6,[R4, #+8]
+    216          		SystemError();
+   \                     ??Display_GMeterScreen_3:
+   \   000000A0   ........           BL       SystemError
+    217          
+    218          	hScreenTimer = WM_CreateTimer(hGMeterScreen, 0, G_METER_SCREEN_REFRESH_TIME, 0);
+   \                     ??Display_GMeterScreen_2:
+   \   000000A4   0030A0E3           MOV      R3,#+0
+   \   000000A8   3220A0E3           MOV      R2,#+50
+   \   000000AC   0010A0E3           MOV      R1,#+0
+   \   000000B0   000094E5           LDR      R0,[R4, #+0]
+   \   000000B4   ........           BL       WM_CreateTimer
+   \   000000B8   040084E5           STR      R0,[R4, #+4]
+    219          
+    220          	return(hGMeterScreen);
+   \   000000BC   000094E5           LDR      R0,[R4, #+0]
+   \   000000C0   10D08DE2           ADD      SP,SP,#+16
+   \   000000C4   7080BDE8           POP      {R4-R6,PC}       ;; return
+    221          }
+    222          
+    223          //
+    224          // Return true if screen touch in on the configurable gauge item
+    225          //
+
+   \                                 In section .text, align 4, keep-with-next
+    226          char IfGMeterConfigGaugePressed(int lastx, int lasty)
+    227          {
+    228          	if ((lastx >= configurableItemRect.x0) && (lastx <= configurableItemRect.x1) && (lasty >= configurableItemRect.y0) && (lasty <= configurableItemRect.y1))
+   \                     IfGMeterConfigGaugePressed:
+   \   00000000   000050E3           CMP      R0,#+0
+   \   00000004   0700004A           BMI      ??IfGMeterConfigGaugePressed_0
+   \   00000008   8D0050E3           CMP      R0,#+141
+   \   0000000C   050000AA           BGE      ??IfGMeterConfigGaugePressed_0
+   \   00000010   000051E3           CMP      R1,#+0
+   \   00000014   0300004A           BMI      ??IfGMeterConfigGaugePressed_0
+   \   00000018   590051E3           CMP      R1,#+89
+   \   0000001C   010000AA           BGE      ??IfGMeterConfigGaugePressed_0
+    229          		return true;
+   \   00000020   0100A0E3           MOV      R0,#+1
+   \   00000024   1EFF2FE1           BX       LR
+    230          	else return false;
+   \                     ??IfGMeterConfigGaugePressed_0:
+   \   00000028   0000A0E3           MOV      R0,#+0
+   \   0000002C   1EFF2FE1           BX       LR               ;; return
+    231          }
+
+   \                                 In section .init_array, align 4, keep-with-next, root
+   \   00000000   ........           DC32    RELOC_ARM_TARGET1 __sti__routine
+
+   \                                 In section .text, align 4, keep-with-next
+   \   static __intrinsic __interwork __softfp void __sti__routine()
+   \                     __sti__routine:
+   \   00000000   ........           ADR      R1,DataElementRect
+   \   00000004   ........           LDR      R0,??DataTable6
+   \   00000008   002091E5           LDR      R2,[R1, #+0]
+   \   0000000C   043091E5           LDR      R3,[R1, #+4]
+   \   00000010   ........           ADR      R1,NameRect
+   \   00000014   0C0080E8           STM      R0,{R2,R3}
+   \   00000018   002091E5           LDR      R2,[R1, #+0]
+   \   0000001C   043091E5           LDR      R3,[R1, #+4]
+   \   00000020   ........           ADR      R1,UnitsRect
+   \   00000024   142080E5           STR      R2,[R0, #+20]
+   \   00000028   183080E5           STR      R3,[R0, #+24]
+   \   0000002C   002091E5           LDR      R2,[R1, #+0]
+   \   00000030   043091E5           LDR      R3,[R1, #+4]
+   \   00000034   282080E5           STR      R2,[R0, #+40]
+   \   00000038   2C3080E5           STR      R3,[R0, #+44]
+   \   0000003C   1EFF2FE1           BX       LR               ;; return
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6:
+   \   00000000   ........           DC32     pData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_1:
+   \   00000000   ........           DC32     hGMeterScreen
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_2:
+   \   00000000   ........           DC32     drawFlag
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_3:
+   \   00000000   ........           DC32     boxStartTime
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_4:
+   \   00000000   ........           DC32     configureGaugeMode
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_5:
+   \   00000000   ........           DC32     lockupSemaphore
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_6:
+   \   00000000   ........           DC32     _cbGMeterCallback
+    232          
+    233          /*************************** End of file ****************************/
+    234          
+
+   Maximum stack usage in bytes:
+
+     Function                   .cstack
+     --------                   -------
+     Display_GMeterScreen           32
+     GMDrawConfigRect()              8
+     IfGMeterConfigGaugePressed      0
+     __sti__routine()                0
+     _cbGMeterCallback              32
+
+
+   Section sizes:
+
+     Function/Label             Bytes
+     --------------             -----
+     hGMeterScreen                21
+     hScreenTimer
+     pGM
+     errorCounter
+     memDev
+     firsttimethrough
+     DataElementRect               8
+     NameRect                      8
+     UnitsRect                     8
+     pData                        60
+     pName
+     pUnits
+     config                       12
+     _cbGMeterCallback           440
+     GMDrawConfigRect()           64
+     Display_GMeterScreen        200
+     IfGMeterConfigGaugePressed   48
+     __sti__routine()             64
+     ??DataTable6                  4
+     ??DataTable6_1                4
+     ??DataTable6_2                4
+     ??DataTable6_3                4
+     ??DataTable6_4                4
+     ??DataTable6_5                4
+     ??DataTable6_6                4
+      Others                       4
+
+ 
+  21 bytes in section .bss
+  60 bytes in section .data
+   4 bytes in section .init_array
+ 880 bytes in section .text
+ 
+ 884 bytes of CODE memory
+  81 bytes of DATA memory
+
+Errors: none
+Warnings: none

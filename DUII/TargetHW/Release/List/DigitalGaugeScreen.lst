@@ -1,0 +1,898 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     02/Feb/2016  18:29:08 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\DUII\DigitalGaugeScreen.cpp                      #
+#    Command line =  C:\DUII\DUII\DigitalGaugeScreen.cpp -D DEBUG=1 -D        #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --eec++ --no_static_destruction                          #
+#    List file    =  C:\DUII\TargetHW\Release\List\DigitalGaugeScreen.lst     #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\DigitalGaugeScreen.o        #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\DUII\DigitalGaugeScreen.cpp
+      1          
+      2          #include <stdio.h>
+      3          #include <stdlib.h>
+      4          #include "DUII.h"
+      5          #include "GUI.h"
+      6          #include "GeneralConfig.h"
+      7          #include "commondefs.h"
+      8          #include "ConfigScreens.h"
+      9          #include "DigitalGaugeScreen.h"
+     10          #include "DigitalDisplay.hpp"
+     11          #include "RunningGauges.h"
+     12          #include "Alarm.hpp"
+     13          #include "gauge.hpp"
+     14          #include <time.h>
+     15          #include "DataHandler.h"
+     16          #include "PredictiveLapTimer.hpp"
+     17          #include "DigitalStringOutput.hpp"
+     18          #include "Utilities.h"
+     19          #include "LEDHandler.h"
+     20          #include "ConfigurableGaugeCommon.h"
+     21          
+     22          #ifdef G_DEBUG
+     23          #include <windows.h>
+     24          #endif
+     25          
+     26          /*********************************************************************
+     27          *
+     28          *       External data and code
+     29          *
+     30          **********************************************************************
+     31          */
+     32          #ifdef __cplusplus
+     33          extern "C" {
+     34          extern char lockupSemaphore;
+     35          extern GUI_CONST_STORAGE GUI_BITMAP bmBestLapEver;
+     36          extern GUI_CONST_STORAGE GUI_BITMAP bmDarkAsphalt;
+     37          extern GUI_CONST_STORAGE GUI_BITMAP bmBestLapSession;
+     38          }
+     39          #endif
+     40          extern void UpdatePredictiveLapControl(PredictiveLapTimer *pPredictiveLap, float predictiveLap);
+     41          
+     42          /*********************************************************************
+     43          *
+     44          *       Public code
+     45          *
+     46          **********************************************************************
+     47          */
+     48          
+     49          /*********************************************************************
+     50          *
+     51          *       Local Constants
+     52          *
+     53          **********************************************************************
+     54          */
+     55          #define END_OF_LAP			80
+     56          #define	COLOR_BAR_X_SIZE	150
+     57          #define	COLOR_BAR_Y_SIZE	3
+     58          #define	TROPHY_X_POS		100
+     59          
+     60          #define	LAP_COLOR			GUI_CYAN
+     61          #define	CONFIGURABLE_COLOR	GUI_ORANGE
+     62          #define	ELAPSED_COLOR		GUI_YELLOW
+     63          
+
+   \                                 In section .text, align 4, keep-with-next
+     64          const GUI_RECT LapNumRect = { 5, 10, END_OF_LAP, 42 };
+   \                     LapNumRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   05000A005000       DC16 5, 10, 80, 42
+   \              2A00        
+
+   \                                 In section .text, align 4, keep-with-next
+     65          const GUI_RECT ElapsedTimeRect = { END_OF_LAP + 5, 10, 295, 42 };
+   \                     ElapsedTimeRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   55000A002701       DC16 85, 10, 295, 42
+   \              2A00        
+     66          const GUI_RECT configurableItemRect = { 310, 10, 470, 95 };
+     67          
+
+   \                                 In section .text, align 4, keep-with-next
+     68          const GUI_RECT LapTimeRect = { 35, 110, 400, 200 };
+   \                     LapTimeRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   23006E009001       DC16 35, 110, 400, 200
+   \              C800        
+     69          
+
+   \                                 In section .text, align 4, keep-with-next
+     70          const GUI_RECT DataElementRect = { 310, 10, 470, 42 };
+   \                     DataElementRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   36010A00D601       DC16 310, 10, 470, 42
+   \              2A00        
+
+   \                                 In section .text, align 4, keep-with-next
+     71          const GUI_RECT NameRect =		 { 310, 47, 470, 71 };
+   \                     NameRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   36012F00D601       DC16 310, 47, 470, 71
+   \              4700        
+
+   \                                 In section .text, align 4, keep-with-next
+     72          const GUI_RECT UnitsRect =		 { 310, 71, 470, 95 };
+   \                     UnitsRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   36014700D601       DC16 310, 71, 470, 95
+   \              5F00        
+     73          
+
+   \                                 In section .data, align 4
+     74          static const DISPLAY_ELEMENT pData =	{ DataElementRect,	GUI_TA_RIGHT,	CONFIGURABLE_COLOR,	&GUI_FontD32 };
+   \                     pData:
+   \   00000000   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0
+   \              0000        
+   \   00000008   01000000FF80       DC32 1, 33023, GUI_FontD32
+   \              0000........
+     75          static const DISPLAY_ELEMENT pName =	{ NameRect,			GUI_TA_RIGHT,	GUI_WHITE,			&GUI_Font24B_ASCII };
+   \                     pName:
+   \   00000014   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0
+   \              0000        
+   \   0000001C   01000000FFFF       DC32 1, 16777215, GUI_Font24B_ASCII
+   \              FF00........
+     76          static const DISPLAY_ELEMENT pUnits =	{ UnitsRect,		GUI_TA_RIGHT,	GUI_WHITE,			&GUI_Font24B_ASCII };
+   \                     pUnits:
+   \   00000028   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0
+   \              0000        
+   \   00000030   01000000FFFF       DC32 1, 16777215, GUI_Font24B_ASCII
+   \              FF00........
+     77          
+
+   \                                 In section .text, align 4, keep-with-next
+     78          const CONFIG_ARGS config = { (DISPLAY_ELEMENT *)&pData, (DISPLAY_ELEMENT *)&pName, (DISPLAY_ELEMENT *)&pUnits };
+   \                     config:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   ............       DC32 pData, pName, pUnits
+   \              ............
+     79          
+     80          /*********************************************************************
+     81          *
+     82          *       Local Variables
+     83          *
+     84          **********************************************************************
+     85          */
+
+   \                                 In section .bss, align 4
+     86          static WM_HWIN hDigitalGaugeScreen;
+   \                     hDigitalGaugeScreen:
+   \   00000000                      DS8 4
+   \   00000004                      DS8 4
+   \   00000008                      DS8 4
+   \   0000000C                      DS8 4
+   \   00000010                      DS8 1
+     87          static WM_HTIMER hScreenTimer;
+     88          static PredictiveLapTimer *pPredictiveLap = 0;
+     89          static GUI_MEMDEV_Handle mem;
+     90          static bool firsttimethrough;
+     91          
+     92          void DGDrawConfigRect(void);
+     93          
+     94          
+
+   \                                 In section .text, align 4, keep-with-next
+     95          void _cbDigitalGaugeCallback(WM_MESSAGE * pMsg)
+     96          {
+   \                     _cbDigitalGaugeCallback:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+     97          	switch(pMsg->MsgId)
+   \   00000004   001090E5           LDR      R1,[R0, #+0]
+   \   00000008   20D04DE2           SUB      SP,SP,#+32
+   \   0000000C   0B1051E2           SUBS     R1,R1,#+11
+   \   00000010   B700000A           BEQ      ??_cbDigitalGaugeCallback_0
+   \   00000014   041051E2           SUBS     R1,R1,#+4
+   \   00000018   1C00000A           BEQ      ??_cbDigitalGaugeCallback_1
+   \   0000001C   411F51E2           SUBS     R1,R1,#+260
+   \   00000020   C200001A           BNE      ??_cbDigitalGaugeCallback_2
+     98          	{
+     99          	case WM_TIMER:
+    100          		if (pMsg->Data.v == hScreenTimer)
+   \   00000024   ........           LDR      R4,??DataTable12_3
+   \   00000028   0C0090E5           LDR      R0,[R0, #+12]
+   \   0000002C   042094E5           LDR      R2,[R4, #+4]
+   \   00000030   020050E1           CMP      R0,R2
+   \   00000034   BE00001A           BNE      ??_cbDigitalGaugeCallback_3
+    101          		{
+    102          			WM_RestartTimer(hScreenTimer, GAUGE_SCREEN_REFRESH_TIME);
+   \   00000038   1910A0E3           MOV      R1,#+25
+   \   0000003C   0200A0E1           MOV      R0,R2
+   \   00000040   ........           BL       WM_RestartTimer
+    103          			WM_InvalidateWindow(hDigitalGaugeScreen);
+   \   00000044   000094E5           LDR      R0,[R4, #+0]
+   \   00000048   ........           BL       WM_InvalidateWindow
+    104          
+    105          			// Check "box timer" if running
+    106          			if (drawFlag)
+   \   0000004C   ........           LDR      R4,??DataTable12_4
+   \   00000050   0000D4E5           LDRB     R0,[R4, #+0]
+   \   00000054   000050E3           CMP      R0,#+0
+   \   00000058   B500000A           BEQ      ??_cbDigitalGaugeCallback_3
+    107          			{
+    108          				if ((GUI_GetTime() - boxStartTime) > BOX_PERSIST_TIME)
+   \   0000005C   ........           BL       GUI_GetTime
+   \   00000060   ........           LDR      R1,??DataTable12_5
+   \   00000064   001091E5           LDR      R1,[R1, #+0]
+   \   00000068   010040E0           SUB      R0,R0,R1
+   \   0000006C   8910A0E3           MOV      R1,#+137
+   \   00000070   4C1D81E3           ORR      R1,R1,#0x1300
+   \   00000074   010050E1           CMP      R0,R1
+   \   00000078   AD0000BA           BLT      ??_cbDigitalGaugeCallback_3
+    109          				{
+    110          					configureGaugeMode = false;
+   \   0000007C   ........           LDR      R1,??DataTable12_6
+   \   00000080   0000A0E3           MOV      R0,#+0
+   \   00000084   0000C1E5           STRB     R0,[R1, #+0]
+    111          					drawFlag = false;
+   \   00000088   0000C4E5           STRB     R0,[R4, #+0]
+   \   0000008C   A80000EA           B        ??_cbDigitalGaugeCallback_3
+    112          				}
+    113          			}
+    114          		}
+    115          		break;
+    116          
+    117          	case WM_PAINT:
+    118          		if (CS_IsVisible(DIGITAL_GAUGE) || firsttimethrough)
+   \                     ??_cbDigitalGaugeCallback_1:
+   \   00000090   0700A0E3           MOV      R0,#+7
+   \   00000094   ........           BL       CS_IsVisible
+   \   00000098   000050E3           CMP      R0,#+0
+   \   0000009C   0300001A           BNE      ??_cbDigitalGaugeCallback_4
+   \   000000A0   ........           LDR      R0,??DataTable12_3
+   \   000000A4   1000D0E5           LDRB     R0,[R0, #+16]
+   \   000000A8   000050E3           CMP      R0,#+0
+   \   000000AC   8B00000A           BEQ      ??_cbDigitalGaugeCallback_5
+    119          		{
+    120          			////GUI_MEMDEV_Handle mControl;
+    121          			////int lap;
+    122          			char scratch[20];
+    123          
+    124          			if (lockupSemaphore)			// If main has not run since our last paint - exit!
+   \                     ??_cbDigitalGaugeCallback_4:
+   \   000000B0   ........           LDR      R0,??DataTable12_7
+   \   000000B4   0010D0E5           LDRB     R1,[R0, #+0]
+   \   000000B8   000051E3           CMP      R1,#+0
+   \   000000BC   9C00001A           BNE      ??_cbDigitalGaugeCallback_3
+    125          				break;
+    126          			else lockupSemaphore = true;
+   \   000000C0   0110A0E3           MOV      R1,#+1
+   \   000000C4   0010C0E5           STRB     R1,[R0, #+0]
+    127          			
+    128          			firsttimethrough = FALSE;
+   \   000000C8   ........           LDR      R4,??DataTable12_3
+   \   000000CC   0000A0E3           MOV      R0,#+0
+   \   000000D0   1000C4E5           STRB     R0,[R4, #+16]
+    129          
+    130          			GUI_MEMDEV_Select(mem);
+   \   000000D4   0C0094E5           LDR      R0,[R4, #+12]
+   \   000000D8   ........           BL       GUI_MEMDEV_Select
+    131          
+    132          			// Draw background
+    133          			GUI_DrawBitmap(&bmDarkAsphalt, 0, 0);
+   \   000000DC   0020A0E3           MOV      R2,#+0
+   \   000000E0   0010A0E3           MOV      R1,#+0
+   \   000000E4   ........           LDR      R0,??DataTable12_8
+   \   000000E8   ........           BL       GUI_DrawBitmap
+    134          
+    135          			// Set overall text mode
+    136          			GUI_SetTextMode(GUI_TM_TRANS);
+   \   000000EC   0200A0E3           MOV      R0,#+2
+   \   000000F0   ........           BL       GUI_SetTextMode
+    137          
+    138          			// Display lap number
+    139          			GUI_SetColor(LAP_COLOR);
+   \   000000F4   FF08A0E3           MOV      R0,#+16711680
+   \   000000F8   FF0C80E3           ORR      R0,R0,#0xFF00
+   \   000000FC   ........           BL       GUI_SetColor
+    140          			GUI_SetFont(&GUI_FontD32);
+   \   00000100   ........           LDR      R5,??DataTable12_9
+   \   00000104   0500A0E1           MOV      R0,R5
+   \   00000108   ........           BL       GUI_SetFont
+    141          			sprintf(scratch, "%d", /* lap = */ GetValue(LAP_NUMBER).iVal);
+   \   0000010C   2410A0E3           MOV      R1,#+36
+   \   00000110   0D00A0E1           MOV      R0,SP
+   \   00000114   ........           BL       GetValue
+   \   00000118   00209DE5           LDR      R2,[SP, #+0]
+   \   0000011C   ........           ADR      R1,??DataTable12  ;; 0x25, 0x64, 0x00, 0x00
+   \   00000120   08008DE2           ADD      R0,SP,#+8
+   \   00000124   ........           BL       sprintf
+    142          			GUI_DispStringInRect(scratch, (GUI_RECT *)&LapNumRect, GUI_TA_LEFT);
+   \   00000128   0020A0E3           MOV      R2,#+0
+   \   0000012C   ............       ADRL     R1,LapNumRect
+   \              ....        
+   \   00000134   08008DE2           ADD      R0,SP,#+8
+   \   00000138   ........           BL       GUI_DispStringInRect
+    143          
+    144          			// Draw lap color bar
+    145          			GUI_FillRect(0, 0, COLOR_BAR_X_SIZE, COLOR_BAR_Y_SIZE);
+   \   0000013C   0330A0E3           MOV      R3,#+3
+   \   00000140   9620A0E3           MOV      R2,#+150
+   \   00000144   0010A0E3           MOV      R1,#+0
+   \   00000148   0000A0E3           MOV      R0,#+0
+   \   0000014C   ........           BL       GUI_FillRect
+    146          
+    147          			// Display elapsed time
+    148          			GUI_SetColor(GUI_WHITE);
+   \   00000150   FF64E0E3           MVN      R6,#-16777216
+   \   00000154   0600A0E1           MOV      R0,R6
+   \   00000158   ........           BL       GUI_SetColor
+    149          			GUI_DispStringInRect(formatElapsedTime(), (GUI_RECT *)&ElapsedTimeRect, GUI_TA_RIGHT);
+   \   0000015C   ........           BL       formatElapsedTime
+   \   00000160   0120A0E3           MOV      R2,#+1
+   \   00000164   ........           ADR      R1,ElapsedTimeRect
+   \   00000168   ........           BL       GUI_DispStringInRect
+    150          
+    151          			// Draw configurable item color bar
+    152          			GUI_SetColor(CONFIGURABLE_COLOR);
+   \   0000016C   FF00A0E3           MOV      R0,#+255
+   \   00000170   800C80E3           ORR      R0,R0,#0x8000
+   \   00000174   ........           BL       GUI_SetColor
+    153          			GUI_FillRect(XSIZE_PHYS - COLOR_BAR_X_SIZE, 0, XSIZE_PHYS, COLOR_BAR_Y_SIZE);
+   \   00000178   782FA0E3           MOV      R2,#+480
+   \   0000017C   0330A0E3           MOV      R3,#+3
+   \   00000180   0010A0E3           MOV      R1,#+0
+   \   00000184   960042E2           SUB      R0,R2,#+150
+   \   00000188   ........           BL       GUI_FillRect
+    154          
+    155          			// Display the selected configurable gauge item
+    156          			DisplayConfigurableItem( &config );
+   \   0000018C   ........           ADR      R0,config
+   \   00000190   ........           BL       DisplayConfigurableItem
+    157          
+    158          			// Display fixed text
+    159          			GUI_SetColor(GUI_WHITE);
+   \   00000194   0600A0E1           MOV      R0,R6
+   \   00000198   ........           BL       GUI_SetColor
+    160          			GUI_SetFont(&GUI_Font24B_ASCII);
+   \   0000019C   ........           LDR      R0,??DataTable12_10
+   \   000001A0   ........           BL       GUI_SetFont
+    161          			GUI_DispStringAt("Lap", 5, 45);
+   \   000001A4   2D20A0E3           MOV      R2,#+45
+   \   000001A8   0510A0E3           MOV      R1,#+5
+   \   000001AC   ........           ADR      R0,??DataTable12_1  ;; "Lap"
+   \   000001B0   ........           BL       GUI_DispStringAt
+    162          
+    163          			GUI_SetColor(ELAPSED_COLOR);
+   \   000001B4   FF08C6E3           BIC      R0,R6,#0xFF0000
+   \   000001B8   ........           BL       GUI_SetColor
+    164          			GUI_DispStringHCenterAt("elapsed", XSIZE_PHYS / 2, 45);
+   \   000001BC   2D20A0E3           MOV      R2,#+45
+   \   000001C0   F010A0E3           MOV      R1,#+240
+   \   000001C4   ........           ADR      R0,`?<Constant "elapsed">`
+   \   000001C8   ........           BL       GUI_DispStringHCenterAt
+    165          
+    166          			// Draw best lap icon
+    167          			if (GetValue(HOLDING).uVal)		// If currently in lap hold time
+   \   000001CC   4E10A0E3           MOV      R1,#+78
+   \   000001D0   0D00A0E1           MOV      R0,SP
+   \   000001D4   ........           BL       GetValue
+   \   000001D8   00009DE5           LDR      R0,[SP, #+0]
+   \   000001DC   000050E3           CMP      R0,#+0
+   \   000001E0   0F00000A           BEQ      ??_cbDigitalGaugeCallback_6
+    168          				switch (DataValues[BEST_LAP].uVal) {
+   \   000001E4   ........           LDR      R0,??DataTable12_11
+   \   000001E8   780290E5           LDR      R0,[R0, #+632]
+   \   000001EC   010050E3           CMP      R0,#+1
+   \   000001F0   0300000A           BEQ      ??_cbDigitalGaugeCallback_7
+   \   000001F4   0A00003A           BCC      ??_cbDigitalGaugeCallback_6
+   \   000001F8   020050E3           CMP      R0,#+2
+   \   000001FC   0400000A           BEQ      ??_cbDigitalGaugeCallback_8
+   \   00000200   070000EA           B        ??_cbDigitalGaugeCallback_6
+    169          					case 0:
+    170          						// undraw icon when lap hold time expires
+    171          						break;
+    172          					case 1:
+    173          						// draw best lap of session icon (checker)
+    174          						GUI_DrawBitmap(&bmBestLapSession, TROPHY_X_POS, 10);
+   \                     ??_cbDigitalGaugeCallback_7:
+   \   00000204   0A20A0E3           MOV      R2,#+10
+   \   00000208   6410A0E3           MOV      R1,#+100
+   \   0000020C   ........           LDR      R0,??DataTable12_12
+   \   00000210   020000EA           B        ??_cbDigitalGaugeCallback_9
+    175          						break;
+    176          					case 2:
+    177          						// draw best lap ever icon (gold cup)
+    178          						GUI_DrawBitmap(&bmBestLapEver, TROPHY_X_POS, 10);
+   \                     ??_cbDigitalGaugeCallback_8:
+   \   00000214   0A20A0E3           MOV      R2,#+10
+   \   00000218   6410A0E3           MOV      R1,#+100
+   \   0000021C   ........           LDR      R0,??DataTable12_13
+   \                     ??_cbDigitalGaugeCallback_9:
+   \   00000220   ........           BL       GUI_DrawBitmap
+    179          						break;
+    180          				} // switch
+    181          
+    182          			// Draw Lap Time
+    183          			GUI_SetColor(GUI_WHITE);
+   \                     ??_cbDigitalGaugeCallback_6:
+   \   00000224   0600A0E1           MOV      R0,R6
+   \   00000228   ........           BL       GUI_SetColor
+    184          			GUI_SetFont(&GUI_FontD32);
+   \   0000022C   0500A0E1           MOV      R0,R5
+   \   00000230   ........           BL       GUI_SetFont
+    185          			GUI_SetFont(&GUI_FontD80);
+   \   00000234   ........           LDR      R0,??DataTable12_14
+   \   00000238   ........           BL       GUI_SetFont
+    186          			GUI_DispStringInRect(formatLapTime(GetValue(LAP_TIME).uVal, false), (GUI_RECT *)&LapTimeRect, GUI_TA_RIGHT);
+   \   0000023C   2010A0E3           MOV      R1,#+32
+   \   00000240   0D00A0E1           MOV      R0,SP
+   \   00000244   ........           BL       GetValue
+   \   00000248   0010A0E3           MOV      R1,#+0
+   \   0000024C   00009DE5           LDR      R0,[SP, #+0]
+   \   00000250   ........           BL       formatLapTime
+   \   00000254   0120A0E3           MOV      R2,#+1
+   \   00000258   ........           ADR      R1,LapTimeRect
+   \   0000025C   ........           BL       GUI_DispStringInRect
+    187          
+    188          			// Update Predictive Lap Control
+    189          			// During the first lap write the name of the track in the predictive lap box.
+    190          			////if (lap == 0)
+    191          			////	pPredictiveLap->SetValue(sysData.track);
+    192          			////else pPredictiveLap->SetValue(GetValue(PREDICTIVE_LAP).fVal);
+    193          			////	mControl = pPredictiveLap->DrawToMemArea();
+    194          			////GUI_MEMDEV_Select(mem);
+    195          			////GUI_MEMDEV_Write(mControl);
+    196          			UpdatePredictiveLapControl(pPredictiveLap, GetValue(PREDICTIVE_LAP).fVal);
+   \   00000260   1F10A0E3           MOV      R1,#+31
+   \   00000264   0D00A0E1           MOV      R0,SP
+   \   00000268   ........           BL       GetValue
+   \   0000026C   00109DE5           LDR      R1,[SP, #+0]
+   \   00000270   080094E5           LDR      R0,[R4, #+8]
+   \   00000274   ........           BL       _Z26UpdatePredictiveLapControlP18PredictiveLapTimerf
+    197          
+    198          			GUI_DrawBitmap(&bmthreewayarrow, 0, 229);
+   \   00000278   E520A0E3           MOV      R2,#+229
+   \   0000027C   0010A0E3           MOV      R1,#+0
+   \   00000280   ........           LDR      R0,??DataTable12_15
+   \   00000284   ........           BL       GUI_DrawBitmap
+    199          
+    200          #ifdef	INCLUDE_RACE_HELP
+    201          			// If the help screen is still being displayed then show the appropriate help screen
+    202          			if (raceTimerActive)
+    203          			{
+    204          				CheckRaceHelpScreen(DIGITAL_GAUGE);
+    205          				DGDrawConfigRect();
+    206          			}
+    207          #endif
+    208          
+    209          			CheckWarningPopups();
+   \   00000288   ........           BL       CheckWarningPopups
+    210          
+    211          			// Draw box around programmable gauge member(s) if requested
+    212          			if (drawFlag)
+   \   0000028C   ........           LDR      R0,??DataTable12_4
+   \   00000290   0000D0E5           LDRB     R0,[R0, #+0]
+   \   00000294   000050E3           CMP      R0,#+0
+   \   00000298   0D00000A           BEQ      ??_cbDigitalGaugeCallback_10
+    213          				DGDrawConfigRect();
+   \   0000029C   FF00A0E3           MOV      R0,#+255
+   \   000002A0   ........           BL       GUI_SetColor
+   \   000002A4   DA20A0E3           MOV      R2,#+218
+   \   000002A8   0610A0E3           MOV      R1,#+6
+   \   000002AC   5F30A0E3           MOV      R3,#+95
+   \   000002B0   402F82E3           ORR      R2,R2,#0x100
+   \   000002B4   4B0F81E2           ADD      R0,R1,#+300
+   \   000002B8   ........           BL       GUI_DrawRect
+   \   000002BC   D920A0E3           MOV      R2,#+217
+   \   000002C0   0710A0E3           MOV      R1,#+7
+   \   000002C4   5E30A0E3           MOV      R3,#+94
+   \   000002C8   402F82E3           ORR      R2,R2,#0x100
+   \   000002CC   4B0F81E2           ADD      R0,R1,#+300
+   \   000002D0   ........           BL       GUI_DrawRect
+    214          
+    215          			GUI_MEMDEV_CopyToLCD(mem);
+   \                     ??_cbDigitalGaugeCallback_10:
+   \   000002D4   0C0094E5           LDR      R0,[R4, #+12]
+   \   000002D8   ........           BL       GUI_MEMDEV_CopyToLCD
+    216          			GUI_SelectLCD();
+   \   000002DC   ........           BL       GUI_SelectLCD
+    217          		}
+    218          
+    219          		if (SlideOutVisible())
+   \                     ??_cbDigitalGaugeCallback_5:
+   \   000002E0   ........           BL       SlideOutVisible
+   \   000002E4   000050E3           CMP      R0,#+0
+   \   000002E8   1100000A           BEQ      ??_cbDigitalGaugeCallback_3
+    220          			DrawSignalStrength();
+   \   000002EC   ........           BL       DrawSignalStrength
+   \   000002F0   0F0000EA           B        ??_cbDigitalGaugeCallback_3
+    221          
+    222          		break;
+    223          
+    224          	case WM_DELETE:
+    225          		if(pPredictiveLap)
+   \                     ??_cbDigitalGaugeCallback_0:
+   \   000002F4   ........           LDR      R4,??DataTable12_3
+   \   000002F8   080094E5           LDR      R0,[R4, #+8]
+   \   000002FC   000050E3           CMP      R0,#+0
+   \   00000300   0300000A           BEQ      ??_cbDigitalGaugeCallback_11
+    226          		{
+    227          			delete pPredictiveLap;
+   \   00000304   ........           BL       _ZN18PredictiveLapTimerD1Ev
+   \   00000308   ........           BL       _ZdlPv
+    228          			pPredictiveLap = 0;
+   \   0000030C   0000A0E3           MOV      R0,#+0
+   \   00000310   080084E5           STR      R0,[R4, #+8]
+    229          		}
+    230          		if (mem)
+   \                     ??_cbDigitalGaugeCallback_11:
+   \   00000314   0C0094E5           LDR      R0,[R4, #+12]
+   \   00000318   000050E3           CMP      R0,#+0
+   \   0000031C   0400000A           BEQ      ??_cbDigitalGaugeCallback_3
+    231          		{
+    232          			GUI_MEMDEV_Delete(mem);
+   \   00000320   ........           BL       GUI_MEMDEV_Delete
+    233          			mem = 0;
+   \   00000324   0000A0E3           MOV      R0,#+0
+   \   00000328   0C0084E5           STR      R0,[R4, #+12]
+   \   0000032C   000000EA           B        ??_cbDigitalGaugeCallback_3
+    234          		}
+    235          		break;
+    236          
+    237          	default:
+    238          		  WM_DefaultProc(pMsg);
+   \                     ??_cbDigitalGaugeCallback_2:
+   \   00000330   ........           BL       WM_DefaultProc
+    239          	};
+    240          }
+   \                     ??_cbDigitalGaugeCallback_3:
+   \   00000334   20D08DE2           ADD      SP,SP,#+32       ;; stack cleaning
+   \   00000338   7080BDE8           POP      {R4-R6,PC}       ;; return
+    241          
+
+   \                                 In section .text, align 4, keep-with-next
+    242          void DGDrawConfigRect(void)
+    243          {
+   \                     _Z16DGDrawConfigRectv:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+    244          	GUI_SetColor(GUI_RED);
+   \   00000008   FF00A0E3           MOV      R0,#+255
+   \   0000000C   ........           BL       GUI_SetColor
+    245          	GUI_DrawRect(configurableItemRect.x0 - 4, configurableItemRect.y0 - 4, configurableItemRect.x1 + 4, configurableItemRect.y1);
+   \   00000010   DA20A0E3           MOV      R2,#+218
+   \   00000014   0610A0E3           MOV      R1,#+6
+   \   00000018   5F30A0E3           MOV      R3,#+95
+   \   0000001C   402F82E3           ORR      R2,R2,#0x100
+   \   00000020   4B0F81E2           ADD      R0,R1,#+300
+   \   00000024   ........           BL       GUI_DrawRect
+    246          	// Draw second rect one pixel inside first to make box two pixels wide
+    247          	GUI_DrawRect(configurableItemRect.x0 - 3, configurableItemRect.y0 - 3, configurableItemRect.x1 + 3, configurableItemRect.y1 - 1);
+   \   00000028   04D08DE2           ADD      SP,SP,#+4
+   \   0000002C   D920A0E3           MOV      R2,#+217
+   \   00000030   0710A0E3           MOV      R1,#+7
+   \   00000034   0040BDE8           POP      {LR}
+   \   00000038   5E30A0E3           MOV      R3,#+94
+   \   0000003C   402F82E3           ORR      R2,R2,#0x100
+   \   00000040   4B0F81E2           ADD      R0,R1,#+300
+   \   00000044   ........           B        GUI_DrawRect     ;; tailcall
+    248          }
+    249          
+
+   \                                 In section .text, align 4, keep-with-next
+    250          WM_HWIN Display_DigitalGaugeScreen(WM_HWIN hParent)
+    251          {
+   \                     Display_DigitalGaugeScreen:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+    252          	firsttimethrough = true;
+   \   00000004   ........           LDR      R4,??DataTable12_3
+   \   00000008   0110A0E3           MOV      R1,#+1
+   \   0000000C   1010C4E5           STRB     R1,[R4, #+16]
+    253          	drawFlag = false;
+   \   00000010   ........           LDR      R1,??DataTable12_4
+   \   00000014   0050A0E3           MOV      R5,#+0
+   \   00000018   0050C1E5           STRB     R5,[R1, #+0]
+    254          
+    255          	if ((hDigitalGaugeScreen = WM_CreateWindowAsChild(0, 0, XSIZE_PHYS, YSIZE_PHYS, hParent, WM_CF_SHOW, _cbDigitalGaugeCallback, 0)) <= 0)
+   \   0000001C   ........           LDR      R1,??DataTable12_16
+   \   00000020   10D04DE2           SUB      SP,SP,#+16
+   \   00000024   08108DE5           STR      R1,[SP, #+8]
+   \   00000028   0210A0E3           MOV      R1,#+2
+   \   0000002C   04108DE5           STR      R1,[SP, #+4]
+   \   00000030   00008DE5           STR      R0,[SP, #+0]
+   \   00000034   0C508DE5           STR      R5,[SP, #+12]
+   \   00000038   443FA0E3           MOV      R3,#+272
+   \   0000003C   782FA0E3           MOV      R2,#+480
+   \   00000040   0010A0E3           MOV      R1,#+0
+   \   00000044   0000A0E3           MOV      R0,#+0
+   \   00000048   ........           BL       WM_CreateWindowAsChild
+   \   0000004C   000084E5           STR      R0,[R4, #+0]
+   \   00000050   010050E3           CMP      R0,#+1
+   \   00000054   000000AA           BGE      ??Display_DigitalGaugeScreen_0
+    256          		SystemError();
+   \   00000058   ........           BL       SystemError
+    257          
+    258          	if ((pPredictiveLap = new PredictiveLapTimer(50, 212, 400, 50, GetPredictiveScale(), -GetPredictiveScale(), hDigitalGaugeScreen)) <= 0)
+   \                     ??Display_DigitalGaugeScreen_0:
+   \   0000005C   3400A0E3           MOV      R0,#+52
+   \   00000060   ........           BL       _Znwj
+   \   00000064   0060B0E1           MOVS     R6,R0
+   \   00000068   1200000A           BEQ      ??Display_DigitalGaugeScreen_1
+   \   0000006C   ........           BL       GetPredictiveScale
+   \   00000070   0050A0E1           MOV      R5,R0
+   \   00000074   ........           BL       GetPredictiveScale
+   \   00000078   001094E5           LDR      R1,[R4, #+0]
+   \   0000007C   04008DE5           STR      R0,[SP, #+4]
+   \   00000080   0C108DE5           STR      R1,[SP, #+12]
+   \   00000084   801425E2           EOR      R1,R5,#0x80000000
+   \   00000088   3200A0E3           MOV      R0,#+50
+   \   0000008C   08108DE5           STR      R1,[SP, #+8]
+   \   00000090   00008DE5           STR      R0,[SP, #+0]
+   \   00000094   643FA0E3           MOV      R3,#+400
+   \   00000098   D420A0E3           MOV      R2,#+212
+   \   0000009C   3210A0E3           MOV      R1,#+50
+   \   000000A0   0600A0E1           MOV      R0,R6
+   \   000000A4   ........           BL       _ZN18PredictiveLapTimerC1Eiiiiffl
+   \   000000A8   080084E5           STR      R0,[R4, #+8]
+   \   000000AC   000050E3           CMP      R0,#+0
+   \   000000B0   0200001A           BNE      ??Display_DigitalGaugeScreen_2
+   \   000000B4   000000EA           B        ??Display_DigitalGaugeScreen_3
+   \                     ??Display_DigitalGaugeScreen_1:
+   \   000000B8   085084E5           STR      R5,[R4, #+8]
+    259          		SystemError();
+   \                     ??Display_DigitalGaugeScreen_3:
+   \   000000BC   ........           BL       SystemError
+    260          
+    261          #ifdef G_DEBUG
+    262          	pOutput = fopen("Output.txt", "w+");
+    263          	iCount = 0;
+    264          #endif
+    265          
+    266          	WM_InvalidateWindow(hDigitalGaugeScreen);
+   \                     ??Display_DigitalGaugeScreen_2:
+   \   000000C0   000094E5           LDR      R0,[R4, #+0]
+   \   000000C4   ........           BL       WM_InvalidateWindow
+    267          
+    268          	// create the memory area to prevent flicker
+    269          	mem = GUI_MEMDEV_Create(0, 0, XSIZE_PHYS, YSIZE_PHYS);
+   \   000000C8   443FA0E3           MOV      R3,#+272
+   \   000000CC   782FA0E3           MOV      R2,#+480
+   \   000000D0   0010A0E3           MOV      R1,#+0
+   \   000000D4   0000A0E3           MOV      R0,#+0
+   \   000000D8   ........           BL       GUI_MEMDEV_Create
+   \   000000DC   0C0084E5           STR      R0,[R4, #+12]
+    270          
+    271          	hScreenTimer = WM_CreateTimer(hDigitalGaugeScreen, 0, GAUGE_SCREEN_REFRESH_TIME, 0);
+   \   000000E0   0030A0E3           MOV      R3,#+0
+   \   000000E4   1920A0E3           MOV      R2,#+25
+   \   000000E8   0010A0E3           MOV      R1,#+0
+   \   000000EC   000094E5           LDR      R0,[R4, #+0]
+   \   000000F0   ........           BL       WM_CreateTimer
+   \   000000F4   040084E5           STR      R0,[R4, #+4]
+    272          
+    273          	return hDigitalGaugeScreen;
+   \   000000F8   000094E5           LDR      R0,[R4, #+0]
+   \   000000FC   10D08DE2           ADD      SP,SP,#+16
+   \   00000100   7080BDE8           POP      {R4-R6,PC}       ;; return
+    274          }
+    275          
+    276          //
+    277          // Return true if screen touch in on the configurable gauge item
+    278          //
+
+   \                                 In section .text, align 4, keep-with-next
+    279          char IfDigitalConfigGaugePressed(int lastx, int lasty)
+    280          {
+    281          	if ((lastx >= configurableItemRect.x0) && (lastx <= configurableItemRect.x1) && (lasty >= configurableItemRect.y0) && (lasty <= configurableItemRect.y1))
+   \                     IfDigitalConfigGaugePressed:
+   \   00000000   3620A0E3           MOV      R2,#+54
+   \   00000004   402F82E3           ORR      R2,R2,#0x100
+   \   00000008   020050E1           CMP      R0,R2
+   \   0000000C   080000BA           BLT      ??IfDigitalConfigGaugePressed_0
+   \   00000010   A12082E2           ADD      R2,R2,#+161
+   \   00000014   020050E1           CMP      R0,R2
+   \   00000018   050000AA           BGE      ??IfDigitalConfigGaugePressed_0
+   \   0000001C   0A0051E3           CMP      R1,#+10
+   \   00000020   030000BA           BLT      ??IfDigitalConfigGaugePressed_0
+   \   00000024   600051E3           CMP      R1,#+96
+   \   00000028   010000AA           BGE      ??IfDigitalConfigGaugePressed_0
+    282          		return true;
+   \   0000002C   0100A0E3           MOV      R0,#+1
+   \   00000030   1EFF2FE1           BX       LR
+    283          	else return false;
+   \                     ??IfDigitalConfigGaugePressed_0:
+   \   00000034   0000A0E3           MOV      R0,#+0
+   \   00000038   1EFF2FE1           BX       LR               ;; return
+    284          }
+
+   \                                 In section .init_array, align 4, keep-with-next, root
+   \   00000000   ........           DC32    RELOC_ARM_TARGET1 __sti__routine
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "%d">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   25640000           DC8 37, 100, 0, 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "Lap">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   4C617000           DC8 76, 97, 112, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \   static __intrinsic __interwork __softfp void __sti__routine()
+   \                     __sti__routine:
+   \   00000000   ............       ADRL     R1,DataElementRect
+   \              ....        
+   \   00000008   ........           LDR      R0,??DataTable12_2
+   \   0000000C   002091E5           LDR      R2,[R1, #+0]
+   \   00000010   043091E5           LDR      R3,[R1, #+4]
+   \   00000014   ............       ADRL     R1,NameRect
+   \              ....        
+   \   0000001C   0C0080E8           STM      R0,{R2,R3}
+   \   00000020   002091E5           LDR      R2,[R1, #+0]
+   \   00000024   043091E5           LDR      R3,[R1, #+4]
+   \   00000028   ............       ADRL     R1,UnitsRect
+   \              ....        
+   \   00000030   142080E5           STR      R2,[R0, #+20]
+   \   00000034   183080E5           STR      R3,[R0, #+24]
+   \   00000038   002091E5           LDR      R2,[R1, #+0]
+   \   0000003C   043091E5           LDR      R3,[R1, #+4]
+   \   00000040   282080E5           STR      R2,[R0, #+40]
+   \   00000044   2C3080E5           STR      R3,[R0, #+44]
+   \   00000048   1EFF2FE1           BX       LR               ;; return
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12:
+   \   00000000   25640000           DC8      0x25, 0x64, 0x00, 0x00
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_1:
+   \   00000000   4C617000           DC8      "Lap"
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_2:
+   \   00000000   ........           DC32     pData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_3:
+   \   00000000   ........           DC32     hDigitalGaugeScreen
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_4:
+   \   00000000   ........           DC32     drawFlag
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_5:
+   \   00000000   ........           DC32     boxStartTime
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_6:
+   \   00000000   ........           DC32     configureGaugeMode
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_7:
+   \   00000000   ........           DC32     lockupSemaphore
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_8:
+   \   00000000   ........           DC32     bmDarkAsphalt
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_9:
+   \   00000000   ........           DC32     GUI_FontD32
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_10:
+   \   00000000   ........           DC32     GUI_Font24B_ASCII
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_11:
+   \   00000000   ........           DC32     DataValues
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_12:
+   \   00000000   ........           DC32     bmBestLapSession
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_13:
+   \   00000000   ........           DC32     bmBestLapEver
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_14:
+   \   00000000   ........           DC32     GUI_FontD80
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_15:
+   \   00000000   ........           DC32     bmthreewayarrow
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable12_16:
+   \   00000000   ........           DC32     _cbDigitalGaugeCallback
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "elapsed">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   656C61707365       DC8 101, 108, 97, 112, 115, 101, 100, 0
+   \              6400        
+    285          /*************************** End of file ****************************/
+    286          
+
+   Maximum stack usage in bytes:
+
+     Function                    .cstack
+     --------                    -------
+     DGDrawConfigRect()               8
+     Display_DigitalGaugeScreen      32
+     IfDigitalConfigGaugePressed      0
+     __sti__routine()                 0
+     _cbDigitalGaugeCallback         48
+
+
+   Section sizes:
+
+     Function/Label              Bytes
+     --------------              -----
+     LapNumRect                     8
+     ElapsedTimeRect                8
+     LapTimeRect                    8
+     DataElementRect                8
+     NameRect                       8
+     UnitsRect                      8
+     pData                         60
+     pName
+     pUnits
+     config                        12
+     hDigitalGaugeScreen           17
+     hScreenTimer
+     pPredictiveLap
+     mem
+     firsttimethrough
+     _cbDigitalGaugeCallback      828
+     DGDrawConfigRect()            72
+     Display_DigitalGaugeScreen   260
+     IfDigitalConfigGaugePressed   60
+     ?<Constant "%d">               4
+     ?<Constant "Lap">              4
+     __sti__routine()              76
+     ??DataTable12                  4
+     ??DataTable12_1                4
+     ??DataTable12_2                4
+     ??DataTable12_3                4
+     ??DataTable12_4                4
+     ??DataTable12_5                4
+     ??DataTable12_6                4
+     ??DataTable12_7                4
+     ??DataTable12_8                4
+     ??DataTable12_9                4
+     ??DataTable12_10               4
+     ??DataTable12_11               4
+     ??DataTable12_12               4
+     ??DataTable12_13               4
+     ??DataTable12_14               4
+     ??DataTable12_15               4
+     ??DataTable12_16               4
+     ?<Constant "elapsed">          8
+      Others                        4
+
+ 
+    17 bytes in section .bss
+    60 bytes in section .data
+     4 bytes in section .init_array
+     8 bytes in section .rodata
+ 1 432 bytes in section .text
+ 
+ 1 436 bytes of CODE  memory
+     8 bytes of CONST memory
+    77 bytes of DATA  memory
+
+Errors: none
+Warnings: none

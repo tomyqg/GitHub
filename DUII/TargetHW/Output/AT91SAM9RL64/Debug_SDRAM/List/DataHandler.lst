@@ -1,0 +1,3303 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     02/Feb/2016  18:31:52 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\DUII\DataHandler.c                               #
+#    Command line =  C:\DUII\DUII\DataHandler.c -D DEBUG=1 -D SDRAM_TARGET=1  #
+#                    -D USB_IS_HIGH_SPEED -D XIGNORE_TEMPERATURE -D           #
+#                    BUILD_DEBUG_PORT -D PROFILER -lCN                        #
+#                    C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\   #
+#                    -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\ #
+#                     --debug --endian=little --cpu=ARM926EJ-S -e --fpu=None  #
+#                    --dlib_config "C:\Program Files (x86)\IAR                #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --use_c++_inline                     #
+#                    --require_prototypes                                     #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\Da #
+#                    taHandler.lst                                            #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\Dat #
+#                    aHandler.o                                               #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\DUII\DataHandler.c
+      1          
+      2          #include "WM.h"
+      3          #include "commondefs.h"
+      4          #include "DataHandler.h"
+      5          #include "LEDHandler.h"
+      6          #include "DUII.h"
+      7          #include <stdio.h>
+      8          #include <string.h>
+      9          #include <math.h>
+     10          #include "ConfigScreens.h"
+     11          #include "SFScreens.h"
+     12          #include "GeneralConfig.h"
+     13          #include "HelpScreens.h"
+     14          #include "VehicleSettingsScreens.h"
+     15          
+     16          #ifndef _WINDOWS
+     17          #include "RTOS.H"
+     18          #include "datadecode.h"
+     19          #include "SPI_API.h"
+     20          #include "message.h"
+     21          #include "opcode.h"
+     22          #else
+     23          #include <time.h>
+     24          #endif
+     25          
+     26          //
+     27          // Public data declarations
+     28          //
+     29          GlobalDataType DataValues[NUMBER_OF_GLOBALS] = { 0 };
+     30          
+     31          
+     32          //
+     33          // Constants
+     34          //
+     35          // Data refresh at 40Hz
+     36          #define	DATA_REFRESH_TIME		50
+     37          #define	TIME_RECT_CENTER_X		70
+     38          #define	TIME_RECT_TOP_Y			9
+     39          #define	CAMERA_X_POS			378
+     40          #define	SD_X_POS				414
+     41          #define	SU_SIGNAL_X_POS			442
+     42          #define	TIME_INCREMENT			DATA_REFRESH_TIME
+     43          #define	SIMULATION_LAP_TIME		82135
+     44          // Since RPM is unsigned we cannot watch for < 0 underflow so watch for rediculous RPM overflow
+     45          #define	MAX_POSSIBLE_RPM		25000
+     46          #define MAX_ANIMATION_CYCLES	4
+     47          
+     48          
+     49          //
+     50          //	Global Resources
+     51          //
+     52          #ifndef _WINDOWS
+     53          extern OS_RSEMA SEMA_GlobalData;			// resource semaphore around global data
+     54          extern OS_MAILBOX MB_SDcardRW;				// mailbox to SD card write task
+     55          extern OS_Q Queue_tqm;						// queue of data to be written to .tqm file
+     56          #endif
+     57          
+     58          //
+     59          // External Code References
+     60          //
+     61          int GetRecordSpeed(void);
+     62          
+     63          //
+     64          // External data declarations
+     65          //
+     66          extern GUI_CONST_STORAGE GUI_BITMAP bmNoSignal;
+     67          extern GUI_CONST_STORAGE GUI_BITMAP bmSignal1;
+     68          extern GUI_CONST_STORAGE GUI_BITMAP bmSignal2;
+     69          extern GUI_CONST_STORAGE GUI_BITMAP bmSignal3;
+     70          extern GUI_CONST_STORAGE GUI_BITMAP bmSignal4;
+     71          extern GUI_CONST_STORAGE GUI_BITMAP bmSignal5;
+     72          extern GUI_CONST_STORAGE GUI_BITMAP bmCameraReadyIcon;
+     73          extern GUI_CONST_STORAGE GUI_BITMAP bmCameraNotReadyIcon;
+     74          extern GUI_CONST_STORAGE GUI_BITMAP bmCameraRecordIcon;
+     75          extern GUI_CONST_STORAGE GUI_BITMAP bmCameraBlankIcon;
+     76          extern GUI_CONST_STORAGE GUI_BITMAP bmNoSUIcon;
+     77          extern GUI_CONST_STORAGE GUI_BITMAP bmSUGoodIcon;
+     78          extern GUI_CONST_STORAGE GUI_BITMAP bmInfoButton1;
+     79          extern GUI_CONST_STORAGE GUI_BITMAP bmInfoButton2;
+     80          extern GUI_CONST_STORAGE GUI_BITMAP bmInfoButton3;
+     81          extern GUI_CONST_STORAGE GUI_BITMAP bmInfoButton4;
+     82          extern GUI_CONST_STORAGE GUI_BITMAP bmInfoButton5;
+     83          extern GUI_CONST_STORAGE GUI_BITMAP bmGreenSD;
+     84          extern GUI_CONST_STORAGE GUI_BITMAP bmRedSD;
+     85          extern GUI_CONST_STORAGE GUI_BITMAP bmWhiteSD;
+     86          extern GUI_CONST_STORAGE GUI_BITMAP bmYellowSD;
+     87          extern GUI_CONST_STORAGE GUI_BITMAP bmLockedSD;
+     88          extern GUI_HSPRITE hSUStatusSprite, hCameraSprite, hSignalStrengthSprite;
+     89          
+     90          //
+     91          // Local defines and structure definitions
+     92          //
+     93          GUI_CONST_STORAGE GUI_BITMAP* SignalStrengthGraphics[] = {&bmNoSignal, &bmSignal1, &bmSignal2, &bmSignal3, &bmSignal4, &bmSignal5 };
+     94          
+     95          typedef struct {
+     96          	int Dir;				// -1 = don't change, 0 = up, 1 = down
+     97          	float Max;				// upper limit
+     98          	float Min;				// lower limit
+     99          	float Inc;				// increment
+    100          	float CurrentValue;
+    101          } DummyDataType;
+    102          
+    103          DummyDataType DummyDataValues[NUMBER_OF_GLOBALS] = {
+    104          //		{	dir,	max,		min,		inc,	value	}
+    105          		{	1,		1.5F,		-1.2F, 		0.02F,	0.0F	},		//	X_G,				// f in Gs
+    106          		{	0,		1.7F,		-1.6F,		0.015F,	0.0F	},		//	Y_G,				// f in Gs
+    107          		{	0,		2.0F,		-2.0F,		0.40F,	1.0F	},		//	Z_G,				// f in Gs
+    108          		{	-1,		0,			0,			0,		0.0F	},		//	MAX_X_G,			// f, max g experienced in x direction since session start
+    109          		{	-1,		0,			0,			0,		0.0F	},		//	MAX_Y_G,			// f, max g experienced in y direction since session start
+    110          		{	-1,		0,			0,			0,		0.0F	},		//	MAX_Z_G,			// f, max g experienced in z direction since session start
+    111          		{	-1,		0,			0,			0,		0.0F	},		//	MIN_X_G,			// f, min g experienced in x direction since session start
+    112          		{	-1,		0,			0,			0,		0.0F	},		//	MIN_Y_G,			// f, min g experienced in y direction since session start
+    113          		{	-1,		0,			0,			0,		0.0F	},		//	MIN_Z_G,			// f, min g experienced in z direction since session start
+    114          		{	1,		1.5F,		-1.2F, 		0.02F,	0.0F	},		//	X_G-DAMPED,			// f in Gs
+    115          		{	0,		1.7F,		-1.6F,		0.015F,	0.0F	},		//	Y_G_DAMPED,			// 10 f in Gs
+    116          		{	0,		2.0F,		2.0F,		0.010F,	1.0F	},		//	Z_G_DAMPED,			// f in Gs	
+    117          		{	0,		34.151F,	34.149F,	0.00001F,0.0F	},		//	LATITUDE,			// d, gps lat out to 6 decimal places
+    118          		{	0,		-83.813F,	-83.815F,	0.00001F,0.0F	},		//	LONGITUDE,			// d, gps lon out to 6 decimal places
+    119          		{	-1,		0,			0,			0,		0.0F	},		//	SPEED,				// f, stored in kph
+    120          		{	0,		359.0,		0.0,		1.00F,	0.0F	},		//	HEADING,			// f, in degrees, 0.0 - 360.0
+    121          		{	0,		359.0,		0.0,		0.50F,	0.0F	},		//	HEADING_DAMPED,		// f, in degrees, 0.0 - 360.0
+    122          		{	0,		10000,		0,			0.1F,	0.0F	},		//	GPS_WEEKS,			// u, number of weeks since GPS start = Jan 06, 1980
+    123          		{	0,		1000,		0,			0.1F,	0.0F	},		//	GPS_TIME,			// u, number of msec since GPS start + number of weeks
+    124          		{	0,		600.0,		200.0,		0.01F,	0.0F	},		//	ALTITUDE,			// f, in meters
+    125          		{	0,		4.4F,		2.5F,		0.0001F,0.0F	},		//	GPS_DOP,			// f gps dilution of precision, range 0.0 - 100.0
+    126          		{	0,		16.0,		0.0,		0.05F,	0.0F	},		//	GPS_NUMSAT,			// 20 u, number of satellites being monitored, 0 = no GPS Lock
+    127          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	MIN_SATS,			// u, minimum number of satellites seen during current session
+    128          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	MAX_SATS,			// u, maximum number of satellites seen during current session
+    129          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	MIN_DOP,			// f, minimum dop number seen during current session
+    130          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	MAX_DOP,			// f, maximum dop number seen during current session
+    131          		{	-1,		0,			0,			0,		0.0F	},		//	MAX_SPEED,			// f, max speed in kph achieved since session start
+    132          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	MIN_ALTITUDE,		// f, in meters
+    133          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	MAX_ALTITUDE,		// f, in meters
+    134          		{	-1,		1.0F,		1.0F,		0.025F,	0.0F	},		//	LAP_DISTANCE,		// f, in meters, since passing s/f
+    135          		{	0,		99999.0F,	0.0F,		1.0F,	0.0F	},		//	TOTAL_DISTANCE,		// f, in meters, since session started
+    136          		{	0,		1.2F,		-0.6F,		0.003F,	0.0F	},		//	PREDICTIVE_LAP,		// 30 f, pace ahead or behind in seconds
+    137          		{	0,		0.0F,		0.0F,		0.0F,	0.0F	},		//	LAP_TIME,			// u, in msec since passing s/f
+    138          		{	0,		123000,		0,			25,		0.0F	},		//	LAST_LAP_TIME,		// u, in msec since passing s/f
+    139          		{	-1,		0,			0,			0,		0.0F	},		//	ELAPSED_TIME,		// u, in msec since session started
+    140          		{	-1,		0,			0,			0,		0.0F	},		//	ELAPSED_RACE_TIME,	// u, in msec since first passing s/f or launch
+    141          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	LAP_NUMBER,			// i, lap we are currently on. 0 = s/f not yet found, -1 = not in lapping mode
+    142          
+    143          		{	1,		120.0F,		80.0F,		0.001F, 80.0F	},		//	VMIN,				// f, last velocity trough
+    144          		{	1,		300.0F,		190.0F,		0.001F,	200.0F	},		//	VMAX,				// f, last velocity peak
+    145          		{	-1,		0,			0,			0,		0.0F	},		//	SPEED_PEAKS,		// f, Vmin in corners (negative number), Vmax on straights (positive), in kph
+    146          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	ZERO_SIXTY,			// u, in msec, 0-60 mph time for drag racing modes
+    147          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	ZERO_HUNDRED,		// 40 u, in msec, 0-100 mph time for drag racing modes	
+    148          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	SIXTY_FOOT,			// u, in msec, 60' time for drag racing modes
+    149          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	THREE_THIRTY_FOOT,	// u, in msec, 330' time for drag racing modes
+    150          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	THOUSAND_FOOT,		// u, in msec, 1000' time for drag racing modes
+    151          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	EIGHTH_MILE,		// u, in msec, 1/8 mile time for drag racing modes
+    152          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	QUARTER_MILE,		// u, in msec, 1/4 mile time for drag racing modes
+    153          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	SIXTY_TRAP,			// f, in kph, 60' trap speed for drag racing modes
+    154          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	THREE_THIRTY_TRAP,	// f, in kph, 330' trap speed for drag racing modes
+    155          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	THOUSAND_TRAP,		// f, in kph, 1000' trap speed for drag racing modes
+    156          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	EIGHTH_TRAP,		// f, in kph, 1/8 mile trap speed for drag racing modes
+    157          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	QUARTER_TRAP,		// 50 f, in kph, 1/4 mile trap speed for drag racing modes
+    158          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	REACTION,			// u, in msec, reaction time for drag racing modes
+    159          		{	-1,		0,			0,			0,		0.0F	},		//	VEHICLE_RPM,		// i, rpm, -1 = undefined
+    160          		{	0,		4.9F,		0.0F,		0.005F,	0.0F	},		//	ANALOG_INPUT_0,		// f, analog input in scaled value DEMO OIL PRESSURE
+    161          		{	0,		4.5F,		0.1F,		0.005F,	0.0F	},		//	ANALOG_INPUT_1,		// f, analog input in scaled value DEMO WATER TEMP	
+    162          		{	0,		1.0F,		0.0F,		0.003F,	0.0F	},		//	ANALOG_INPUT_2,		// f, analog input in scaled value DEMO BATTERY VOLTAGE
+    163          		{	0,		8.7F,		2.0F,		0.005F,	0.0F	},		//	ANALOG_INPUT_3,		// f, analog input in scaled value DEMO FUEL
+    164          		{	0,		1.5,		0.5,		0.01F,	0.0F	},		//	DIGITAL_INPUT_4,	// u, digital input, 0 = OFF state, 1 = ON state
+    165          		{	0,		1.5,		0.5,		0.005F,	0.0F	},		//	DIGITAL_INPUT_5,	// u, digital input, 0 = OFF state, 1 = ON state
+    166          		{	-1,		1.0,		1.0,		0.025F,	0.0F	},		//	MAX_A_0,			// f, max value recorded for input during session
+    167          		{	-1,		1.0,		1.0,		0.025F,	0.0F	},		//	MAX_A_1,			// 60 f, max value recorded for input during session	
+    168          		{	-1,		1.0,		1.0,		0.025F,	0.0F	},		//	MAX_A_2,			// f, max value recorded for input during session
+    169          		{	-1,		1.0,		1.0,		0.025F,	0.0F	},		//	MAX_A_3,			// f, max value recorded for input during session
+    170          		{	-1,		1.0,		1.0,		0.025F,	0.0F	},		//	MIN_A_0,			// f, min value recorded for input during session
+    171          		{	-1,		1.0,		1.0,		0.025F,	0.0F	},		//	MIN_A_1,			// f, min value recorded for input during session	
+    172          		{	-1,		1.0,		1.0,		0.025F,	0.0F	},		//	MIN_A_2,			// f, min value recorded for input during session
+    173          		{	-1,		1.0,		1.0,		0.025F,	0.0F	},		//	MIN_A_3,			// f, min value recorded for input during session
+    174          		{	0,		1.0,		1.0,		0.025F,	0.0F	},		//	MAX_RPM,			// i, maximum rpm reading since session started
+    175          
+    176          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	TOTAL_HIGHREVS,		// u, total number of high revs ( > red line < max rpm ) since session started
+    177          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	TOTAL_OVERREVS,		// u, total number of overrevs ( > max rpm ) since session started
+    178          
+    179          		{	0,		14.3,		10.5,		0.001F,	12.0F	},		//	VEHICLE_12V,		// 70 f, vehicle battery voltage
+    180          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	HORSEPOWER,			// f, in Watts, for all modes
+    181          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	TORQUE,				// f, in N-m, for all modes
+    182          		{	-1,		0,			0,			0,		0.0F	},		//	GEAR,				// i, 0 = not moving, -1 = undefined
+    183          		{	0,		3.5F,		0.0,		0.010F,	0.0F	},		//	CAMERA_STATUS,		// i, 0 = camera not ready, 1 = camera ready, 2 = camera recording, -1 = no camera
+    184          		{	-1,		0.5F,		0.5F,		0.0,	0.5F	},		//	AUTOX_DRAG_LAUNCH,	// f, gs encountered during launch of auto-x or drag mode
+    185          		{	0,		20.0F,		30.0F,		0.001F,	0.0F	},		//	SU_TEMPERATURE		// f, core temp of SU - 50 degrees F
+    186          		{	-1,		0.0,		0.0,		0.0F,	0.0F	},		//	HOLDING,			// u = 1 = holding, 0 = not holding
+    187          		{	0,		2.95F,		0.0,		0.005F,	2.0F	},		//	BEST_LAP,			// 78 u = 2 = best lap ever, 1 = best lap of session, 0 = not best lap
+    188          		{	-1,		0.0F,		0.0F,		0.0F,	0.0F	},		//	COMBINED_G,			// f in Gs	
+    189          		{	0,		123000,		0,			25,		0.0F	}		//	BEST_SESSION_LAP,	// u, in msec best time so far in session
+    190          }; // DummyDataValues
+    191          
+    192          //
+    193          // Local function prototypes
+    194          //
+    195          float CalcSpeed(void);
+    196          #ifdef _WINDOWS
+    197          void dataTickCallback(WM_MESSAGE * pMsg);
+    198          #endif
+    199          
+    200          //
+    201          // Local variable declarations
+    202          //
+    203          #ifdef _WINDOWS
+    204          static long hDataUpdateTimer;
+    205          #endif
+    206          static char SDBusy = false;
+    207          unsigned int minSimRPM;
+    208          int maxSimGear;
+    209          int animationIndex, animationCycles;
+    210          int newScreen = true;
+    211          int hasInfoKey;
+    212          const GUI_BITMAP *pAnimation;
+    213          
+    214          
+
+   \                                 In section .text, align 4, keep-with-next
+    215          GlobalDataType GetRawValue(GlobalDataIndexType dataType) {
+   \                     GetRawValue:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+    216          	GlobalDataType retval;
+    217          
+    218          	// request use of global data
+    219          	OS_Use(&SEMA_GlobalData);
+   \   00000004   ........           LDR      R7,??DataTable7
+   \   00000008   0060A0E1           MOV      R6,R0
+   \   0000000C   04D04DE2           SUB      SP,SP,#+4
+   \   00000010   0140A0E1           MOV      R4,R1
+   \   00000014   0700A0E1           MOV      R0,R7
+   \   00000018   ........           BL       OS_Use
+    220          
+    221          	// get value from table
+    222          	retval = DataValues[dataType];
+   \   0000001C   ........           LDR      R0,??DataTable7_1
+   \   00000020   FF4004E2           AND      R4,R4,#0xFF
+   \   00000024   840180E0           ADD      R0,R0,R4, LSL #+3
+   \   00000028   D040C0E1           LDRD     R4,R5,[R0, #+0]
+    223          	
+    224          	// relinquish global data
+    225          	OS_Unuse(&SEMA_GlobalData);
+   \   0000002C   0700A0E1           MOV      R0,R7
+   \   00000030   ........           BL       OS_Unuse
+    226          	
+    227          	return(retval);
+   \   00000034   F040C6E1           STRD     R4,R5,[R6, #+0]
+   \   00000038   04D08DE2           ADD      SP,SP,#+4
+   \   0000003C   F080BDE8           POP      {R4-R7,PC}       ;; return
+    228          } // GetRawValue
+    229          
+
+   \                                 In section .text, align 4, keep-with-next
+    230          GlobalDataType GetValue(GlobalDataIndexType dataType) {
+   \                     GetValue:
+   \   00000000   F0472DE9           PUSH     {R4-R10,LR}
+    231          	GlobalDataType retval;
+    232          
+    233          	// request use of global data
+    234          	OS_Use(&SEMA_GlobalData);
+   \   00000004   ........           LDR      R7,??DataTable7
+   \   00000008   0060A0E1           MOV      R6,R0
+   \   0000000C   01A0A0E1           MOV      R10,R1
+   \   00000010   0700A0E1           MOV      R0,R7
+   \   00000014   ........           BL       OS_Use
+    235          
+    236          	// get value from table
+    237          	retval = DataValues[dataType];
+   \   00000018   ........           LDR      R8,??DataTable7_1
+   \   0000001C   FF900AE2           AND      R9,R10,#0xFF
+   \   00000020   890188E0           ADD      R0,R8,R9, LSL #+3
+   \   00000024   D040C0E1           LDRD     R4,R5,[R0, #+0]
+    238          
+    239          	// relinquish global data
+    240          	OS_Unuse(&SEMA_GlobalData);
+   \   00000028   0700A0E1           MOV      R0,R7
+   \   0000002C   ........           BL       OS_Unuse
+    241          
+    242          	switch (dataType) {
+   \   00000030   FF000AE2           AND      R0,R10,#0xFF
+   \   00000034   0E0040E2           SUB      R0,R0,#+14
+   \   00000038   420050E3           CMP      R0,#+66
+   \   0000003C   00F18F90           ADDLS    PC,PC,R0, LSL #+2
+   \                     ??GetValue_0:
+   \   00000040   C900008A           BHI      ??GetValue_1
+   \   00000044   410000EA           B        ??GetValue_2
+   \   00000048   C70000EA           B        ??GetValue_1
+   \   0000004C   C60000EA           B        ??GetValue_1
+   \   00000050   C50000EA           B        ??GetValue_1
+   \   00000054   C40000EA           B        ??GetValue_1
+   \   00000058   4F0000EA           B        ??GetValue_3
+   \   0000005C   C20000EA           B        ??GetValue_1
+   \   00000060   C10000EA           B        ??GetValue_1
+   \   00000064   C00000EA           B        ??GetValue_1
+   \   00000068   BF0000EA           B        ??GetValue_1
+   \   0000006C   BE0000EA           B        ??GetValue_1
+   \   00000070   BD0000EA           B        ??GetValue_1
+   \   00000074   350000EA           B        ??GetValue_2
+   \   00000078   470000EA           B        ??GetValue_3
+   \   0000007C   460000EA           B        ??GetValue_3
+   \   00000080   450000EA           B        ??GetValue_3
+   \   00000084   440000EA           B        ??GetValue_3
+   \   00000088   B70000EA           B        ??GetValue_1
+   \   0000008C   840000EA           B        ??GetValue_4
+   \   00000090   B50000EA           B        ??GetValue_1
+   \   00000094   B40000EA           B        ??GetValue_1
+   \   00000098   B30000EA           B        ??GetValue_1
+   \   0000009C   B20000EA           B        ??GetValue_1
+   \   000000A0   2A0000EA           B        ??GetValue_2
+   \   000000A4   290000EA           B        ??GetValue_2
+   \   000000A8   280000EA           B        ??GetValue_2
+   \   000000AC   AE0000EA           B        ??GetValue_1
+   \   000000B0   AD0000EA           B        ??GetValue_1
+   \   000000B4   AC0000EA           B        ??GetValue_1
+   \   000000B8   AB0000EA           B        ??GetValue_1
+   \   000000BC   AA0000EA           B        ??GetValue_1
+   \   000000C0   A90000EA           B        ??GetValue_1
+   \   000000C4   A80000EA           B        ??GetValue_1
+   \   000000C8   200000EA           B        ??GetValue_2
+   \   000000CC   1F0000EA           B        ??GetValue_2
+   \   000000D0   1E0000EA           B        ??GetValue_2
+   \   000000D4   1D0000EA           B        ??GetValue_2
+   \   000000D8   1C0000EA           B        ??GetValue_2
+   \   000000DC   A20000EA           B        ??GetValue_1
+   \   000000E0   220000EA           B        ??GetValue_5
+   \   000000E4   4E0000EA           B        ??GetValue_6
+   \   000000E8   4D0000EA           B        ??GetValue_6
+   \   000000EC   4C0000EA           B        ??GetValue_6
+   \   000000F0   4B0000EA           B        ??GetValue_6
+   \   000000F4   9C0000EA           B        ??GetValue_1
+   \   000000F8   9B0000EA           B        ??GetValue_1
+   \   000000FC   480000EA           B        ??GetValue_6
+   \   00000100   470000EA           B        ??GetValue_6
+   \   00000104   460000EA           B        ??GetValue_6
+   \   00000108   450000EA           B        ??GetValue_6
+   \   0000010C   440000EA           B        ??GetValue_6
+   \   00000110   430000EA           B        ??GetValue_6
+   \   00000114   420000EA           B        ??GetValue_6
+   \   00000118   410000EA           B        ??GetValue_6
+   \   0000011C   920000EA           B        ??GetValue_1
+   \   00000120   910000EA           B        ??GetValue_1
+   \   00000124   900000EA           B        ??GetValue_1
+   \   00000128   8F0000EA           B        ??GetValue_1
+   \   0000012C   8E0000EA           B        ??GetValue_1
+   \   00000130   8D0000EA           B        ??GetValue_1
+   \   00000134   8C0000EA           B        ??GetValue_1
+   \   00000138   8B0000EA           B        ??GetValue_1
+   \   0000013C   8A0000EA           B        ??GetValue_1
+   \   00000140   1C0000EA           B        ??GetValue_7
+   \   00000144   670000EA           B        ??GetValue_8
+   \   00000148   870000EA           B        ??GetValue_1
+   \   0000014C   780000EA           B        ??GetValue_9
+    243          		// Convert kilometers to miles
+    244          		case SPEED:
+    245          		case MAX_SPEED:
+    246          		case SPEED_PEAKS:
+    247          		case VMIN:
+    248          		case VMAX:
+    249          		case SIXTY_TRAP:
+    250          		case THREE_THIRTY_TRAP:
+    251          		case THOUSAND_TRAP:
+    252          		case EIGHTH_TRAP:
+    253          		case QUARTER_TRAP:
+    254          			if (sysData.units == STD)
+   \                     ??GetValue_2:
+   \   00000150   ........           LDR      R0,??DataTable7_2
+   \   00000154   640090E5           LDR      R0,[R0, #+100]
+   \   00000158   000050E3           CMP      R0,#+0
+   \   0000015C   8200001A           BNE      ??GetValue_1
+    255          				retval.fVal *= KILOMETERS_TO_MILES;
+   \   00000160   0410A0E1           MOV      R1,R4
+   \   00000164   ........           LDR      R0,??DataTable7_3  ;; 0x3f1f122f
+   \                     ??GetValue_10:
+   \   00000168   ........           BL       __aeabi_fmul
+   \   0000016C   7D0000EA           B        ??GetValue_11
+    256          			break;
+    257          		
+    258          		// round off rpm to nearest 20
+    259          		case VEHICLE_RPM:
+    260          			if ((retval.iVal = retval.iVal - retval.iVal % 20) < 0)		// Not that iVal IS signed so we can watch for underflow here!
+   \                     ??GetValue_5:
+   \   00000170   ........           LDR      R1,??DataTable7_4  ;; 0x66666667
+   \   00000174   0400A0E1           MOV      R0,R4
+   \   00000178   9021C1E0           SMULL    R2,R1,R0,R1
+   \   0000017C   C101B0E1           ASRS     R0,R1,#+3
+   \   00000180   01008042           ADDMI    R0,R0,#+1
+   \   00000184   1410A0E3           MOV      R1,#+20
+   \   00000188   910000E0           MUL      R0,R1,R0
+   \   0000018C   0040B0E1           MOVS     R4,R0
+   \   00000190   7500005A           BPL      ??GetValue_1
+    261          				retval.iVal = 0;
+   \                     ??GetValue_12:
+   \   00000194   0040A0E3           MOV      R4,#+0
+   \   00000198   730000EA           B        ??GetValue_1
+    262          			break;
+    263          
+    264          		// convert meters to feet
+    265          		case LAP_DISTANCE:
+    266          		case TOTAL_DISTANCE:
+    267          		case ALTITUDE:
+    268          		case MIN_ALTITUDE:
+    269          		case MAX_ALTITUDE:
+    270          			if (sysData.units == STD)
+   \                     ??GetValue_3:
+   \   0000019C   ........           LDR      R0,??DataTable7_2
+   \   000001A0   640090E5           LDR      R0,[R0, #+100]
+   \   000001A4   000050E3           CMP      R0,#+0
+   \   000001A8   6F00001A           BNE      ??GetValue_1
+    271          				retval.fVal *= METERS_TO_FEET;
+   \   000001AC   0410A0E1           MOV      R1,R4
+   \   000001B0   ........           LDR      R0,??DataTable8  ;; 0x4051f8a1
+   \   000001B4   EBFFFFEA           B        ??GetValue_10
+    272          			break;
+    273          
+    274          		case SU_TEMPERATURE:
+    275          			if (suData.suHwRev < 200) {		// only do this if we are not connected to 3 axis SU2
+   \                     ??GetValue_7:
+   \   000001B8   ........           LDR      R0,??DataTable8_1
+   \   000001BC   1400D0E5           LDRB     R0,[R0, #+20]
+   \   000001C0   C80050E3           CMP      R0,#+200
+   \   000001C4   F2FFFF2A           BCS      ??GetValue_12
+    276          				if (sysData.units == STD)
+   \   000001C8   ........           LDR      R0,??DataTable7_2
+   \   000001CC   640090E5           LDR      R0,[R0, #+100]
+   \   000001D0   000050E3           CMP      R0,#+0
+   \   000001D4   6400001A           BNE      ??GetValue_1
+    277          					// convert C to F	
+    278          					retval.fVal = (retval.fVal * 9.0 / 5.0) + 32.0;
+   \   000001D8   0400A0E1           MOV      R0,R4
+   \   000001DC   ........           BL       __aeabi_f2d
+   \   000001E0   0130A0E1           MOV      R3,R1
+   \   000001E4   0020A0E1           MOV      R2,R0
+   \   000001E8   4014A0E3           MOV      R1,#+1073741824
+   \   000001EC   0000A0E3           MOV      R0,#+0
+   \   000001F0   881981E3           ORR      R1,R1,#0x220000
+   \   000001F4   ........           BL       __aeabi_dmul
+   \   000001F8   4034A0E3           MOV      R3,#+1073741824
+   \   000001FC   0020A0E3           MOV      R2,#+0
+   \   00000200   503983E3           ORR      R3,R3,#0x140000
+   \   00000204   ........           BL       __aeabi_ddiv
+   \   00000208   0130A0E1           MOV      R3,R1
+   \   0000020C   0020A0E1           MOV      R2,R0
+   \   00000210   4014A0E3           MOV      R1,#+1073741824
+   \   00000214   0000A0E3           MOV      R0,#+0
+   \   00000218   401881E3           ORR      R1,R1,#0x400000
+   \   0000021C   ........           BL       __aeabi_dadd
+   \   00000220   4F0000EA           B        ??GetValue_13
+    279          			} // if
+    280          			else
+    281          				retval.fVal = 0.0;
+    282          			break;
+    283          			
+    284          		case ANALOG_INPUT_0:		// note inputs are scaled to users units so no metric conversion
+    285          		case ANALOG_INPUT_1:		
+    286          		case ANALOG_INPUT_2:
+    287          		case ANALOG_INPUT_3:
+    288          		case MAX_A_0:
+    289          		case MAX_A_1:
+    290          		case MAX_A_2:
+    291          		case MAX_A_3:
+    292          		case MIN_A_0:
+    293          		case MIN_A_1:
+    294          		case MIN_A_2:
+    295          		case MIN_A_3:
+    296          			{
+    297          			float tempfloat;
+    298          			int i;
+    299          			
+    300          			// create index into scaling values so we can use one general routine
+    301          			if (dataType <= ANALOG_INPUT_3)
+   \                     ??GetValue_6:
+   \   00000224   FFA00AE2           AND      R10,R10,#0xFF
+   \   00000228   3A005AE3           CMP      R10,#+58
+    302          				i = dataType - (int) ANALOG_INPUT_0;	// analog value
+   \   0000022C   36004932           SUBCC    R0,R9,#+54
+   \   00000230   0200003A           BCC      ??GetValue_14
+    303          			else if (dataType <= MAX_A_3)
+   \   00000234   40005AE3           CMP      R10,#+64
+    304          				i = dataType - (int) MAX_A_0;			// max analog value
+   \   00000238   3C004932           SUBCC    R0,R9,#+60
+    305          			else
+    306          				i = dataType - (int) MIN_A_0;			// min analog value
+   \   0000023C   40004922           SUBCS    R0,R9,#+64
+    307          
+    308          			// check for bad ranges
+    309          			if (vehicleData.analogInput[i].highVoltagePoint == vehicleData.analogInput[i].lowVoltagePoint)
+   \                     ??GetValue_14:
+   \   00000240   ........           LDR      R1,??DataTable10
+   \   00000244   007381E0           ADD      R7,R1,R0, LSL #+6
+   \   00000248   A41097E5           LDR      R1,[R7, #+164]
+   \   0000024C   A80097E5           LDR      R0,[R7, #+168]
+   \   00000250   ........           BL       __aeabi_cfcmpeq
+   \   00000254   CEFFFF0A           BEQ      ??GetValue_12
+    310          				retval.fVal = 0.0;
+    311          			else {
+    312          				// snap values to rails
+    313          //					if (retVal < vehicleData.analogInputs[i].lowValuePoint;
+    314          //						tempfloat = 0.0;
+    315          //					else if (retVal > vehicleData.analogInputs[i].highValuePoint)
+    316          //						tempfloat = 1.0;
+    317          //					else
+    318          					// scale as percent of usable range
+    319          					tempfloat = (retval.fVal - vehicleData.analogInput[i].lowVoltagePoint) /
+    320          						(vehicleData.analogInput[i].highVoltagePoint - vehicleData.analogInput[i].lowVoltagePoint);
+    321          
+    322          				// scale as actual units to be measured
+    323          				retval.fVal = tempfloat * (vehicleData.analogInput[i].highValuePoint - vehicleData.analogInput[i].lowValuePoint) + vehicleData.analogInput[i].lowValuePoint;
+   \                     ??GetValue_15:
+   \   00000258   AC8097E5           LDR      R8,[R7, #+172]
+   \   0000025C   0400A0E1           MOV      R0,R4
+   \   00000260   ........           BL       __aeabi_fsub
+   \   00000264   0090A0E1           MOV      R9,R0
+   \   00000268   A80097E5           LDR      R0,[R7, #+168]
+   \   0000026C   A41097E5           LDR      R1,[R7, #+164]
+   \   00000270   ........           BL       __aeabi_fsub
+   \   00000274   0010A0E1           MOV      R1,R0
+   \   00000278   0900A0E1           MOV      R0,R9
+   \   0000027C   ........           BL       __aeabi_fdiv
+   \   00000280   0090A0E1           MOV      R9,R0
+   \   00000284   B00097E5           LDR      R0,[R7, #+176]
+   \   00000288   0810A0E1           MOV      R1,R8
+   \   0000028C   ........           BL       __aeabi_fsub
+   \   00000290   0910A0E1           MOV      R1,R9
+   \   00000294   ........           BL       __aeabi_fmul
+   \   00000298   0810A0E1           MOV      R1,R8
+   \   0000029C   ........           BL       __aeabi_fadd
+   \   000002A0   300000EA           B        ??GetValue_11
+    324          			} // else
+    325          			break;
+    326          		} // case
+    327          		
+    328          		case LAP_TIME:
+    329          			if (DataValues[LAP_NUMBER].uVal > 1) {
+   \                     ??GetValue_4:
+   \   000002A4   200198E5           LDR      R0,[R8, #+288]
+   \   000002A8   020050E3           CMP      R0,#+2
+   \   000002AC   0A00003A           BCC      ??GetValue_16
+    330          				if (retval.iVal < (trackData.laptimeHold * 1000)) {
+   \   000002B0   ........           LDR      R1,??DataTable14
+   \   000002B4   FA2FA0E3           MOV      R2,#+1000
+   \   000002B8   4110D1E5           LDRB     R1,[R1, #+65]
+   \   000002BC   820161E1           SMULBB   R1,R2,R1
+   \   000002C0   010054E1           CMP      R4,R1
+   \   000002C4   040000AA           BGE      ??GetValue_16
+    331          					// request use of global data
+    332          					OS_Use(&SEMA_GlobalData);
+   \   000002C8   0700A0E1           MOV      R0,R7
+   \   000002CC   ........           BL       OS_Use
+    333          				
+    334          					// get value from table
+    335          					retval.uVal = DataValues[LAST_LAP_TIME].uVal;
+   \   000002D0   084198E5           LDR      R4,[R8, #+264]
+    336          				
+    337          					// relinquish global data
+    338          					OS_Unuse(&SEMA_GlobalData);
+   \   000002D4   0700A0E1           MOV      R0,R7
+   \   000002D8   ........           BL       OS_Unuse
+    339          				} // if
+    340          			} // if
+    341          			if (retval.iVal < 0)
+   \                     ??GetValue_16:
+   \   000002DC   0400B0E1           MOVS     R0,R4
+   \   000002E0   2100005A           BPL      ??GetValue_1
+    342          				retval.iVal = 0;
+   \   000002E4   AAFFFFEA           B        ??GetValue_12
+    343          		break;
+    344          		
+    345          		case HOLDING:
+    346          			{
+    347          				unsigned int lapnum;
+    348          				float laptime;
+    349          
+    350          				// request use of global data
+    351          				OS_Use(&SEMA_GlobalData);
+   \                     ??GetValue_8:
+   \   000002E8   0700A0E1           MOV      R0,R7
+   \   000002EC   ........           BL       OS_Use
+    352          				
+    353          				// get values from table
+    354          				lapnum = DataValues[LAP_NUMBER].uVal;
+   \   000002F0   209198E5           LDR      R9,[R8, #+288]
+    355          				laptime = DataValues[LAP_TIME].fVal;
+   \   000002F4   008198E5           LDR      R8,[R8, #+256]
+    356          				
+    357          				// relinquish global data
+    358          				OS_Unuse(&SEMA_GlobalData);
+   \   000002F8   0700A0E1           MOV      R0,R7
+   \   000002FC   ........           BL       OS_Unuse
+    359          
+    360          				if (lapnum > 1) {
+   \   00000300   020059E3           CMP      R9,#+2
+   \   00000304   A2FFFF3A           BCC      ??GetValue_12
+    361          					if (laptime < (trackData.laptimeHold * 1000))
+   \   00000308   ........           LDR      R0,??DataTable14
+   \   0000030C   FA1FA0E3           MOV      R1,#+1000
+   \   00000310   4100D0E5           LDRB     R0,[R0, #+65]
+   \   00000314   810060E1           SMULBB   R0,R1,R0
+   \   00000318   ........           BL       __aeabi_i2f
+   \   0000031C   0010A0E1           MOV      R1,R0
+   \   00000320   0800A0E1           MOV      R0,R8
+   \   00000324   ........           BL       __aeabi_cfcmple
+   \   00000328   99FFFF2A           BCS      ??GetValue_12
+    362          						retval.uVal = true;			// holding
+   \   0000032C   0140A0E3           MOV      R4,#+1
+   \   00000330   0D0000EA           B        ??GetValue_1
+    363          					else retval.uVal = false;		// not holding
+    364          				}
+    365          				else retval.uVal = false;			// not holding
+    366          			}
+    367          			break;
+    368          
+    369          		case COMBINED_G:
+    370          			retval.fVal = sqrt((DataValues[X_G_DAMPED].fVal * DataValues[X_G_DAMPED].fVal) + (DataValues[Y_G_DAMPED].fVal * DataValues[Y_G_DAMPED].fVal));
+   \                     ??GetValue_9:
+   \   00000334   480098E5           LDR      R0,[R8, #+72]
+   \   00000338   507098E5           LDR      R7,[R8, #+80]
+   \   0000033C   0010A0E1           MOV      R1,R0
+   \   00000340   ........           BL       __aeabi_fmul
+   \   00000344   0080A0E1           MOV      R8,R0
+   \   00000348   0700A0E1           MOV      R0,R7
+   \   0000034C   0710A0E1           MOV      R1,R7
+   \   00000350   ........           BL       __aeabi_fmul
+   \   00000354   0810A0E1           MOV      R1,R8
+   \   00000358   ........           BL       __aeabi_fadd
+   \   0000035C   ........           BL       __aeabi_f2d
+   \   00000360   ........           BL       sqrt
+   \                     ??GetValue_13:
+   \   00000364   ........           BL       __aeabi_d2f
+   \                     ??GetValue_11:
+   \   00000368   0040A0E1           MOV      R4,R0
+    371          			break;
+    372          
+    373          		case DIGITAL_INPUT_4:
+    374          		case DIGITAL_INPUT_5:
+    375          		default:
+    376          		// no processing necessary
+    377          			break;
+    378          	} // switch
+    379          
+    380          	return retval;
+   \                     ??GetValue_1:
+   \   0000036C   F040C6E1           STRD     R4,R5,[R6, #+0]
+   \   00000370   F087BDE8           POP      {R4-R10,PC}      ;; return
+    381          } // GetValue
+    382          
+    383          #define	INCREASING	true
+    384          #define	DECREASING	false
+    385          #define	SPEED_INCREMENT	0.3			// was .3, tried .25
+    386          //#define	SPEED_DECREMENT	1.062		// make bigger if speed creeps up, make smaller if speed creeps down
+    387          #define	SPEED_DECREMENT	1.100		// make bigger if speed creeps up, make smaller if speed creeps down
+    388          #define	RPM_INCREMENT	23
+    389          #define	RPM_DECREMENT	92
+    390          #define	SHIFT_RPM		530
+    391          #define	DISTANCE_INCREMENT	1.0
+    392          int speedDirection = INCREASING;
+    393          int shifting = false;
+    394          unsigned char metRecordSpeedYet;
+    395          
+
+   \                                 In section .text, align 4, keep-with-next
+    396          void SimStartSession(void)
+    397          {
+   \                     SimStartSession:
+   \   00000000   70402DE9           PUSH     {R4-R6,LR}
+    398          	int i;
+    399          
+    400          	DataValues[SPEED].fVal = 0;
+   \   00000004   ........           LDR      R5,??DataTable7_1
+    401          	DataValues[SPEED_PEAKS].fVal = 0;
+    402          	minSimRPM = (unsigned int)(vehicleData.tach.scaleEnd * 0.7);			// Lowest RPM in simulated drive
+   \   00000008   ........           LDR      R4,??DataTable10
+   \   0000000C   0060A0E3           MOV      R6,#+0
+   \   00000010   706085E5           STR      R6,[R5, #+112]
+   \   00000014   386185E5           STR      R6,[R5, #+312]
+   \   00000018   140094E5           LDR      R0,[R4, #+20]
+   \   0000001C   ........           BL       __aeabi_i2d
+   \   00000020   0020A0E1           MOV      R2,R0
+   \   00000024   0130A0E1           MOV      R3,R1
+   \   00000028   ........           ADR      R0,??DataTable3
+   \   0000002C   030090E8           LDM      R0,{R0,R1}
+   \   00000030   ........           BL       __aeabi_dmul
+   \   00000034   ........           BL       __aeabi_d2uiz
+    403          	DataValues[VEHICLE_RPM].uVal = minSimRPM;
+    404          	DataValues[MAX_RPM].uVal = 0;
+   \   00000038   0020A0E3           MOV      R2,#+0
+    405          	DataValues[ELAPSED_TIME].uVal = 0;
+    406          	DataValues[ELAPSED_RACE_TIME].uVal = 0;
+    407          	DataValues[LAP_NUMBER].iVal = 0;
+    408          	DataValues[LAP_TIME].uVal = 0;
+    409          	DataValues[BEST_SESSION_LAP].uVal = 0;
+    410          	DataValues[GEAR].iVal = 1;
+   \   0000003C   0130A0E3           MOV      R3,#+1
+   \   00000040   F80885E5           STR      R0,[R5, #+2296]
+   \   00000044   A80185E5           STR      R0,[R5, #+424]
+   \   00000048   202285E5           STR      R2,[R5, #+544]
+   \   0000004C   102185E5           STR      R2,[R5, #+272]
+   \   00000050   182185E5           STR      R2,[R5, #+280]
+   \   00000054   202185E5           STR      R2,[R5, #+288]
+   \   00000058   002185E5           STR      R2,[R5, #+256]
+   \   0000005C   882285E5           STR      R2,[R5, #+648]
+   \   00000060   503285E5           STR      R3,[R5, #+592]
+    411          	DataValues[LAP_DISTANCE].fVal = 0.0F;
+   \   00000064   E86085E5           STR      R6,[R5, #+232]
+    412          	speedDirection = INCREASING;
+   \   00000068   003985E5           STR      R3,[R5, #+2304]
+    413          	// See how may gears to allow for this vehicle
+    414          	for (i = 0; i < NUMBER_OF_GEARS; i++)
+   \   0000006C   0010A0E3           MOV      R1,#+0
+    415          	{
+    416          		if (vehicleData.gearRatios[i] == 0)
+   \                     ??SimStartSession_0:
+   \   00000070   300094E5           LDR      R0,[R4, #+48]
+   \   00000074   ........           BL       __aeabi_cfcmpeq
+   \   00000078   0300000A           BEQ      ??SimStartSession_1
+    417          			break;
+    418          	}
+   \   0000007C   016086E2           ADD      R6,R6,#+1
+   \   00000080   044084E2           ADD      R4,R4,#+4
+   \   00000084   080056E3           CMP      R6,#+8
+   \   00000088   F8FFFFBA           BLT      ??SimStartSession_0
+    419          	maxSimGear = i + 1;
+   \                     ??SimStartSession_1:
+   \   0000008C   010086E2           ADD      R0,R6,#+1
+   \   00000090   FC0885E5           STR      R0,[R5, #+2300]
+    420          
+    421          	unsavedSysData.waitingForRecordSpeed = TRUE;
+   \   00000094   ........           LDR      R0,??DataTable15
+    422          	metRecordSpeedYet = FALSE;
+   \   00000098   2C29C5E5           STRB     R2,[R5, #+2348]
+   \   0000009C   D530C0E5           STRB     R3,[R0, #+213]
+    423          }
+   \   000000A0   7080BDE8           POP      {R4-R6,PC}       ;; return
+    424          
+    425          //
+    426          // Test code - dummy timer tick to change data.  The method of updating the data is fake,
+    427          // but the method of notifying the screens about the new data is real.
+    428          //
+
+   \                                 In section .text, align 4, keep-with-next
+    429          void DummyTick(void) {
+   \                     DummyTick:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+    430          	static unsigned char dummy_initialized = 0;
+    431          	int i;
+    432          
+    433          	// Simulate time data, lap number and other non-cycling data
+    434          	DataValues[ELAPSED_TIME].uVal += TIME_INCREMENT;
+   \   00000004   ........           LDR      R4,??DataTable7_1
+   \   00000008   14D04DE2           SUB      SP,SP,#+20
+   \   0000000C   100194E5           LDR      R0,[R4, #+272]
+    435          	DataValues[ELAPSED_RACE_TIME].uVal += TIME_INCREMENT;
+    436          	DataValues[LAP_DISTANCE].fVal += DISTANCE_INCREMENT;
+   \   00000010   E81094E5           LDR      R1,[R4, #+232]
+   \   00000014   320080E2           ADD      R0,R0,#+50
+   \   00000018   100184E5           STR      R0,[R4, #+272]
+   \   0000001C   180194E5           LDR      R0,[R4, #+280]
+   \   00000020   320080E2           ADD      R0,R0,#+50
+   \   00000024   180184E5           STR      R0,[R4, #+280]
+   \   00000028   FE05A0E3           MOV      R0,#+1065353216
+   \   0000002C   ........           BL       __aeabi_fadd
+   \   00000030   E80084E5           STR      R0,[R4, #+232]
+    437          	if ((DataValues[LAP_TIME].uVal += TIME_INCREMENT) > SIMULATION_LAP_TIME)
+   \   00000034   000194E5           LDR      R0,[R4, #+256]
+   \   00000038   D810A0E3           MOV      R1,#+216
+   \   0000003C   320080E2           ADD      R0,R0,#+50
+   \   00000040   501B81E3           ORR      R1,R1,#0x14000
+   \   00000044   000184E5           STR      R0,[R4, #+256]
+   \   00000048   010050E1           CMP      R0,R1
+   \   0000004C   0B00003A           BCC      ??DummyTick_1
+    438          	{
+    439          		DataValues[LAP_NUMBER].iVal += 1;
+   \   00000050   201194E5           LDR      R1,[R4, #+288]
+    440          		DataValues[LAST_LAP_TIME].uVal = DataValues[LAP_TIME].uVal;
+   \   00000054   080184E5           STR      R0,[R4, #+264]
+   \   00000058   011081E2           ADD      R1,R1,#+1
+   \   0000005C   201184E5           STR      R1,[R4, #+288]
+    441          		if (0 == DataValues[BEST_SESSION_LAP].uVal || DataValues[LAST_LAP_TIME].uVal < DataValues[BEST_SESSION_LAP].uVal)
+   \   00000060   881294E5           LDR      R1,[R4, #+648]
+   \   00000064   000051E3           CMP      R1,#+0
+   \   00000068   0100000A           BEQ      ??DummyTick_2
+   \   0000006C   010050E1           CMP      R0,R1
+   \   00000070   0000002A           BCS      ??DummyTick_3
+    442          			DataValues[BEST_SESSION_LAP].uVal = DataValues[LAST_LAP_TIME].uVal;	
+   \                     ??DummyTick_2:
+   \   00000074   880284E5           STR      R0,[R4, #+648]
+    443          		DataValues[LAP_TIME].uVal = 0;
+   \                     ??DummyTick_3:
+   \   00000078   0000A0E3           MOV      R0,#+0
+   \   0000007C   000184E5           STR      R0,[R4, #+256]
+    444          	}
+    445          
+    446          	// Simulate speed and gears
+    447          	if (speedDirection == INCREASING)
+   \                     ??DummyTick_1:
+   \   00000080   001994E5           LDR      R1,[R4, #+2304]
+   \   00000084   A85194E5           LDR      R5,[R4, #+424]
+   \   00000088   040994E5           LDR      R0,[R4, #+2308]
+   \   0000008C   010051E3           CMP      R1,#+1
+   \   00000090   3B00001A           BNE      ??DummyTick_4
+    448          	{
+    449          		if (shifting)
+   \   00000094   000050E3           CMP      R0,#+0
+   \   00000098   0F00000A           BEQ      ??DummyTick_5
+    450          		{
+    451          			//int lowerLim;
+    452          
+    453          			if ((DataValues[VEHICLE_RPM].uVal -= SHIFT_RPM) > MAX_POSSIBLE_RPM)		// Watch for overflow of unsigned int
+   \   0000009C   1100E0E3           MVN      R0,#+17
+   \   000000A0   800FC0E3           BIC      R0,R0,#0x200
+   \   000000A4   A910A0E3           MOV      R1,#+169
+   \   000000A8   050080E0           ADD      R0,R0,R5
+   \   000000AC   611C81E3           ORR      R1,R1,#0x6100
+   \   000000B0   A80184E5           STR      R0,[R4, #+424]
+   \   000000B4   010050E1           CMP      R0,R1
+    454          				DataValues[VEHICLE_RPM].uVal = 0;
+   \   000000B8   0000A023           MOVCS    R0,#+0
+   \   000000BC   A8018425           STRCS    R0,[R4, #+424]
+    455          			if (DataValues[VEHICLE_RPM].uVal <= (unsigned int)minSimRPM)
+   \   000000C0   F80894E5           LDR      R0,[R4, #+2296]
+   \   000000C4   A81194E5           LDR      R1,[R4, #+424]
+   \                     ??DummyTick_6:
+   \   000000C8   010050E1           CMP      R0,R1
+   \   000000CC   5F00003A           BCC      ??DummyTick_7
+    456          				shifting = false;
+   \   000000D0   0000A0E3           MOV      R0,#+0
+   \                     ??DummyTick_8:
+   \   000000D4   040984E5           STR      R0,[R4, #+2308]
+   \   000000D8   5C0000EA           B        ??DummyTick_7
+    457          		}
+    458          		else
+    459          		{
+    460          			DataValues[SPEED].fVal = CalcSpeed();
+   \                     ??DummyTick_5:
+   \   000000DC   506294E5           LDR      R6,[R4, #+592]
+   \   000000E0   ........           LDR      R7,??DataTable10
+   \   000000E4   0500A0E1           MOV      R0,R5
+   \   000000E8   ........           BL       __aeabi_ui2f
+   \   000000EC   541097E5           LDR      R1,[R7, #+84]
+   \   000000F0   ........           BL       __aeabi_fmul
+   \   000000F4   501097E5           LDR      R1,[R7, #+80]
+   \   000000F8   ........           BL       __aeabi_fdiv
+   \   000000FC   061187E0           ADD      R1,R7,R6, LSL #+2
+   \   00000100   2C1091E5           LDR      R1,[R1, #+44]
+   \   00000104   ........           BL       __aeabi_fdiv
+   \   00000108   ........           BL       __aeabi_f2d
+   \   0000010C   0020A0E1           MOV      R2,R0
+   \   00000110   0130A0E1           MOV      R3,R1
+   \   00000114   BC0F8FE2           ADR      R0,??DummyTick_9
+   \   00000118   030090E8           LDM      R0,{R0,R1}
+   \   0000011C   ........           BL       __aeabi_dmul
+   \   00000120   ........           BL       __aeabi_d2f
+   \   00000124   700084E5           STR      R0,[R4, #+112]
+    461          			if ((DataValues[VEHICLE_RPM].uVal += (RPM_INCREMENT * (maxSimGear - DataValues[GEAR].iVal))) >= (unsigned)(vehicleData.tach.scaleEnd - 150))
+   \   00000128   FC0894E5           LDR      R0,[R4, #+2300]
+   \   0000012C   1720A0E3           MOV      R2,#+23
+   \   00000130   061040E0           SUB      R1,R0,R6
+   \   00000134   925121E0           MLA      R1,R2,R1,R5
+   \   00000138   142097E5           LDR      R2,[R7, #+20]
+   \   0000013C   9530E0E3           MVN      R3,#+149
+   \   00000140   022083E0           ADD      R2,R3,R2
+   \   00000144   A81184E5           STR      R1,[R4, #+424]
+   \   00000148   020051E1           CMP      R1,R2
+   \   0000014C   3F00003A           BCC      ??DummyTick_7
+    462          			{
+    463          				if (++DataValues[GEAR].iVal == maxSimGear)
+   \   00000150   011086E2           ADD      R1,R6,#+1
+   \   00000154   501284E5           STR      R1,[R4, #+592]
+   \   00000158   000051E1           CMP      R1,R0
+   \   0000015C   0600001A           BNE      ??DummyTick_10
+    464          				{
+    465          					if (maxSimGear > 1)
+   \   00000160   020050E3           CMP      R0,#+2
+    466          						DataValues[GEAR].iVal = DataValues[GEAR].iVal - 1;
+   \   00000164   010041A2           SUBGE    R0,R1,#+1
+   \   00000168   500284A5           STRGE    R0,[R4, #+592]
+    467          					DataValues[SPEED_PEAKS].fVal = DataValues[SPEED].fVal;
+   \   0000016C   700094E5           LDR      R0,[R4, #+112]
+   \   00000170   380184E5           STR      R0,[R4, #+312]
+    468          					speedDirection = DECREASING;
+   \   00000174   0000A0E3           MOV      R0,#+0
+   \   00000178   330000EA           B        ??DummyTick_11
+    469          				}
+    470          				else
+    471          				{
+    472          					shifting = true;
+   \                     ??DummyTick_10:
+   \   0000017C   0100A0E3           MOV      R0,#+1
+   \   00000180   D3FFFFEA           B        ??DummyTick_8
+    473          				}
+    474          			}
+    475          		}
+    476          	}
+    477          	else
+    478          	{
+    479          		if (shifting)
+   \                     ??DummyTick_4:
+   \   00000184   ........           LDR      R7,??DataTable10
+   \   00000188   000050E3           CMP      R0,#+0
+   \   0000018C   0600000A           BEQ      ??DummyTick_12
+    480          		{
+    481          			if ((DataValues[VEHICLE_RPM].uVal += SHIFT_RPM) >= (unsigned)(vehicleData.tach.scaleEnd - 100))
+   \   00000190   1200A0E3           MOV      R0,#+18
+   \   00000194   141097E5           LDR      R1,[R7, #+20]
+   \   00000198   800F80E3           ORR      R0,R0,#0x200
+   \   0000019C   050080E0           ADD      R0,R0,R5
+   \   000001A0   641041E2           SUB      R1,R1,#+100
+   \   000001A4   A80184E5           STR      R0,[R4, #+424]
+   \   000001A8   C6FFFFEA           B        ??DummyTick_6
+    482          				shifting = false;
+    483          		}
+    484          		else
+    485          		{
+    486          			DataValues[SPEED].fVal = CalcSpeed();
+   \                     ??DummyTick_12:
+   \   000001AC   506294E5           LDR      R6,[R4, #+592]
+   \   000001B0   0500A0E1           MOV      R0,R5
+   \   000001B4   ........           BL       __aeabi_ui2f
+   \   000001B8   541097E5           LDR      R1,[R7, #+84]
+   \   000001BC   ........           BL       __aeabi_fmul
+   \   000001C0   501097E5           LDR      R1,[R7, #+80]
+   \   000001C4   ........           BL       __aeabi_fdiv
+   \   000001C8   061187E0           ADD      R1,R7,R6, LSL #+2
+   \   000001CC   2C1091E5           LDR      R1,[R1, #+44]
+   \   000001D0   ........           BL       __aeabi_fdiv
+   \   000001D4   ........           BL       __aeabi_f2d
+   \   000001D8   0020A0E1           MOV      R2,R0
+   \   000001DC   0130A0E1           MOV      R3,R1
+   \   000001E0   890F8FE2           ADR      R0,??DummyTick_9
+   \   000001E4   030090E8           LDM      R0,{R0,R1}
+   \   000001E8   ........           BL       __aeabi_dmul
+   \   000001EC   ........           BL       __aeabi_d2f
+    487          			if ((DataValues[VEHICLE_RPM].uVal -= RPM_DECREMENT) > MAX_POSSIBLE_RPM)
+   \   000001F0   A920A0E3           MOV      R2,#+169
+   \   000001F4   5C1045E2           SUB      R1,R5,#+92
+   \   000001F8   612C82E3           ORR      R2,R2,#0x6100
+   \   000001FC   A81184E5           STR      R1,[R4, #+424]
+   \   00000200   020051E1           CMP      R1,R2
+    488          				DataValues[VEHICLE_RPM].uVal = 0;
+   \   00000204   0010A023           MOVCS    R1,#+0
+   \   00000208   A8118425           STRCS    R1,[R4, #+424]
+    489          			if (DataValues[VEHICLE_RPM].uVal <= minSimRPM)
+   \   0000020C   F81894E5           LDR      R1,[R4, #+2296]
+   \   00000210   A82194E5           LDR      R2,[R4, #+424]
+   \   00000214   700084E5           STR      R0,[R4, #+112]
+   \   00000218   020051E1           CMP      R1,R2
+   \   0000021C   0B00003A           BCC      ??DummyTick_7
+    490          			{
+    491          				if (--DataValues[GEAR].iVal == 1)
+   \   00000220   011046E2           SUB      R1,R6,#+1
+   \   00000224   501284E5           STR      R1,[R4, #+592]
+   \   00000228   010051E3           CMP      R1,#+1
+   \   0000022C   D2FFFF1A           BNE      ??DummyTick_10
+    492          				{
+    493          					if (maxSimGear > 1)
+   \   00000230   FC1894E5           LDR      R1,[R4, #+2300]
+    494          						DataValues[GEAR].iVal = 2;
+    495          					DataValues[SPEED_PEAKS].fVal = -DataValues[SPEED].fVal;
+   \   00000234   800420E2           EOR      R0,R0,#0x80000000
+   \   00000238   020051E3           CMP      R1,#+2
+   \   0000023C   0210A0A3           MOVGE    R1,#+2
+   \   00000240   380184E5           STR      R0,[R4, #+312]
+   \   00000244   501284A5           STRGE    R1,[R4, #+592]
+    496          					speedDirection = INCREASING;
+   \   00000248   0100A0E3           MOV      R0,#+1
+   \                     ??DummyTick_11:
+   \   0000024C   000984E5           STR      R0,[R4, #+2304]
+    497          				}
+    498          				else
+    499          				{
+    500          					shifting = true;
+    501          				}
+    502          			}
+    503          		}
+    504          	}
+    505          
+    506          
+    507          	for (i = 0; i < NUMBER_OF_GLOBALS; i++) {
+   \                     ??DummyTick_7:
+   \   00000250   4074A0E3           MOV      R7,#+1073741824
+   \   00000254   0080A0E3           MOV      R8,#+0
+   \   00000258   0450A0E1           MOV      R5,R4
+   \   0000025C   A56F84E2           ADD      R6,R4,#+660
+   \   00000260   807887E3           ORR      R7,R7,#0x800000
+   \   00000264   ........           LDR      R11,??DataTable7_2
+   \   00000268   00A0A0E3           MOV      R10,#+0
+   \   0000026C   0190A0E3           MOV      R9,#+1
+    508          
+    509          		// request use of global data
+    510          //		OS_Use(&SEMA_GlobalData);
+    511          
+    512          		if (-1 != DummyDataValues[i].Dir) {
+   \                     ??DummyTick_13:
+   \   00000270   040016E5           LDR      R0,[R6, #-4]
+   \   00000274   010070E3           CMN      R0,#+1
+   \   00000278   D500000A           BEQ      ??DummyTick_14
+    513          			switch (i) {
+   \   0000027C   4F0058E3           CMP      R8,#+79
+   \   00000280   08F18F90           ADDLS    PC,PC,R8, LSL #+2
+   \                     ??DummyTick_0:
+   \   00000284   D200008A           BHI      ??DummyTick_14
+   \   00000288   4E0000EA           B        ??DummyTick_15
+   \   0000028C   4D0000EA           B        ??DummyTick_15
+   \   00000290   4C0000EA           B        ??DummyTick_15
+   \   00000294   CE0000EA           B        ??DummyTick_14
+   \   00000298   CD0000EA           B        ??DummyTick_14
+   \   0000029C   CC0000EA           B        ??DummyTick_14
+   \   000002A0   CB0000EA           B        ??DummyTick_14
+   \   000002A4   CA0000EA           B        ??DummyTick_14
+   \   000002A8   C90000EA           B        ??DummyTick_14
+   \   000002AC   450000EA           B        ??DummyTick_15
+   \   000002B0   440000EA           B        ??DummyTick_15
+   \   000002B4   430000EA           B        ??DummyTick_15
+   \   000002B8   5E0000EA           B        ??DummyTick_16
+   \   000002BC   5D0000EA           B        ??DummyTick_16
+   \   000002C0   C30000EA           B        ??DummyTick_14
+   \   000002C4   3F0000EA           B        ??DummyTick_15
+   \   000002C8   3E0000EA           B        ??DummyTick_15
+   \   000002CC   820000EA           B        ??DummyTick_17
+   \   000002D0   810000EA           B        ??DummyTick_17
+   \   000002D4   3B0000EA           B        ??DummyTick_15
+   \   000002D8   3A0000EA           B        ??DummyTick_15
+   \   000002DC   7E0000EA           B        ??DummyTick_17
+   \   000002E0   BB0000EA           B        ??DummyTick_14
+   \   000002E4   BA0000EA           B        ??DummyTick_14
+   \   000002E8   B90000EA           B        ??DummyTick_14
+   \   000002EC   B80000EA           B        ??DummyTick_14
+   \   000002F0   B70000EA           B        ??DummyTick_14
+   \   000002F4   B60000EA           B        ??DummyTick_14
+   \   000002F8   B50000EA           B        ??DummyTick_14
+   \   000002FC   310000EA           B        ??DummyTick_15
+   \   00000300   300000EA           B        ??DummyTick_15
+   \   00000304   2F0000EA           B        ??DummyTick_15
+   \   00000308   B10000EA           B        ??DummyTick_14
+   \   0000030C   B00000EA           B        ??DummyTick_14
+   \   00000310   AF0000EA           B        ??DummyTick_14
+   \   00000314   AE0000EA           B        ??DummyTick_14
+   \   00000318   AD0000EA           B        ??DummyTick_14
+   \   0000031C   290000EA           B        ??DummyTick_15
+   \   00000320   280000EA           B        ??DummyTick_15
+   \   00000324   AA0000EA           B        ??DummyTick_14
+   \   00000328   A90000EA           B        ??DummyTick_14
+   \   0000032C   A80000EA           B        ??DummyTick_14
+   \   00000330   A70000EA           B        ??DummyTick_14
+   \   00000334   A60000EA           B        ??DummyTick_14
+   \   00000338   A50000EA           B        ??DummyTick_14
+   \   0000033C   A40000EA           B        ??DummyTick_14
+   \   00000340   A30000EA           B        ??DummyTick_14
+   \   00000344   1F0000EA           B        ??DummyTick_15
+   \   00000348   1E0000EA           B        ??DummyTick_15
+   \   0000034C   1D0000EA           B        ??DummyTick_15
+   \   00000350   1C0000EA           B        ??DummyTick_15
+   \   00000354   1B0000EA           B        ??DummyTick_15
+   \   00000358   9D0000EA           B        ??DummyTick_14
+   \   0000035C   9C0000EA           B        ??DummyTick_14
+   \   00000360   180000EA           B        ??DummyTick_15
+   \   00000364   170000EA           B        ??DummyTick_15
+   \   00000368   160000EA           B        ??DummyTick_15
+   \   0000036C   150000EA           B        ??DummyTick_15
+   \   00000370   590000EA           B        ??DummyTick_17
+   \   00000374   580000EA           B        ??DummyTick_17
+   \   00000378   950000EA           B        ??DummyTick_14
+   \   0000037C   940000EA           B        ??DummyTick_14
+   \   00000380   930000EA           B        ??DummyTick_14
+   \   00000384   920000EA           B        ??DummyTick_14
+   \   00000388   910000EA           B        ??DummyTick_14
+   \   0000038C   900000EA           B        ??DummyTick_14
+   \   00000390   8F0000EA           B        ??DummyTick_14
+   \   00000394   8E0000EA           B        ??DummyTick_14
+   \   00000398   7A0000EA           B        ??DummyTick_18
+   \   0000039C   8C0000EA           B        ??DummyTick_14
+   \   000003A0   8B0000EA           B        ??DummyTick_14
+   \   000003A4   070000EA           B        ??DummyTick_15
+   \   000003A8   890000EA           B        ??DummyTick_14
+   \   000003AC   880000EA           B        ??DummyTick_14
+   \   000003B0   870000EA           B        ??DummyTick_14
+   \   000003B4   480000EA           B        ??DummyTick_17
+   \   000003B8   850000EA           B        ??DummyTick_14
+   \   000003BC   010000EA           B        ??DummyTick_15
+   \   000003C0   830000EA           B        ??DummyTick_14
+   \   000003C4   440000EA           B        ??DummyTick_17
+    514          				case X_G:					// f in Gs
+    515          				case Y_G:					// f in Gs
+    516          				case Z_G:					// f in Gs
+    517          				case X_G_DAMPED:			// f in Gs
+    518          				case Y_G_DAMPED:			// f in Gs
+    519          				case Z_G_DAMPED:			// f in Gs
+    520          				case HEADING:				// f, in degrees, 0.0 - 360.0
+    521          				case HEADING_DAMPED:		// f, in degrees, 0.0 - 360.0
+    522          				case ALTITUDE:				// f, in meters
+    523          				case GPS_DOP:				// f gps dilution of precision, range 0.0 - 100.0
+    524          				case LAP_DISTANCE:			// f, in meters, since passing s/f
+    525          				case TOTAL_DISTANCE:		// f, in meters, since session started
+    526          				case PREDICTIVE_LAP:		// f, pace ahead or behind in seconds
+    527          				case ANALOG_INPUT_0:		// f, analog input in scaled value
+    528          				case ANALOG_INPUT_1:		// f, analog input in scaled value		
+    529          				case ANALOG_INPUT_2:		// f, analog input in scaled value
+    530          				case ANALOG_INPUT_3:		// f, analog input in scaled value
+    531          				case SU_TEMPERATURE:		// f
+    532          				case VEHICLE_12V:			// f
+    533          				case SIXTY_TRAP:			// f
+    534          				case THREE_THIRTY_TRAP:		// f
+    535          				case THOUSAND_TRAP:			// f
+    536          				case EIGHTH_TRAP:			// f
+    537          				case QUARTER_TRAP:			// f
+    538          				case VMAX:					// f
+    539          				case VMIN:					// f
+    540          
+    541          					if (!dummy_initialized)
+   \                     ??DummyTick_15:
+   \   000003C8   2D09D4E5           LDRB     R0,[R4, #+2349]
+   \   000003CC   000050E3           CMP      R0,#+0
+    542          						DataValues[i].fVal = DummyDataValues[i].Min;
+   \   000003D0   04009605           LDREQ    R0,[R6, #+4]
+   \   000003D4   00008505           STREQ    R0,[R5, #+0]
+    543          
+    544          					if (DummyDataValues[i].Dir == 0)	{		// Increasing
+   \   000003D8   040016E5           LDR      R0,[R6, #-4]
+   \   000003DC   001095E5           LDR      R1,[R5, #+0]
+   \   000003E0   000050E3           CMP      R0,#+0
+   \   000003E4   0A00001A           BNE      ??DummyTick_19
+    545          						if ((DataValues[i].fVal += DummyDataValues[i].Inc) > DummyDataValues[i].Max)
+   \   000003E8   080096E5           LDR      R0,[R6, #+8]
+   \   000003EC   ........           BL       __aeabi_fadd
+   \   000003F0   0010A0E1           MOV      R1,R0
+   \   000003F4   001085E5           STR      R1,[R5, #+0]
+   \   000003F8   000096E5           LDR      R0,[R6, #+0]
+   \   000003FC   ........           BL       __aeabi_cfcmple
+   \                     ??DummyTick_20:
+   \   00000400   7300002A           BCS      ??DummyTick_14
+    546          							DummyDataValues[i].Dir = 1;			// Start decreasing
+   \   00000404   049006E5           STR      R9,[R6, #-4]
+   \   00000408   710000EA           B        ??DummyTick_14
+   \                     ??DummyTick_9:
+   \   0000040C   FBA82B442C07       DC32     0x442BA8FB,0x3F4F072C
+   \              4F3F        
+    547          					} // if
+    548          					else {									// Decreasing
+    549          						if ((DataValues[i].fVal -= DummyDataValues[i].Inc) < DummyDataValues[i].Min)
+   \                     ??DummyTick_19:
+   \   00000414   0100A0E1           MOV      R0,R1
+   \   00000418   081096E5           LDR      R1,[R6, #+8]
+   \   0000041C   ........           BL       __aeabi_fsub
+   \   00000420   000085E5           STR      R0,[R5, #+0]
+   \   00000424   041096E5           LDR      R1,[R6, #+4]
+   \   00000428   ........           BL       __aeabi_cfcmple
+   \                     ??DummyTick_21:
+   \   0000042C   6800002A           BCS      ??DummyTick_14
+    550          							DummyDataValues[i].Dir = 0;			// Start increasing
+   \   00000430   04A006E5           STR      R10,[R6, #-4]
+   \   00000434   660000EA           B        ??DummyTick_14
+    551          					} // else
+    552          
+    553          					break;
+    554          
+    555          				case LATITUDE:			// d, gps lat out to 6 decimal places
+    556          				case LONGITUDE:			// d, gps lon out to 6 decimal places
+    557          
+    558          					if (!dummy_initialized)
+   \                     ??DummyTick_16:
+   \   00000438   2D09D4E5           LDRB     R0,[R4, #+2349]
+   \   0000043C   000050E3           CMP      R0,#+0
+   \   00000440   0300001A           BNE      ??DummyTick_22
+    559          						DataValues[i].dVal = DummyDataValues[i].Min;
+   \   00000444   040096E5           LDR      R0,[R6, #+4]
+   \   00000448   ........           BL       __aeabi_f2d
+   \   0000044C   03008DE8           STM      SP,{R0,R1}
+   \   00000450   F000C5E1           STRD     R0,R1,[R5, #+0]
+    560          
+    561          					if (-1 != DummyDataValues[i].Dir) {
+   \                     ??DummyTick_22:
+   \   00000454   042016E5           LDR      R2,[R6, #-4]
+   \   00000458   010072E3           CMN      R2,#+1
+   \   0000045C   5C00000A           BEQ      ??DummyTick_14
+    562          						if (DummyDataValues[i].Dir == 0)	{		// Increasing
+   \   00000460   D000C5E1           LDRD     R0,R1,[R5, #+0]
+   \   00000464   F800CDE1           STRD     R0,R1,[SP, #+8]
+   \   00000468   000052E3           CMP      R2,#+0
+   \   0000046C   080096E5           LDR      R0,[R6, #+8]
+   \   00000470   0B00001A           BNE      ??DummyTick_23
+    563          							if ((DataValues[i].dVal += DummyDataValues[i].Inc) > DummyDataValues[i].Max)
+   \   00000474   ........           BL       __aeabi_f2d
+   \   00000478   0020A0E1           MOV      R2,R0
+   \   0000047C   0130A0E1           MOV      R3,R1
+   \   00000480   D800CDE1           LDRD     R0,R1,[SP, #+8]
+   \   00000484   ........           BL       __aeabi_dadd
+   \   00000488   03008DE8           STM      SP,{R0,R1}
+   \   0000048C   F000C5E1           STRD     R0,R1,[R5, #+0]
+   \   00000490   000096E5           LDR      R0,[R6, #+0]
+   \   00000494   ........           BL       __aeabi_f2d
+   \   00000498   D020C5E1           LDRD     R2,R3,[R5, #+0]
+   \   0000049C   ........           BL       __aeabi_cdcmple
+   \   000004A0   D6FFFFEA           B        ??DummyTick_20
+    564          								DummyDataValues[i].Dir = 1;			// Start decreasing
+    565          						} // if
+    566          						else {									// Decreasing
+    567          							if ((DataValues[i].dVal -= DummyDataValues[i].Inc) < DummyDataValues[i].Min)
+   \                     ??DummyTick_23:
+   \   000004A4   ........           BL       __aeabi_f2d
+   \   000004A8   0020A0E1           MOV      R2,R0
+   \   000004AC   0130A0E1           MOV      R3,R1
+   \   000004B0   D800CDE1           LDRD     R0,R1,[SP, #+8]
+   \   000004B4   ........           BL       __aeabi_dsub
+   \   000004B8   03008DE8           STM      SP,{R0,R1}
+   \   000004BC   F000C5E1           STRD     R0,R1,[R5, #+0]
+   \   000004C0   040096E5           LDR      R0,[R6, #+4]
+   \   000004C4   ........           BL       __aeabi_f2d
+   \   000004C8   0020A0E1           MOV      R2,R0
+   \   000004CC   0130A0E1           MOV      R3,R1
+   \   000004D0   D000C5E1           LDRD     R0,R1,[R5, #+0]
+   \   000004D4   ........           BL       __aeabi_cdcmple
+   \   000004D8   D3FFFFEA           B        ??DummyTick_21
+    568          								DummyDataValues[i].Dir = 0;			// Start increasing
+    569          						} // else
+    570          					} // if
+    571          					break;
+    572          
+    573          				case GPS_WEEKS:			// u, number of weeks since GPS start = Jan 06, 1980
+    574          				case GPS_TIME:			// u, number of msec since GPS start + number of weeks
+    575          				case GPS_NUMSAT:		// u, number of satellites being monitored, 0 = no GPS Lock
+    576          				case DIGITAL_INPUT_4:	// u, digital input, 0 = OFF state, 1 = ON state
+    577          				case DIGITAL_INPUT_5:	// u, digital input, 0 = OFF state, 1 = ON state
+    578          				case CAMERA_STATUS:		// i, 0 = camera not ready, 1 = camera ready, 2 = camera recording, -1 = no camera
+    579          				case BEST_LAP:			// u, 0 = not best lap, 1 = session best lap, 2 = best lap ever
+    580          					{
+    581          						if (!dummy_initialized)
+   \                     ??DummyTick_17:
+   \   000004DC   2D09D4E5           LDRB     R0,[R4, #+2349]
+   \   000004E0   000050E3           CMP      R0,#+0
+   \   000004E4   0200001A           BNE      ??DummyTick_24
+    582          							DataValues[i].iVal = (int)DummyDataValues[i].Min;
+   \   000004E8   040096E5           LDR      R0,[R6, #+4]
+   \   000004EC   ........           BL       __aeabi_f2iz
+   \   000004F0   000085E5           STR      R0,[R5, #+0]
+    583          
+    584          						if (DummyDataValues[i].Dir == 0)	{		// Increasing
+   \                     ??DummyTick_24:
+   \   000004F4   040016E5           LDR      R0,[R6, #-4]
+   \   000004F8   081096E5           LDR      R1,[R6, #+8]
+   \   000004FC   000050E3           CMP      R0,#+0
+   \   00000500   0C0096E5           LDR      R0,[R6, #+12]
+   \   00000504   0700001A           BNE      ??DummyTick_25
+    585          							if ((DummyDataValues[i].CurrentValue += DummyDataValues[i].Inc) > (DummyDataValues[i].Max))
+   \   00000508   ........           BL       __aeabi_fadd
+   \   0000050C   0C0086E5           STR      R0,[R6, #+12]
+   \   00000510   000096E5           LDR      R0,[R6, #+0]
+   \   00000514   0C1096E5           LDR      R1,[R6, #+12]
+   \   00000518   ........           BL       __aeabi_cfcmple
+   \   0000051C   0600002A           BCS      ??DummyTick_26
+    586          								DummyDataValues[i].Dir = 1;			// Start decreasing
+   \   00000520   049006E5           STR      R9,[R6, #-4]
+   \   00000524   040000EA           B        ??DummyTick_26
+    587          						} // if
+    588          						else {									// Decreasing
+    589          							if ((DummyDataValues[i].CurrentValue -= DummyDataValues[i].Inc) < DummyDataValues[i].Min)
+   \                     ??DummyTick_25:
+   \   00000528   ........           BL       __aeabi_fsub
+   \   0000052C   0C0086E5           STR      R0,[R6, #+12]
+   \   00000530   041096E5           LDR      R1,[R6, #+4]
+   \   00000534   ........           BL       __aeabi_cfcmple
+    590          								DummyDataValues[i].Dir = 0;			// Start increasing
+   \   00000538   04A00635           STRCC    R10,[R6, #-4]
+    591          						} // else
+    592          
+    593          						DataValues[i].iVal = (int)DummyDataValues[i].CurrentValue;
+   \                     ??DummyTick_26:
+   \   0000053C   0C0096E5           LDR      R0,[R6, #+12]
+   \   00000540   ........           BL       __aeabi_f2iz
+    594          					} // case
+    595          
+    596          					if (!suData.suPresent) {
+   \   00000544   ........           LDR      R1,??DataTable8_1
+   \   00000548   000085E5           STR      R0,[R5, #+0]
+   \   0000054C   0C10D1E5           LDRB     R1,[R1, #+12]
+   \   00000550   440494E5           LDR      R0,[R4, #+1092]
+   \   00000554   000051E3           CMP      R1,#+0
+   \   00000558   0710A0E1           MOV      R1,R7
+   \   0000055C   0400001A           BNE      ??DummyTick_27
+    597          						if ((DummyDataValues[GPS_NUMSAT].CurrentValue) >= 4.0)
+   \   00000560   ........           BL       __aeabi_cfrcmple
+   \   00000564   1A00008A           BHI      ??DummyTick_14
+    598          							suData.suPresent = true;
+   \   00000568   ........           LDR      R0,??DataTable8_1
+   \   0000056C   0C90C0E5           STRB     R9,[R0, #+12]
+   \   00000570   170000EA           B        ??DummyTick_14
+    599          					}
+    600          					else	// su is present, don't let satellites drop below 4
+    601          						if (DummyDataValues[GPS_NUMSAT].CurrentValue < 4.0) {
+   \                     ??DummyTick_27:
+   \   00000574   ........           BL       __aeabi_cfcmple
+   \   00000578   1500002A           BCS      ??DummyTick_14
+    602          							DummyDataValues[GPS_NUMSAT].CurrentValue = 4.0;
+   \   0000057C   447484E5           STR      R7,[R4, #+1092]
+    603          							DummyDataValues[GPS_NUMSAT].Dir = 0;	// go up
+   \   00000580   34A484E5           STR      R10,[R4, #+1076]
+   \   00000584   120000EA           B        ??DummyTick_14
+    604          						} // if
+    605          					break;
+    606          
+    607          				case MAX_RPM:			// u, maximum rpm reading since session started
+    608          					// set max values
+    609          					if (DataValues[VEHICLE_RPM].uVal > MAX_POSSIBLE_RPM)
+   \                     ??DummyTick_18:
+   \   00000588   A80194E5           LDR      R0,[R4, #+424]
+   \   0000058C   A910A0E3           MOV      R1,#+169
+   \   00000590   611C81E3           ORR      R1,R1,#0x6100
+   \   00000594   010050E1           CMP      R0,R1
+    610          						DataValues[VEHICLE_RPM].uVal = 0;
+    611          					if (DataValues[MAX_RPM].uVal > MAX_POSSIBLE_RPM)
+   \   00000598   200294E5           LDR      R0,[R4, #+544]
+   \   0000059C   A8A18425           STRCS    R10,[R4, #+424]
+   \   000005A0   010050E1           CMP      R0,R1
+    612          						DataValues[MAX_RPM].uVal = 0;
+    613          					if (sysData.maxRpmEver > MAX_POSSIBLE_RPM)
+   \   000005A4   BC009BE5           LDR      R0,[R11, #+188]
+   \   000005A8   20A28425           STRCS    R10,[R4, #+544]
+   \   000005AC   010050E1           CMP      R0,R1
+    614          						sysData.maxRpmEver = 0;
+    615          
+    616          					if (DataValues[VEHICLE_RPM].uVal > DataValues[MAX_RPM].uVal) {
+   \   000005B0   A80194E5           LDR      R0,[R4, #+424]
+   \   000005B4   201294E5           LDR      R1,[R4, #+544]
+   \   000005B8   BCA08B25           STRCS    R10,[R11, #+188]
+   \   000005BC   000051E1           CMP      R1,R0
+   \   000005C0   0300002A           BCS      ??DummyTick_14
+    617          						DataValues[MAX_RPM].uVal = DataValues[VEHICLE_RPM].uVal;
+    618          						if (DataValues[VEHICLE_RPM].uVal > sysData.maxRpmEver)
+   \   000005C4   BC109BE5           LDR      R1,[R11, #+188]
+   \   000005C8   200284E5           STR      R0,[R4, #+544]
+   \   000005CC   000051E1           CMP      R1,R0
+    619          							sysData.maxRpmEver = DataValues[VEHICLE_RPM].uVal;
+   \   000005D0   BC008B35           STRCC    R0,[R11, #+188]
+    620          					} // if
+    621          					break;
+    622          				} // switch
+    623          			} // if
+    624          
+    625          		// relinquish global data
+    626          //		OS_Unuse(&SEMA_GlobalData);
+    627          
+    628          	} // for
+   \                     ??DummyTick_14:
+   \   000005D4   018088E2           ADD      R8,R8,#+1
+   \   000005D8   146086E2           ADD      R6,R6,#+20
+   \   000005DC   085085E2           ADD      R5,R5,#+8
+   \   000005E0   520058E3           CMP      R8,#+82
+   \   000005E4   21FFFFBA           BLT      ??DummyTick_13
+    629          
+    630          
+    631          	dummy_initialized = 1;
+    632          
+    633          	// Check maxs
+    634          	if (DataValues[SPEED].fVal > DataValues[MAX_SPEED].fVal)
+   \   000005E8   701094E5           LDR      R1,[R4, #+112]
+   \   000005EC   D00094E5           LDR      R0,[R4, #+208]
+   \   000005F0   ........           BL       __aeabi_cfcmple
+    635          		DataValues[MAX_SPEED].fVal = DataValues[SPEED].fVal;
+    636          	if (DataValues[X_G_DAMPED].fVal > DataValues[MAX_X_G].fVal)
+   \   000005F4   482094E5           LDR      R2,[R4, #+72]
+   \   000005F8   D0108435           STRCC    R1,[R4, #+208]
+   \   000005FC   180094E5           LDR      R0,[R4, #+24]
+   \   00000600   0210A0E1           MOV      R1,R2
+   \   00000604   ........           BL       __aeabi_cfcmple
+    637          		DataValues[MAX_X_G].fVal = DataValues[X_G_DAMPED].fVal;
+   \   00000608   18208435           STRCC    R2,[R4, #+24]
+    638          	if (DataValues[X_G_DAMPED].fVal < DataValues[MIN_X_G].fVal)
+   \   0000060C   0200A0E1           MOV      R0,R2
+   \   00000610   301094E5           LDR      R1,[R4, #+48]
+   \   00000614   ........           BL       __aeabi_cfcmple
+    639          		DataValues[MIN_X_G].fVal = DataValues[X_G_DAMPED].fVal;
+   \   00000618   30208435           STRCC    R2,[R4, #+48]
+    640          	if (DataValues[Y_G_DAMPED].fVal > DataValues[MAX_Y_G].fVal)
+   \   0000061C   502094E5           LDR      R2,[R4, #+80]
+   \   00000620   200094E5           LDR      R0,[R4, #+32]
+   \   00000624   0210A0E1           MOV      R1,R2
+   \   00000628   ........           BL       __aeabi_cfcmple
+    641          		DataValues[MAX_Y_G].fVal = DataValues[Y_G_DAMPED].fVal;
+   \   0000062C   20208435           STRCC    R2,[R4, #+32]
+    642          	if (DataValues[Y_G_DAMPED].fVal < DataValues[MIN_Y_G].fVal)
+   \   00000630   0200A0E1           MOV      R0,R2
+   \   00000634   381094E5           LDR      R1,[R4, #+56]
+   \   00000638   ........           BL       __aeabi_cfcmple
+    643          		DataValues[MIN_Y_G].fVal = DataValues[Y_G_DAMPED].fVal;
+   \   0000063C   38208435           STRCC    R2,[R4, #+56]
+    644          	if (DataValues[Z_G_DAMPED].fVal > DataValues[MAX_Z_G].fVal)
+   \   00000640   582094E5           LDR      R2,[R4, #+88]
+   \   00000644   280094E5           LDR      R0,[R4, #+40]
+   \   00000648   0210A0E1           MOV      R1,R2
+   \   0000064C   ........           BL       __aeabi_cfcmple
+    645          		DataValues[MAX_Z_G].fVal = DataValues[Z_G_DAMPED].fVal;
+   \   00000650   28208435           STRCC    R2,[R4, #+40]
+    646          	if (DataValues[Z_G_DAMPED].fVal < DataValues[MIN_Z_G].fVal)
+   \   00000654   0200A0E1           MOV      R0,R2
+   \   00000658   401094E5           LDR      R1,[R4, #+64]
+   \   0000065C   ........           BL       __aeabi_cfcmple
+   \   00000660   2D99C4E5           STRB     R9,[R4, #+2349]
+    647          		DataValues[MIN_Z_G].fVal = DataValues[Z_G_DAMPED].fVal;
+   \   00000664   40208435           STRCC    R2,[R4, #+64]
+    648          
+    649          	// Since we know in this test we that we have updated ALL data values we should always
+    650          	// update all the LED status too
+    651          	SetWarningLED(BOTH_WARNING_LED, (int) GetValue(ANALOG_INPUT_0).fVal);
+   \   00000668   3610A0E3           MOV      R1,#+54
+   \   0000066C   0D00A0E1           MOV      R0,SP
+   \   00000670   ........           BL       GetValue
+   \   00000674   00009DE5           LDR      R0,[SP, #+0]
+   \   00000678   ........           BL       __aeabi_f2iz
+   \   0000067C   ........           BL       __aeabi_i2f
+   \   00000680   0010A0E1           MOV      R1,R0
+   \   00000684   0300A0E3           MOV      R0,#+3
+   \   00000688   ........           BL       SetWarningLED
+    652          	SetTachLEDs(GetValue(VEHICLE_RPM).iVal);
+   \   0000068C   3510A0E3           MOV      R1,#+53
+   \   00000690   0D00A0E1           MOV      R0,SP
+   \   00000694   ........           BL       GetValue
+   \   00000698   00009DE5           LDR      R0,[SP, #+0]
+   \   0000069C   ........           BL       SetTachLEDs
+    653          
+    654          	//
+    655          	// Handle fake start record speed/end record time variables
+    656          	//
+    657          	if (!metRecordSpeedYet)
+   \   000006A0   2C09D4E5           LDRB     R0,[R4, #+2348]
+   \   000006A4   000050E3           CMP      R0,#+0
+   \   000006A8   0700001A           BNE      ??DummyTick_28
+    658          		if (DataValues[SPEED].fVal >= GetRecordSpeed())
+   \   000006AC   ........           BL       GetRecordSpeed
+   \   000006B0   ........           BL       __aeabi_i2f
+   \   000006B4   0010A0E1           MOV      R1,R0
+   \   000006B8   700094E5           LDR      R0,[R4, #+112]
+   \   000006BC   ........           BL       __aeabi_cfrcmple
+    659          		{
+    660          			unsavedSysData.waitingForRecordSpeed = FALSE;
+   \   000006C0   ........           LDRLS    R0,??DataTable17
+    661          			metRecordSpeedYet = TRUE;
+   \   000006C4   2C99C495           STRBLS   R9,[R4, #+2348]
+   \   000006C8   D5A0C095           STRBLS   R10,[R0, #+213]
+    662          		}
+    663          } // DummyTick
+   \                     ??DummyTick_28:
+   \   000006CC   14D08DE2           ADD      SP,SP,#+20       ;; stack cleaning
+   \   000006D0   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    664          
+
+   \                                 In section .text, align 4, keep-with-next
+    665          float CalcSpeed(void)
+    666          {
+   \                     CalcSpeed:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+    667          	return (float)DataValues[VEHICLE_RPM].uVal 
+    668          		* vehicleData.tireCircumference 
+    669          		/ vehicleData.diffRatio 
+    670          		/ vehicleData.gearRatios[DataValues[GEAR].iVal - 1]
+    671          		* 0.0009469;				// 60 / (12 * 5280);
+   \   00000004   ........           LDR      R5,??DataTable7_1
+   \   00000008   ........           LDR      R4,??DataTable10
+   \   0000000C   A80195E5           LDR      R0,[R5, #+424]
+   \   00000010   ........           BL       __aeabi_ui2f
+   \   00000014   541094E5           LDR      R1,[R4, #+84]
+   \   00000018   ........           BL       __aeabi_fmul
+   \   0000001C   501094E5           LDR      R1,[R4, #+80]
+   \   00000020   ........           BL       __aeabi_fdiv
+   \   00000024   501295E5           LDR      R1,[R5, #+592]
+   \   00000028   011184E0           ADD      R1,R4,R1, LSL #+2
+   \   0000002C   2C1091E5           LDR      R1,[R1, #+44]
+   \   00000030   ........           BL       __aeabi_fdiv
+   \   00000034   ........           BL       __aeabi_f2d
+   \   00000038   0020A0E1           MOV      R2,R0
+   \   0000003C   0130A0E1           MOV      R3,R1
+   \   00000040   ........           ADR      R0,??DataTable7_5
+   \   00000044   030090E8           LDM      R0,{R0,R1}
+   \   00000048   ........           BL       __aeabi_dmul
+   \   0000004C   3040BDE8           POP      {R4,R5,LR}
+   \   00000050   ........           B        __aeabi_d2f      ;; tailcall
+    672          }
+    673          
+
+   \                                 In section .text, align 4, keep-with-next
+    674          void InitCommSimulatorTask(void)
+    675          {
+    676          #ifdef _WINDOWS
+    677          	GUI_HWIN hDummyWin;
+    678          #endif
+    679          
+    680          	SimStartSession();			// Initialize SIM data
+   \                     InitCommSimulatorTask:
+   \   00000000   ........           B        SimStartSession  ;; tailcall
+    681          	
+    682          #ifdef _WINDOWS
+    683          // Create perpetual window to run data tick timer
+    684          	hDummyWin = WM_CreateWindow(0,0,0,0, WM_CF_HIDE, dataTickCallback,0);
+    685          	hDataUpdateTimer = WM_CreateTimer(hDummyWin, 0, DATA_REFRESH_TIME, 0);
+    686          #endif
+    687          }
+    688          
+    689          #ifdef _WINDOWS
+    690          void dataTickCallback(WM_MESSAGE * pMsg)
+    691          {
+    692          	if (pMsg->MsgId == WM_TIMER)
+    693          	{
+    694          			if (pMsg->Data.v == hDataUpdateTimer)
+    695          			{
+    696          				DummyTick();
+    697          				WM_RestartTimer(hDataUpdateTimer, DATA_REFRESH_TIME);
+    698          			}
+    699          	}
+    700          	else WM_DefaultProc(pMsg);
+    701          }
+    702          #endif
+    703          
+    704          #ifndef _WINDOWS
+
+   \                                 In section .text, align 4, keep-with-next
+    705          void CommSimulatorTask(void)
+    706          {
+   \                     CommSimulatorTask:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+    707            	InitCommSimulatorTask();
+   \   00000004   ........           BL       SimStartSession
+   \   00000008   ........           LDR      R4,??DataTable17
+    708          	while (1)
+    709          	{
+    710          		if (DU2_SHUTDOWN == unsavedSysData.systemMode)	// user requested shutdown
+   \                     ??CommSimulatorTask_0:
+   \   0000000C   8800D4E5           LDRB     R0,[R4, #+136]
+   \   00000010   1E0050E3           CMP      R0,#+30
+   \   00000014   0400001A           BNE      ??CommSimulatorTask_1
+    711          			// go away, just go away
+    712          			SendMessage((u08) DISPLAY_UNIT, (u08) SENSOR_UNIT, (u08) POWER_DOWN, (u08) 0);
+   \   00000018   0030A0E3           MOV      R3,#+0
+   \   0000001C   9320A0E3           MOV      R2,#+147
+   \   00000020   0210A0E3           MOV      R1,#+2
+   \   00000024   0300A0E3           MOV      R0,#+3
+   \   00000028   ........           BL       SendMessage
+    713          		
+    714          		OS_Delay(DATA_TIMER_DELAY);				// Reduce to 1 when SU attached
+   \                     ??CommSimulatorTask_1:
+   \   0000002C   1900A0E3           MOV      R0,#+25
+   \   00000030   ........           BL       OS_Delay
+    715          		DummyTick();							// Remove altogether when SU attached
+   \   00000034   ........           BL       DummyTick
+   \   00000038   F3FFFFEA           B        ??CommSimulatorTask_0
+    716          	}
+    717          }
+    718          #endif
+    719          
+    720          #define GEARFACTOR	0.95						// multiply by this to get in the middle of gear range for reliability
+    721          
+
+   \                                 In section .text, align 4, keep-with-next
+    722          void SetGear( int command ) {
+   \                     SetGear:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+    723          	static float speedRPMTable[NUMBER_OF_GEARS] = { 0.0 };			// meters per engine revolution
+    724          	static int topgear = 0;											// max programmed gear
+    725          	int i;
+    726          	
+    727          	if (GEAR_RESET == command) {
+   \   00000004   ........           LDR      R7,??DataTable10
+   \   00000008   ........           LDR      R8,??DataTable7_1
+   \   0000000C   504097E5           LDR      R4,[R7, #+80]
+   \   00000010   000050E3           CMP      R0,#+0
+   \   00000014   2600001A           BNE      ??SetGear_0
+    728          		for (i=0; i < NUMBER_OF_GEARS; i++) {
+   \   00000018   0800A0E3           MOV      R0,#+8
+   \   0000001C   900E80E3           ORR      R0,R0,#0x900
+   \   00000020   089080E0           ADD      R9,R0,R8
+   \   00000024   0060A0E3           MOV      R6,#+0
+   \   00000028   540097E5           LDR      R0,[R7, #+84]
+   \   0000002C   ........           BL       __aeabi_f2d
+   \   00000030   0020A0E3           MOV      R2,#+0
+   \   00000034   ........           LDR      R3,??DataTable17_1  ;; 0x40438000
+   \   00000038   ........           BL       __aeabi_ddiv
+   \   0000003C   00A0A0E1           MOV      R10,R0
+   \   00000040   01B0A0E1           MOV      R11,R1
+   \   00000044   0400A0E1           MOV      R0,R4
+   \   00000048   ........           BL       __aeabi_f2d
+   \   0000004C   0020A0E1           MOV      R2,R0
+   \   00000050   0130A0E1           MOV      R3,R1
+   \   00000054   0A00A0E1           MOV      R0,R10
+   \   00000058   0B10A0E1           MOV      R1,R11
+   \   0000005C   ........           BL       __aeabi_ddiv
+   \   00000060   0040A0E1           MOV      R4,R0
+   \   00000064   0150A0E1           MOV      R5,R1
+    729          			if (0.0 == vehicleData.gearRatios[i]) {
+   \                     ??SetGear_1:
+   \   00000068   300097E5           LDR      R0,[R7, #+48]
+   \   0000006C   0010A0E3           MOV      R1,#+0
+   \   00000070   ........           BL       __aeabi_cfcmpeq
+   \   00000074   0100001A           BNE      ??SetGear_2
+    730          				topgear = i;
+   \   00000078   286988E5           STR      R6,[R8, #+2344]
+    731          				break;
+   \   0000007C   F08FBDE8           POP      {R4-R11,PC}
+    732          			}
+    733          			else {
+    734          				// circumference in m / diff / gear ratio = meters / engine rev
+    735          				speedRPMTable[i] = (vehicleData.tireCircumference / 39.0) / vehicleData.diffRatio / vehicleData.gearRatios[i];
+   \                     ??SetGear_2:
+   \   00000080   ........           BL       __aeabi_f2d
+   \   00000084   0020A0E1           MOV      R2,R0
+   \   00000088   0130A0E1           MOV      R3,R1
+   \   0000008C   0400A0E1           MOV      R0,R4
+   \   00000090   0510A0E1           MOV      R1,R5
+   \   00000094   ........           BL       __aeabi_ddiv
+   \   00000098   ........           BL       __aeabi_d2f
+    736          			} // if
+    737          		} // for
+   \   0000009C   016086E2           ADD      R6,R6,#+1
+   \   000000A0   040089E4           STR      R0,[R9], #+4
+   \   000000A4   047087E2           ADD      R7,R7,#+4
+   \   000000A8   080056E3           CMP      R6,#+8
+   \   000000AC   EDFFFFBA           BLT      ??SetGear_1
+   \   000000B0   F08FBDE8           POP      {R4-R11,PC}
+    738          	} // if
+    739          	else {		// must be GEAR_CALC
+    740          		// check for gears not configured
+    741          		if ((vehicleData.diffRatio < 0.01) || (-1 == DataValues[VEHICLE_RPM].iVal)) {
+   \                     ??SetGear_0:
+   \   000000B4   0400A0E1           MOV      R0,R4
+   \   000000B8   ........           LDR      R1,??DataTable17_2  ;; 0x3c23d70b
+   \   000000BC   ........           BL       __aeabi_cfcmple
+   \   000000C0   0050E0E3           MVN      R5,#+0
+   \   000000C4   0200003A           BCC      ??SetGear_3
+   \   000000C8   A84198E5           LDR      R4,[R8, #+424]
+   \   000000CC   050054E1           CMP      R4,R5
+   \   000000D0   0100001A           BNE      ??SetGear_4
+    742          			DataValues[GEAR].iVal = -1;
+   \                     ??SetGear_3:
+   \   000000D4   505288E5           STR      R5,[R8, #+592]
+   \   000000D8   F08FBDE8           POP      {R4-R11,PC}
+    743          		} // if
+    744          		// check for sitting still or no rpm
+    745          		else if ((0.1 > DataValues[SPEED].fVal) || (0 == DataValues[VEHICLE_RPM].iVal)) {
+   \                     ??SetGear_4:
+   \   000000DC   700098E5           LDR      R0,[R8, #+112]
+   \   000000E0   ........           LDR      R1,??DataTable17_3  ;; 0x3dcccccd
+   \   000000E4   ........           BL       __aeabi_cfcmple
+   \   000000E8   0100003A           BCC      ??SetGear_5
+   \   000000EC   000054E3           CMP      R4,#+0
+   \   000000F0   0200001A           BNE      ??SetGear_6
+    746          			DataValues[GEAR].iVal = 0;
+   \                     ??SetGear_5:
+   \   000000F4   0000A0E3           MOV      R0,#+0
+   \   000000F8   500288E5           STR      R0,[R8, #+592]
+   \   000000FC   F08FBDE8           POP      {R4-R11,PC}
+    747          		} // if
+    748          		else {
+    749          			float speedfactor;
+    750          
+    751          			// speed in m/s divided by rpm in rev/s = meters / engine rev
+    752          			speedfactor = DataValues[SPEED].fVal * 1000.0 / 3600.0 / (((float) DataValues[VEHICLE_RPM].iVal) / 60.0);
+    753          			speedfactor = speedfactor * GEARFACTOR;
+   \                     ??SetGear_6:
+   \   00000100   ........           BL       __aeabi_f2d
+   \   00000104   0020A0E1           MOV      R2,R0
+   \   00000108   0130A0E1           MOV      R3,R1
+   \   0000010C   0000A0E3           MOV      R0,#+0
+   \   00000110   ........           LDR      R1,??DataTable17_4  ;; 0x408f4000
+   \   00000114   ........           BL       __aeabi_dmul
+   \   00000118   0020A0E3           MOV      R2,#+0
+   \   0000011C   ........           LDR      R3,??DataTable17_5  ;; 0x40ac2000
+   \   00000120   ........           BL       __aeabi_ddiv
+   \   00000124   0060A0E1           MOV      R6,R0
+   \   00000128   0170A0E1           MOV      R7,R1
+   \   0000012C   0400A0E1           MOV      R0,R4
+   \   00000130   ........           BL       __aeabi_i2f
+   \   00000134   ........           BL       __aeabi_f2d
+   \   00000138   4034A0E3           MOV      R3,#+1073741824
+   \   0000013C   0020A0E3           MOV      R2,#+0
+   \   00000140   4E3883E3           ORR      R3,R3,#0x4E0000
+   \   00000144   ........           BL       __aeabi_ddiv
+   \   00000148   0020A0E1           MOV      R2,R0
+   \   0000014C   0130A0E1           MOV      R3,R1
+   \   00000150   0600A0E1           MOV      R0,R6
+   \   00000154   0710A0E1           MOV      R1,R7
+   \   00000158   ........           BL       __aeabi_ddiv
+   \   0000015C   ........           BL       __aeabi_d2f
+   \   00000160   ........           BL       __aeabi_f2d
+   \   00000164   0020A0E1           MOV      R2,R0
+   \   00000168   0130A0E1           MOV      R3,R1
+   \   0000016C   ........           ADR      R0,??DataTable10_1
+   \   00000170   030090E8           LDM      R0,{R0,R1}
+   \   00000174   ........           BL       __aeabi_dmul
+   \   00000178   ........           BL       __aeabi_d2f
+   \   0000017C   0010A0E1           MOV      R1,R0
+    754          			
+    755          			for (i = 0; i < topgear; i++) {
+   \   00000180   0800A0E3           MOV      R0,#+8
+   \   00000184   900E80E3           ORR      R0,R0,#0x900
+   \   00000188   0060A0E3           MOV      R6,#+0
+   \   0000018C   082080E0           ADD      R2,R0,R8
+   \   00000190   283998E5           LDR      R3,[R8, #+2344]
+   \                     ??SetGear_7:
+   \   00000194   030056E1           CMP      R6,R3
+   \   00000198   CDFFFFAA           BGE      ??SetGear_3
+    756          				if (speedfactor <= speedRPMTable[i]) {
+   \   0000019C   040092E4           LDR      R0,[R2], #+4
+   \   000001A0   ........           BL       __aeabi_cfrcmple
+   \   000001A4   016086E2           ADD      R6,R6,#+1
+   \   000001A8   F9FFFF8A           BHI      ??SetGear_7
+    757          					DataValues[GEAR].iVal = i+1;
+   \   000001AC   506288E5           STR      R6,[R8, #+592]
+    758          					break;
+    759          				} // if
+    760          			} // for
+    761          			// if no match then error
+    762          			if (i >= topgear)
+    763          				DataValues[GEAR].iVal = -1;
+    764          		} // else
+    765          	} // else
+    766          } // SetGear
+   \   000001B0   F08FBDE8           POP      {R4-R11,PC}      ;; return
+
+   \                                 In section .data, align 8
+   \                     DataValues:
+   \   00000000   000000000000       DC32 0H, 0H
+   \              0000        
+   \   00000008   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000018   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000028   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000038   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000048   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000058   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000068   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000078   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000088   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000098   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   000000A8   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   000000B8   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   000000C8   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   000000D8   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   000000E8   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   000000F8   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000108   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000118   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000128   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000138   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000148   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000158   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000168   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000178   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000188   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000198   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   000001A8   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   000001B8   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   000001C8   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   000001D8   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   000001E8   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   000001F8   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000208   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000218   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000228   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000238   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000248   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000258   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000268   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000278   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   00000288   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0
+   \              0000        
+   \                     DummyDataValues:
+   \   00000290   010000000000       DC32 1, 3FC00000H, 0BF99999AH, 3CA3D70AH, 0H, 0, 3FD9999AH, 0BFCCCCCDH
+   \              C03F9A9999BF
+   \              0AD7A33C0000
+   \              000000000000
+   \              9A99D93FCDCC
+   \              CCBF        
+   \   000002B0   8FC2753C0000       DC32 3C75C28FH, 0H, 0, 40000000H, 0C0000000H, 3ECCCCCDH, 3F800000H, -1
+   \              000000000000
+   \              000000400000
+   \              00C0CDCCCC3E
+   \              0000803FFFFF
+   \              FFFF        
+   \   000002D0   000000000000       DC32 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H, -1, 0H, 0H
+   \              000000000000
+   \              00000000FFFF
+   \              FFFF00000000
+   \              000000000000
+   \              000000000000
+   \              FFFFFFFF0000
+   \              000000000000
+   \              000000000000
+   \              0000FFFFFFFF
+   \              000000000000
+   \              0000        
+   \   00000314   000000000000       DC32 0H, 0H, -1, 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H, 1, 3FC00000H
+   \              0000FFFFFFFF
+   \              000000000000
+   \              000000000000
+   \              00000000FFFF
+   \              FFFF00000000
+   \              000000000000
+   \              000000000000
+   \              010000000000
+   \              C03F        
+   \   0000034C   9A9999BF0AD7       DC32 0BF99999AH, 3CA3D70AH, 0H, 0, 3FD9999AH, 0BFCCCCCDH, 3C75C28FH, 0H
+   \              A33C00000000
+   \              000000009A99
+   \              D93FCDCCCCBF
+   \              8FC2753C0000
+   \              0000        
+   \   0000036C   000000000000       DC32 0, 40000000H, 40000000H, 3C23D70AH, 3F800000H, 0, 42089AA0H
+   \              004000000040
+   \              0AD7233C0000
+   \              803F00000000
+   \              A09A0842    
+   \   00000388   93980842ACC5       DC32 42089893H, 3727C5ACH, 0H, 0, 0C2A7A042H, 0C2A7A148H, 3727C5ACH, 0H
+   \              273700000000
+   \              0000000042A0
+   \              A7C248A1A7C2
+   \              ACC527370000
+   \              0000        
+   \   000003A8   FFFFFFFF0000       DC32 -1, 0H, 0H, 0H, 0H, 0, 43B38000H, 0H, 3F800000H, 0H, 0, 43B38000H
+   \              000000000000
+   \              000000000000
+   \              000000000000
+   \              0080B3430000
+   \              00000000803F
+   \              000000000000
+   \              00000080B343
+   \   000003D8   000000000000       DC32 0H, 3F000000H, 0H, 0, 461C4000H, 0H, 3DCCCCCDH, 0H, 0, 447A0000H
+   \              003F00000000
+   \              000000000040
+   \              1C4600000000
+   \              CDCCCC3D0000
+   \              000000000000
+   \              00007A44    
+   \   00000400   00000000CDCC       DC32 0H, 3DCCCCCDH, 0H, 0, 44160000H, 43480000H, 3C23D70AH, 0H, 0
+   \              CC3D00000000
+   \              000000000000
+   \              164400004843
+   \              0AD7233C0000
+   \              000000000000
+   \   00000424   CDCC8C400000       DC32 408CCCCDH, 40200000H, 38D1B717H, 0H, 0, 41800000H, 0H, 3D4CCCCDH
+   \              204017B7D138
+   \              000000000000
+   \              000000008041
+   \              00000000CDCC
+   \              4C3D        
+   \   00000444   00000000FFFF       DC32 0H, -1, 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H, -1
+   \              FFFF00000000
+   \              000000000000
+   \              000000000000
+   \              FFFFFFFF0000
+   \              000000000000
+   \              000000000000
+   \              0000FFFFFFFF
+   \              000000000000
+   \              000000000000
+   \              00000000FFFF
+   \              FFFF        
+   \   00000488   000000000000       DC32 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H, -1, 0H, 0H
+   \              000000000000
+   \              00000000FFFF
+   \              FFFF00000000
+   \              000000000000
+   \              000000000000
+   \              FFFFFFFF0000
+   \              000000000000
+   \              000000000000
+   \              0000FFFFFFFF
+   \              000000000000
+   \              0000        
+   \   000004CC   000000000000       DC32 0H, 0H, -1, 3F800000H, 3F800000H, 3CCCCCCDH, 0H, 0, 47C34F80H, 0H
+   \              0000FFFFFFFF
+   \              0000803F0000
+   \              803FCDCCCC3C
+   \              000000000000
+   \              0000804FC347
+   \              00000000    
+   \   000004F4   0000803F0000       DC32 3F800000H, 0H, 0, 3F99999AH, 0BF19999AH, 3B449BA6H, 0H, 0, 0H, 0H
+   \              000000000000
+   \              9A99993F9A99
+   \              19BFA69B443B
+   \              000000000000
+   \              000000000000
+   \              00000000    
+   \   0000051C   000000000000       DC32 0H, 0H, 0, 47F03C00H, 0H, 41C80000H, 0H, -1, 0H, 0H, 0H, 0H, -1
+   \              000000000000
+   \              003CF0470000
+   \              00000000C841
+   \              00000000FFFF
+   \              FFFF00000000
+   \              000000000000
+   \              000000000000
+   \              FFFFFFFF    
+   \   00000550   000000000000       DC32 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H, 1, 42F00000H, 42A00000H
+   \              000000000000
+   \              00000000FFFF
+   \              FFFF00000000
+   \              000000000000
+   \              000000000000
+   \              010000000000
+   \              F0420000A042
+   \   00000580   6F12833A0000       DC32 3A83126FH, 42A00000H, 1, 43960000H, 433E0000H, 3A83126FH
+   \              A04201000000
+   \              000096430000
+   \              3E436F12833A
+   \   00000598   00004843FFFF       DC32 43480000H, -1, 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H
+   \              FFFF00000000
+   \              000000000000
+   \              000000000000
+   \              FFFFFFFF0000
+   \              000000000000
+   \              000000000000
+   \              0000FFFFFFFF
+   \              000000000000
+   \              000000000000
+   \   000005D4   00000000FFFF       DC32 0H, -1, 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H, -1
+   \              FFFF00000000
+   \              000000000000
+   \              000000000000
+   \              FFFFFFFF0000
+   \              000000000000
+   \              000000000000
+   \              0000FFFFFFFF
+   \              000000000000
+   \              000000000000
+   \              00000000FFFF
+   \              FFFF        
+   \   00000618   000000000000       DC32 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H, -1, 0H, 0H
+   \              000000000000
+   \              00000000FFFF
+   \              FFFF00000000
+   \              000000000000
+   \              000000000000
+   \              FFFFFFFF0000
+   \              000000000000
+   \              000000000000
+   \              0000FFFFFFFF
+   \              000000000000
+   \              0000        
+   \   0000065C   000000000000       DC32 0H, 0H, -1, 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H
+   \              0000FFFFFFFF
+   \              000000000000
+   \              000000000000
+   \              00000000FFFF
+   \              FFFF00000000
+   \              000000000000
+   \              000000000000
+   \              FFFFFFFF0000
+   \              000000000000
+   \              000000000000
+   \              0000        
+   \   000006A0   FFFFFFFF0000       DC32 -1, 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H, 0, 409CCCCDH, 0H
+   \              000000000000
+   \              000000000000
+   \              0000FFFFFFFF
+   \              000000000000
+   \              000000000000
+   \              000000000000
+   \              0000CDCC9C40
+   \              00000000    
+   \   000006D4   0AD7A33B0000       DC32 3BA3D70AH, 0H, 0, 40900000H, 3DCCCCCDH, 3BA3D70AH, 0H, 0
+   \              000000000000
+   \              00009040CDCC
+   \              CC3D0AD7A33B
+   \              000000000000
+   \              0000        
+   \   000006F4   0000803F0000       DC32 3F800000H, 0H, 3B449BA6H, 0H, 0, 410B3333H, 40000000H, 3BA3D70AH
+   \              0000A69B443B
+   \              000000000000
+   \              000033330B41
+   \              000000400AD7
+   \              A33B        
+   \   00000714   000000000000       DC32 0H, 0, 3FC00000H, 3F000000H, 3C23D70AH, 0H, 0, 3FC00000H
+   \              00000000C03F
+   \              0000003F0AD7
+   \              233C00000000
+   \              000000000000
+   \              C03F        
+   \   00000734   0000003F0AD7       DC32 3F000000H, 3BA3D70AH, 0H, -1, 3F800000H, 3F800000H, 3CCCCCCDH, 0H
+   \              A33B00000000
+   \              FFFFFFFF0000
+   \              803F0000803F
+   \              CDCCCC3C0000
+   \              0000        
+   \   00000754   FFFFFFFF0000       DC32 -1, 3F800000H, 3F800000H, 3CCCCCCDH, 0H, -1, 3F800000H, 3F800000H
+   \              803F0000803F
+   \              CDCCCC3C0000
+   \              0000FFFFFFFF
+   \              0000803F0000
+   \              803F        
+   \   00000774   CDCCCC3C0000       DC32 3CCCCCCDH, 0H, -1, 3F800000H, 3F800000H, 3CCCCCCDH, 0H, -1
+   \              0000FFFFFFFF
+   \              0000803F0000
+   \              803FCDCCCC3C
+   \              00000000FFFF
+   \              FFFF        
+   \   00000794   0000803F0000       DC32 3F800000H, 3F800000H, 3CCCCCCDH, 0H, -1, 3F800000H, 3F800000H
+   \              803FCDCCCC3C
+   \              00000000FFFF
+   \              FFFF0000803F
+   \              0000803F    
+   \   000007B0   CDCCCC3C0000       DC32 3CCCCCCDH, 0H, -1, 3F800000H, 3F800000H, 3CCCCCCDH, 0H, -1
+   \              0000FFFFFFFF
+   \              0000803F0000
+   \              803FCDCCCC3C
+   \              00000000FFFF
+   \              FFFF        
+   \   000007D0   0000803F0000       DC32 3F800000H, 3F800000H, 3CCCCCCDH, 0H, 0, 3F800000H, 3F800000H
+   \              803FCDCCCC3C
+   \              000000000000
+   \              00000000803F
+   \              0000803F    
+   \   000007EC   CDCCCC3C0000       DC32 3CCCCCCDH, 0H, -1, 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H, 0
+   \              0000FFFFFFFF
+   \              000000000000
+   \              000000000000
+   \              00000000FFFF
+   \              FFFF00000000
+   \              000000000000
+   \              000000000000
+   \              00000000    
+   \   00000820   CDCC64410000       DC32 4164CCCDH, 41280000H, 3A83126FH, 41400000H, -1, 0H, 0H, 0H, 0H, -1
+   \              28416F12833A
+   \              00004041FFFF
+   \              FFFF00000000
+   \              000000000000
+   \              000000000000
+   \              FFFFFFFF    
+   \   00000848   000000000000       DC32 0H, 0H, 0H, 0H, -1, 0H, 0H, 0H, 0H, 0, 40600000H, 0H, 3C23D70AH
+   \              000000000000
+   \              00000000FFFF
+   \              FFFF00000000
+   \              000000000000
+   \              000000000000
+   \              000000000000
+   \              604000000000
+   \              0AD7233C    
+   \   0000087C   00000000FFFF       DC32 0H, -1, 3F000000H, 3F000000H, 0H, 3F000000H, 0, 41A00000H
+   \              FFFF0000003F
+   \              0000003F0000
+   \              00000000003F
+   \              000000000000
+   \              A041        
+   \   0000089C   0000F0416F12       DC32 41F00000H, 3A83126FH, 0H, -1, 0H, 0H, 0H, 0H, 0, 403CCCCDH, 0H
+   \              833A00000000
+   \              FFFFFFFF0000
+   \              000000000000
+   \              000000000000
+   \              000000000000
+   \              CDCC3C400000
+   \              0000        
+   \   000008C8   0AD7A33B0000       DC32 3BA3D70AH, 40000000H, -1, 0H, 0H, 0H, 0H, 0, 47F03C00H, 0H
+   \              0040FFFFFFFF
+   \              000000000000
+   \              000000000000
+   \              000000000000
+   \              0000003CF047
+   \              00000000    
+   \   000008F0   0000C8410000       DC32 41C80000H, 0H
+   \              0000        
+   \                     minSimRPM:
+   \   000008F8   00000000           DC8 0, 0, 0, 0
+   \                     maxSimGear:
+   \   000008FC   00000000           DC8 0, 0, 0, 0
+   \                     speedDirection:
+   \   00000900   01000000           DC32 1
+   \                     shifting:
+   \   00000904   00000000           DC32 0
+   \   00000908   00000000           DC32 0H
+   \   0000090C   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \              00000000    
+   \   0000091C   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              000000000000
+   \   00000928   00000000           DC32 0
+   \                     metRecordSpeedYet:
+   \   0000092C   00                 DC8 0
+   \   0000092D   00                 DC8 0
+
+   \                                 In section .data, align 4
+   \                     SignalStrengthGraphics:
+   \   00000000   ............       DC32 bmNoSignal, bmSignal1, bmSignal2, bmSignal3, bmSignal4, bmSignal5
+   \              ............
+   \              ............
+   \              ............
+   \   00000018   00                 DC8 0
+
+   \                                 In section .data, align 4
+   \                     animationIndex:
+   \   00000000   00000000           DC8 0, 0, 0, 0
+   \                     animationCycles:
+   \   00000004   00000000           DC8 0, 0, 0, 0
+   \                     newScreen:
+   \   00000008   01000000           DC32 1
+   \                     hasInfoKey:
+   \   0000000C   00000000           DC8 0, 0, 0, 0
+   \                     pAnimation:
+   \   00000010   00000000           DC8 0, 0, 0, 0
+    767          
+    768          
+
+   \                                 In section .text, align 4, keep-with-next
+    769          void DrawSignalStrength(void)
+    770          {
+   \                     DrawSignalStrength:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   \   00000004   28D04DE2           SUB      SP,SP,#+40
+    771          	if (SlideOutVisible())
+   \   00000008   ........           BL       SlideOutVisible
+   \   0000000C   000050E3           CMP      R0,#+0
+   \   00000010   2400000A           BEQ      ??DrawSignalStrength_2
+    772          	{
+    773          		// Signal strength
+    774          		GUI_SPRITE_SetBitmap(hSignalStrengthSprite, SlideoutGetSignalStrengthIcon());
+   \   00000014   ........           BL       SlideoutGetSignalStrengthIcon
+   \   00000018   0010A0E1           MOV      R1,R0
+   \   0000001C   ........           LDR      R0,??DataTable17_6
+   \   00000020   000090E5           LDR      R0,[R0, #+0]
+   \   00000024   ........           BL       GUI_SPRITE_SetBitmap
+    775          
+    776          		// Draw camera icon
+    777          		GUI_SPRITE_SetBitmap(hCameraSprite, GetCameraIcon());
+   \   00000028   4B10A0E3           MOV      R1,#+75
+   \   0000002C   0D00A0E1           MOV      R0,SP
+   \   00000030   ........           BL       GetValue
+   \   00000034   00009DE5           LDR      R0,[SP, #+0]
+   \   00000038   030050E3           CMP      R0,#+3
+   \   0000003C   00F18F90           ADDLS    PC,PC,R0, LSL #+2
+   \                     ??DrawSignalStrength_0:
+   \   00000040   0B00008A           BHI      ??DrawSignalStrength_3
+   \   00000044   020000EA           B        ??DrawSignalStrength_4
+   \   00000048   070000EA           B        ??DrawSignalStrength_5
+   \   0000004C   040000EA           B        ??DrawSignalStrength_6
+   \   00000050   010000EA           B        ??DrawSignalStrength_7
+   \                     ??DrawSignalStrength_4:
+   \   00000054   ........           LDR      R1,??DataTable17_7
+   \   00000058   060000EA           B        ??DrawSignalStrength_8
+   \                     ??DrawSignalStrength_7:
+   \   0000005C   ........           LDR      R1,??DataTable17_8
+   \   00000060   040000EA           B        ??DrawSignalStrength_8
+   \                     ??DrawSignalStrength_6:
+   \   00000064   ........           LDR      R1,??DataTable17_9
+   \   00000068   020000EA           B        ??DrawSignalStrength_8
+   \                     ??DrawSignalStrength_5:
+   \   0000006C   ........           LDR      R1,??DataTable17_10
+   \   00000070   000000EA           B        ??DrawSignalStrength_8
+   \                     ??DrawSignalStrength_3:
+   \   00000074   0010A0E3           MOV      R1,#+0
+   \                     ??DrawSignalStrength_8:
+   \   00000078   ........           LDR      R0,??DataTable17_11
+   \   0000007C   000090E5           LDR      R0,[R0, #+0]
+   \   00000080   ........           BL       GUI_SPRITE_SetBitmap
+    778          
+    779          		// Draw SU Status icon
+    780          		GUI_SPRITE_SetBitmap(hSUStatusSprite, GetSUStatusIcon());
+   \   00000084   ........           LDR      R0,??DataTable8_1
+   \   00000088   0C00D0E5           LDRB     R0,[R0, #+12]
+   \   0000008C   000050E3           CMP      R0,#+0
+    781          	}
+   \   00000090   ........           LDR      R0,??DataTable17_12
+   \   00000094   ........           LDRNE    R1,??DataTable17_13
+   \   00000098   ........           LDREQ    R1,??DataTable17_14
+   \   0000009C   000090E5           LDR      R0,[R0, #+0]
+   \   000000A0   ........           BL       GUI_SPRITE_SetBitmap
+   \   000000A4   7C0000EA           B        ??DrawSignalStrength_9
+    782          	else
+    783          	{
+    784          		const GUI_BITMAP *pIcon;
+    785          		char scratch[30];
+    786          
+    787          		// Signal strength
+    788          		GUI_DrawBitmap(GetSignalStrengthIcon(), SU_SIGNAL_X_POS, 0);
+   \                     ??DrawSignalStrength_2:
+   \   000000A8   ........           LDR      R0,??DataTable8_1
+   \   000000AC   0C00D0E5           LDRB     R0,[R0, #+12]
+   \   000000B0   000050E3           CMP      R0,#+0
+   \   000000B4   1500000A           BEQ      ??DrawSignalStrength_10
+   \   000000B8   1510A0E3           MOV      R1,#+21
+   \   000000BC   0D00A0E1           MOV      R0,SP
+   \   000000C0   ........           BL       GetValue
+   \   000000C4   00009DE5           LDR      R0,[SP, #+0]
+   \   000000C8   0010A0E3           MOV      R1,#+0
+   \   000000CC   030050E3           CMP      R0,#+3
+   \   000000D0   0B0000BA           BLT      ??DrawSignalStrength_11
+   \   000000D4   050050E3           CMP      R0,#+5
+   \   000000D8   0110A0B3           MOVLT    R1,#+1
+   \   000000DC   080000BA           BLT      ??DrawSignalStrength_11
+   \   000000E0   070050E3           CMP      R0,#+7
+   \   000000E4   0210A0B3           MOVLT    R1,#+2
+   \   000000E8   050000BA           BLT      ??DrawSignalStrength_11
+   \   000000EC   090050E3           CMP      R0,#+9
+   \   000000F0   0310A0B3           MOVLT    R1,#+3
+   \   000000F4   020000BA           BLT      ??DrawSignalStrength_11
+   \   000000F8   0B0050E3           CMP      R0,#+11
+   \   000000FC   0410A0B3           MOVLT    R1,#+4
+   \   00000100   0510A0A3           MOVGE    R1,#+5
+   \                     ??DrawSignalStrength_11:
+   \   00000104   ........           LDR      R0,??DataTable17_15
+   \   00000108   010190E7           LDR      R0,[R0, +R1, LSL #+2]
+   \   0000010C   000000EA           B        ??DrawSignalStrength_12
+   \                     ??DrawSignalStrength_10:
+   \   00000110   ........           LDR      R0,??DataTable17_14
+   \                     ??DrawSignalStrength_12:
+   \   00000114   BA10A0E3           MOV      R1,#+186
+   \   00000118   0020A0E3           MOV      R2,#+0
+   \   0000011C   401F81E3           ORR      R1,R1,#0x100
+   \   00000120   ........           BL       GUI_DrawBitmap
+    789          
+    790          		// SD card
+    791          		if (SDBusy)
+   \   00000124   ........           LDR      R4,??DataTable17_15
+   \   00000128   1800D4E5           LDRB     R0,[R4, #+24]
+   \   0000012C   000050E3           CMP      R0,#+0
+   \   00000130   0700000A           BEQ      ??DrawSignalStrength_13
+    792          		{
+    793          			GUI_DrawBitmap(&bmRedSD, SD_X_POS, 0);
+   \   00000134   9E10A0E3           MOV      R1,#+158
+   \   00000138   0020A0E3           MOV      R2,#+0
+   \   0000013C   401F81E3           ORR      R1,R1,#0x100
+   \   00000140   ........           LDR      R0,??DataTable17_16
+   \   00000144   ........           BL       GUI_DrawBitmap
+    794          			SDBusy = false;
+   \   00000148   0000A0E3           MOV      R0,#+0
+   \   0000014C   1800C4E5           STRB     R0,[R4, #+24]
+   \   00000150   1E0000EA           B        ??DrawSignalStrength_14
+    795          		}
+    796          		else
+    797          		{
+    798          			// Update SD card status ICON
+    799          #ifdef _WINDOWS
+    800          			GUI_DrawBitmap(&bmGreenSD, SD_X_POS, 0);
+    801          #else
+    802          			if (unsavedSysData.sdCardInserted == 0)										// If no card present
+   \                     ??DrawSignalStrength_13:
+   \   00000154   ........           LDR      R0,??DataTable15
+   \   00000158   C00090E5           LDR      R0,[R0, #+192]
+   \   0000015C   000050E3           CMP      R0,#+0
+    803          				pIcon = &bmWhiteSD;
+   \   00000160   ........           LDREQ    R4,??DataTable17_17
+   \   00000164   1100000A           BEQ      ??DrawSignalStrength_15
+    804          			else if (SDCardWriteProtected() == 1)										// If SD card is write protected
+   \   00000168   ........           BL       SDCardWriteProtected
+   \   0000016C   010050E3           CMP      R0,#+1
+    805          				pIcon = &bmLockedSD;
+   \   00000170   ........           LDREQ    R4,??DataTable17_18
+   \   00000174   0D00000A           BEQ      ??DrawSignalStrength_15
+    806          			else if (OS_GetMessageCnt(&MB_SDcardRW) || OS_Q_GetMessageCnt(&Queue_tqm))	// If card is writing
+   \   00000178   ........           LDR      R0,??DataTable17_19
+   \   0000017C   ........           BL       OS_GetMessageCnt
+   \   00000180   000050E3           CMP      R0,#+0
+   \   00000184   0300001A           BNE      ??DrawSignalStrength_16
+   \   00000188   ........           LDR      R0,??DataTable17_20
+   \   0000018C   ........           BL       OS_Q_GetMessageCnt
+   \   00000190   000050E3           CMP      R0,#+0
+   \   00000194   0100000A           BEQ      ??DrawSignalStrength_17
+    807          				pIcon = &bmRedSD;
+   \                     ??DrawSignalStrength_16:
+   \   00000198   ........           LDR      R4,??DataTable17_16
+   \   0000019C   030000EA           B        ??DrawSignalStrength_15
+    808          			else if (SDCardAlmostFull())												// If SD card is almost full
+   \                     ??DrawSignalStrength_17:
+   \   000001A0   ........           BL       SDCardAlmostFull
+   \   000001A4   000050E3           CMP      R0,#+0
+    809          				pIcon = &bmYellowSD;
+   \   000001A8   ........           LDRNE    R4,??DataTable17_21
+    810          			else pIcon = &bmGreenSD;
+   \   000001AC   ........           LDREQ    R4,??DataTable17_22
+    811          			if (SlideOutVisible())
+   \                     ??DrawSignalStrength_15:
+   \   000001B0   ........           BL       SlideOutVisible
+   \   000001B4   000050E3           CMP      R0,#+0
+   \   000001B8   0400001A           BNE      ??DrawSignalStrength_14
+    812          			{
+    813          			}
+    814          			else GUI_DrawBitmap(pIcon, SD_X_POS, 0);
+   \   000001BC   9E10A0E3           MOV      R1,#+158
+   \   000001C0   0020A0E3           MOV      R2,#+0
+   \   000001C4   401F81E3           ORR      R1,R1,#0x100
+   \   000001C8   0400A0E1           MOV      R0,R4
+   \   000001CC   ........           BL       GUI_DrawBitmap
+    815          #endif
+    816          		}
+    817          
+    818          		// Draw camera icon if a camera is selected
+    819          		if (GetSUCam() != CAMERA_NONE)
+   \                     ??DrawSignalStrength_14:
+   \   000001D0   ........           BL       GetSUCam
+   \   000001D4   000050E3           CMP      R0,#+0
+   \   000001D8   1800000A           BEQ      ??DrawSignalStrength_18
+    820          		{
+    821          			pIcon = GetCameraIcon();
+   \   000001DC   4B10A0E3           MOV      R1,#+75
+   \   000001E0   0D00A0E1           MOV      R0,SP
+   \   000001E4   ........           BL       GetValue
+   \   000001E8   00009DE5           LDR      R0,[SP, #+0]
+   \   000001EC   030050E3           CMP      R0,#+3
+   \   000001F0   00F18F90           ADDLS    PC,PC,R0, LSL #+2
+   \                     ??DrawSignalStrength_1:
+   \   000001F4   1100008A           BHI      ??DrawSignalStrength_18
+   \   000001F8   020000EA           B        ??DrawSignalStrength_19
+   \   000001FC   070000EA           B        ??DrawSignalStrength_20
+   \   00000200   040000EA           B        ??DrawSignalStrength_21
+   \   00000204   010000EA           B        ??DrawSignalStrength_22
+   \                     ??DrawSignalStrength_19:
+   \   00000208   ........           LDR      R4,??DataTable17_7
+   \   0000020C   040000EA           B        ??DrawSignalStrength_23
+   \                     ??DrawSignalStrength_22:
+   \   00000210   ........           LDR      R4,??DataTable17_8
+   \   00000214   020000EA           B        ??DrawSignalStrength_23
+   \                     ??DrawSignalStrength_21:
+   \   00000218   ........           LDR      R4,??DataTable17_9
+   \   0000021C   000000EA           B        ??DrawSignalStrength_23
+   \                     ??DrawSignalStrength_20:
+   \   00000220   ........           LDR      R4,??DataTable17_10
+    822          			if (pIcon != 0)
+   \                     ??DrawSignalStrength_23:
+   \   00000224   000054E3           CMP      R4,#+0
+   \   00000228   0400000A           BEQ      ??DrawSignalStrength_18
+    823          				GUI_DrawBitmap(pIcon, CAMERA_X_POS, 0);
+   \   0000022C   7A10A0E3           MOV      R1,#+122
+   \   00000230   0020A0E3           MOV      R2,#+0
+   \   00000234   401F81E3           ORR      R1,R1,#0x100
+   \   00000238   0400A0E1           MOV      R0,R4
+   \   0000023C   ........           BL       GUI_DrawBitmap
+    824          		}
+    825          
+    826          		// Draw the Information icon, if info is available on thie screen
+    827          		DrawInfo();
+   \                     ??DrawSignalStrength_18:
+   \   00000240   ........           BL       DrawInfo
+    828          	
+    829          		// Put time on display
+    830          
+    831          		GUI_SetFont(&GUI_Font20_ASCII);
+   \   00000244   ........           LDR      R0,??DataTable17_23
+   \   00000248   ........           BL       GUI_SetFont
+    832          		GUI_SetColor(GUI_WHITE);	
+   \   0000024C   FF04E0E3           MVN      R0,#-16777216
+   \   00000250   ........           BL       GUI_SetColor
+    833          		GUI_SetTextMode(GUI_TEXTMODE_TRANS);
+   \   00000254   0200A0E3           MOV      R0,#+2
+   \   00000258   ........           BL       GUI_SetTextMode
+    834          			
+    835          		if (HaveSatelliteReception())
+   \   0000025C   ........           BL       HaveSatelliteReception
+   \   00000260   000050E3           CMP      R0,#+0
+   \   00000264   0700000A           BEQ      ??DrawSignalStrength_24
+    836          			GUI_DispStringHCenterAt(GetTimeString(SHORT12, scratch), TIME_RECT_CENTER_X, TIME_RECT_TOP_Y);
+   \   00000268   08108DE2           ADD      R1,SP,#+8
+   \   0000026C   0300A0E3           MOV      R0,#+3
+   \   00000270   ........           BL       formattime
+   \   00000274   0920A0E3           MOV      R2,#+9
+   \   00000278   4610A0E3           MOV      R1,#+70
+   \   0000027C   08008DE2           ADD      R0,SP,#+8
+   \   00000280   ........           BL       GUI_DispStringHCenterAt
+   \   00000284   040000EA           B        ??DrawSignalStrength_9
+    837          		else
+    838          			GUI_DispStringHCenterAt("         ", TIME_RECT_CENTER_X, TIME_RECT_TOP_Y);			
+   \                     ??DrawSignalStrength_24:
+   \   00000288   0920A0E3           MOV      R2,#+9
+   \   0000028C   4610A0E3           MOV      R1,#+70
+   \   00000290   ............       ADRL     R0,`?<Constant "         ">`
+   \              ....        
+   \   00000298   ........           BL       GUI_DispStringHCenterAt
+    839          	}
+    840          }
+   \                     ??DrawSignalStrength_9:
+   \   0000029C   28D08DE2           ADD      SP,SP,#+40       ;; stack cleaning
+   \   000002A0   1080BDE8           POP      {R4,PC}          ;; return
+    841          
+    842          //
+    843          // Return pointer to appropriate camera icon
+    844          //
+
+   \                                 In section .text, align 4, keep-with-next
+    845          const GUI_BITMAP *GetCameraIcon(void)
+    846          {
+   \                     GetCameraIcon:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   0CD04DE2           SUB      SP,SP,#+12
+    847          	switch (GetValue(CAMERA_STATUS).iVal)
+   \   00000008   4B10A0E3           MOV      R1,#+75
+   \   0000000C   0D00A0E1           MOV      R0,SP
+   \   00000010   ........           BL       GetValue
+   \   00000014   00009DE5           LDR      R0,[SP, #+0]
+   \   00000018   030050E3           CMP      R0,#+3
+   \   0000001C   00F18F90           ADDLS    PC,PC,R0, LSL #+2
+   \                     ??GetCameraIcon_0:
+   \   00000020   0B00008A           BHI      ??GetCameraIcon_1
+   \   00000024   080000EA           B        ??GetCameraIcon_2
+   \   00000028   010000EA           B        ??GetCameraIcon_3
+   \   0000002C   020000EA           B        ??GetCameraIcon_4
+   \   00000030   030000EA           B        ??GetCameraIcon_5
+    848          	{
+    849          		case CAMERA_STATUS_NOT_READY:		return &bmCameraNotReadyIcon;
+   \                     ??GetCameraIcon_3:
+   \   00000034   ........           LDR      R0,??DataTable17_10
+   \   00000038   060000EA           B        ??GetCameraIcon_6
+    850          		case CAMERA_STATUS_READY:			return &bmCameraReadyIcon;
+   \                     ??GetCameraIcon_4:
+   \   0000003C   ........           LDR      R0,??DataTable17_9
+   \   00000040   040000EA           B        ??GetCameraIcon_6
+    851          		case CAMERA_STATUS_RECORDING:		return &bmCameraRecordIcon;
+   \                     ??GetCameraIcon_5:
+   \   00000044   ........           LDR      R0,??DataTable17_8
+   \   00000048   020000EA           B        ??GetCameraIcon_6
+    852          		case CAMERA_STATUS_NOT_CONNECTED:	return &bmCameraBlankIcon;
+   \                     ??GetCameraIcon_2:
+   \   0000004C   ........           LDR      R0,??DataTable17_7
+   \   00000050   000000EA           B        ??GetCameraIcon_6
+    853          		default:							return 0;
+   \                     ??GetCameraIcon_1:
+   \   00000054   0000A0E3           MOV      R0,#+0
+   \                     ??GetCameraIcon_6:
+   \   00000058   0CD08DE2           ADD      SP,SP,#+12       ;; stack cleaning
+   \   0000005C   0080BDE8           POP      {PC}             ;; return
+    854          	}
+    855          }
+    856          
+
+   \                                 In section .text, align 4, keep-with-next
+    857          const GUI_BITMAP *GetSUStatusIcon(void)
+    858          {
+    859          	if (suData.suPresent)
+   \                     GetSUStatusIcon:
+   \   00000000   ........           LDR      R0,??DataTable17_24
+   \   00000004   0C00D0E5           LDRB     R0,[R0, #+12]
+   \   00000008   000050E3           CMP      R0,#+0
+   \   0000000C   0100000A           BEQ      ??GetSUStatusIcon_0
+    860          		return &bmSUGoodIcon;
+   \   00000010   ........           LDR      R0,??DataTable17_13
+   \   00000014   1EFF2FE1           BX       LR
+    861          	else return &bmNoSUIcon;
+   \                     ??GetSUStatusIcon_0:
+   \   00000018   ........           LDR      R0,??DataTable17_14
+   \   0000001C   1EFF2FE1           BX       LR               ;; return
+    862          }
+    863          
+
+   \                                 In section .text, align 4, keep-with-next
+    864          const GUI_BITMAP *SlideoutGetSignalStrengthIcon(void)
+    865          {
+   \                     SlideoutGetSignalStrengthIcon:
+   \   00000000   00402DE9           PUSH     {LR}
+    866          	const GUI_BITMAP *pIcon;
+    867          
+    868          	if ((pIcon = GetSignalStrengthIcon()) == &bmNoSUIcon)
+   \   00000004   ........           LDR      R0,??DataTable17_24
+   \   00000008   0CD04DE2           SUB      SP,SP,#+12
+   \   0000000C   0C00D0E5           LDRB     R0,[R0, #+12]
+   \   00000010   000050E3           CMP      R0,#+0
+   \   00000014   1500000A           BEQ      ??SlideoutGetSignalStrengthIcon_0
+   \   00000018   1510A0E3           MOV      R1,#+21
+   \   0000001C   0D00A0E1           MOV      R0,SP
+   \   00000020   ........           BL       GetValue
+   \   00000024   00009DE5           LDR      R0,[SP, #+0]
+   \   00000028   0010A0E3           MOV      R1,#+0
+   \   0000002C   030050E3           CMP      R0,#+3
+   \   00000030   0B0000BA           BLT      ??SlideoutGetSignalStrengthIcon_1
+   \   00000034   050050E3           CMP      R0,#+5
+   \   00000038   0110A0B3           MOVLT    R1,#+1
+   \   0000003C   080000BA           BLT      ??SlideoutGetSignalStrengthIcon_1
+   \   00000040   070050E3           CMP      R0,#+7
+   \   00000044   0210A0B3           MOVLT    R1,#+2
+   \   00000048   050000BA           BLT      ??SlideoutGetSignalStrengthIcon_1
+   \   0000004C   090050E3           CMP      R0,#+9
+   \   00000050   0310A0B3           MOVLT    R1,#+3
+   \   00000054   020000BA           BLT      ??SlideoutGetSignalStrengthIcon_1
+   \   00000058   0B0050E3           CMP      R0,#+11
+   \   0000005C   0410A0B3           MOVLT    R1,#+4
+   \   00000060   0510A0A3           MOVGE    R1,#+5
+   \                     ??SlideoutGetSignalStrengthIcon_1:
+   \   00000064   ........           LDR      R0,??DataTable17_15
+   \   00000068   010190E7           LDR      R0,[R0, +R1, LSL #+2]
+   \   0000006C   000000EA           B        ??SlideoutGetSignalStrengthIcon_2
+   \                     ??SlideoutGetSignalStrengthIcon_0:
+   \   00000070   ........           LDR      R0,??DataTable17_14
+   \                     ??SlideoutGetSignalStrengthIcon_2:
+   \   00000074   ........           LDR      R1,??DataTable17_14
+    869          		pIcon = &bmNoSignal;
+    870          	return pIcon;
+   \   00000078   0CD08DE2           ADD      SP,SP,#+12
+   \   0000007C   010050E1           CMP      R0,R1
+   \   00000080   ........           LDREQ    R0,??DataTable17_25
+   \   00000084   0080BDE8           POP      {PC}             ;; return
+    871          }
+    872          
+
+   \                                 In section .text, align 4, keep-with-next
+    873          const GUI_BITMAP *GetSignalStrengthIcon(void)
+    874          {
+    875          	if (!suData.suPresent)
+   \                     GetSignalStrengthIcon:
+   \   00000000   ........           LDR      R0,??DataTable17_24
+   \   00000004   0C00D0E5           LDRB     R0,[R0, #+12]
+   \   00000008   000050E3           CMP      R0,#+0
+    876          		return &bmNoSUIcon;
+   \   0000000C   ........           LDREQ    R0,??DataTable17_14
+   \   00000010   0000001A           BNE      ??GetSignalStrengthIcon_0
+    877          	else
+    878          	{
+    879          		int numsats;
+    880          		int bitmapindex;
+    881          		
+    882          		numsats = GetValue(GPS_NUMSAT).iVal;
+   \   00000014   1EFF2FE1           BX       LR
+   \                     ??GetSignalStrengthIcon_0:
+   \   00000018   00402DE9           PUSH     {LR}
+   \   0000001C   0CD04DE2           SUB      SP,SP,#+12
+   \   00000020   1510A0E3           MOV      R1,#+21
+   \   00000024   0D00A0E1           MOV      R0,SP
+   \   00000028   ........           BL       GetValue
+   \   0000002C   00009DE5           LDR      R0,[SP, #+0]
+    883          
+    884          		bitmapindex = 0;
+   \   00000030   0010A0E3           MOV      R1,#+0
+    885          		
+    886          		if (numsats >= 3) {
+   \   00000034   030050E3           CMP      R0,#+3
+   \   00000038   0E0000BA           BLT      ??GetSignalStrengthIcon_1
+    887          			if (numsats >= 5) {
+   \   0000003C   050050E3           CMP      R0,#+5
+   \   00000040   0B0000BA           BLT      ??GetSignalStrengthIcon_2
+    888          				if (numsats >= 7) {
+   \   00000044   070050E3           CMP      R0,#+7
+   \   00000048   070000BA           BLT      ??GetSignalStrengthIcon_3
+    889          					if (numsats >= 9) {
+   \   0000004C   090050E3           CMP      R0,#+9
+   \   00000050   030000BA           BLT      ??GetSignalStrengthIcon_4
+    890          						if (numsats >= 11) {
+   \   00000054   0B0050E3           CMP      R0,#+11
+    891          							bitmapindex = 5;
+   \   00000058   0510A0A3           MOVGE    R1,#+5
+   \   0000005C   0410A0B3           MOVLT    R1,#+4
+   \   00000060   040000EA           B        ??GetSignalStrengthIcon_1
+    892          						} // if
+    893          						else
+    894          							bitmapindex = 4;
+    895          					} // if
+    896          					else
+    897          						bitmapindex = 3;
+   \                     ??GetSignalStrengthIcon_4:
+   \   00000064   0310A0E3           MOV      R1,#+3
+   \   00000068   020000EA           B        ??GetSignalStrengthIcon_1
+    898          				} // if
+    899          				else
+    900          					bitmapindex = 2;
+   \                     ??GetSignalStrengthIcon_3:
+   \   0000006C   0210A0E3           MOV      R1,#+2
+   \   00000070   000000EA           B        ??GetSignalStrengthIcon_1
+    901          			} // if
+    902          			else
+    903          				bitmapindex = 1;
+   \                     ??GetSignalStrengthIcon_2:
+   \   00000074   0110A0E3           MOV      R1,#+1
+    904          		} // if
+    905          		return SignalStrengthGraphics[bitmapindex];
+   \                     ??GetSignalStrengthIcon_1:
+   \   00000078   ........           LDR      R0,??DataTable17_15
+   \   0000007C   010190E7           LDR      R0,[R0, +R1, LSL #+2]
+   \   00000080   0CD08DE2           ADD      SP,SP,#+12       ;; stack cleaning
+   \   00000084   0080BDE8           POP      {PC}             ;; return
+    906          	}
+    907          }
+    908          
+    909          //
+    910          // Beginning a process where we KNOW the SD card will be busy (like formatting the card)
+    911          // let the application force the state to busy and then let the background task come by
+    912          // and return the state to not busy when it has the chance to run and sees that the card
+    913          // is no longer busy.
+    914          //
+
+   \                                 In section .text, align 4, keep-with-next
+    915          void ForceSDBusy(WM_HWIN hWin)
+    916          {
+   \                     ForceSDBusy:
+   \   00000000   00402DE9           PUSH     {LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+    917          	WM_InvalidateRect(hWin, &BannerRect);
+   \   00000008   ........           LDR      R1,??DataTable17_26
+   \   0000000C   ........           BL       WM_InvalidateRect
+    918          
+    919          	SDBusy = true;		// Set flag
+   \   00000010   ........           LDR      R0,??DataTable17_15
+   \   00000014   0110A0E3           MOV      R1,#+1
+   \   00000018   1810C0E5           STRB     R1,[R0, #+24]
+    920          	GUI_Exec();			// Give a chance for the paint routine to run before the format or write process begins
+   \   0000001C   04D08DE2           ADD      SP,SP,#+4
+   \   00000020   0040BDE8           POP      {LR}
+   \   00000024   ........           B        GUI_Exec         ;; tailcall
+    921          }
+    922          
+    923          //
+    924          // Inform title bar that this is a new screen
+    925          //
+
+   \                                 In section .text, align 4, keep-with-next
+    926          void ResetNewScreen(void)
+    927          {
+    928          	animationIndex = 0;
+   \                     ResetNewScreen:
+   \   00000000   ........           LDR      R0,??DataTable17_27
+   \   00000004   0010A0E3           MOV      R1,#+0
+   \   00000008   001080E5           STR      R1,[R0, #+0]
+    929          	animationCycles = MAX_ANIMATION_CYCLES;
+   \   0000000C   0410A0E3           MOV      R1,#+4
+   \   00000010   041080E5           STR      R1,[R0, #+4]
+    930          	newScreen = true;
+   \   00000014   0110A0E3           MOV      R1,#+1
+   \   00000018   081080E5           STR      R1,[R0, #+8]
+    931          }
+   \   0000001C   1EFF2FE1           BX       LR               ;; return
+    932          
+    933          
+
+   \                                 In section .text, align 4, keep-with-next
+    934          void DrawInfo(void)
+    935          {
+   \                     DrawInfo:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+    936          	if (newScreen == true)
+   \   00000004   ........           LDR      R4,??DataTable17_27
+   \   00000008   080094E5           LDR      R0,[R4, #+8]
+   \   0000000C   010050E3           CMP      R0,#+1
+   \   00000010   0300001A           BNE      ??DrawInfo_1
+    937          	{
+    938          		// First time displaying this screen - fully populate help variables
+    939          		hasInfoKey = CheckForInfoKey(true);
+   \   00000014   ........           BL       CheckForInfoKey
+   \   00000018   0C0084E5           STR      R0,[R4, #+12]
+    940          		newScreen = false;
+   \   0000001C   0000A0E3           MOV      R0,#+0
+   \   00000020   080084E5           STR      R0,[R4, #+8]
+    941          	}
+    942          
+    943          	// First and subsequent paints of this screen - only animate Info Icon of there is a
+    944          	// tutorial associated with this screen.  pHelpScreens == -1 used to show if there is a tutorial
+    945          	if (pHelpScreens != (HELP_SCREENS *)-1)
+   \                     ??DrawInfo_1:
+   \   00000024   ........           LDR      R0,??DataTable17_28
+   \   00000028   0010E0E3           MVN      R1,#+0
+   \   0000002C   000090E5           LDR      R0,[R0, #+0]
+   \   00000030   010050E1           CMP      R0,R1
+   \   00000034   2400000A           BEQ      ??DrawInfo_2
+    946          	{
+    947          		if (animationCycles)
+   \   00000038   040094E5           LDR      R0,[R4, #+4]
+   \   0000003C   000050E3           CMP      R0,#+0
+   \   00000040   2300000A           BEQ      ??DrawInfo_3
+    948          		{
+    949          			if (animationIndex >= 10)
+   \   00000044   001094E5           LDR      R1,[R4, #+0]
+   \   00000048   0A0051E3           CMP      R1,#+10
+   \   0000004C   040000BA           BLT      ??DrawInfo_4
+    950          			{
+    951          				animationIndex = 0;
+   \   00000050   0010A0E3           MOV      R1,#+0
+    952          				animationCycles--;
+   \   00000054   010040E2           SUB      R0,R0,#+1
+   \   00000058   001084E5           STR      R1,[R4, #+0]
+   \   0000005C   040084E5           STR      R0,[R4, #+4]
+   \   00000060   0B0000EA           B        ??DrawInfo_5
+    953          			}
+    954          			switch (animationIndex)
+   \                     ??DrawInfo_4:
+   \   00000064   011041E2           SUB      R1,R1,#+1
+   \   00000068   070051E3           CMP      R1,#+7
+   \   0000006C   01F18F90           ADDLS    PC,PC,R1, LSL #+2
+   \                     ??DrawInfo_0:
+   \   00000070   0700008A           BHI      ??DrawInfo_5
+   \   00000074   080000EA           B        ??DrawInfo_6
+   \   00000078   090000EA           B        ??DrawInfo_7
+   \   0000007C   0A0000EA           B        ??DrawInfo_8
+   \   00000080   0B0000EA           B        ??DrawInfo_9
+   \   00000084   0A0000EA           B        ??DrawInfo_9
+   \   00000088   070000EA           B        ??DrawInfo_8
+   \   0000008C   040000EA           B        ??DrawInfo_7
+   \   00000090   010000EA           B        ??DrawInfo_6
+    955          			{
+    956          			default:
+    957          			case 9:
+    958          			case 0:	pAnimation = &bmInfoButton1;	break;
+   \                     ??DrawInfo_5:
+   \   00000094   ........           LDR      R0,??DataTable17_29
+   \   00000098   060000EA           B        ??DrawInfo_10
+    959          			case 8:
+    960          			case 1:	pAnimation = &bmInfoButton2;	break;
+   \                     ??DrawInfo_6:
+   \   0000009C   ........           LDR      R0,??DataTable17_30
+   \   000000A0   040000EA           B        ??DrawInfo_10
+    961          			case 7:
+    962          			case 2:	pAnimation = &bmInfoButton3;	break;
+   \                     ??DrawInfo_7:
+   \   000000A4   ........           LDR      R0,??DataTable17_31
+   \   000000A8   020000EA           B        ??DrawInfo_10
+    963          			case 6:
+    964          			case 3:	pAnimation = &bmInfoButton4;	break;
+   \                     ??DrawInfo_8:
+   \   000000AC   ........           LDR      R0,??DataTable17_32
+   \   000000B0   000000EA           B        ??DrawInfo_10
+    965          			case 5:
+    966          			case 4:	pAnimation = &bmInfoButton5;	break;
+   \                     ??DrawInfo_9:
+   \   000000B4   ........           LDR      R0,??DataTable17_33
+   \                     ??DrawInfo_10:
+   \   000000B8   100084E5           STR      R0,[R4, #+16]
+    967          			}
+    968          			animationIndex++;
+   \   000000BC   000094E5           LDR      R0,[R4, #+0]
+   \   000000C0   010080E2           ADD      R0,R0,#+1
+   \   000000C4   000084E5           STR      R0,[R4, #+0]
+   \   000000C8   010000EA           B        ??DrawInfo_3
+    969          		}
+    970          	}
+    971          	else pAnimation = &bmInfoButton1;
+   \                     ??DrawInfo_2:
+   \   000000CC   ........           LDR      R0,??DataTable17_29
+   \   000000D0   100084E5           STR      R0,[R4, #+16]
+    972          
+    973          	if (pAnimation)
+   \                     ??DrawInfo_3:
+   \   000000D4   100094E5           LDR      R0,[R4, #+16]
+   \   000000D8   000050E3           CMP      R0,#+0
+   \   000000DC   0200000A           BEQ      ??DrawInfo_11
+    974          		GUI_DrawBitmap(pAnimation, 0, 0);
+   \   000000E0   0020A0E3           MOV      R2,#+0
+   \   000000E4   0010A0E3           MOV      R1,#+0
+   \   000000E8   ........           BL       GUI_DrawBitmap
+    975          }
+   \                     ??DrawInfo_11:
+   \   000000EC   1080BDE8           POP      {R4,PC}          ;; return
+    976          
+    977          //
+    978          // Convert temperature in degrees fahrenheit to centigrade
+    979          //
+
+   \                                 In section .text, align 4, keep-with-next
+    980           float f_to_c(float val)
+    981           {
+   \                     f_to_c:
+   \   00000000   00402DE9           PUSH     {LR}
+    982          	 return (val - 32.0) * 5.0 / 9.0;
+   \   00000004   ........           BL       __aeabi_f2d
+   \   00000008   0130A0E1           MOV      R3,R1
+   \   0000000C   0020A0E1           MOV      R2,R0
+   \   00000010   C014A0E3           MOV      R1,#-1073741824
+   \   00000014   0000A0E3           MOV      R0,#+0
+   \   00000018   401881E3           ORR      R1,R1,#0x400000
+   \   0000001C   ........           BL       __aeabi_dadd
+   \   00000020   0130A0E1           MOV      R3,R1
+   \   00000024   0020A0E1           MOV      R2,R0
+   \   00000028   4014A0E3           MOV      R1,#+1073741824
+   \   0000002C   0000A0E3           MOV      R0,#+0
+   \   00000030   501981E3           ORR      R1,R1,#0x140000
+   \   00000034   ........           BL       __aeabi_dmul
+   \   00000038   4034A0E3           MOV      R3,#+1073741824
+   \   0000003C   0020A0E3           MOV      R2,#+0
+   \   00000040   883983E3           ORR      R3,R3,#0x220000
+   \   00000044   ........           BL       __aeabi_ddiv
+   \   00000048   0040BDE8           POP      {LR}
+   \   0000004C   ........           B        __aeabi_d2f      ;; tailcall
+    983           }
+    984          
+    985          //
+    986          // Convert temperature in degrees centigrade to fahrenheit
+    987          //
+
+   \                                 In section .text, align 4, keep-with-next
+    988           float c_to_f(float val)
+    989           {
+   \                     c_to_f:
+   \   00000000   00402DE9           PUSH     {LR}
+    990          	 return ((val * 9.0) / 5.0) + 32.0;
+   \   00000004   ........           BL       __aeabi_f2d
+   \   00000008   0130A0E1           MOV      R3,R1
+   \   0000000C   0020A0E1           MOV      R2,R0
+   \   00000010   4014A0E3           MOV      R1,#+1073741824
+   \   00000014   0000A0E3           MOV      R0,#+0
+   \   00000018   881981E3           ORR      R1,R1,#0x220000
+   \   0000001C   ........           BL       __aeabi_dmul
+   \   00000020   4034A0E3           MOV      R3,#+1073741824
+   \   00000024   0020A0E3           MOV      R2,#+0
+   \   00000028   503983E3           ORR      R3,R3,#0x140000
+   \   0000002C   ........           BL       __aeabi_ddiv
+   \   00000030   0130A0E1           MOV      R3,R1
+   \   00000034   0020A0E1           MOV      R2,R0
+   \   00000038   4014A0E3           MOV      R1,#+1073741824
+   \   0000003C   0000A0E3           MOV      R0,#+0
+   \   00000040   401881E3           ORR      R1,R1,#0x400000
+   \   00000044   ........           BL       __aeabi_dadd
+   \   00000048   0040BDE8           POP      {LR}
+   \   0000004C   ........           B        __aeabi_d2f      ;; tailcall
+    991           }
+    992          
+
+   \                                 In section .text, align 4, keep-with-next
+    993          char *GetTimeString(timeforms what, char *pString)
+    994          {
+   \                     GetTimeString:
+   \   00000000   10402DE9           PUSH     {R4,LR}
+   \   00000004   0140A0E1           MOV      R4,R1
+    995          #ifdef _WINDOWS
+    996          		time_t t;
+    997          		struct tm *currentTime;
+    998          		char hour;
+    999          		char pm;
+   1000          
+   1001          		t = time((time_t *)NULL);
+   1002          		currentTime = localtime(&t);
+   1003          
+   1004          		hour = currentTime->tm_hour;
+   1005          		pm = (hour >= 12);
+   1006          		
+   1007          		if (hour > 12)
+   1008          			hour = hour % 12;
+   1009          		if (hour == 0)
+   1010          			hour = 12;
+   1011          
+   1012          		sprintf(pString, "%d:%02d%s", hour, currentTime->tm_min, pm? "pm": "am");
+   1013          #else
+   1014          		formattime (what, pString);
+   \   00000008   ........           BL       formattime
+   1015          #endif
+   1016          		return pString;
+   \   0000000C   0400A0E1           MOV      R0,R4
+   \   00000010   1080BDE8           POP      {R4,PC}          ;; return
+   1017          }
+   1018          
+
+   \                                 In section .text, align 4, keep-with-next
+   1019          void ResetTrip(void)
+   1020          {
+   1021          	sysData.driveTripDistance = 0.0;
+   \                     ResetTrip:
+   \   00000000   ........           LDR      R0,??DataTable17_34
+   \   00000004   0010A0E3           MOV      R1,#+0
+   \   00000008   CC1080E5           STR      R1,[R0, #+204]
+   1022          	sysData.driveTripTime = 0;
+   \   0000000C   C81080E5           STR      R1,[R0, #+200]
+   1023          }
+   \   00000010   1EFF2FE1           BX       LR               ;; return
+   1024          
+
+   \                                 In section .text, align 4, keep-with-next
+   1025          void ResetMax(void)
+   1026          {
+   1027          	DataValues[MAX_SPEED].fVal = 0.0;
+   \                     ResetMax:
+   \   00000000   ........           LDR      R0,??DataTable17_35
+   \   00000004   0010A0E3           MOV      R1,#+0
+   \   00000008   D01080E5           STR      R1,[R0, #+208]
+   1028          	DataValues[MAX_X_G].fVal = 0.0;
+   \   0000000C   181080E5           STR      R1,[R0, #+24]
+   1029          	DataValues[MAX_Y_G].fVal = 0.0;
+   \   00000010   201080E5           STR      R1,[R0, #+32]
+   1030          	DataValues[MAX_Z_G].fVal = 0.0;
+   \   00000014   281080E5           STR      R1,[R0, #+40]
+   1031          	DataValues[MIN_X_G].fVal = 0.0;
+   \   00000018   301080E5           STR      R1,[R0, #+48]
+   1032          	DataValues[MIN_Y_G].fVal = 0.0;
+   \   0000001C   381080E5           STR      R1,[R0, #+56]
+   1033          	DataValues[MIN_Z_G].fVal = 0.0;
+   \   00000020   401080E5           STR      R1,[R0, #+64]
+   1034          }
+   \   00000024   1EFF2FE1           BX       LR               ;; return
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable3:
+   \   00000000   666666666666       DC32     0x66666666,0x3FE66666
+   \              E63F        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable7:
+   \   00000000   ........           DC32     SEMA_GlobalData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable7_1:
+   \   00000000   ........           DC32     DataValues
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable7_2:
+   \   00000000   ........           DC32     sysData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable7_3:
+   \   00000000   2F121F3F           DC32     0x3f1f122f
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable7_4:
+   \   00000000   67666666           DC32     0x66666667
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable7_5:
+   \   00000000   FBA82B442C07       DC32     0x442BA8FB,0x3F4F072C
+   \              4F3F        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable8:
+   \   00000000   A1F85140           DC32     0x4051f8a1
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable8_1:
+   \   00000000   ........           DC32     suData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10:
+   \   00000000   ........           DC32     vehicleData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable10_1:
+   \   00000000   666666666666       DC32     0x66666666,0x3FEE6666
+   \              EE3F        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable14:
+   \   00000000   ........           DC32     trackData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable15:
+   \   00000000   ........           DC32     unsavedSysData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17:
+   \   00000000   ........           DC32     unsavedSysData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_1:
+   \   00000000   00804340           DC32     0x40438000
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_2:
+   \   00000000   0BD7233C           DC32     0x3c23d70b
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_3:
+   \   00000000   CDCCCC3D           DC32     0x3dcccccd
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_4:
+   \   00000000   00408F40           DC32     0x408f4000
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_5:
+   \   00000000   0020AC40           DC32     0x40ac2000
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_6:
+   \   00000000   ........           DC32     hSignalStrengthSprite
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_7:
+   \   00000000   ........           DC32     bmCameraBlankIcon
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_8:
+   \   00000000   ........           DC32     bmCameraRecordIcon
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_9:
+   \   00000000   ........           DC32     bmCameraReadyIcon
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_10:
+   \   00000000   ........           DC32     bmCameraNotReadyIcon
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_11:
+   \   00000000   ........           DC32     hCameraSprite
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_12:
+   \   00000000   ........           DC32     hSUStatusSprite
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_13:
+   \   00000000   ........           DC32     bmSUGoodIcon
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_14:
+   \   00000000   ........           DC32     bmNoSUIcon
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_15:
+   \   00000000   ........           DC32     SignalStrengthGraphics
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_16:
+   \   00000000   ........           DC32     bmRedSD
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_17:
+   \   00000000   ........           DC32     bmWhiteSD
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_18:
+   \   00000000   ........           DC32     bmLockedSD
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_19:
+   \   00000000   ........           DC32     MB_SDcardRW
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_20:
+   \   00000000   ........           DC32     Queue_tqm
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_21:
+   \   00000000   ........           DC32     bmYellowSD
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_22:
+   \   00000000   ........           DC32     bmGreenSD
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_23:
+   \   00000000   ........           DC32     GUI_Font20_ASCII
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_24:
+   \   00000000   ........           DC32     suData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_25:
+   \   00000000   ........           DC32     bmNoSignal
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_26:
+   \   00000000   ........           DC32     BannerRect
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_27:
+   \   00000000   ........           DC32     animationIndex
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_28:
+   \   00000000   ........           DC32     pHelpScreens
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_29:
+   \   00000000   ........           DC32     bmInfoButton1
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_30:
+   \   00000000   ........           DC32     bmInfoButton2
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_31:
+   \   00000000   ........           DC32     bmInfoButton3
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_32:
+   \   00000000   ........           DC32     bmInfoButton4
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_33:
+   \   00000000   ........           DC32     bmInfoButton5
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_34:
+   \   00000000   ........           DC32     sysData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable17_35:
+   \   00000000   ........           DC32     DataValues
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "         ">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   202020202020       DC8 32, 32, 32, 32, 32, 32, 32, 32, 32, 0
+   \              20202000    
+   \   0000000A   0000               DC8 0, 0
+
+   Maximum stack usage in bytes:
+
+     Function                      .cstack
+     --------                      -------
+     CalcSpeed                         12
+     CommSimulatorTask                  8
+     DrawInfo                           8
+     DrawSignalStrength                48
+     DummyTick                         56
+     ForceSDBusy                        8
+     GetCameraIcon                     16
+     GetRawValue                       24
+     GetSUStatusIcon                    0
+     GetSignalStrengthIcon             16
+     GetTimeString                      8
+     GetValue                          32
+     InitCommSimulatorTask              8
+     ResetMax                           0
+     ResetNewScreen                     0
+     ResetTrip                          0
+     SetGear                           36
+     SimStartSession                   16
+     SlideoutGetSignalStrengthIcon     16
+     c_to_f                             4
+     f_to_c                             4
+
+
+   Section sizes:
+
+     Function/Label                Bytes
+     --------------                -----
+     GetRawValue                     64
+     GetValue                       884
+     SimStartSession                164
+     DummyTick                     1748
+     CalcSpeed                       84
+     InitCommSimulatorTask            4
+     CommSimulatorTask               60
+     SetGear                        436
+     DataValues                    2350
+     DummyDataValues
+     minSimRPM
+     maxSimGear
+     speedDirection
+     shifting
+     speedRPMTable
+     topgear
+     metRecordSpeedYet
+     dummy_initialized
+     SignalStrengthGraphics          25
+     SDBusy
+     animationIndex                  20
+     animationCycles
+     newScreen
+     hasInfoKey
+     pAnimation
+     DrawSignalStrength             676
+     GetCameraIcon                   96
+     GetSUStatusIcon                 32
+     SlideoutGetSignalStrengthIcon  136
+     GetSignalStrengthIcon          136
+     ForceSDBusy                     40
+     ResetNewScreen                  32
+     DrawInfo                       240
+     f_to_c                          80
+     c_to_f                          80
+     GetTimeString                   20
+     ResetTrip                       20
+     ResetMax                        40
+     ??DataTable3                     8
+     ??DataTable7                     4
+     ??DataTable7_1                   4
+     ??DataTable7_2                   4
+     ??DataTable7_3                   4
+     ??DataTable7_4                   4
+     ??DataTable7_5                   8
+     ??DataTable8                     4
+     ??DataTable8_1                   4
+     ??DataTable10                    4
+     ??DataTable10_1                  8
+     ??DataTable14                    4
+     ??DataTable15                    4
+     ??DataTable17                    4
+     ??DataTable17_1                  4
+     ??DataTable17_2                  4
+     ??DataTable17_3                  4
+     ??DataTable17_4                  4
+     ??DataTable17_5                  4
+     ??DataTable17_6                  4
+     ??DataTable17_7                  4
+     ??DataTable17_8                  4
+     ??DataTable17_9                  4
+     ??DataTable17_10                 4
+     ??DataTable17_11                 4
+     ??DataTable17_12                 4
+     ??DataTable17_13                 4
+     ??DataTable17_14                 4
+     ??DataTable17_15                 4
+     ??DataTable17_16                 4
+     ??DataTable17_17                 4
+     ??DataTable17_18                 4
+     ??DataTable17_19                 4
+     ??DataTable17_20                 4
+     ??DataTable17_21                 4
+     ??DataTable17_22                 4
+     ??DataTable17_23                 4
+     ??DataTable17_24                 4
+     ??DataTable17_25                 4
+     ??DataTable17_26                 4
+     ??DataTable17_27                 4
+     ??DataTable17_28                 4
+     ??DataTable17_29                 4
+     ??DataTable17_30                 4
+     ??DataTable17_31                 4
+     ??DataTable17_32                 4
+     ??DataTable17_33                 4
+     ??DataTable17_34                 4
+     ??DataTable17_35                 4
+     ?<Constant "         ">         12
+
+ 
+ 2 395 bytes in section .data
+ 5 292 bytes in section .text
+ 
+ 5 292 bytes of CODE memory
+ 2 395 bytes of DATA memory
+
+Errors: none
+Warnings: none

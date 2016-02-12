@@ -1,0 +1,1320 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     02/Feb/2016  18:31:53 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\DUII\DriveScreen.cpp                             #
+#    Command line =  C:\DUII\DUII\DriveScreen.cpp -D DEBUG=1 -D               #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D                   #
+#                    XIGNORE_TEMPERATURE -D BUILD_DEBUG_PORT -D PROFILER      #
+#                    -lCN C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Li #
+#                    st\ -o C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\ #
+#                    Obj\ --debug --endian=little --cpu=ARM926EJ-S -e         #
+#                    --fpu=None --dlib_config "C:\Program Files (x86)\IAR     #
+#                    Systems\Embedded Workbench 6.0\arm\INC\c\DLib_Config_Ful #
+#                    l.h" -I C:\DUII\TargetHW\Application\SEGGERDEMO\ -I      #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ -I PROFILER\         #
+#                    --cpu_mode arm -Ohs --eec++                              #
+#    List file    =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\List\Dr #
+#                    iveScreen.lst                                            #
+#    Object file  =  C:\DUII\TargetHW\Output\AT91SAM9RL64\Debug_SDRAM\Obj\Dri #
+#                    veScreen.o                                               #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\DUII\DriveScreen.cpp
+      1          
+      2          #include <stdio.h>
+      3          #include <stdlib.h>
+      4          #include <string.h>
+      5          #include "DUII.h"
+      6          #include "GUI.h"
+      7          #include "GeneralConfig.h"
+      8          #include "commondefs.h"
+      9          #include "ConfigScreens.h"
+     10          #include "DriveScreen.h"
+     11          #include "gauge.hpp"
+     12          #include "RunningGauges.h"
+     13          #include "DataHandler.h"
+     14          #include "SFScreens.h"
+     15          #include "LEDHandler.h"
+     16          
+     17          /*********************************************************************
+     18          *
+     19          *       External data and code
+     20          *
+     21          **********************************************************************
+     22          */
+     23          #ifdef __cplusplus
+     24          extern "C" {
+     25          #endif
+     26          
+     27          extern GUI_CONST_STORAGE GUI_BITMAP bmDriveModeBackground;
+     28          extern GUI_CONST_STORAGE GUI_BITMAP bmDriveModeBackgroundNewCompass;
+     29          extern GUI_CONST_STORAGE GUI_BITMAP bmCompassList;
+     30          extern GUI_CONST_STORAGE GUI_BITMAP bmthreewayarrow;
+     31          extern GUI_CONST_STORAGE GUI_BITMAP bmDriveButton;
+     32          extern GUI_CONST_STORAGE GUI_BITMAP bmN;
+     33          extern GUI_CONST_STORAGE GUI_BITMAP bmNE;
+     34          extern GUI_CONST_STORAGE GUI_BITMAP bmE;
+     35          extern GUI_CONST_STORAGE GUI_BITMAP bmSE;
+     36          extern GUI_CONST_STORAGE GUI_BITMAP bmS;
+     37          extern GUI_CONST_STORAGE GUI_BITMAP bmSW;
+     38          extern GUI_CONST_STORAGE GUI_BITMAP bmW;
+     39          extern GUI_CONST_STORAGE GUI_BITMAP bmNW;
+     40          extern char lockupSemaphore;
+     41          
+     42          #ifdef __cplusplus
+     43          }
+     44          #endif
+     45          
+     46          /*********************************************************************
+     47          *
+     48          *       Public code
+     49          *
+     50          **********************************************************************
+     51          */
+     52          
+     53          /*********************************************************************
+     54          *
+     55          *       Local Prototypes
+     56          *
+     57          **********************************************************************
+     58          */
+     59          
+     60          /*********************************************************************
+     61          *
+     62          *       Local Defines and Constants
+     63          *
+     64          **********************************************************************
+     65          */
+     66          enum Headings { NORTH, NORTHEAST, EAST, SOUTHEAST, SOUTH, SOUTHWEST, WEST, NORTHWEST };
+
+   \                                 In section .text, align 4, keep-with-next
+     67          const GUI_RECT SpeedRect = { 0, 8, 90, 42 };
+   \                     SpeedRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   000008005A00       DC16 0, 8, 90, 42
+   \              2A00        
+
+   \                                 In section .text, align 4, keep-with-next
+     68          const GUI_RECT TimeRect = { 320, 8, 320+115, 42 };
+   \                     TimeRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   40010800B301       DC16 320, 8, 435, 42
+   \              2A00        
+     69          
+
+   \                                 In section .text, align 4, keep-with-next
+     70          const GUI_RECT MaxSpeedRect = { 95, 99, 95+141, 99+33 };
+   \                     MaxSpeedRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   5F006300EC00       DC16 95, 99, 236, 132
+   \              8400        
+
+   \                                 In section .text, align 4, keep-with-next
+     71          const GUI_RECT LatGRect = { 385, 100, 385+100, 100+30 };
+   \                     LatGRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   81016400E501       DC16 385, 100, 485, 130
+   \              8200        
+
+   \                                 In section .text, align 4, keep-with-next
+     72          const GUI_RECT MaxBrakeRect = { 385, 150, 385+100, 150+30 };
+   \                     MaxBrakeRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   81019600E501       DC16 385, 150, 485, 180
+   \              B400        
+
+   \                                 In section .text, align 4, keep-with-next
+     73          const GUI_RECT MaxLaunchRect = { 385, 200, 385+100, 200+30 };
+   \                     MaxLaunchRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   8101C800E501       DC16 385, 200, 485, 230
+   \              E600        
+
+   \                                 In section .text, align 4, keep-with-next
+     74          const GUI_RECT TripDistanceRect = { 95, 150, 95+200, 150+30 };
+   \                     TripDistanceRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   5F0096002701       DC16 95, 150, 295, 180
+   \              B400        
+
+   \                                 In section .text, align 4, keep-with-next
+     75          const GUI_RECT ElapsedTimeRect = { 95, 200, 95+200, 200+30 };
+   \                     ElapsedTimeRect:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   5F00C8002701       DC16 95, 200, 295, 230
+   \              E600        
+     76          
+     77          #define	RESET_TRIP_BTN		GUI_ID_USER + 1
+     78          #define	RESET_MAX_BTN		GUI_ID_USER + 2
+     79          #define FEET_PER_MILE		5280.0
+     80          #define METERS_PER_MILE		1609.344
+     81          #define METERS_PER_KM		1000.0
+     82          #define	DRIVE_SCREEN_REFRESH_TIME	50
+     83          
+     84          #define	COMPASS_WINDOW_LEFT			171
+     85          #define	COMPASS_WINDOW_TOP			8
+     86          #define	COMPASS_WINDOW_WIDTH		138
+     87          #define	PIXELS_PER_360_DEGREES		506.0
+     88          #define	OFFSET_TO_NORTH_IN_STRIP	105
+     89          #define	OFFSET_OF_NORTH_IN_VIEW_WINDOW	69
+     90          #define	DEFAULT_NORTH_OFFSET		OFFSET_TO_NORTH_IN_STRIP - OFFSET_OF_NORTH_IN_VIEW_WINDOW
+     91          #define	COMPASS_CHANGE_KPH			8.3
+     92          #define	COMPASS_CHANGE_MPH			5.0
+     93          
+     94          /*********************************************************************
+     95          *
+     96          *       Local Variables
+     97          *
+     98          **********************************************************************
+     99          */
+
+   \                                 In section .bss, align 4
+    100          BUTTON_Handle hResetTrip, hResetMax;
+   \                     hResetTrip:
+   \   00000000                      DS8 4
+   \                     hResetMax:
+   \   00000004                      DS8 4
+   \   00000008                      DS8 4
+   \   0000000C                      DS8 4
+   \   00000010                      DS8 4
+   \   00000014                      DS8 4
+   \   00000018                      DS8 4
+   \   0000001C                      DS8 4
+   \   00000020                      DS8 4
+   \   00000024                      DS8 4
+   \   00000028                      DS8 4
+   \   0000002C                      DS8 1
+   \   0000002D                      DS8 3
+   \   00000030                      DS8 32
+   \   00000050                      DS8 12
+   \   0000005C                      DS8 12
+   \   00000068                      DS8 12
+   \   00000074                      DS8 12
+   \   00000080                      DS8 20
+   \   00000094                      DS8 32
+   \   000000B4                      DS8 32
+   \   000000D4                      DS8 32
+    101          static WM_HTIMER hScreenTimer;
+    102          static WM_HWIN hDriveScreen;
+    103          static bool firsttimethrough;
+    104          static GUI_MEMDEV_Handle memDriveScreen;
+    105          static int offset, previousOffset, workingOffset;
+    106          static float heading;
+
+   \                                 In section .bss, align 4
+   \   00000000                      DS8 4
+    107          static int speed, time;
+
+   \                                 In section .bss, align 4
+   \   00000000                      DS8 4
+    108          static float float_1, float_2;
+    109          static char speedStr[30];
+    110          static char yGStr[10], xGStr[10], maxXGStr[10], minXGStr[10];
+    111          static char maxSpeedStr[20];
+    112          static char timeStr[30];
+    113          static char tripDistStr[30];
+    114          static char elapsedStr[30];
+    115          
+    116          
+
+   \                                 In section .text, align 4, keep-with-next
+    117          void _cbDriveCallback(WM_MESSAGE * pMsg)
+    118          {
+   \                     _cbDriveCallback:
+   \   00000000   F0412DE9           PUSH     {R4-R8,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+    119          	int NCode, Id;
+    120          	float speedFloat;
+    121          
+    122          	switch(pMsg->MsgId)
+   \   00000008   000094E5           LDR      R0,[R4, #+0]
+   \   0000000C   08D04DE2           SUB      SP,SP,#+8
+   \   00000010   010050E2           SUBS     R0,R0,#+1
+   \   00000014   0800000A           BEQ      ??_cbDriveCallback_0
+   \   00000018   0A0050E2           SUBS     R0,R0,#+10
+   \   0000001C   9701000A           BEQ      ??_cbDriveCallback_1
+   \   00000020   040050E2           SUBS     R0,R0,#+4
+   \   00000024   ED00000A           BEQ      ??_cbDriveCallback_2
+   \   00000028   170050E2           SUBS     R0,R0,#+23
+   \   0000002C   7C01000A           BEQ      ??_cbDriveCallback_3
+   \   00000030   ED0050E2           SUBS     R0,R0,#+237
+   \   00000034   2100000A           BEQ      ??_cbDriveCallback_4
+   \   00000038   980100EA           B        ??_cbDriveCallback_5
+    123          	{
+    124          	case WM_CREATE:
+    125          		// First time through - set initial heading and offset
+    126          		heading = GetValue(HEADING).fVal;
+   \                     ??_cbDriveCallback_0:
+   \   0000003C   0F10A0E3           MOV      R1,#+15
+   \   00000040   0D00A0E1           MOV      R0,SP
+   \   00000044   ........           BL       GetValue
+   \   00000048   5053A0E3           MOV      R5,#+1073741825
+   \   0000004C   ED5785E3           ORR      R5,R5,#0x3B40000
+   \   00000050   00009DE5           LDR      R0,[SP, #+0]
+    127          
+    128          		// Safety check
+    129          		while (heading > 360.0)
+   \   00000054   0510A0E1           MOV      R1,R5
+   \   00000058   ........           BL       __aeabi_cfrcmple
+   \   0000005C   C044A0E3           MOV      R4,#-1073741824
+   \   00000060   ED4784E3           ORR      R4,R4,#0x3B40000
+   \   00000064   0400008A           BHI      ??_cbDriveCallback_6
+    130          			heading -= 360.0;
+   \                     ??_cbDriveCallback_7:
+   \   00000068   0410A0E1           MOV      R1,R4
+   \   0000006C   ........           BL       __aeabi_fadd
+   \   00000070   0510A0E1           MOV      R1,R5
+   \   00000074   ........           BL       __aeabi_cfrcmple
+   \   00000078   FAFFFF9A           BLS      ??_cbDriveCallback_7
+   \                     ??_cbDriveCallback_6:
+   \   0000007C   ........           LDR      R6,??DataTable23_2
+   \   00000080   200086E5           STR      R0,[R6, #+32]
+    131          
+    132          		// Convert the heading (0-360) to a pixel offset within the graphic of the strip
+    133          		offset = previousOffset = workingOffset = (int)((heading / 360.0) * PIXELS_PER_360_DEGREES) + OFFSET_TO_NORTH_IN_STRIP - OFFSET_OF_NORTH_IN_VIEW_WINDOW;
+   \   00000084   ........           BL       __aeabi_f2d
+   \   00000088   0020A0E3           MOV      R2,#+0
+   \   0000008C   ........           LDR      R3,??DataTable23_3  ;; 0x40768000
+   \   00000090   ........           BL       __aeabi_ddiv
+   \   00000094   0020A0E1           MOV      R2,R0
+   \   00000098   0130A0E1           MOV      R3,R1
+   \   0000009C   0000A0E3           MOV      R0,#+0
+   \   000000A0   ........           LDR      R1,??DataTable23_4  ;; 0x407fa000
+   \   000000A4   ........           BL       __aeabi_dmul
+   \   000000A8   ........           BL       __aeabi_d2iz
+   \   000000AC   240080E2           ADD      R0,R0,#+36
+   \   000000B0   1C0086E5           STR      R0,[R6, #+28]
+   \   000000B4   180086E5           STR      R0,[R6, #+24]
+   \   000000B8   140086E5           STR      R0,[R6, #+20]
+    134          		break;
+   \   000000BC   790100EA           B        ??_cbDriveCallback_8
+    135          
+    136          	case WM_TIMER:
+    137          		if (pMsg->Data.v == hScreenTimer)
+   \                     ??_cbDriveCallback_4:
+   \   000000C0   ........           LDR      R6,??DataTable23_2
+   \   000000C4   0C1094E5           LDR      R1,[R4, #+12]
+   \   000000C8   080096E5           LDR      R0,[R6, #+8]
+   \   000000CC   000051E1           CMP      R1,R0
+   \   000000D0   0300001A           BNE      ??_cbDriveCallback_9
+    138          		{
+    139          			WM_RestartTimer(hScreenTimer, DRIVE_SCREEN_REFRESH_TIME);
+   \   000000D4   3210A0E3           MOV      R1,#+50
+   \   000000D8   ........           BL       WM_RestartTimer
+    140          			WM_InvalidateWindow(hDriveScreen);
+   \   000000DC   0C0096E5           LDR      R0,[R6, #+12]
+   \   000000E0   ........           BL       WM_InvalidateWindow
+    141          		}
+    142          
+    143          		// Get data values
+    144          		// Get speed
+    145          		speed = (int)(speedFloat = GetValue(SPEED).fVal);
+   \                     ??_cbDriveCallback_9:
+   \   000000E4   0E10A0E3           MOV      R1,#+14
+   \   000000E8   0D00A0E1           MOV      R0,SP
+   \   000000EC   ........           BL       GetValue
+   \   000000F0   00809DE5           LDR      R8,[SP, #+0]
+   \   000000F4   0800A0E1           MOV      R0,R8
+   \   000000F8   ........           BL       __aeabi_f2iz
+    146          
+    147          		// Don't show direction if moving too slowly that integer roundoff makes direction "snap"
+    148          		if (speedFloat > (sysData.units == STD ? COMPASS_CHANGE_MPH : COMPASS_CHANGE_KPH))
+   \   000000FC   ........           LDR      R7,??DataTable23_5
+   \   00000100   240086E5           STR      R0,[R6, #+36]
+   \   00000104   640097E5           LDR      R0,[R7, #+100]
+   \   00000108   000050E3           CMP      R0,#+0
+   \   0000010C   0300001A           BNE      ??_cbDriveCallback_10
+   \   00000110   4054A0E3           MOV      R5,#+1073741824
+   \   00000114   0040A0E3           MOV      R4,#+0
+   \   00000118   505985E3           ORR      R5,R5,#0x140000
+   \   0000011C   010000EA           B        ??_cbDriveCallback_11
+   \                     ??_cbDriveCallback_10:
+   \   00000120   AC4F8FE2           ADR      R4,??_cbDriveCallback_12
+   \   00000124   300094E8           LDM      R4,{R4,R5}
+   \                     ??_cbDriveCallback_11:
+   \   00000128   0800A0E1           MOV      R0,R8
+   \   0000012C   ........           BL       __aeabi_f2d
+   \   00000130   0020A0E1           MOV      R2,R0
+   \   00000134   0130A0E1           MOV      R3,R1
+   \   00000138   0400A0E1           MOV      R0,R4
+   \   0000013C   0510A0E1           MOV      R1,R5
+   \   00000140   ........           BL       __aeabi_cdcmple
+   \   00000144   1200002A           BCS      ??_cbDriveCallback_13
+    149          		{
+    150          			heading = GetValue(HEADING).fVal;
+   \   00000148   0F10A0E3           MOV      R1,#+15
+   \   0000014C   0D00A0E1           MOV      R0,SP
+   \   00000150   ........           BL       GetValue
+   \   00000154   5053A0E3           MOV      R5,#+1073741825
+   \   00000158   ED5785E3           ORR      R5,R5,#0x3B40000
+   \   0000015C   00009DE5           LDR      R0,[SP, #+0]
+    151          
+    152          			// Safety check
+    153          			while (heading > 360.0)
+   \   00000160   0510A0E1           MOV      R1,R5
+   \   00000164   ........           BL       __aeabi_cfrcmple
+   \   00000168   C044A0E3           MOV      R4,#-1073741824
+   \   0000016C   200086E5           STR      R0,[R6, #+32]
+   \   00000170   ED4784E3           ORR      R4,R4,#0x3B40000
+   \   00000174   0600008A           BHI      ??_cbDriveCallback_13
+    154          				heading -= 360.0;
+   \                     ??_cbDriveCallback_14:
+   \   00000178   200096E5           LDR      R0,[R6, #+32]
+   \   0000017C   0410A0E1           MOV      R1,R4
+   \   00000180   ........           BL       __aeabi_fadd
+   \   00000184   0510A0E1           MOV      R1,R5
+   \   00000188   ........           BL       __aeabi_cfrcmple
+   \   0000018C   200086E5           STR      R0,[R6, #+32]
+   \   00000190   F8FFFF9A           BLS      ??_cbDriveCallback_14
+    155          			// check for actual movement in the PAINT routine so we explicitly only move one pixel per paint!
+    156          		}
+    157          		// Convert the heading (0-360) to a pixel offset within the graphic of the strip
+    158          		// Note - allow compass to continue to move towards last known target direction even if stopped
+    159          		workingOffset = (int)((heading / 360.0) * PIXELS_PER_360_DEGREES) + OFFSET_TO_NORTH_IN_STRIP - OFFSET_OF_NORTH_IN_VIEW_WINDOW;
+   \                     ??_cbDriveCallback_13:
+   \   00000194   200096E5           LDR      R0,[R6, #+32]
+   \   00000198   ........           BL       __aeabi_f2d
+   \   0000019C   0020A0E3           MOV      R2,#+0
+   \   000001A0   ........           LDR      R3,??DataTable23_3  ;; 0x40768000
+   \   000001A4   ........           BL       __aeabi_ddiv
+   \   000001A8   0020A0E1           MOV      R2,R0
+   \   000001AC   0130A0E1           MOV      R3,R1
+   \   000001B0   0000A0E3           MOV      R0,#+0
+   \   000001B4   ........           LDR      R1,??DataTable23_4  ;; 0x407fa000
+   \   000001B8   ........           BL       __aeabi_dmul
+   \   000001BC   ........           BL       __aeabi_d2iz
+   \   000001C0   240080E2           ADD      R0,R0,#+36
+   \   000001C4   1C0086E5           STR      R0,[R6, #+28]
+    160          		sprintf(speedStr, "%d", speed);
+   \   000001C8   242096E5           LDR      R2,[R6, #+36]
+   \   000001CC   D41F8FE2           ADR      R1,??_cbDriveCallback_15  ;; 0x25, 0x64, 0x00, 0x00
+   \   000001D0   300086E2           ADD      R0,R6,#+48
+   \   000001D4   ........           BL       sprintf
+    161          
+    162          		// Get Max Speed
+    163          		sprintf(maxSpeedStr, "%d%s", (int)(GetValue(MAX_SPEED).fVal), (sysData.units == STD ? "mph" : "kph"));
+   \   000001D8   640097E5           LDR      R0,[R7, #+100]
+   \   000001DC   1A10A0E3           MOV      R1,#+26
+   \   000001E0   000050E3           CMP      R0,#+0
+   \   000001E4   CF4F8F02           ADREQ    R4,??_cbDriveCallback_15+0x4  ;; "mph"
+   \   000001E8   CF4F8F12           ADRNE    R4,??_cbDriveCallback_15+0x8  ;; "kph"
+   \   000001EC   0D00A0E1           MOV      R0,SP
+   \   000001F0   ........           BL       GetValue
+   \   000001F4   00009DE5           LDR      R0,[SP, #+0]
+   \   000001F8   ........           BL       __aeabi_f2iz
+   \   000001FC   0020A0E1           MOV      R2,R0
+   \   00000200   0430A0E1           MOV      R3,R4
+   \   00000204   ............       ADRL     R1,`?<Constant "%d%s">`
+   \              ....        
+   \   0000020C   800086E2           ADD      R0,R6,#+128
+   \   00000210   ........           BL       sprintf
+    164          
+    165          		GetTimeString(SHORT12, timeStr);
+   \   00000214   941086E2           ADD      R1,R6,#+148
+   \   00000218   0300A0E3           MOV      R0,#+3
+   \   0000021C   ........           BL       GetTimeString
+    166          
+    167          		// Draw max LatG
+    168          		float_1 = GetValue(MAX_Y_G).fVal;
+   \   00000220   0410A0E3           MOV      R1,#+4
+   \   00000224   0D00A0E1           MOV      R0,SP
+   \   00000228   ........           BL       GetValue
+   \   0000022C   00009DE5           LDR      R0,[SP, #+0]
+    169          		float_2 = 0.0 - GetValue(MIN_Y_G).fVal;
+   \   00000230   0710A0E3           MOV      R1,#+7
+   \   00000234   280086E5           STR      R0,[R6, #+40]
+   \   00000238   0D00A0E1           MOV      R0,SP
+   \   0000023C   ........           BL       GetValue
+   \   00000240   00009DE5           LDR      R0,[SP, #+0]
+   \   00000244   800420E2           EOR      R0,R0,#0x80000000
+   \   00000248   ........           BL       __aeabi_f2d
+   \   0000024C   ........           BL       __aeabi_d2f
+   \   00000250   0010A0E1           MOV      R1,R0
+    170          		if (float_2 > float_1)
+   \   00000254   280096E5           LDR      R0,[R6, #+40]
+   \   00000258   ........           BL       __aeabi_cfcmple
+    171          			float_1 = float_2;
+   \   0000025C   28108635           STRCC    R1,[R6, #+40]
+    172          		sprintf(yGStr, "%0.02fg", float_1);
+   \   00000260   ............       ADRL     R4,`?<Constant "%0.02fg">`
+   \              ....        
+   \   00000268   280096E5           LDR      R0,[R6, #+40]
+   \   0000026C   ........           BL       __aeabi_f2d
+   \   00000270   0020A0E1           MOV      R2,R0
+   \   00000274   0130A0E1           MOV      R3,R1
+   \   00000278   0410A0E1           MOV      R1,R4
+   \   0000027C   500086E2           ADD      R0,R6,#+80
+   \   00000280   ........           BL       sprintf
+    173          
+    174          		sprintf(maxXGStr, "%0.02fg", GetValue(MAX_X_G).fVal);
+   \   00000284   0310A0E3           MOV      R1,#+3
+   \   00000288   0D00A0E1           MOV      R0,SP
+   \   0000028C   ........           BL       GetValue
+   \   00000290   00009DE5           LDR      R0,[SP, #+0]
+   \   00000294   ........           BL       __aeabi_f2d
+   \   00000298   0020A0E1           MOV      R2,R0
+   \   0000029C   0130A0E1           MOV      R3,R1
+   \   000002A0   0410A0E1           MOV      R1,R4
+   \   000002A4   680086E2           ADD      R0,R6,#+104
+   \   000002A8   ........           BL       sprintf
+    175          		sprintf(minXGStr, "%0.02fg", 0.0 - GetValue(MIN_X_G).fVal);
+   \   000002AC   0610A0E3           MOV      R1,#+6
+   \   000002B0   0D00A0E1           MOV      R0,SP
+   \   000002B4   ........           BL       GetValue
+   \   000002B8   00009DE5           LDR      R0,[SP, #+0]
+   \   000002BC   800420E2           EOR      R0,R0,#0x80000000
+   \   000002C0   ........           BL       __aeabi_f2d
+   \   000002C4   0020A0E1           MOV      R2,R0
+   \   000002C8   0130A0E1           MOV      R3,R1
+   \   000002CC   0410A0E1           MOV      R1,R4
+   \   000002D0   740086E2           ADD      R0,R6,#+116
+   \   000002D4   ........           BL       sprintf
+    176          
+    177          		// Native units is meters.
+    178          		// convert to miles or km
+    179          		if (STD == sysData.units)		// miles
+   \   000002D8   644097E5           LDR      R4,[R7, #+100]
+   \   000002DC   CC0097E5           LDR      R0,[R7, #+204]
+   \   000002E0   000054E3           CMP      R4,#+0
+   \   000002E4   0500001A           BNE      ??_cbDriveCallback_16
+    180          			float_1 = sysData.driveTripDistance / METERS_PER_MILE;
+   \   000002E8   ........           BL       __aeabi_f2d
+   \   000002EC   ........           ADR      R2,??DataTable22
+   \   000002F0   0C0092E8           LDM      R2,{R2,R3}
+   \   000002F4   ........           BL       __aeabi_ddiv
+   \   000002F8   ........           BL       __aeabi_d2f
+   \   000002FC   020000EA           B        ??_cbDriveCallback_17
+    181          		else							// km
+    182          			float_1 = sysData.driveTripDistance / METERS_PER_KM;
+   \                     ??_cbDriveCallback_16:
+   \   00000300   4414A0E3           MOV      R1,#+1140850688
+   \   00000304   7A1881E3           ORR      R1,R1,#0x7A0000
+   \   00000308   ........           BL       __aeabi_fdiv
+   \                     ??_cbDriveCallback_17:
+   \   0000030C   280086E5           STR      R0,[R6, #+40]
+    183          		sprintf(tripDistStr, "%0.1f%s", float_1, (sysData.units == STD ? "miles" : "km"));
+   \   00000310   000054E3           CMP      R4,#+0
+   \   00000314   ............       ADRLEQ   R0,`?<Constant "miles">`
+   \              ....        
+   \   0000031C   ........           ADRNE    R0,??DataTable22_1  ;; 0x6B, 0x6D, 0x00, 0x00
+   \   00000320   00008DE5           STR      R0,[SP, #+0]
+   \   00000324   280096E5           LDR      R0,[R6, #+40]
+   \   00000328   ........           BL       __aeabi_f2d
+   \   0000032C   0020A0E1           MOV      R2,R0
+   \   00000330   0130A0E1           MOV      R3,R1
+   \   00000334   ............       ADRL     R1,`?<Constant "%0.1f%s">`
+   \              ....        
+   \   0000033C   B40086E2           ADD      R0,R6,#+180
+   \   00000340   ........           BL       sprintf
+    184          
+    185          		time = sysData.driveTripTime / 1000;
+   \   00000344   C80097E5           LDR      R0,[R7, #+200]
+   \   00000348   ........           LDR      R2,??DataTable23_6  ;; 0x83126e98
+   \   0000034C   902281E0           UMULL    R2,R1,R0,R2
+   \   00000350   A104A0E1           LSR      R0,R1,#+9
+    186          		if (time < 3600)
+   \   00000354   ........           LDR      R1,??DataTable23_7  ;; 0x88888889
+   \   00000358   9021C1E0           SMULL    R2,R1,R0,R1
+   \   0000035C   001081E0           ADD      R1,R1,R0
+   \   00000360   C122B0E1           ASRS     R2,R1,#+5
+   \   00000364   01208242           ADDMI    R2,R2,#+1
+   \   00000368   3C10A0E3           MOV      R1,#+60
+   \   0000036C   910203E0           MUL      R3,R1,R2
+   \   00000370   E10E50E3           CMP      R0,#+3600
+   \   00000374   033040E0           SUB      R3,R0,R3
+   \   00000378   040000AA           BGE      ??_cbDriveCallback_18
+    187          			sprintf(elapsedStr, "%02d:%02d", time / 60, time % 60);
+   \   0000037C   ............       ADRL     R1,`?<Constant "%02d:%02d">`
+   \              ....        
+   \   00000384   D40086E2           ADD      R0,R6,#+212
+   \   00000388   ........           BL       sprintf
+   \   0000038C   C50000EA           B        ??_cbDriveCallback_8
+    188          		else
+    189          			sprintf(elapsedStr, "%02d:%02d:%02d", time/3600, (time/60)%60, time % 60);
+   \                     ??_cbDriveCallback_18:
+   \   00000390   00308DE5           STR      R3,[SP, #+0]
+   \   00000394   ........           LDR      R3,??DataTable23_7  ;; 0x88888889
+   \   00000398   92C3C3E0           SMULL    R12,R3,R2,R3
+   \   0000039C   023083E0           ADD      R3,R3,R2
+   \   000003A0   C332B0E1           ASRS     R3,R3,#+5
+   \   000003A4   01308342           ADDMI    R3,R3,#+1
+   \   000003A8   910303E0           MUL      R3,R1,R3
+   \   000003AC   ........           LDR      R1,??DataTable23_8  ;; 0x91a2b3c5
+   \   000003B0   033042E0           SUB      R3,R2,R3
+   \   000003B4   9021C1E0           SMULL    R2,R1,R0,R1
+   \   000003B8   001081E0           ADD      R1,R1,R0
+   \   000003BC   C125B0E1           ASRS     R2,R1,#+11
+   \   000003C0   01208242           ADDMI    R2,R2,#+1
+   \   000003C4   ............       ADRL     R1,`?<Constant "%02d:%02d:%02d">`
+   \              ....        
+   \   000003CC   D40086E2           ADD      R0,R6,#+212
+   \   000003D0   ........           BL       sprintf
+   \   000003D4   B30000EA           B        ??_cbDriveCallback_8
+   \                     ??_cbDriveCallback_12:
+   \   000003D8   9A9999999999       DC32     0x9999999A,0x40209999
+   \              2040        
+    190          
+    191          		break;
+    192          
+    193          
+    194          	case WM_PAINT:
+    195          		if (CS_IsVisible(DRIVE_MODE_SCREEN) || firsttimethrough)
+   \                     ??_cbDriveCallback_2:
+   \   000003E0   0500A0E3           MOV      R0,#+5
+   \   000003E4   ........           BL       CS_IsVisible
+   \   000003E8   000050E3           CMP      R0,#+0
+   \   000003EC   0300001A           BNE      ??_cbDriveCallback_19
+   \   000003F0   ........           LDR      R0,??DataTable23_2
+   \   000003F4   2C00D0E5           LDRB     R0,[R0, #+44]
+   \   000003F8   000050E3           CMP      R0,#+0
+   \   000003FC   A900000A           BEQ      ??_cbDriveCallback_8
+    196          		{
+    197          			if (lockupSemaphore)			// If main has not run since our last paint - exit!
+   \                     ??_cbDriveCallback_19:
+   \   00000400   ........           LDR      R0,??DataTable23_9
+   \   00000404   0010D0E5           LDRB     R1,[R0, #+0]
+   \   00000408   000051E3           CMP      R1,#+0
+   \   0000040C   A500001A           BNE      ??_cbDriveCallback_8
+    198          				break;
+    199          			else lockupSemaphore++;
+   \   00000410   0110A0E3           MOV      R1,#+1
+    200          			
+    201          			if (firsttimethrough)
+   \   00000414   ........           LDR      R6,??DataTable23_2
+   \   00000418   0010C0E5           STRB     R1,[R0, #+0]
+   \   0000041C   2C00D6E5           LDRB     R0,[R6, #+44]
+   \   00000420   000050E3           CMP      R0,#+0
+   \   00000424   0200000A           BEQ      ??_cbDriveCallback_20
+    202          			{
+    203          				GUI_Clear();			// Clear screen to remove artifacts from previous screen in area at bottom of screen NOT part of memory device area
+   \   00000428   ........           BL       GUI_Clear
+    204          				firsttimethrough = FALSE;
+   \   0000042C   0000A0E3           MOV      R0,#+0
+   \   00000430   2C00C6E5           STRB     R0,[R6, #+44]
+    205          			}
+    206          
+    207          			// Draw compass strip under background image
+    208          			GUI_MEMDEV_Select(memDriveScreen);
+   \                     ??_cbDriveCallback_20:
+   \   00000434   100096E5           LDR      R0,[R6, #+16]
+   \   00000438   ........           BL       GUI_MEMDEV_Select
+    209          
+    210          			// Draw strip at specified offset
+    211          			// check for actual movement in the PAINT routine so we explicitly only move one pixel per paint!
+    212          			// Move one or two pixels in the required direction
+    213          			if (workingOffset > previousOffset)
+   \   0000043C   1C1096E5           LDR      R1,[R6, #+28]
+   \   00000440   182096E5           LDR      R2,[R6, #+24]
+   \   00000444   140096E5           LDR      R0,[R6, #+20]
+   \   00000448   010052E1           CMP      R2,R1
+   \   0000044C   050000AA           BGE      ??_cbDriveCallback_21
+    214          			{
+    215          				offset++;
+    216          				previousOffset++;
+    217          				if (workingOffset > previousOffset)
+   \   00000450   012082E2           ADD      R2,R2,#+1
+   \   00000454   010080E2           ADD      R0,R0,#+1
+   \   00000458   010052E1           CMP      R2,R1
+   \   0000045C   070000AA           BGE      ??_cbDriveCallback_22
+    218          					offset++;
+   \   00000460   010080E2           ADD      R0,R0,#+1
+   \   00000464   050000EA           B        ??_cbDriveCallback_22
+    219          			}
+    220          			else if (workingOffset < previousOffset)
+   \                     ??_cbDriveCallback_21:
+   \   00000468   020051E1           CMP      R1,R2
+   \   0000046C   030000AA           BGE      ??_cbDriveCallback_22
+    221          			{
+    222          				offset--;
+    223          				previousOffset--;
+    224          				if (workingOffset < previousOffset)
+   \   00000470   012042E2           SUB      R2,R2,#+1
+   \   00000474   010040E2           SUB      R0,R0,#+1
+   \   00000478   020051E1           CMP      R1,R2
+    225          					offset--;
+   \   0000047C   010040B2           SUBLT    R0,R0,#+1
+   \                     ??_cbDriveCallback_22:
+   \   00000480   140086E5           STR      R0,[R6, #+20]
+    226          			}
+    227          
+    228          			previousOffset = offset;
+   \   00000484   180086E5           STR      R0,[R6, #+24]
+    229          
+    230          			GUI_DrawBitmap(&bmCompassList, COMPASS_WINDOW_LEFT - offset, COMPASS_WINDOW_TOP);
+   \   00000488   AB1060E2           RSB      R1,R0,#+171
+   \   0000048C   0820A0E3           MOV      R2,#+8
+   \   00000490   ........           LDR      R0,??DataTable23_10
+   \   00000494   ........           BL       GUI_DrawBitmap
+    231          
+    232          			/* Paint the background window */
+    233          			GUI_DrawBitmap(&bmDriveModeBackgroundNewCompass, 0, 0);
+   \   00000498   0020A0E3           MOV      R2,#+0
+   \   0000049C   0010A0E3           MOV      R1,#+0
+   \   000004A0   ........           LDR      R0,??DataTable23_11
+   \   000004A4   ........           BL       GUI_DrawBitmap
+    234          
+    235          			GUI_SetTextMode(GUI_TM_TRANS);
+   \   000004A8   0200A0E3           MOV      R0,#+2
+   \   000004AC   ........           BL       GUI_SetTextMode
+    236          			GUI_SetColor(GUI_WHITE);
+   \   000004B0   FF44E0E3           MVN      R4,#-16777216
+   \   000004B4   0400A0E1           MOV      R0,R4
+   \   000004B8   ........           BL       GUI_SetColor
+    237          			GUI_SetFont(&GUI_FontD32);
+   \   000004BC   ........           LDR      R0,??DataTable23_12
+   \   000004C0   ........           BL       GUI_SetFont
+    238          
+    239          			// Draw speed
+    240          			GUI_DispStringInRect(speedStr, (GUI_RECT *)&SpeedRect, GUI_TA_HCENTER);
+   \   000004C4   0220A0E3           MOV      R2,#+2
+   \   000004C8   ............       ADRL     R1,SpeedRect
+   \              ....        
+   \   000004D0   300086E2           ADD      R0,R6,#+48
+   \   000004D4   ........           BL       GUI_DispStringInRect
+    241          
+    242          			// Draw time of day if we have satellite lock
+    243          			if (HaveSatelliteReception())
+   \   000004D8   ........           LDR      R5,??DataTable23_13
+   \   000004DC   ........           BL       HaveSatelliteReception
+   \   000004E0   000050E3           CMP      R0,#+0
+   \   000004E4   1100000A           BEQ      ??_cbDriveCallback_23
+    244          			{
+    245          				GUI_DispStringInRect(timeStr, (GUI_RECT *)&TimeRect, GUI_TA_RIGHT);
+   \   000004E8   0120A0E3           MOV      R2,#+1
+   \   000004EC   ............       ADRL     R1,TimeRect
+   \              ....        
+   \   000004F4   940086E2           ADD      R0,R6,#+148
+   \   000004F8   ........           BL       GUI_DispStringInRect
+    246          				GUI_SetFont(&GUI_Font24B_ASCII);
+   \   000004FC   0500A0E1           MOV      R0,R5
+   \   00000500   ........           BL       GUI_SetFont
+    247          				GUI_DispStringAt(timeStr+strlen(timeStr)-2, 440, 22);
+   \   00000504   940086E2           ADD      R0,R6,#+148
+   \   00000508   ........           BL       strlen
+   \   0000050C   060080E0           ADD      R0,R0,R6
+   \   00000510   1620A0E3           MOV      R2,#+22
+   \   00000514   6E1FA0E3           MOV      R1,#+440
+   \   00000518   920080E2           ADD      R0,R0,#+146
+   \   0000051C   ........           BL       GUI_DispStringAt
+   \   00000520   040000EA           B        ??_cbDriveCallback_24
+   \                     ??_cbDriveCallback_15:
+   \   00000524   25640000           DC8      0x25, 0x64, 0x00, 0x00
+   \   00000528   6D706800           DC8      "mph"
+   \   0000052C   6B706800           DC8      "kph"
+    248          			}
+    249          			else GUI_SetFont(&GUI_Font24B_ASCII);
+   \                     ??_cbDriveCallback_23:
+   \   00000530   0500A0E1           MOV      R0,R5
+   \   00000534   ........           BL       GUI_SetFont
+    250          			
+    251          			// Draw speed units
+    252          			GUI_SetColor(GUI_GRAY);
+   \                     ??_cbDriveCallback_24:
+   \   00000538   ........           LDR      R0,??DataTable23_14  ;; 0x808080
+   \   0000053C   ........           BL       GUI_SetColor
+    253          			GUI_DispStringAt((sysData.units == STD ? "MPH" : "KPH"), 20, 43);
+   \   00000540   ........           LDR      R0,??DataTable23_5
+   \   00000544   2B20A0E3           MOV      R2,#+43
+   \   00000548   640090E5           LDR      R0,[R0, #+100]
+   \   0000054C   1410A0E3           MOV      R1,#+20
+   \   00000550   000050E3           CMP      R0,#+0
+   \   00000554   ........           ADREQ    R0,??DataTable23  ;; "MPH"
+   \   00000558   ........           ADRNE    R0,??DataTable23_1  ;; "KPH"
+   \   0000055C   ........           BL       GUI_DispStringAt
+    254          
+    255          			// Draw max speed
+    256          			GUI_SetColor(GUI_WHITE);
+   \   00000560   0400A0E1           MOV      R0,R4
+   \   00000564   ........           BL       GUI_SetColor
+    257          			GUI_SetFont(&GUI_Font32B_ASCII);
+   \   00000568   ........           LDR      R0,??DataTable23_15
+   \   0000056C   ........           BL       GUI_SetFont
+    258          			GUI_DispStringInRect(maxSpeedStr, (GUI_RECT *)&MaxSpeedRect, GUI_TA_LEFT);
+   \   00000570   0020A0E3           MOV      R2,#+0
+   \   00000574   ............       ADRL     R1,MaxSpeedRect
+   \              ....        
+   \   0000057C   800086E2           ADD      R0,R6,#+128
+   \   00000580   ........           BL       GUI_DispStringInRect
+    259          
+    260          			// Draw max LatG
+    261          			GUI_DispStringInRect(yGStr, (GUI_RECT *)&LatGRect, GUI_TA_LEFT);
+   \   00000584   0020A0E3           MOV      R2,#+0
+   \   00000588   ............       ADRL     R1,LatGRect
+   \              ....        
+   \   00000590   500086E2           ADD      R0,R6,#+80
+   \   00000594   ........           BL       GUI_DispStringInRect
+    262          
+    263          			// Draw max Brake Gs
+    264          			GUI_DispStringInRect(maxXGStr, (GUI_RECT *)&MaxBrakeRect, GUI_TA_LEFT);
+   \   00000598   ............       ADRL     R4,MaxBrakeRect
+   \              ....        
+   \   000005A0   0020A0E3           MOV      R2,#+0
+   \   000005A4   0410A0E1           MOV      R1,R4
+   \   000005A8   680086E2           ADD      R0,R6,#+104
+   \   000005AC   ........           BL       GUI_DispStringInRect
+    265          
+    266          			GUI_DispStringInRect(xGStr, (GUI_RECT *)&MaxBrakeRect, GUI_TA_LEFT);
+   \   000005B0   0020A0E3           MOV      R2,#+0
+   \   000005B4   0410A0E1           MOV      R1,R4
+   \   000005B8   5C0086E2           ADD      R0,R6,#+92
+   \   000005BC   ........           BL       GUI_DispStringInRect
+    267          
+    268          			// Draw max Launch Gs
+    269          			GUI_DispStringInRect(minXGStr, (GUI_RECT *)&MaxLaunchRect, GUI_TA_LEFT);
+   \   000005C0   0020A0E3           MOV      R2,#+0
+   \   000005C4   ........           ADR      R1,MaxLaunchRect
+   \   000005C8   740086E2           ADD      R0,R6,#+116
+   \   000005CC   ........           BL       GUI_DispStringInRect
+    270          
+    271          			// Draw trip distance
+    272          			GUI_DispStringInRect(tripDistStr, (GUI_RECT *)&TripDistanceRect, GUI_TA_LEFT);
+   \   000005D0   0020A0E3           MOV      R2,#+0
+   \   000005D4   ........           ADR      R1,TripDistanceRect
+   \   000005D8   B40086E2           ADD      R0,R6,#+180
+   \   000005DC   ........           BL       GUI_DispStringInRect
+    273          
+    274          			// Draw elapsed time
+    275          			GUI_DispStringInRect(elapsedStr, (GUI_RECT *)&ElapsedTimeRect, GUI_TA_LEFT);
+   \   000005E0   0020A0E3           MOV      R2,#+0
+   \   000005E4   ........           ADR      R1,ElapsedTimeRect
+   \   000005E8   D40086E2           ADD      R0,R6,#+212
+   \   000005EC   ........           BL       GUI_DispStringInRect
+    276          
+    277          			if (SlideOutVisible())
+   \   000005F0   ........           BL       SlideOutVisible
+   \   000005F4   000050E3           CMP      R0,#+0
+   \   000005F8   0000000A           BEQ      ??_cbDriveCallback_25
+    278          				DrawSignalStrength();
+   \   000005FC   ........           BL       DrawSignalStrength
+    279          
+    280          #ifdef	INCLUDE_RACE_HELP
+    281          			// If the help screen is still being displayed then show the appropriate help screen
+    282          			if (raceTimerActive)
+    283          			{
+    284          				CheckRaceHelpScreen(DRIVE_MODE_SCREEN);
+    285          			}
+    286          #endif
+    287          
+    288          			CheckWarningPopups();
+   \                     ??_cbDriveCallback_25:
+   \   00000600   ........           BL       CheckWarningPopups
+    289          
+    290          			GUI_MEMDEV_CopyToLCD(memDriveScreen);
+   \   00000604   100096E5           LDR      R0,[R6, #+16]
+   \   00000608   ........           BL       GUI_MEMDEV_CopyToLCD
+    291          			GUI_SelectLCD();
+   \   0000060C   ........           BL       GUI_SelectLCD
+    292          
+    293          			// Draw navigation arrow - NOT within the memory device of this screen so draw seperately
+    294          			GUI_DrawBitmap(&bmthreewayarrow, 0, 229);
+   \   00000610   E520A0E3           MOV      R2,#+229
+   \   00000614   0010A0E3           MOV      R1,#+0
+   \   00000618   ........           LDR      R0,??DataTable23_16
+   \   0000061C   ........           BL       GUI_DrawBitmap
+   \   00000620   200000EA           B        ??_cbDriveCallback_8
+    295          		}
+    296          		break;
+    297          
+    298          	case WM_NOTIFY_PARENT:
+    299                Id    = WM_GetId(pMsg->hWinSrc);      // Id of widget
+   \                     ??_cbDriveCallback_3:
+   \   00000624   080094E5           LDR      R0,[R4, #+8]
+   \   00000628   ........           BL       WM_GetId
+   \   0000062C   0050A0E1           MOV      R5,R0
+    300                NCode = pMsg->Data.v;                 // Notification code
+    301          	   if (NCode == WM_NOTIFICATION_RELEASED)
+   \   00000630   0C0094E5           LDR      R0,[R4, #+12]
+   \   00000634   020050E3           CMP      R0,#+2
+   \   00000638   1A00001A           BNE      ??_cbDriveCallback_8
+    302          		{
+    303          			if (!SlideOutDeployed())
+   \   0000063C   ........           BL       SlideOutDeployed
+   \   00000640   000050E3           CMP      R0,#+0
+   \   00000644   1700001A           BNE      ??_cbDriveCallback_8
+    304          			{
+    305          				if (Id == RESET_TRIP_BTN)
+   \   00000648   0100A0E3           MOV      R0,#+1
+   \   0000064C   800E80E3           ORR      R0,R0,#0x800
+   \   00000650   000055E1           CMP      R5,R0
+   \   00000654   0400001A           BNE      ??_cbDriveCallback_26
+    306          				{
+    307          					ResetTrip();
+   \   00000658   ........           BL       ResetTrip
+    308          					WM_InvalidateWindow(hDriveScreen);
+   \                     ??_cbDriveCallback_27:
+   \   0000065C   ........           LDR      R0,??DataTable23_2
+   \   00000660   0C0090E5           LDR      R0,[R0, #+12]
+   \   00000664   ........           BL       WM_InvalidateWindow
+   \   00000668   0E0000EA           B        ??_cbDriveCallback_8
+    309          				}
+    310          				else if (Id == RESET_MAX_BTN)
+   \                     ??_cbDriveCallback_26:
+   \   0000066C   010080E2           ADD      R0,R0,#+1
+   \   00000670   000055E1           CMP      R5,R0
+   \   00000674   0B00001A           BNE      ??_cbDriveCallback_8
+    311          				{
+    312          					ResetMax();
+   \   00000678   ........           BL       ResetMax
+    313          					WM_InvalidateWindow(hDriveScreen);
+   \   0000067C   F6FFFFEA           B        ??_cbDriveCallback_27
+    314          				}
+    315          			}
+    316          		}
+    317          		break;
+    318          
+    319          	case WM_DELETE:
+    320          		if (memDriveScreen)
+   \                     ??_cbDriveCallback_1:
+   \   00000680   ........           LDR      R6,??DataTable23_2
+   \   00000684   100096E5           LDR      R0,[R6, #+16]
+   \   00000688   000050E3           CMP      R0,#+0
+   \   0000068C   0500000A           BEQ      ??_cbDriveCallback_8
+    321          		{
+    322          			GUI_MEMDEV_Delete(memDriveScreen);
+   \   00000690   ........           BL       GUI_MEMDEV_Delete
+    323          			memDriveScreen = 0;
+   \   00000694   0000A0E3           MOV      R0,#+0
+   \   00000698   100086E5           STR      R0,[R6, #+16]
+   \   0000069C   010000EA           B        ??_cbDriveCallback_8
+    324          		}
+    325          		break;
+    326          
+    327          	default:
+    328          		  WM_DefaultProc(pMsg);
+   \                     ??_cbDriveCallback_5:
+   \   000006A0   0400A0E1           MOV      R0,R4
+   \   000006A4   ........           BL       WM_DefaultProc
+    329          	};
+    330          }
+   \                     ??_cbDriveCallback_8:
+   \   000006A8   08D08DE2           ADD      SP,SP,#+8        ;; stack cleaning
+   \   000006AC   F081BDE8           POP      {R4-R8,PC}       ;; return
+    331          
+    332          
+    333          /*********************************************************************
+    334          *
+    335          *       Drive Screen
+    336          */
+
+   \                                 In section .text, align 4, keep-with-next
+    337          WM_HWIN Display_DriveScreen(WM_HWIN hParent)
+    338          {
+   \                     Display_DriveScreen:
+   \   00000000   F0432DE9           PUSH     {R4-R9,LR}
+   \   00000004   0050A0E1           MOV      R5,R0
+    339          	firsttimethrough = true;
+   \   00000008   ........           LDR      R4,??DataTable23_2
+   \   0000000C   0100A0E3           MOV      R0,#+1
+   \   00000010   2C00C4E5           STRB     R0,[R4, #+44]
+   \   00000014   14D04DE2           SUB      SP,SP,#+20
+    340          
+    341          	// create a memory area to reduce flicker on paint.
+    342          	memDriveScreen = GUI_MEMDEV_Create(0, 0, XSIZE_PHYS, 232);
+   \   00000018   E830A0E3           MOV      R3,#+232
+   \   0000001C   782FA0E3           MOV      R2,#+480
+   \   00000020   0010A0E3           MOV      R1,#+0
+   \   00000024   0000A0E3           MOV      R0,#+0
+   \   00000028   ........           BL       GUI_MEMDEV_Create
+   \   0000002C   100084E5           STR      R0,[R4, #+16]
+    343          
+    344          	if ((hDriveScreen = WM_CreateWindowAsChild(0, 0, XSIZE_PHYS, YSIZE_PHYS, hParent, WM_CF_SHOW, _cbDriveCallback, 0)) <= 0)
+   \   00000030   0000A0E3           MOV      R0,#+0
+   \   00000034   0C008DE5           STR      R0,[SP, #+12]
+   \   00000038   ........           LDR      R0,??DataTable23_17
+   \   0000003C   00508DE5           STR      R5,[SP, #+0]
+   \   00000040   08008DE5           STR      R0,[SP, #+8]
+   \   00000044   0200A0E3           MOV      R0,#+2
+   \   00000048   04008DE5           STR      R0,[SP, #+4]
+   \   0000004C   443FA0E3           MOV      R3,#+272
+   \   00000050   782FA0E3           MOV      R2,#+480
+   \   00000054   0010A0E3           MOV      R1,#+0
+   \   00000058   0000A0E3           MOV      R0,#+0
+   \   0000005C   ........           BL       WM_CreateWindowAsChild
+   \   00000060   0C0084E5           STR      R0,[R4, #+12]
+   \   00000064   010050E3           CMP      R0,#+1
+   \   00000068   000000AA           BGE      ??Display_DriveScreen_0
+    345          		SystemError();
+   \   0000006C   ........           BL       SystemError
+    346          
+    347          	// Create Reset buttons
+    348          	hResetTrip = BUTTON_CreateEx(150, 230, 160, 40, hDriveScreen, WM_CF_SHOW | WM_CF_STATIC, 0, RESET_TRIP_BTN);
+   \                     ??Display_DriveScreen_0:
+   \   00000070   0100A0E3           MOV      R0,#+1
+   \   00000074   800E80E3           ORR      R0,R0,#0x800
+   \   00000078   0C008DE5           STR      R0,[SP, #+12]
+   \   0000007C   0000A0E3           MOV      R0,#+0
+   \   00000080   08008DE5           STR      R0,[SP, #+8]
+   \   00000084   0C0094E5           LDR      R0,[R4, #+12]
+   \   00000088   0250A0E3           MOV      R5,#+2
+   \   0000008C   405B85E3           ORR      R5,R5,#0x10000
+   \   00000090   00008DE5           STR      R0,[SP, #+0]
+   \   00000094   04508DE5           STR      R5,[SP, #+4]
+   \   00000098   2830A0E3           MOV      R3,#+40
+   \   0000009C   A020A0E3           MOV      R2,#+160
+   \   000000A0   E610A0E3           MOV      R1,#+230
+   \   000000A4   9600A0E3           MOV      R0,#+150
+   \   000000A8   ........           BL       BUTTON_CreateEx
+    349          	BUTTON_SetBitmap(hResetTrip, BUTTON_BI_UNPRESSED, &bmDriveButton);
+   \   000000AC   ........           LDR      R6,??DataTable23_18
+   \   000000B0   000084E5           STR      R0,[R4, #+0]
+   \   000000B4   0620A0E1           MOV      R2,R6
+   \   000000B8   0010A0E3           MOV      R1,#+0
+   \   000000BC   ........           BL       BUTTON_SetBitmap
+    350          	BUTTON_SetFont(hResetTrip, &GUI_Font24B_ASCII);
+   \   000000C0   ........           LDR      R7,??DataTable23_13
+   \   000000C4   000094E5           LDR      R0,[R4, #+0]
+   \   000000C8   0710A0E1           MOV      R1,R7
+   \   000000CC   ........           BL       BUTTON_SetFont
+    351          	BUTTON_SetTextColor(hResetTrip, BUTTON_BI_UNPRESSED, GUI_WHITE);
+   \   000000D0   FF84E0E3           MVN      R8,#-16777216
+   \   000000D4   0820A0E1           MOV      R2,R8
+   \   000000D8   0010A0E3           MOV      R1,#+0
+   \   000000DC   000094E5           LDR      R0,[R4, #+0]
+   \   000000E0   ........           BL       BUTTON_SetTextColor
+    352          	BUTTON_SetTextColor(hResetTrip, BUTTON_BI_PRESSED, GUI_GRAY);
+   \   000000E4   ........           LDR      R9,??DataTable23_14  ;; 0x808080
+   \   000000E8   0110A0E3           MOV      R1,#+1
+   \   000000EC   0920A0E1           MOV      R2,R9
+   \   000000F0   000094E5           LDR      R0,[R4, #+0]
+   \   000000F4   ........           BL       BUTTON_SetTextColor
+    353          	BUTTON_SetTextColor(hResetTrip, BUTTON_BI_DISABLED, GUI_WHITE);
+   \   000000F8   0820A0E1           MOV      R2,R8
+   \   000000FC   0210A0E3           MOV      R1,#+2
+   \   00000100   000094E5           LDR      R0,[R4, #+0]
+   \   00000104   ........           BL       BUTTON_SetTextColor
+    354          	BUTTON_SetText(hResetTrip, "Reset Trip");
+   \   00000108   ........           ADR      R1,`?<Constant "Reset Trip">`
+   \   0000010C   000094E5           LDR      R0,[R4, #+0]
+   \   00000110   ........           BL       BUTTON_SetText
+    355          
+    356          	hResetMax = BUTTON_CreateEx(313, 230, 160, 40, hDriveScreen, WM_CF_SHOW | WM_CF_STATIC, 0, RESET_MAX_BTN);
+   \   00000114   F80C45E2           SUB      R0,R5,#+63488
+   \   00000118   0C008DE5           STR      R0,[SP, #+12]
+   \   0000011C   0000A0E3           MOV      R0,#+0
+   \   00000120   08008DE5           STR      R0,[SP, #+8]
+   \   00000124   0C0094E5           LDR      R0,[R4, #+12]
+   \   00000128   E610A0E3           MOV      R1,#+230
+   \   0000012C   00008DE5           STR      R0,[SP, #+0]
+   \   00000130   04508DE5           STR      R5,[SP, #+4]
+   \   00000134   2830A0E3           MOV      R3,#+40
+   \   00000138   A020A0E3           MOV      R2,#+160
+   \   0000013C   530081E2           ADD      R0,R1,#+83
+   \   00000140   ........           BL       BUTTON_CreateEx
+   \   00000144   040084E5           STR      R0,[R4, #+4]
+    357          	BUTTON_SetBitmap(hResetMax, BUTTON_BI_UNPRESSED, &bmDriveButton);
+   \   00000148   0620A0E1           MOV      R2,R6
+   \   0000014C   0010A0E3           MOV      R1,#+0
+   \   00000150   ........           BL       BUTTON_SetBitmap
+    358          	BUTTON_SetFont(hResetMax, &GUI_Font24B_ASCII);
+   \   00000154   0710A0E1           MOV      R1,R7
+   \   00000158   040094E5           LDR      R0,[R4, #+4]
+   \   0000015C   ........           BL       BUTTON_SetFont
+    359          	BUTTON_SetTextColor(hResetMax, BUTTON_BI_UNPRESSED, GUI_WHITE);
+   \   00000160   0820A0E1           MOV      R2,R8
+   \   00000164   0010A0E3           MOV      R1,#+0
+   \   00000168   040094E5           LDR      R0,[R4, #+4]
+   \   0000016C   ........           BL       BUTTON_SetTextColor
+    360          	BUTTON_SetTextColor(hResetMax, BUTTON_BI_PRESSED, GUI_GRAY);
+   \   00000170   0920A0E1           MOV      R2,R9
+   \   00000174   0110A0E3           MOV      R1,#+1
+   \   00000178   040094E5           LDR      R0,[R4, #+4]
+   \   0000017C   ........           BL       BUTTON_SetTextColor
+    361          	BUTTON_SetTextColor(hResetMax, BUTTON_BI_DISABLED, GUI_WHITE);
+   \   00000180   0820A0E1           MOV      R2,R8
+   \   00000184   0210A0E3           MOV      R1,#+2
+   \   00000188   040094E5           LDR      R0,[R4, #+4]
+   \   0000018C   ........           BL       BUTTON_SetTextColor
+    362          	BUTTON_SetText(hResetMax, "Reset Max");
+   \   00000190   ........           ADR      R1,`?<Constant "Reset Max">`
+   \   00000194   040094E5           LDR      R0,[R4, #+4]
+   \   00000198   ........           BL       BUTTON_SetText
+    363          
+    364          	WM_InvalidateWindow(hDriveScreen);
+   \   0000019C   0C0094E5           LDR      R0,[R4, #+12]
+   \   000001A0   ........           BL       WM_InvalidateWindow
+    365          
+    366          	hScreenTimer = WM_CreateTimer(hDriveScreen, 0, GAUGE_SCREEN_REFRESH_TIME, 0);
+   \   000001A4   0030A0E3           MOV      R3,#+0
+   \   000001A8   1920A0E3           MOV      R2,#+25
+   \   000001AC   0010A0E3           MOV      R1,#+0
+   \   000001B0   0C0094E5           LDR      R0,[R4, #+12]
+   \   000001B4   ........           BL       WM_CreateTimer
+   \   000001B8   080084E5           STR      R0,[R4, #+8]
+    367          
+    368          	return hDriveScreen;
+   \   000001BC   0C0094E5           LDR      R0,[R4, #+12]
+   \   000001C0   14D08DE2           ADD      SP,SP,#+20
+   \   000001C4   F083BDE8           POP      {R4-R9,PC}       ;; return
+    369          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable22:
+   \   00000000   4C3789416025       DC32     0x4189374C,0x40992560
+   \              9940        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable22_1:
+   \   00000000   6B6D0000           DC8      0x6B, 0x6D, 0x00, 0x00
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23:
+   \   00000000   4D504800           DC8      "MPH"
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_1:
+   \   00000000   4B504800           DC8      "KPH"
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_2:
+   \   00000000   ........           DC32     hResetTrip
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_3:
+   \   00000000   00807640           DC32     0x40768000
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_4:
+   \   00000000   00A07F40           DC32     0x407fa000
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_5:
+   \   00000000   ........           DC32     sysData
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_6:
+   \   00000000   986E1283           DC32     0x83126e98
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_7:
+   \   00000000   89888888           DC32     0x88888889
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_8:
+   \   00000000   C5B3A291           DC32     0x91a2b3c5
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_9:
+   \   00000000   ........           DC32     lockupSemaphore
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_10:
+   \   00000000   ........           DC32     bmCompassList
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_11:
+   \   00000000   ........           DC32     bmDriveModeBackgroundNewCompass
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_12:
+   \   00000000   ........           DC32     GUI_FontD32
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_13:
+   \   00000000   ........           DC32     GUI_Font24B_ASCII
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_14:
+   \   00000000   80808000           DC32     0x808080
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_15:
+   \   00000000   ........           DC32     GUI_Font32B_ASCII
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_16:
+   \   00000000   ........           DC32     bmthreewayarrow
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_17:
+   \   00000000   ........           DC32     _cbDriveCallback
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable23_18:
+   \   00000000   ........           DC32     bmDriveButton
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "%d">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   25640000           DC8 37, 100, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "%d%s">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   256425730000       DC8 37, 100, 37, 115, 0, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "%0.02fg">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   25302E303266       DC8 37, 48, 46, 48, 50, 102, 103, 0
+   \              6700        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "%0.1f%s">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   25302E316625       DC8 37, 48, 46, 49, 102, 37, 115, 0
+   \              7300        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "miles">`:
+   \   00000000                      ; Initializer data, 8 bytes
+   \   00000000   6D696C657300       DC8 109, 105, 108, 101, 115, 0, 0, 0
+   \              0000        
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "%02d:%02d">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   253032643A25       DC8 37, 48, 50, 100, 58, 37, 48, 50, 100, 0
+   \              30326400    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "%02d:%02d:%02d">`:
+   \   00000000                      ; Initializer data, 16 bytes
+   \   00000000   253032643A25       DC8 37, 48, 50, 100, 58, 37, 48, 50, 100, 58
+   \              3032643A    
+   \   0000000A   253032640000       DC8 37, 48, 50, 100, 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Reset Trip">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   526573657420       DC8 82, 101, 115, 101, 116, 32, 84, 114, 105, 112
+   \              54726970    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     `?<Constant "Reset Max">`:
+   \   00000000                      ; Initializer data, 12 bytes
+   \   00000000   526573657420       DC8 82, 101, 115, 101, 116, 32, 77, 97, 120, 0
+   \              4D617800    
+   \   0000000A   0000               DC8 0, 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "mph">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   6D706800           DC8 109, 112, 104, 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "kph">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   6B706800           DC8 107, 112, 104, 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "km">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   6B6D0000           DC8 107, 109, 0, 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "MPH">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   4D504800           DC8 77, 80, 72, 0
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant "KPH">`:
+   \   00000000                      ; Initializer data, 4 bytes
+   \   00000000   4B504800           DC8 75, 80, 72, 0
+    370          
+    371          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function            .cstack
+     --------            -------
+     Display_DriveScreen     48
+     _cbDriveCallback        32
+
+
+   Section sizes:
+
+     Function/Label               Bytes
+     --------------               -----
+     SpeedRect                       8
+     TimeRect                        8
+     MaxSpeedRect                    8
+     LatGRect                        8
+     MaxBrakeRect                    8
+     MaxLaunchRect                   8
+     TripDistanceRect                8
+     ElapsedTimeRect                 8
+     hResetTrip                    244
+     hResetMax
+     hScreenTimer
+     hDriveScreen
+     memDriveScreen
+     offset
+     previousOffset
+     workingOffset
+     heading
+     speed
+     float_1
+     firsttimethrough
+     speedStr
+     yGStr
+     xGStr
+     maxXGStr
+     minXGStr
+     maxSpeedStr
+     timeStr
+     tripDistStr
+     elapsedStr
+     time                            4
+     float_2                         4
+     _cbDriveCallback             1712
+     Display_DriveScreen           456
+     ??DataTable22                   8
+     ??DataTable22_1                 4
+     ??DataTable23                   4
+     ??DataTable23_1                 4
+     ??DataTable23_2                 4
+     ??DataTable23_3                 4
+     ??DataTable23_4                 4
+     ??DataTable23_5                 4
+     ??DataTable23_6                 4
+     ??DataTable23_7                 4
+     ??DataTable23_8                 4
+     ??DataTable23_9                 4
+     ??DataTable23_10                4
+     ??DataTable23_11                4
+     ??DataTable23_12                4
+     ??DataTable23_13                4
+     ??DataTable23_14                4
+     ??DataTable23_15                4
+     ??DataTable23_16                4
+     ??DataTable23_17                4
+     ??DataTable23_18                4
+     ?<Constant "%d">                4
+     ?<Constant "%d%s">              8
+     ?<Constant "%0.02fg">           8
+     ?<Constant "%0.1f%s">           8
+     ?<Constant "miles">             8
+     ?<Constant "%02d:%02d">        12
+     ?<Constant "%02d:%02d:%02d">   16
+     ?<Constant "Reset Trip">       12
+     ?<Constant "Reset Max">        12
+     ?<Constant "mph">               4
+     ?<Constant "kph">               4
+     ?<Constant "km">                4
+     ?<Constant "MPH">               4
+     ?<Constant "KPH">               4
+
+ 
+   252 bytes in section .bss
+    24 bytes in section .rodata
+ 2 404 bytes in section .text
+ 
+ 2 404 bytes of CODE  memory
+    24 bytes of CONST memory
+   252 bytes of DATA  memory
+
+Errors: none
+Warnings: none

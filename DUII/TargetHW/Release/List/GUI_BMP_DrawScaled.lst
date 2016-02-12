@@ -1,0 +1,2000 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.10.2.52244/W32 for ARM     19/Nov/2015  13:10:39 #
+# Copyright 1999-2010 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  arm                                                      #
+#    Endian       =  little                                                   #
+#    Source file  =  C:\DUII\TargetHW\GUI\GUI_BMP_DrawScaled.c                #
+#    Command line =  C:\DUII\TargetHW\GUI\GUI_BMP_DrawScaled.c -D DEBUG=1 -D  #
+#                    SDRAM_TARGET=1 -D USB_IS_HIGH_SPEED -D NOPROFILER -D     #
+#                    OS_TRACE=0 -D OS_VIEW_ENABLE=0 -lCN                      #
+#                    C:\DUII\TargetHW\Release\List\ -o                        #
+#                    C:\DUII\TargetHW\Release\Obj\ --endian=little            #
+#                    --cpu=ARM926EJ-S -e --fpu=None --dlib_config             #
+#                    "C:\Program Files (x86)\IAR Systems\Embedded Workbench   #
+#                    6.0\arm\INC\c\DLib_Config_Normal.h" -I                   #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\ -I              #
+#                    C:\DUII\TargetHW\Application\SEGGERDEMO\Src\ -I          #
+#                    C:\DUII\TargetHW\Config\ -I C:\DUII\TargetHW\FS\ -I      #
+#                    C:\DUII\TargetHW\GUI\ -I C:\DUII\TargetHW\Inc\ -I        #
+#                    C:\DUII\TargetHW\OS\ -I C:\DUII\TargetHW\Setup\ -I       #
+#                    \DUII\DUII\ -I \DUII\DUII\Graphics\ --cpu_mode arm -Ohs  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  C:\DUII\TargetHW\Release\List\GUI_BMP_DrawScaled.lst     #
+#    Object file  =  C:\DUII\TargetHW\Release\Obj\GUI_BMP_DrawScaled.o        #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+C:\DUII\TargetHW\GUI\GUI_BMP_DrawScaled.c
+      1          /*********************************************************************
+      2          *                SEGGER Microcontroller GmbH & Co. KG                *
+      3          *        Solutions for real time microcontroller applications        *
+      4          **********************************************************************
+      5          *                                                                    *
+      6          *        (c) 1996 - 2010  SEGGER Microcontroller GmbH & Co. KG       *
+      7          *                                                                    *
+      8          *        Internet: www.segger.com    Support:  support@segger.com    *
+      9          *                                                                    *
+     10          **********************************************************************
+     11          
+     12          ** emWin V5.06 - Graphical user interface for embedded applications **
+     13          emWin is protected by international copyright laws.   Knowledge of the
+     14          source code may not be used to write a similar product.  This file may
+     15          only be used in accordance with a license and should not be re-
+     16          distributed in any way. We appreciate your understanding and fairness.
+     17          ----------------------------------------------------------------------
+     18          File        : GUI_BMP_DrawScaled.c
+     19          Purpose     : Implementation of GUI_BMP... functions
+     20          ---------------------------END-OF-HEADER------------------------------
+     21          */
+     22          
+     23          #include "GUI_BMP_Private.h"
+     24          
+     25          /*********************************************************************
+     26          *
+     27          *       Defines
+     28          *
+     29          **********************************************************************
+     30          */
+     31          #define STATE_READY 0 /* Ready */
+     32          #define STATE_ABS8  1 /* Remaining absolute pixels (8bpp) */
+     33          #define STATE_RLE8  2 /* Remaining compressed pixels (RLE8) */
+     34          #define STATE_ABS4  3 /* Remaining absolute pixels (4bpp) */
+     35          #define STATE_RLE4  4 /* Remaining compressed pixels (RLE4) */
+     36          #define STATE_LBRK  5 /* Line break */
+     37          #define STATE_DELTA 6 /* Move cursor */
+     38          
+     39          /*********************************************************************
+     40          *
+     41          *       Types
+     42          *
+     43          **********************************************************************
+     44          */
+     45          typedef struct {
+     46            int ColorIndex;
+     47            U32 RemPixels;
+     48            int State;
+     49            int xSize;
+     50            int xPos;
+     51            int Compression;
+     52            U8 Cmd;
+     53            U8 Data;
+     54            U8 NumNibble;
+     55            U8 DummyRead;
+     56          } CONTEXT_DECOMP_BMP;
+     57          
+     58          typedef void tDrawLineScaled(const U8 * pData, int x0, int y0, int xSize, int Num, int Denom, unsigned NumLines, int BytesPerPixel, int Bpp);
+     59          
+     60          /*********************************************************************
+     61          *
+     62          *       Static code
+     63          *
+     64          **********************************************************************
+     65          */
+     66          /*********************************************************************
+     67          *
+     68          *       _GetStep
+     69          */
+     70          static int _GetStep(int * pYSize, int * pY, int Num, int Denom) {
+     71            *pYSize = (I32)(*pYSize) * Num / Denom;
+     72            if (*pYSize > 0) {
+     73              *pY = *pYSize - 1;
+     74              return -1;
+     75            } else if (*pYSize < 0) {
+     76              *pYSize = -*pYSize;
+     77              *pY = 0;
+     78              return 1;
+     79            } else {
+     80              return 0;
+     81            }
+     82          }
+     83          
+     84          /*********************************************************************
+     85          *
+     86          *       _GetColor
+     87          */
+
+   \                                 In section .text, align 4, keep-with-next
+     88          static U32 _GetColor(const U8 ** ppData, unsigned *pPixelPos, int SkipCnt, int Bpp) {
+   \                     _GetColor:
+   \   00000000   F0402DE9           PUSH     {R4-R7,LR}
+   \   00000004   0040A0E1           MOV      R4,R0
+   \   00000008   04D04DE2           SUB      SP,SP,#+4
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0260A0E1           MOV      R6,R2
+     89            U32 Color;
+     90            unsigned Index, Shift, Odd;
+     91            U8 Mask;
+     92            const U8 * pData;
+     93            pData = *ppData;
+   \   00000014   007094E5           LDR      R7,[R4, #+0]
+     94            switch (Bpp) {
+   \   00000018   013053E2           SUBS     R3,R3,#+1
+   \   0000001C   0400000A           BEQ      ??_GetColor_0
+   \   00000020   033053E2           SUBS     R3,R3,#+3
+   \   00000024   1800000A           BEQ      ??_GetColor_1
+   \   00000028   043053E2           SUBS     R3,R3,#+4
+   \   0000002C   2400000A           BEQ      ??_GetColor_2
+   \   00000030   270000EA           B        ??_GetColor_3
+     95            case 1:
+     96              Shift = (*pPixelPos) & 7;
+   \                     ??_GetColor_0:
+   \   00000034   0000D5E5           LDRB     R0,[R5, #+0]
+     97              Mask  = 0x80 >> Shift;
+     98              Index = (*pData & Mask) >> (7 - Shift);
+   \   00000038   0010D7E5           LDRB     R1,[R7, #+0]
+   \   0000003C   8020A0E3           MOV      R2,#+128
+   \   00000040   070000E2           AND      R0,R0,#0x7
+   \   00000044   521001E0           AND      R1,R1,R2, ASR R0
+   \   00000048   0020A0E1           MOV      R2,R0
+   \   0000004C   000086E0           ADD      R0,R6,R0
+   \   00000050   010080E2           ADD      R0,R0,#+1
+   \   00000054   072062E2           RSB      R2,R2,#+7
+   \   00000058   080050E3           CMP      R0,#+8
+   \   0000005C   5112A0E1           ASR      R1,R1,R2
+     99              if ((Shift + SkipCnt + 1) > 7) {
+    100                pData += (Shift + SkipCnt + 1) >> 3;
+   \   00000060   A0718720           ADDCS    R7,R7,R0, LSR #+3
+    101              }
+    102              break;
+    103            case 4:
+    104              Odd   = (*pPixelPos) & 1;
+    105              Shift = Odd << 2;
+    106              Mask  = 0xF0 >> Shift;
+    107              Index = (*pData & Mask) >> (4 - Shift);
+    108              if ((Odd + SkipCnt + 1) > 1) {
+    109                pData += (Odd + SkipCnt + 1) >> 1;
+    110              }
+    111              break;
+    112            case 8:
+    113              Index = *pData;
+    114              pData += SkipCnt + 1;
+    115              break;
+    116            default:
+    117              return 0;
+    118            }
+    119            Color       = LCD_Index2Color(LCD__aConvTable[Index]);
+   \                     ??_GetColor_4:
+   \   00000064   ........           LDR      R0,??DataTable6
+   \   00000068   010190E7           LDR      R0,[R0, +R1, LSL #+2]
+   \   0000006C   ........           BL       LCD_Index2Color
+    120            *ppData     = pData;
+   \   00000070   007084E5           STR      R7,[R4, #+0]
+    121            *pPixelPos += SkipCnt + 1;
+   \   00000074   001095E5           LDR      R1,[R5, #+0]
+   \   00000078   012086E2           ADD      R2,R6,#+1
+   \   0000007C   011082E0           ADD      R1,R2,R1
+   \   00000080   001085E5           STR      R1,[R5, #+0]
+    122            return Color;
+   \                     ??_GetColor_5:
+   \   00000084   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   00000088   F080BDE8           POP      {R4-R7,PC}       ;; return
+   \                     ??_GetColor_1:
+   \   0000008C   0000D5E5           LDRB     R0,[R5, #+0]
+   \   00000090   0010D7E5           LDRB     R1,[R7, #+0]
+   \   00000094   F030A0E3           MOV      R3,#+240
+   \   00000098   012000E2           AND      R2,R0,#0x1
+   \   0000009C   0201A0E1           LSL      R0,R2,#+2
+   \   000000A0   531001E0           AND      R1,R1,R3, ASR R0
+   \   000000A4   040060E2           RSB      R0,R0,#+4
+   \   000000A8   5110A0E1           ASR      R1,R1,R0
+   \   000000AC   020086E0           ADD      R0,R6,R2
+   \   000000B0   010080E2           ADD      R0,R0,#+1
+   \   000000B4   020050E3           CMP      R0,#+2
+   \   000000B8   E9FFFF3A           BCC      ??_GetColor_4
+   \   000000BC   A07087E0           ADD      R7,R7,R0, LSR #+1
+   \   000000C0   E7FFFFEA           B        ??_GetColor_4
+   \                     ??_GetColor_2:
+   \   000000C4   0010D7E5           LDRB     R1,[R7, #+0]
+   \   000000C8   070086E0           ADD      R0,R6,R7
+   \   000000CC   017080E2           ADD      R7,R0,#+1
+   \   000000D0   E3FFFFEA           B        ??_GetColor_4
+   \                     ??_GetColor_3:
+   \   000000D4   0000A0E3           MOV      R0,#+0
+   \   000000D8   E9FFFFEA           B        ??_GetColor_5
+    123          }
+    124          
+    125          /*********************************************************************
+    126          *
+    127          *       _DrawLineScaled_Pal
+    128          *
+    129          * Parameters
+    130          *   pData      - Pointer to buffer with color information
+    131          *   x0, y0     - Drawing position of leftmost pixel
+    132          *   xSize      - Number of origilal pixels in color buffer
+    133          *   Num        - Numerator for scaling
+    134          *   Denom      - Denominator for scaling
+    135          *   NumLines   - Number of repetitions the line needs to be drawn
+    136          *   Bpp        - Number of bits per pixel (1, 4 or 8)
+    137          */
+
+   \                                 In section .text, align 4, keep-with-next
+    138          static void _DrawLineScaled_Pal(const U8 * pData, int x0, int y0, int xSize, int Num, int Denom, unsigned NumLines, int BytesPerPixel, int Bpp) {
+   \                     _DrawLineScaled_Pal:
+   \   00000000   F14F2DE9           PUSH     {R0,R4-R11,LR}
+   \   00000004   0140A0E1           MOV      R4,R1
+   \   00000008   08D04DE2           SUB      SP,SP,#+8
+    139            unsigned Compare, Current, PixelPos;
+    140            int SkipCnt, NumReps;
+    141            GUI_USE_PARA(BytesPerPixel);
+    142            PixelPos = 0;
+   \   0000000C   0010A0E3           MOV      R1,#+0
+   \   00000010   04108DE5           STR      R1,[SP, #+4]
+   \   00000014   34709DE5           LDR      R7,[SP, #+52]
+    143            /*
+    144             * Iterate over the original pixels
+    145             */
+    146            Current = Denom / 2;
+    147            Compare = Denom;
+   \   00000018   38109DE5           LDR      R1,[SP, #+56]
+   \   0000001C   0250A0E1           MOV      R5,R2
+   \   00000020   A70F87E0           ADD      R0,R7,R7, LSR #+31
+   \   00000024   051081E0           ADD      R1,R1,R5
+   \   00000028   03A0A0E1           MOV      R10,R3
+   \   0000002C   30609DE5           LDR      R6,[SP, #+48]
+   \   00000030   C090A0E1           ASR      R9,R0,#+1
+   \   00000034   0780A0E1           MOV      R8,R7
+   \   00000038   00108DE5           STR      R1,[SP, #+0]
+    148            do {
+    149              GUI_COLOR Color;
+    150              SkipCnt = 0;
+   \                     ??_DrawLineScaled_Pal_0:
+   \   0000003C   0020A0E3           MOV      R2,#+0
+    151              /*
+    152               * Find out how many source pixels can be skipped
+    153               */
+    154              while (Current += Num, Current < Compare) {
+   \                     ??_DrawLineScaled_Pal_1:
+   \   00000040   099086E0           ADD      R9,R6,R9
+   \   00000044   080059E1           CMP      R9,R8
+   \   00000048   0500002A           BCS      ??_DrawLineScaled_Pal_2
+    155                SkipCnt++;
+    156                if (xSize-- == 0) {
+   \   0000004C   0A00A0E1           MOV      R0,R10
+   \   00000050   012082E2           ADD      R2,R2,#+1
+   \   00000054   01A040E2           SUB      R10,R0,#+1
+   \   00000058   000050E3           CMP      R0,#+0
+   \   0000005C   F7FFFF1A           BNE      ??_DrawLineScaled_Pal_1
+   \   00000060   1E0000EA           B        ??_DrawLineScaled_Pal_3
+    157                  return;
+    158                }
+    159              }
+    160              /*
+    161               * Get color from data pointer and skip the number of pixels that are irrelevant
+    162               */
+    163              Color = _GetColor(&pData, &PixelPos, SkipCnt, Bpp);
+   \                     ??_DrawLineScaled_Pal_2:
+   \   00000064   40309DE5           LDR      R3,[SP, #+64]
+   \   00000068   04108DE2           ADD      R1,SP,#+4
+   \   0000006C   08008DE2           ADD      R0,SP,#+8
+   \   00000070   ........           BL       _GetColor
+    164              LCD_SetColor(Color);
+   \   00000074   ........           BL       LCD_SetColor
+    165              /*
+    166               * Find out how many times this pixel needs to be repeated
+    167               */
+    168              NumReps = 1;
+   \   00000078   01B0A0E3           MOV      R11,#+1
+   \   0000007C   000000EA           B        ??_DrawLineScaled_Pal_4
+    169              while (Compare += Denom, Current >= Compare) {
+    170                NumReps++;
+   \                     ??_DrawLineScaled_Pal_5:
+   \   00000080   01B08BE2           ADD      R11,R11,#+1
+    171              }
+   \                     ??_DrawLineScaled_Pal_4:
+   \   00000084   088087E0           ADD      R8,R7,R8
+   \   00000088   080059E1           CMP      R9,R8
+   \   0000008C   FBFFFF2A           BCS      ??_DrawLineScaled_Pal_5
+    172              /*
+    173               * Draw the pixel
+    174               */
+    175              if ((NumReps == 1) && (NumLines == 1)) {
+   \   00000090   01005BE3           CMP      R11,#+1
+   \   00000094   38009D05           LDREQ    R0,[SP, #+56]
+   \   00000098   01005003           CMPEQ    R0,#+1
+   \   0000009C   0300001A           BNE      ??_DrawLineScaled_Pal_6
+    176                LCD_DrawPixel(x0, y0);
+   \   000000A0   0510A0E1           MOV      R1,R5
+   \   000000A4   0400A0E1           MOV      R0,R4
+   \   000000A8   ........           BL       LCD_DrawPixel
+   \   000000AC   060000EA           B        ??_DrawLineScaled_Pal_7
+    177              } else {
+    178                LCD_FillRect(x0, y0, x0 + NumReps - 1, y0 + NumLines - 1);
+   \                     ??_DrawLineScaled_Pal_6:
+   \   000000B0   00009DE5           LDR      R0,[SP, #+0]
+   \   000000B4   0510A0E1           MOV      R1,R5
+   \   000000B8   013040E2           SUB      R3,R0,#+1
+   \   000000BC   0B0084E0           ADD      R0,R4,R11
+   \   000000C0   012040E2           SUB      R2,R0,#+1
+   \   000000C4   0400A0E1           MOV      R0,R4
+   \   000000C8   ........           BL       LCD_FillRect
+    179              }
+    180              x0 += NumReps;
+    181            } while (xSize--);
+   \                     ??_DrawLineScaled_Pal_7:
+   \   000000CC   0A00A0E1           MOV      R0,R10
+   \   000000D0   04408BE0           ADD      R4,R11,R4
+   \   000000D4   01A040E2           SUB      R10,R0,#+1
+   \   000000D8   000050E3           CMP      R0,#+0
+   \   000000DC   D6FFFF1A           BNE      ??_DrawLineScaled_Pal_0
+   \                     ??_DrawLineScaled_Pal_3:
+   \   000000E0   0CD08DE2           ADD      SP,SP,#+12       ;; stack cleaning
+   \   000000E4   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    182          }
+    183          
+    184          /*********************************************************************
+    185          *
+    186          *       _DrawLineScaled_RGB
+    187          *
+    188          * Parameters
+    189          *   pData      - Pointer to buffer with color information
+    190          *   x0, y0     - Drawing position of leftmost pixel
+    191          *   xSize      - Number of origilal pixels in color buffer
+    192          *   Num        - Numerator for scaling
+    193          *   Denom      - Denominator for scaling
+    194          *   NumLines   - Number of repetitions the line needs to be drawn
+    195          */
+
+   \                                 In section .text, align 4, keep-with-next
+    196          static void _DrawLineScaled_RGB(const U8 * pData, int x0, int y0, int xSize, int Num, int Denom, unsigned NumLines, int BytesPerPixel, int Bpp) {
+   \                     _DrawLineScaled_RGB:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0150A0E1           MOV      R5,R1
+   \   0000000C   2C709DE5           LDR      R7,[SP, #+44]
+    197            unsigned Compare, Current;
+    198            int SkipCnt, NumReps;
+    199            GUI_USE_PARA(Bpp);
+    200            /*
+    201             * Iterate over the original pixels
+    202             */
+    203            Current = Denom / 2;
+    204            Compare = Denom;
+   \   00000010   30109DE5           LDR      R1,[SP, #+48]
+   \   00000014   0040A0E1           MOV      R4,R0
+   \   00000018   0260A0E1           MOV      R6,R2
+   \   0000001C   A70F87E0           ADD      R0,R7,R7, LSR #+31
+   \   00000020   061081E0           ADD      R1,R1,R6
+   \   00000024   03A0A0E1           MOV      R10,R3
+   \   00000028   C090A0E1           ASR      R9,R0,#+1
+   \   0000002C   0780A0E1           MOV      R8,R7
+   \   00000030   00108DE5           STR      R1,[SP, #+0]
+    205            /* Adjust data pointer to first pixel */
+    206            do {
+    207              U8 r, g, b;
+    208              GUI_COLOR Color;
+    209              SkipCnt = 0;
+   \                     ??_DrawLineScaled_RGB_0:
+   \   00000034   0010A0E3           MOV      R1,#+0
+    210              /*
+    211               * Find out how many source pixels can be skipped
+    212               */
+    213              while (Current += Num, Current < Compare) {
+   \                     ??_DrawLineScaled_RGB_1:
+   \   00000038   28009DE5           LDR      R0,[SP, #+40]
+   \   0000003C   011081E2           ADD      R1,R1,#+1
+   \   00000040   099080E0           ADD      R9,R0,R9
+   \   00000044   080059E1           CMP      R9,R8
+   \   00000048   0400002A           BCS      ??_DrawLineScaled_RGB_2
+    214                SkipCnt++;
+    215                if (xSize-- == 0) {
+   \   0000004C   0A00A0E1           MOV      R0,R10
+   \   00000050   01A040E2           SUB      R10,R0,#+1
+   \   00000054   000050E3           CMP      R0,#+0
+   \   00000058   F6FFFF1A           BNE      ??_DrawLineScaled_RGB_1
+   \   0000005C   220000EA           B        ??_DrawLineScaled_RGB_3
+    216                  return;
+    217                }
+    218              }
+    219              /*
+    220               * Get color from data pointer
+    221               */
+    222              b = *(pData);
+    223              g = *(pData + 1);
+    224              r = *(pData + 2);
+    225              Color = ((U32)b << 16) | (g << 8) | r;
+   \                     ??_DrawLineScaled_RGB_2:
+   \   00000060   0120D4E5           LDRB     R2,[R4, #+1]
+   \   00000064   0000D4E5           LDRB     R0,[R4, #+0]
+    226              /*
+    227               * Skip the number of pixels that are irrelevant
+    228               */
+    229              pData += (SkipCnt + 1) * BytesPerPixel;
+    230              /*
+    231               * Find out how many times this pixel needs to be repeated
+    232               */
+    233              NumReps = 1;
+   \   00000068   01B0A0E3           MOV      R11,#+1
+   \   0000006C   0224A0E1           LSL      R2,R2,#+8
+   \   00000070   000882E1           ORR      R0,R2,R0, LSL #+16
+   \   00000074   0220D4E5           LDRB     R2,[R4, #+2]
+   \   00000078   000082E1           ORR      R0,R2,R0
+   \   0000007C   34209DE5           LDR      R2,[SP, #+52]
+   \   00000080   924124E0           MLA      R4,R2,R1,R4
+   \   00000084   000000EA           B        ??_DrawLineScaled_RGB_4
+    234              while (Compare += Denom, Current >= Compare) {
+    235                NumReps++;
+   \                     ??_DrawLineScaled_RGB_5:
+   \   00000088   01B08BE2           ADD      R11,R11,#+1
+    236              }
+   \                     ??_DrawLineScaled_RGB_4:
+   \   0000008C   088087E0           ADD      R8,R7,R8
+   \   00000090   080059E1           CMP      R9,R8
+   \   00000094   FBFFFF2A           BCS      ??_DrawLineScaled_RGB_5
+    237              /*
+    238               * Draw the pixel
+    239               */
+    240              LCD_SetColor(Color);
+   \   00000098   ........           BL       LCD_SetColor
+    241              if ((NumReps == 1) && (NumLines == 1)) {
+   \   0000009C   01005BE3           CMP      R11,#+1
+   \   000000A0   30009D05           LDREQ    R0,[SP, #+48]
+   \   000000A4   01005003           CMPEQ    R0,#+1
+   \   000000A8   0300001A           BNE      ??_DrawLineScaled_RGB_6
+    242                LCD_DrawPixel(x0, y0);
+   \   000000AC   0610A0E1           MOV      R1,R6
+   \   000000B0   0500A0E1           MOV      R0,R5
+   \   000000B4   ........           BL       LCD_DrawPixel
+   \   000000B8   060000EA           B        ??_DrawLineScaled_RGB_7
+    243              } else {
+    244                LCD_FillRect(x0, y0, x0 + NumReps - 1, y0 + NumLines - 1);
+   \                     ??_DrawLineScaled_RGB_6:
+   \   000000BC   00009DE5           LDR      R0,[SP, #+0]
+   \   000000C0   0610A0E1           MOV      R1,R6
+   \   000000C4   013040E2           SUB      R3,R0,#+1
+   \   000000C8   0B0085E0           ADD      R0,R5,R11
+   \   000000CC   012040E2           SUB      R2,R0,#+1
+   \   000000D0   0500A0E1           MOV      R0,R5
+   \   000000D4   ........           BL       LCD_FillRect
+    245              }
+    246              x0 += NumReps;
+    247            } while (xSize--);
+   \                     ??_DrawLineScaled_RGB_7:
+   \   000000D8   0A00A0E1           MOV      R0,R10
+   \   000000DC   05508BE0           ADD      R5,R11,R5
+   \   000000E0   01A040E2           SUB      R10,R0,#+1
+   \   000000E4   000050E3           CMP      R0,#+0
+   \   000000E8   D1FFFF1A           BNE      ??_DrawLineScaled_RGB_0
+   \                     ??_DrawLineScaled_RGB_3:
+   \   000000EC   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   000000F0   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    248          }
+    249          
+    250          /*********************************************************************
+    251          *
+    252          *       _DrawLineScaled_16bpp
+    253          *
+    254          * Parameters
+    255          *   pData      - Pointer to buffer with color information
+    256          *   x0, y0     - Drawing position of leftmost pixel
+    257          *   xSize      - Number of origilal pixels in color buffer
+    258          *   Num        - Numerator for scaling
+    259          *   Denom      - Denominator for scaling
+    260          *   NumLines   - Number of repetitions the line needs to be drawn
+    261          */
+
+   \                                 In section .text, align 4, keep-with-next
+    262          static void _DrawLineScaled_16bpp(const U8 * pData, int x0, int y0, int xSize, int Num, int Denom, unsigned NumLines, int BytesPerPixel, int Bpp) {
+   \                     _DrawLineScaled_16bpp:
+   \   00000000   F14F2DE9           PUSH     {R0,R4-R11,LR}
+   \   00000004   08D04DE2           SUB      SP,SP,#+8
+   \   00000008   0140A0E1           MOV      R4,R1
+   \   0000000C   34709DE5           LDR      R7,[SP, #+52]
+    263            unsigned Compare, Current;
+    264            int SkipCnt, NumReps;
+    265            GUI_USE_PARA(Bpp);
+    266            /*
+    267             * Iterate over the original pixels
+    268             */
+    269            Current = Denom / 2;
+    270            Compare = Denom;
+   \   00000010   38109DE5           LDR      R1,[SP, #+56]
+   \   00000014   0250A0E1           MOV      R5,R2
+   \   00000018   A70F87E0           ADD      R0,R7,R7, LSR #+31
+   \   0000001C   051081E0           ADD      R1,R1,R5
+   \   00000020   03A0A0E1           MOV      R10,R3
+   \   00000024   30609DE5           LDR      R6,[SP, #+48]
+   \   00000028   C090A0E1           ASR      R9,R0,#+1
+   \   0000002C   0780A0E1           MOV      R8,R7
+   \   00000030   00108DE5           STR      R1,[SP, #+0]
+    271            /* Adjust data pointer to first pixel */
+    272            do {
+    273              U16 Index;
+    274              GUI_COLOR Color;
+    275              SkipCnt = 0;
+   \                     ??_DrawLineScaled_16bpp_0:
+   \   00000034   00B0A0E3           MOV      R11,#+0
+    276              /*
+    277               * Find out how many source pixels can be skipped
+    278               */
+    279              while (Current += Num, Current < Compare) {
+   \                     ??_DrawLineScaled_16bpp_1:
+   \   00000038   099086E0           ADD      R9,R6,R9
+   \   0000003C   080059E1           CMP      R9,R8
+   \   00000040   0500002A           BCS      ??_DrawLineScaled_16bpp_2
+    280                SkipCnt++;
+    281                if (xSize-- == 0) {
+   \   00000044   0A00A0E1           MOV      R0,R10
+   \   00000048   01B08BE2           ADD      R11,R11,#+1
+   \   0000004C   01A040E2           SUB      R10,R0,#+1
+   \   00000050   000050E3           CMP      R0,#+0
+   \   00000054   F7FFFF1A           BNE      ??_DrawLineScaled_16bpp_1
+   \   00000058   210000EA           B        ??_DrawLineScaled_16bpp_3
+    282                  return;
+    283                }
+    284              }
+    285              /*
+    286               * Get color from data pointer
+    287               */
+    288              Index = GUI__Read16(&pData);
+   \                     ??_DrawLineScaled_16bpp_2:
+   \   0000005C   08008DE2           ADD      R0,SP,#+8
+   \   00000060   ........           BL       GUI__Read16
+    289              Color = LCD_Index2Color_M555(Index);
+   \   00000064   ........           BL       LCD_Index2Color_M555
+    290              /*
+    291               * Skip the number of pixels that are irrelevant
+    292               */
+    293              pData += (SkipCnt + 0) * BytesPerPixel;
+   \   00000068   3C109DE5           LDR      R1,[SP, #+60]
+   \   0000006C   08209DE5           LDR      R2,[SP, #+8]
+   \   00000070   912B22E0           MLA      R2,R1,R11,R2
+    294              /*
+    295               * Find out how many times this pixel needs to be repeated
+    296               */
+    297              NumReps = 1;
+   \   00000074   01B0A0E3           MOV      R11,#+1
+   \   00000078   08208DE5           STR      R2,[SP, #+8]
+   \   0000007C   000000EA           B        ??_DrawLineScaled_16bpp_4
+    298              while (Compare += Denom, Current >= Compare) {
+    299                NumReps++;
+   \                     ??_DrawLineScaled_16bpp_5:
+   \   00000080   01B08BE2           ADD      R11,R11,#+1
+    300              }
+   \                     ??_DrawLineScaled_16bpp_4:
+   \   00000084   088087E0           ADD      R8,R7,R8
+   \   00000088   080059E1           CMP      R9,R8
+   \   0000008C   FBFFFF2A           BCS      ??_DrawLineScaled_16bpp_5
+    301              /*
+    302               * Draw the pixel
+    303               */
+    304              LCD_SetColor(Color);
+   \   00000090   ........           BL       LCD_SetColor
+    305              if ((NumReps == 1) && (NumLines == 1)) {
+   \   00000094   01005BE3           CMP      R11,#+1
+   \   00000098   38009D05           LDREQ    R0,[SP, #+56]
+   \   0000009C   01005003           CMPEQ    R0,#+1
+   \   000000A0   0300001A           BNE      ??_DrawLineScaled_16bpp_6
+    306                LCD_DrawPixel(x0, y0);
+   \   000000A4   0510A0E1           MOV      R1,R5
+   \   000000A8   0400A0E1           MOV      R0,R4
+   \   000000AC   ........           BL       LCD_DrawPixel
+   \   000000B0   060000EA           B        ??_DrawLineScaled_16bpp_7
+    307              } else {
+    308                LCD_FillRect(x0, y0, x0 + NumReps - 1, y0 + NumLines - 1);
+   \                     ??_DrawLineScaled_16bpp_6:
+   \   000000B4   00009DE5           LDR      R0,[SP, #+0]
+   \   000000B8   0510A0E1           MOV      R1,R5
+   \   000000BC   013040E2           SUB      R3,R0,#+1
+   \   000000C0   0B0084E0           ADD      R0,R4,R11
+   \   000000C4   012040E2           SUB      R2,R0,#+1
+   \   000000C8   0400A0E1           MOV      R0,R4
+   \   000000CC   ........           BL       LCD_FillRect
+    309              }
+    310              x0 += NumReps;
+    311            } while (xSize--);
+   \                     ??_DrawLineScaled_16bpp_7:
+   \   000000D0   0A00A0E1           MOV      R0,R10
+   \   000000D4   04408BE0           ADD      R4,R11,R4
+   \   000000D8   01A040E2           SUB      R10,R0,#+1
+   \   000000DC   000050E3           CMP      R0,#+0
+   \   000000E0   D3FFFF1A           BNE      ??_DrawLineScaled_16bpp_0
+   \                     ??_DrawLineScaled_16bpp_3:
+   \   000000E4   0CD08DE2           ADD      SP,SP,#+12       ;; stack cleaning
+   \   000000E8   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    312          }
+    313          
+    314          /*********************************************************************
+    315          *
+    316          *       _DrawBitmapScaled
+    317          *
+    318          * Parameters
+    319          *   pContext   - Pointer to GUI_BMP_CONTEXT structure
+    320          *   x0, y0     - Drawing position of leftmost pixel
+    321          *   XSize      - Number of original width in color buffer
+    322          *   YSize      - Number of original height in color buffer
+    323          *   Num        - Numerator for scaling
+    324          *   Denom      - Denominator for scaling
+    325          */
+
+   \                                 In section .text, align 4, keep-with-next
+    326          static int _DrawBitmapScaled(GUI_BMP_CONTEXT * pContext, int x0, int y0, int XSize, int YSize, int Num, int Denom, int BytesPerPixel, int Bpp, tDrawLineScaled * pfDrawLineScaled) {
+   \                     _DrawBitmapScaled:
+   \   00000000   FE4F2DE9           PUSH     {R1-R11,LR}
+   \   00000004   20D04DE2           SUB      SP,SP,#+32
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   58609DE5           LDR      R6,[SP, #+88]
+   \   00000010   50009DE5           LDR      R0,[SP, #+80]
+   \   00000014   54509DE5           LDR      R5,[SP, #+84]
+    327            int y, BytesPerLine, Step, SkipCnt, NumReps;
+    328            const U8 * pData;
+    329            unsigned Compare, Current;
+    330            Current = Denom / 2;
+   \   00000018   A61F86E0           ADD      R1,R6,R6, LSR #+31
+   \   0000001C   C190A0E1           ASR      R9,R1,#+1
+    331            Compare = Denom;
+    332            Step = _GetStep(&YSize, &y, Num, Denom);
+   \   00000020   950000E0           MUL      R0,R5,R0
+   \   00000024   0610A0E1           MOV      R1,R6
+   \   00000028   ........           BL       __aeabi_idiv
+   \   0000002C   06B0A0E1           MOV      R11,R6
+   \   00000030   14008DE5           STR      R0,[SP, #+20]
+   \   00000034   010050E3           CMP      R0,#+1
+   \   00000038   2E0000AA           BGE      ??_DrawBitmapScaled_1
+   \   0000003C   000050E3           CMP      R0,#+0
+   \   00000040   2F00005A           BPL      ??_DrawBitmapScaled_2
+   \   00000044   0010A0E1           MOV      R1,R0
+   \   00000048   001061E2           RSB      R1,R1,#+0
+   \   0000004C   14108DE5           STR      R1,[SP, #+20]
+   \   00000050   0070A0E3           MOV      R7,#+0
+   \   00000054   0110A0E3           MOV      R1,#+1
+    333            if (!Step) {
+    334              return 1;
+    335            }
+    336            switch (Bpp) {
+   \                     ??_DrawBitmapScaled_3:
+   \   00000058   60009DE5           LDR      R0,[SP, #+96]
+   \   0000005C   18108DE5           STR      R1,[SP, #+24]
+   \   00000060   010040E2           SUB      R0,R0,#+1
+   \   00000064   1F0050E3           CMP      R0,#+31
+   \   00000068   00F18F90           ADDLS    PC,PC,R0, LSL #+2
+   \                     ??_DrawBitmapScaled_0:
+   \   0000006C   3500008A           BHI      ??_DrawBitmapScaled_4
+   \   00000070   1E0000EA           B        ??_DrawBitmapScaled_5
+   \   00000074   330000EA           B        ??_DrawBitmapScaled_4
+   \   00000078   320000EA           B        ??_DrawBitmapScaled_4
+   \   0000007C   220000EA           B        ??_DrawBitmapScaled_6
+   \   00000080   300000EA           B        ??_DrawBitmapScaled_4
+   \   00000084   2F0000EA           B        ??_DrawBitmapScaled_4
+   \   00000088   2E0000EA           B        ??_DrawBitmapScaled_4
+   \   0000008C   220000EA           B        ??_DrawBitmapScaled_7
+   \   00000090   2C0000EA           B        ??_DrawBitmapScaled_4
+   \   00000094   2B0000EA           B        ??_DrawBitmapScaled_4
+   \   00000098   2A0000EA           B        ??_DrawBitmapScaled_4
+   \   0000009C   290000EA           B        ??_DrawBitmapScaled_4
+   \   000000A0   280000EA           B        ??_DrawBitmapScaled_4
+   \   000000A4   270000EA           B        ??_DrawBitmapScaled_4
+   \   000000A8   260000EA           B        ??_DrawBitmapScaled_4
+   \   000000AC   1E0000EA           B        ??_DrawBitmapScaled_8
+   \   000000B0   240000EA           B        ??_DrawBitmapScaled_4
+   \   000000B4   230000EA           B        ??_DrawBitmapScaled_4
+   \   000000B8   220000EA           B        ??_DrawBitmapScaled_4
+   \   000000BC   210000EA           B        ??_DrawBitmapScaled_4
+   \   000000C0   200000EA           B        ??_DrawBitmapScaled_4
+   \   000000C4   1F0000EA           B        ??_DrawBitmapScaled_4
+   \   000000C8   1E0000EA           B        ??_DrawBitmapScaled_4
+   \   000000CC   160000EA           B        ??_DrawBitmapScaled_8
+   \   000000D0   1C0000EA           B        ??_DrawBitmapScaled_4
+   \   000000D4   1B0000EA           B        ??_DrawBitmapScaled_4
+   \   000000D8   1A0000EA           B        ??_DrawBitmapScaled_4
+   \   000000DC   190000EA           B        ??_DrawBitmapScaled_4
+   \   000000E0   180000EA           B        ??_DrawBitmapScaled_4
+   \   000000E4   170000EA           B        ??_DrawBitmapScaled_4
+   \   000000E8   160000EA           B        ??_DrawBitmapScaled_4
+   \   000000EC   0E0000EA           B        ??_DrawBitmapScaled_8
+    337            case 1:
+    338              BytesPerLine = ((XSize + 31) >> 5) << 2;
+   \                     ??_DrawBitmapScaled_5:
+   \   000000F0   28009DE5           LDR      R0,[SP, #+40]
+   \   000000F4   100000EA           B        ??_DrawBitmapScaled_9
+   \                     ??_DrawBitmapScaled_1:
+   \   000000F8   017040E2           SUB      R7,R0,#+1
+   \   000000FC   0010E0E3           MVN      R1,#+0
+   \   00000100   D4FFFFEA           B        ??_DrawBitmapScaled_3
+   \                     ??_DrawBitmapScaled_2:
+   \   00000104   0100A0E3           MOV      R0,#+1
+   \   00000108   400000EA           B        ??_DrawBitmapScaled_10
+    339              break;
+    340            case 4:
+    341              BytesPerLine = (((XSize << 2) + 31) >> 5) << 2;
+   \                     ??_DrawBitmapScaled_6:
+   \   0000010C   28009DE5           LDR      R0,[SP, #+40]
+   \   00000110   1F10A0E3           MOV      R1,#+31
+   \   00000114   000181E0           ADD      R0,R1,R0, LSL #+2
+   \   00000118   080000EA           B        ??_DrawBitmapScaled_11
+    342              break;
+    343            case 8:
+    344              BytesPerLine = ((XSize +  3) >> 2) << 2;
+   \                     ??_DrawBitmapScaled_7:
+   \   0000011C   28009DE5           LDR      R0,[SP, #+40]
+   \   00000120   030080E2           ADD      R0,R0,#+3
+   \   00000124   4001A0E1           ASR      R0,R0,#+2
+   \   00000128   050000EA           B        ??_DrawBitmapScaled_12
+    345              break;
+    346            case 16:
+    347            case 24:
+    348            case 32:
+    349              BytesPerLine = (((BytesPerPixel << 3) * XSize + 31) >> 5) << 2;
+   \                     ??_DrawBitmapScaled_8:
+   \   0000012C   5C009DE5           LDR      R0,[SP, #+92]
+   \   00000130   28109DE5           LDR      R1,[SP, #+40]
+   \   00000134   8001A0E1           LSL      R0,R0,#+3
+   \   00000138   910000E0           MUL      R0,R1,R0
+   \                     ??_DrawBitmapScaled_9:
+   \   0000013C   1F0080E2           ADD      R0,R0,#+31
+   \                     ??_DrawBitmapScaled_11:
+   \   00000140   C002A0E1           ASR      R0,R0,#+5
+   \                     ??_DrawBitmapScaled_12:
+   \   00000144   0081A0E1           LSL      R8,R0,#+2
+    350              break;
+    351            }
+    352            /*
+    353             * Iterate over the original pixels
+    354             */
+    355            do {
+    356              SkipCnt = 0;
+   \                     ??_DrawBitmapScaled_4:
+   \   00000148   00A0A0E3           MOV      R10,#+0
+   \   0000014C   000000EA           B        ??_DrawBitmapScaled_13
+    357              /*
+    358               * Find out how many source lines can be skipped
+    359               */
+    360              while (Current += Num, Current < Compare) {
+    361                SkipCnt++;
+   \                     ??_DrawBitmapScaled_14:
+   \   00000150   01A08AE2           ADD      R10,R10,#+1
+    362              }
+   \                     ??_DrawBitmapScaled_13:
+   \   00000154   099085E0           ADD      R9,R5,R9
+   \   00000158   0B0059E1           CMP      R9,R11
+   \   0000015C   FBFFFF3A           BCC      ??_DrawBitmapScaled_14
+   \   00000160   00005AE3           CMP      R10,#+0
+   \   00000164   0900004A           BMI      ??_DrawBitmapScaled_15
+   \                     ??_DrawBitmapScaled_16:
+   \   00000168   01A04AE2           SUB      R10,R10,#+1
+    363              /*
+    364               * Skip the number of lines that are irrelevant
+    365               */
+    366              while (SkipCnt-- >= 0) {
+    367                /* Read one line of pixel data */
+    368                if (GUI_BMP__ReadData(pContext, BytesPerLine, &pData, 0)) {
+   \   0000016C   0030A0E3           MOV      R3,#+0
+   \   00000170   1C208DE2           ADD      R2,SP,#+28
+   \   00000174   0810A0E1           MOV      R1,R8
+   \   00000178   0400A0E1           MOV      R0,R4
+   \   0000017C   ........           BL       GUI_BMP__ReadData
+   \   00000180   000050E3           CMP      R0,#+0
+   \   00000184   DEFFFF1A           BNE      ??_DrawBitmapScaled_2
+    369                  return 1; /* Error */
+    370                }
+    371              }
+   \   00000188   00005AE3           CMP      R10,#+0
+   \   0000018C   F5FFFF5A           BPL      ??_DrawBitmapScaled_16
+    372              /*
+    373               * Find out how many times this line needs to be repeated
+    374               */
+    375              NumReps = 1;
+   \                     ??_DrawBitmapScaled_15:
+   \   00000190   01A0A0E3           MOV      R10,#+1
+   \   00000194   000000EA           B        ??_DrawBitmapScaled_17
+    376              while (Compare += Denom, Current >= Compare) {
+    377                NumReps++;
+   \                     ??_DrawBitmapScaled_18:
+   \   00000198   01A08AE2           ADD      R10,R10,#+1
+    378              }
+   \                     ??_DrawBitmapScaled_17:
+   \   0000019C   0BB086E0           ADD      R11,R6,R11
+   \   000001A0   0B0059E1           CMP      R9,R11
+   \   000001A4   FBFFFF2A           BCS      ??_DrawBitmapScaled_18
+    379              /*
+    380               * Draw the line
+    381               */
+    382              pfDrawLineScaled(pData, x0, (Step < 0) ? y0 + y - NumReps + 1 : y0 + y, XSize, Num, Denom, NumReps, BytesPerPixel, Bpp);
+   \   000001A8   24009DE5           LDR      R0,[SP, #+36]
+   \   000001AC   08A08DE5           STR      R10,[SP, #+8]
+   \   000001B0   002087E0           ADD      R2,R7,R0
+   \   000001B4   18009DE5           LDR      R0,[SP, #+24]
+   \   000001B8   04608DE5           STR      R6,[SP, #+4]
+   \   000001BC   000050E3           CMP      R0,#+0
+   \   000001C0   0A004240           SUBMI    R0,R2,R10
+   \   000001C4   01208042           ADDMI    R2,R0,#+1
+   \   000001C8   60009DE5           LDR      R0,[SP, #+96]
+   \   000001CC   00508DE5           STR      R5,[SP, #+0]
+   \   000001D0   10008DE5           STR      R0,[SP, #+16]
+   \   000001D4   5C009DE5           LDR      R0,[SP, #+92]
+   \   000001D8   28309DE5           LDR      R3,[SP, #+40]
+   \   000001DC   0C008DE5           STR      R0,[SP, #+12]
+   \   000001E0   20109DE5           LDR      R1,[SP, #+32]
+   \   000001E4   1C009DE5           LDR      R0,[SP, #+28]
+   \   000001E8   64C09DE5           LDR      R12,[SP, #+100]
+   \   000001EC   3CFF2FE1           BLX      R12
+    383              y += Step * NumReps;
+   \   000001F0   18009DE5           LDR      R0,[SP, #+24]
+   \   000001F4   9A7027E0           MLA      R7,R10,R0,R7
+    384            } while ((y < YSize) && (y >= 0));
+   \   000001F8   14009DE5           LDR      R0,[SP, #+20]
+   \   000001FC   000057E1           CMP      R7,R0
+   \   00000200   010000AA           BGE      ??_DrawBitmapScaled_19
+   \   00000204   000057E3           CMP      R7,#+0
+   \   00000208   CEFFFF5A           BPL      ??_DrawBitmapScaled_4
+    385            return 0;
+   \                     ??_DrawBitmapScaled_19:
+   \   0000020C   0000A0E3           MOV      R0,#+0
+   \                     ??_DrawBitmapScaled_10:
+   \   00000210   2CD08DE2           ADD      SP,SP,#+44       ;; stack cleaning
+   \   00000214   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    386          }
+    387          
+    388          /*********************************************************************
+    389          *
+    390          *       _GetColorIndex_RLE
+    391          */
+
+   \                                 In section .text, align 4, keep-with-next
+    392          static int _GetColorIndex_RLE(GUI_BMP_CONTEXT * pContext, int SkipCnt, CONTEXT_DECOMP_BMP * pContextBmp) {
+   \                     _GetColorIndex_RLE:
+   \   00000000   F04F2DE9           PUSH     {R4-R11,LR}
+   \   00000004   04D04DE2           SUB      SP,SP,#+4
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   0150A0E1           MOV      R5,R1
+   \   00000010   0260A0E1           MOV      R6,R2
+   \   00000014   0470A0E3           MOV      R7,#+4
+   \   00000018   ........           LDR      R8,??DataTable6
+   \   0000001C   0190A0E3           MOV      R9,#+1
+   \   00000020   02A0A0E3           MOV      R10,#+2
+   \   00000024   00B0A0E3           MOV      R11,#+0
+    393            const U8 * pData;
+    394            do {
+    395              if (pContextBmp->State == STATE_READY) {
+   \                     ??_GetColorIndex_RLE_1:
+   \   00000028   080096E5           LDR      R0,[R6, #+8]
+   \   0000002C   000050E3           CMP      R0,#+0
+   \   00000030   2900000A           BEQ      ??_GetColorIndex_RLE_2
+    396                int DoLoop;
+    397                DoLoop = 1;
+    398                do {
+    399                  if (GUI_BMP__ReadData(pContext, 2, &pData, 0)) {
+    400                    return 1;
+    401                  }
+    402                  pContextBmp->Cmd  = *pData++;
+    403                  pContextBmp->Data = *pData;
+    404                  if (pContextBmp->Cmd == 0) {
+    405                    switch (pContextBmp->Data) {
+    406                    case 0:   /* End of line */
+    407                      if (pContextBmp->xPos < pContextBmp->xSize) {
+    408                        /* Premature break */
+    409                        DoLoop = 0;
+    410                        pContextBmp->State = STATE_LBRK;
+    411                      } else {
+    412                        pContextBmp->xPos = 0;
+    413                      }
+    414                      break;
+    415                    case 1:   /* End of image */
+    416                      DoLoop = 0;
+    417                      if (pContextBmp->xPos < pContextBmp->xSize) {
+    418                        pContextBmp->State = STATE_LBRK;
+    419                      }
+    420                      break;
+    421                    case 2:   /* Delta */
+    422                      if (GUI_BMP__ReadData(pContext, 2, &pData, 0)) {
+    423                        return 1;
+    424                      }
+    425                      pContextBmp->RemPixels = (*(pData + 1) * pContextBmp->xSize) + *pData;
+    426                      pContextBmp->State = STATE_DELTA;
+    427                      if (pContextBmp->xPos == pContextBmp->xSize) {
+    428                        pContextBmp->xPos = 0;
+    429                      }
+    430                      pContextBmp->xPos += *pData;
+    431                      DoLoop = 0;
+    432                      break;
+    433                    default:  /* Absolute mode */
+    434                      switch (pContextBmp->Compression) {
+    435                      case BI_RLE4:
+    436                        pContextBmp->State     = STATE_ABS4;
+    437                        pContextBmp->RemPixels = pContextBmp->Data;
+    438                        pContextBmp->DummyRead = (((pContextBmp->Data + 1) >> 1) & 1);
+    439                        pContextBmp->NumNibble = 0;
+    440                        DoLoop = 0;
+    441                        break;
+    442                      case BI_RLE8:
+    443                        pContextBmp->State     = STATE_ABS8;
+    444                        pContextBmp->RemPixels = pContextBmp->Data;
+    445                        DoLoop = 0;
+    446                        break;
+    447                      }
+    448                      break;
+    449                    }
+    450                  } else {
+    451                    switch (pContextBmp->Compression) {
+    452                    case BI_RLE4:
+    453                      pContextBmp->State      = STATE_RLE4;
+    454                      pContextBmp->RemPixels  = pContextBmp->Cmd;
+    455                      pContextBmp->NumNibble  = 0;
+    456                      DoLoop = 0;
+    457                      break;
+    458                    case BI_RLE8:
+    459                      pContextBmp->ColorIndex = LCD__aConvTable[pContextBmp->Data];
+    460                      pContextBmp->State      = STATE_RLE8;
+    461                      pContextBmp->RemPixels  = pContextBmp->Cmd;
+    462                      DoLoop = 0;
+    463                      break;
+    464                    }
+    465                  }
+    466                } while (DoLoop);
+    467              }
+    468              switch (pContextBmp->State) {
+   \                     ??_GetColorIndex_RLE_3:
+   \   00000034   080096E5           LDR      R0,[R6, #+8]
+   \   00000038   010040E2           SUB      R0,R0,#+1
+   \   0000003C   050050E3           CMP      R0,#+5
+   \   00000040   00F18F90           ADDLS    PC,PC,R0, LSL #+2
+   \                     ??_GetColorIndex_RLE_0:
+   \   00000044   5100008A           BHI      ??_GetColorIndex_RLE_4
+   \   00000048   040000EA           B        ??_GetColorIndex_RLE_5
+   \   0000004C   930000EA           B        ??_GetColorIndex_RLE_6
+   \   00000050   980000EA           B        ??_GetColorIndex_RLE_7
+   \   00000054   C00000EA           B        ??_GetColorIndex_RLE_8
+   \   00000058   3E0000EA           B        ??_GetColorIndex_RLE_9
+   \   0000005C   450000EA           B        ??_GetColorIndex_RLE_10
+    469              /* Remaining absolute pixels (8bpp) */
+    470              case STATE_ABS8:
+    471                if (GUI_BMP__ReadData(pContext, 1, &pData, 0)) {
+   \                     ??_GetColorIndex_RLE_5:
+   \   00000060   0030A0E3           MOV      R3,#+0
+   \   00000064   0D20A0E1           MOV      R2,SP
+   \   00000068   0110A0E3           MOV      R1,#+1
+   \   0000006C   0400A0E1           MOV      R0,R4
+   \   00000070   ........           BL       GUI_BMP__ReadData
+   \   00000074   000050E3           CMP      R0,#+0
+   \   00000078   1E00001A           BNE      ??_GetColorIndex_RLE_11
+    472                  return 1;
+    473                }
+    474                pContextBmp->ColorIndex = LCD__aConvTable[*pData];
+   \   0000007C   00009DE5           LDR      R0,[SP, #+0]
+   \   00000080   0000D0E5           LDRB     R0,[R0, #+0]
+   \   00000084   000198E7           LDR      R0,[R8, +R0, LSL #+2]
+   \   00000088   000086E5           STR      R0,[R6, #+0]
+    475                if (--pContextBmp->RemPixels == 0) {
+   \   0000008C   040096E5           LDR      R0,[R6, #+4]
+   \   00000090   010050E2           SUBS     R0,R0,#+1
+   \   00000094   040086E5           STR      R0,[R6, #+4]
+   \   00000098   0A00001A           BNE      ??_GetColorIndex_RLE_12
+    476                  pContextBmp->State = STATE_READY;
+   \   0000009C   08B086E5           STR      R11,[R6, #+8]
+    477                  if (pContextBmp->Data & 1) {
+   \   000000A0   1900D6E5           LDRB     R0,[R6, #+25]
+   \   000000A4   010010E3           TST      R0,#0x1
+   \   000000A8   0600000A           BEQ      ??_GetColorIndex_RLE_12
+    478                    if (GUI_BMP__ReadData(pContext, 1, &pData, 0)) {
+   \   000000AC   0030A0E3           MOV      R3,#+0
+   \   000000B0   0D20A0E1           MOV      R2,SP
+   \   000000B4   0110A0E3           MOV      R1,#+1
+   \   000000B8   0400A0E1           MOV      R0,R4
+   \   000000BC   ........           BL       GUI_BMP__ReadData
+   \   000000C0   000050E3           CMP      R0,#+0
+   \   000000C4   0B00001A           BNE      ??_GetColorIndex_RLE_11
+    479                      return 1;
+    480                    }
+    481                  }
+    482                }
+    483                pContextBmp->xPos++;
+   \                     ??_GetColorIndex_RLE_12:
+   \   000000C8   100096E5           LDR      R0,[R6, #+16]
+   \   000000CC   010080E2           ADD      R0,R0,#+1
+   \   000000D0   100086E5           STR      R0,[R6, #+16]
+    484                break;
+   \   000000D4   2D0000EA           B        ??_GetColorIndex_RLE_4
+   \                     ??_GetColorIndex_RLE_13:
+   \   000000D8   10B086E5           STR      R11,[R6, #+16]
+   \                     ??_GetColorIndex_RLE_2:
+   \   000000DC   0030A0E3           MOV      R3,#+0
+   \   000000E0   0D20A0E1           MOV      R2,SP
+   \   000000E4   0210A0E3           MOV      R1,#+2
+   \   000000E8   0400A0E1           MOV      R0,R4
+   \   000000EC   ........           BL       GUI_BMP__ReadData
+   \   000000F0   000050E3           CMP      R0,#+0
+   \   000000F4   0100000A           BEQ      ??_GetColorIndex_RLE_14
+   \                     ??_GetColorIndex_RLE_11:
+   \   000000F8   0100A0E3           MOV      R0,#+1
+   \   000000FC   280000EA           B        ??_GetColorIndex_RLE_15
+   \                     ??_GetColorIndex_RLE_14:
+   \   00000100   00009DE5           LDR      R0,[SP, #+0]
+   \   00000104   0000D0E5           LDRB     R0,[R0, #+0]
+   \   00000108   1800C6E5           STRB     R0,[R6, #+24]
+   \   0000010C   00109DE5           LDR      R1,[SP, #+0]
+   \   00000110   000050E3           CMP      R0,#+0
+   \   00000114   011081E2           ADD      R1,R1,#+1
+   \   00000118   00108DE5           STR      R1,[SP, #+0]
+   \   0000011C   0010D1E5           LDRB     R1,[R1, #+0]
+   \   00000120   1910C6E5           STRB     R1,[R6, #+25]
+   \   00000124   4F00001A           BNE      ??_GetColorIndex_RLE_16
+   \   00000128   0100B0E1           MOVS     R0,R1
+   \   0000012C   0300000A           BEQ      ??_GetColorIndex_RLE_17
+   \   00000130   020051E3           CMP      R1,#+2
+   \   00000134   2100000A           BEQ      ??_GetColorIndex_RLE_18
+   \   00000138   3800002A           BCS      ??_GetColorIndex_RLE_19
+   \   0000013C   1A0000EA           B        ??_GetColorIndex_RLE_20
+   \                     ??_GetColorIndex_RLE_17:
+   \   00000140   100096E5           LDR      R0,[R6, #+16]
+   \   00000144   0C1096E5           LDR      R1,[R6, #+12]
+   \   00000148   010050E1           CMP      R0,R1
+   \   0000014C   E1FFFFAA           BGE      ??_GetColorIndex_RLE_13
+   \                     ??_GetColorIndex_RLE_21:
+   \   00000150   0500A0E3           MOV      R0,#+5
+   \   00000154   080086E5           STR      R0,[R6, #+8]
+    485              /* Remaining compressed pixels (RLE8) */
+    486              case STATE_RLE8:
+    487                if (--pContextBmp->RemPixels == 0) {
+    488                  pContextBmp->State = STATE_READY;
+    489                }
+    490                pContextBmp->xPos++;
+    491                break;
+    492          
+    493              /* Remaining absolute pixels (4bpp) */
+    494              case STATE_ABS4:
+    495                if (pContextBmp->NumNibble == 0) {
+    496                  if (GUI_BMP__ReadData(pContext, 1, &pData, 0)) {
+    497                    return 1;
+    498                  }
+    499                  pContextBmp->Data       = *pData;
+    500                  pContextBmp->ColorIndex = LCD__aConvTable[pContextBmp->Data >> 4];
+    501                } else {
+    502                  pContextBmp->ColorIndex = LCD__aConvTable[pContextBmp->Data & 15];
+    503                }
+    504                pContextBmp->NumNibble ^= 1;
+    505                pContextBmp->xPos++;
+    506                if (--pContextBmp->RemPixels == 0) {
+    507                  pContextBmp->State = STATE_READY;
+    508                  /* Make sure we are on an even 16bit-adr */
+    509                  if (pContextBmp->DummyRead) {
+    510                    if (GUI_BMP__ReadData(pContext, 1, &pData, 0)) {
+    511                      return 1;
+    512                    }
+    513                  }
+    514                }
+    515                break;
+    516              /* Remaining compressed pixels (RLE4) */
+    517              case STATE_RLE4:
+    518                if (pContextBmp->NumNibble == 0) {
+    519                  pContextBmp->ColorIndex = LCD__aConvTable[pContextBmp->Data  >> 4];
+    520                } else {
+    521                  pContextBmp->ColorIndex = LCD__aConvTable[pContextBmp->Data  & 15];
+    522                }
+    523                pContextBmp->NumNibble ^= 1;
+    524                pContextBmp->xPos++;
+    525                if (--pContextBmp->RemPixels == 0) {
+    526                  pContextBmp->State = STATE_READY;
+    527                }
+    528                break;
+    529          
+    530              /* Premature line break */
+    531              case STATE_LBRK:
+    532                pContextBmp->ColorIndex = LCD__aConvTable[0];
+   \                     ??_GetColorIndex_RLE_9:
+   \   00000158   000098E5           LDR      R0,[R8, #+0]
+   \   0000015C   000086E5           STR      R0,[R6, #+0]
+    533                if (++pContextBmp->xPos == pContextBmp->xSize) {
+   \   00000160   100096E5           LDR      R0,[R6, #+16]
+   \   00000164   010080E2           ADD      R0,R0,#+1
+   \   00000168   100086E5           STR      R0,[R6, #+16]
+   \   0000016C   0C1096E5           LDR      R1,[R6, #+12]
+   \   00000170   010050E1           CMP      R0,R1
+    534                  pContextBmp->State = STATE_READY;
+   \   00000174   08B08605           STREQ    R11,[R6, #+8]
+    535                }
+    536              /* Delta mode */
+    537              case STATE_DELTA:
+    538                pContextBmp->ColorIndex = LCD__aConvTable[0];
+   \                     ??_GetColorIndex_RLE_10:
+   \   00000178   000098E5           LDR      R0,[R8, #+0]
+   \   0000017C   000086E5           STR      R0,[R6, #+0]
+    539                if (--pContextBmp->RemPixels == 0) {
+   \                     ??_GetColorIndex_RLE_22:
+   \   00000180   040096E5           LDR      R0,[R6, #+4]
+   \   00000184   010050E2           SUBS     R0,R0,#+1
+   \   00000188   040086E5           STR      R0,[R6, #+4]
+    540                  pContextBmp->State = STATE_READY;
+   \   0000018C   08B08605           STREQ    R11,[R6, #+8]
+    541                }
+    542                break;
+    543              }
+    544            } while (SkipCnt--);
+   \                     ??_GetColorIndex_RLE_4:
+   \   00000190   0500A0E1           MOV      R0,R5
+   \   00000194   015040E2           SUB      R5,R0,#+1
+   \   00000198   000050E3           CMP      R0,#+0
+   \   0000019C   A1FFFF1A           BNE      ??_GetColorIndex_RLE_1
+    545            return pContextBmp->ColorIndex;
+   \   000001A0   000096E5           LDR      R0,[R6, #+0]
+   \                     ??_GetColorIndex_RLE_15:
+   \   000001A4   04D08DE2           ADD      SP,SP,#+4        ;; stack cleaning
+   \   000001A8   F08FBDE8           POP      {R4-R11,PC}      ;; return
+   \                     ??_GetColorIndex_RLE_20:
+   \   000001AC   100096E5           LDR      R0,[R6, #+16]
+   \   000001B0   0C1096E5           LDR      R1,[R6, #+12]
+   \   000001B4   010050E1           CMP      R0,R1
+   \   000001B8   9DFFFFAA           BGE      ??_GetColorIndex_RLE_3
+   \   000001BC   E3FFFFEA           B        ??_GetColorIndex_RLE_21
+   \                     ??_GetColorIndex_RLE_18:
+   \   000001C0   0030A0E3           MOV      R3,#+0
+   \   000001C4   0D20A0E1           MOV      R2,SP
+   \   000001C8   0400A0E1           MOV      R0,R4
+   \   000001CC   ........           BL       GUI_BMP__ReadData
+   \   000001D0   000050E3           CMP      R0,#+0
+   \   000001D4   C7FFFF1A           BNE      ??_GetColorIndex_RLE_11
+   \   000001D8   00109DE5           LDR      R1,[SP, #+0]
+   \   000001DC   00209DE5           LDR      R2,[SP, #+0]
+   \   000001E0   0110D1E5           LDRB     R1,[R1, #+1]
+   \   000001E4   0C0096E5           LDR      R0,[R6, #+12]
+   \   000001E8   0020D2E5           LDRB     R2,[R2, #+0]
+   \   000001EC   902121E0           MLA      R1,R0,R1,R2
+   \   000001F0   041086E5           STR      R1,[R6, #+4]
+   \   000001F4   0610A0E3           MOV      R1,#+6
+   \   000001F8   081086E5           STR      R1,[R6, #+8]
+   \   000001FC   101096E5           LDR      R1,[R6, #+16]
+   \   00000200   000051E1           CMP      R1,R0
+   \   00000204   10B08605           STREQ    R11,[R6, #+16]
+   \   00000208   00109DE5           LDR      R1,[SP, #+0]
+   \   0000020C   100096E5           LDR      R0,[R6, #+16]
+   \   00000210   0010D1E5           LDRB     R1,[R1, #+0]
+   \   00000214   000081E0           ADD      R0,R1,R0
+   \   00000218   100086E5           STR      R0,[R6, #+16]
+   \   0000021C   D5FFFFEA           B        ??_GetColorIndex_RLE_10
+   \                     ??_GetColorIndex_RLE_19:
+   \   00000220   142096E5           LDR      R2,[R6, #+20]
+   \   00000224   010052E3           CMP      R2,#+1
+   \   00000228   0B00000A           BEQ      ??_GetColorIndex_RLE_23
+   \   0000022C   AAFFFF3A           BCC      ??_GetColorIndex_RLE_2
+   \   00000230   020052E3           CMP      R2,#+2
+   \   00000234   A8FFFF1A           BNE      ??_GetColorIndex_RLE_2
+   \   00000238   0320A0E3           MOV      R2,#+3
+   \   0000023C   010081E2           ADD      R0,R1,#+1
+   \   00000240   082086E5           STR      R2,[R6, #+8]
+   \   00000244   FF0000E2           AND      R0,R0,#0xFF
+   \   00000248   041086E5           STR      R1,[R6, #+4]
+   \   0000024C   A00009E0           AND      R0,R9,R0, LSR #+1
+   \   00000250   1B00C6E5           STRB     R0,[R6, #+27]
+   \   00000254   1AB0C6E5           STRB     R11,[R6, #+26]
+   \   00000258   190000EA           B        ??_GetColorIndex_RLE_24
+   \                     ??_GetColorIndex_RLE_23:
+   \   0000025C   089086E5           STR      R9,[R6, #+8]
+   \   00000260   041086E5           STR      R1,[R6, #+4]
+   \   00000264   7DFFFFEA           B        ??_GetColorIndex_RLE_5
+   \                     ??_GetColorIndex_RLE_16:
+   \   00000268   142096E5           LDR      R2,[R6, #+20]
+   \   0000026C   010052E3           CMP      R2,#+1
+   \   00000270   0600000A           BEQ      ??_GetColorIndex_RLE_25
+   \   00000274   98FFFF3A           BCC      ??_GetColorIndex_RLE_2
+   \   00000278   020052E3           CMP      R2,#+2
+   \   0000027C   96FFFF1A           BNE      ??_GetColorIndex_RLE_2
+   \   00000280   087086E5           STR      R7,[R6, #+8]
+   \   00000284   040086E5           STR      R0,[R6, #+4]
+   \   00000288   1AB0C6E5           STRB     R11,[R6, #+26]
+   \   0000028C   350000EA           B        ??_GetColorIndex_RLE_26
+   \                     ??_GetColorIndex_RLE_25:
+   \   00000290   011198E7           LDR      R1,[R8, +R1, LSL #+2]
+   \   00000294   001086E5           STR      R1,[R6, #+0]
+   \   00000298   08A086E5           STR      R10,[R6, #+8]
+   \   0000029C   040086E5           STR      R0,[R6, #+4]
+   \                     ??_GetColorIndex_RLE_6:
+   \   000002A0   040096E5           LDR      R0,[R6, #+4]
+   \   000002A4   010050E2           SUBS     R0,R0,#+1
+   \   000002A8   040086E5           STR      R0,[R6, #+4]
+   \   000002AC   85FFFF1A           BNE      ??_GetColorIndex_RLE_12
+   \   000002B0   08B086E5           STR      R11,[R6, #+8]
+   \   000002B4   83FFFFEA           B        ??_GetColorIndex_RLE_12
+   \                     ??_GetColorIndex_RLE_7:
+   \   000002B8   1A00D6E5           LDRB     R0,[R6, #+26]
+   \   000002BC   000050E3           CMP      R0,#+0
+   \   000002C0   0B00001A           BNE      ??_GetColorIndex_RLE_27
+   \                     ??_GetColorIndex_RLE_24:
+   \   000002C4   0030A0E3           MOV      R3,#+0
+   \   000002C8   0D20A0E1           MOV      R2,SP
+   \   000002CC   0110A0E3           MOV      R1,#+1
+   \   000002D0   0400A0E1           MOV      R0,R4
+   \   000002D4   ........           BL       GUI_BMP__ReadData
+   \   000002D8   000050E3           CMP      R0,#+0
+   \   000002DC   85FFFF1A           BNE      ??_GetColorIndex_RLE_11
+   \   000002E0   00009DE5           LDR      R0,[SP, #+0]
+   \   000002E4   0000D0E5           LDRB     R0,[R0, #+0]
+   \   000002E8   1900C6E5           STRB     R0,[R6, #+25]
+   \   000002EC   4002A0E1           ASR      R0,R0,#+4
+   \   000002F0   010000EA           B        ??_GetColorIndex_RLE_28
+   \                     ??_GetColorIndex_RLE_27:
+   \   000002F4   1900D6E5           LDRB     R0,[R6, #+25]
+   \   000002F8   0F0000E2           AND      R0,R0,#0xF
+   \                     ??_GetColorIndex_RLE_28:
+   \   000002FC   000198E7           LDR      R0,[R8, +R0, LSL #+2]
+   \   00000300   000086E5           STR      R0,[R6, #+0]
+   \   00000304   1A00D6E5           LDRB     R0,[R6, #+26]
+   \   00000308   010020E2           EOR      R0,R0,#0x1
+   \   0000030C   1A00C6E5           STRB     R0,[R6, #+26]
+   \   00000310   100096E5           LDR      R0,[R6, #+16]
+   \   00000314   010080E2           ADD      R0,R0,#+1
+   \   00000318   100086E5           STR      R0,[R6, #+16]
+   \   0000031C   040096E5           LDR      R0,[R6, #+4]
+   \   00000320   010050E2           SUBS     R0,R0,#+1
+   \   00000324   040086E5           STR      R0,[R6, #+4]
+   \   00000328   98FFFF1A           BNE      ??_GetColorIndex_RLE_4
+   \   0000032C   08B086E5           STR      R11,[R6, #+8]
+   \   00000330   1B00D6E5           LDRB     R0,[R6, #+27]
+   \   00000334   000050E3           CMP      R0,#+0
+   \   00000338   94FFFF0A           BEQ      ??_GetColorIndex_RLE_4
+   \   0000033C   0030A0E3           MOV      R3,#+0
+   \   00000340   0D20A0E1           MOV      R2,SP
+   \   00000344   0110A0E3           MOV      R1,#+1
+   \   00000348   0400A0E1           MOV      R0,R4
+   \   0000034C   ........           BL       GUI_BMP__ReadData
+   \   00000350   000050E3           CMP      R0,#+0
+   \   00000354   67FFFF1A           BNE      ??_GetColorIndex_RLE_11
+   \   00000358   8CFFFFEA           B        ??_GetColorIndex_RLE_4
+   \                     ??_GetColorIndex_RLE_8:
+   \   0000035C   1A00D6E5           LDRB     R0,[R6, #+26]
+   \   00000360   000050E3           CMP      R0,#+0
+   \   00000364   0200001A           BNE      ??_GetColorIndex_RLE_29
+   \                     ??_GetColorIndex_RLE_26:
+   \   00000368   1900D6E5           LDRB     R0,[R6, #+25]
+   \   0000036C   4002A0E1           ASR      R0,R0,#+4
+   \   00000370   010000EA           B        ??_GetColorIndex_RLE_30
+   \                     ??_GetColorIndex_RLE_29:
+   \   00000374   1900D6E5           LDRB     R0,[R6, #+25]
+   \   00000378   0F0000E2           AND      R0,R0,#0xF
+   \                     ??_GetColorIndex_RLE_30:
+   \   0000037C   000198E7           LDR      R0,[R8, +R0, LSL #+2]
+   \   00000380   000086E5           STR      R0,[R6, #+0]
+   \   00000384   1A00D6E5           LDRB     R0,[R6, #+26]
+   \   00000388   010020E2           EOR      R0,R0,#0x1
+   \   0000038C   1A00C6E5           STRB     R0,[R6, #+26]
+   \   00000390   100096E5           LDR      R0,[R6, #+16]
+   \   00000394   010080E2           ADD      R0,R0,#+1
+   \   00000398   100086E5           STR      R0,[R6, #+16]
+   \   0000039C   77FFFFEA           B        ??_GetColorIndex_RLE_22
+    546          }
+    547          
+    548          /*********************************************************************
+    549          *
+    550          *       _SkipLine_RLE
+    551          *
+    552          * Return value:
+    553          *   Number of skipped lines
+    554          */
+    555          static int _SkipLine_RLE(GUI_BMP_CONTEXT * pContext, CONTEXT_DECOMP_BMP * pContextBmp) {
+    556            int i;
+    557            for (i = 0; i < pContextBmp->xSize; i++) {
+    558              _GetColorIndex_RLE(pContext, 0, pContextBmp);
+    559            }
+    560            return 1;
+    561          }
+    562          
+    563          /*********************************************************************
+    564          *
+    565          *       _DrawLineScaled_RLE
+    566          *
+    567          * Parameters
+    568          *   pData      - Pointer to buffer with color information
+    569          *   x0, y0     - Drawing position of leftmost pixel
+    570          *   xSize      - Number of origilal pixels in color buffer
+    571          *   Num        - Numerator for scaling
+    572          *   Denom      - Denominator for scaling
+    573          *   NumLines   - Number of repetitions the line needs to be drawn
+    574          *   Compression- Compression method (BI_RLE4 or BI_RLE8)
+    575          *
+    576          * Return value:
+    577          *   0  = ok
+    578          *   >0 = Number of lines skipped
+    579          *   <0 = Error
+    580          */
+
+   \                                 In section .text, align 4, keep-with-next
+    581          static int _DrawLineScaled_RLE(GUI_BMP_CONTEXT * pContext, int x0, int y0, int xSize, int Num, int Denom, unsigned NumLines, CONTEXT_DECOMP_BMP * pContextBmp) {
+   \                     _DrawLineScaled_RLE:
+   \   00000000   F14F2DE9           PUSH     {R0,R4-R11,LR}
+   \   00000004   08D04DE2           SUB      SP,SP,#+8
+   \   00000008   0140A0E1           MOV      R4,R1
+   \   0000000C   34709DE5           LDR      R7,[SP, #+52]
+    582            unsigned Compare, Current;
+    583            int SkipCnt, NumReps;
+    584            /*
+    585             * Iterate over the original pixels
+    586             */
+    587            Current = Denom / 2;
+    588            Compare = Denom;
+   \   00000010   38109DE5           LDR      R1,[SP, #+56]
+   \   00000014   0250A0E1           MOV      R5,R2
+   \   00000018   A70F87E0           ADD      R0,R7,R7, LSR #+31
+   \   0000001C   051081E0           ADD      R1,R1,R5
+   \   00000020   03A0A0E1           MOV      R10,R3
+   \   00000024   30609DE5           LDR      R6,[SP, #+48]
+   \   00000028   C090A0E1           ASR      R9,R0,#+1
+   \   0000002C   0780A0E1           MOV      R8,R7
+   \   00000030   00108DE5           STR      R1,[SP, #+0]
+    589            do {
+    590              int ColorIndex;
+    591              SkipCnt = 0;
+   \                     ??_DrawLineScaled_RLE_0:
+   \   00000034   0010A0E3           MOV      R1,#+0
+    592              /*
+    593               * Find out how many source pixels can be skipped
+    594               */
+    595              while (Current += Num, Current < Compare) {
+   \                     ??_DrawLineScaled_RLE_1:
+   \   00000038   099086E0           ADD      R9,R6,R9
+   \   0000003C   080059E1           CMP      R9,R8
+   \   00000040   0700002A           BCS      ??_DrawLineScaled_RLE_2
+    596                SkipCnt++;
+    597                if (xSize-- == 0) {
+   \   00000044   0A00A0E1           MOV      R0,R10
+   \   00000048   011081E2           ADD      R1,R1,#+1
+   \   0000004C   01A040E2           SUB      R10,R0,#+1
+   \   00000050   000050E3           CMP      R0,#+0
+   \   00000054   F7FFFF1A           BNE      ??_DrawLineScaled_RLE_1
+    598                  return 0;
+   \                     ??_DrawLineScaled_RLE_3:
+   \   00000058   0000A0E3           MOV      R0,#+0
+   \   0000005C   0CD08DE2           ADD      SP,SP,#+12
+   \   00000060   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    599                }
+    600              }
+    601              /*
+    602               * Get color from data pointer and skip the number of pixels that are irrelevant
+    603               */
+    604              ColorIndex = _GetColorIndex_RLE(pContext, SkipCnt, pContextBmp);
+   \                     ??_DrawLineScaled_RLE_2:
+   \   00000064   3C209DE5           LDR      R2,[SP, #+60]
+   \   00000068   08009DE5           LDR      R0,[SP, #+8]
+   \   0000006C   ........           BL       _GetColorIndex_RLE
+    605              LCD__SetColorIndex(ColorIndex);
+   \   00000070   ........           LDR      R1,??DataTable6_1
+    606              /*
+    607               * Find out how many times this pixel needs to be repeated
+    608               */
+    609              NumReps = 1;
+   \   00000074   01B0A0E3           MOV      R11,#+1
+   \   00000078   001091E5           LDR      R1,[R1, #+0]
+   \   0000007C   000081E5           STR      R0,[R1, #+0]
+   \   00000080   000000EA           B        ??_DrawLineScaled_RLE_4
+    610              while (Compare += Denom, Current >= Compare) {
+    611                NumReps++;
+   \                     ??_DrawLineScaled_RLE_5:
+   \   00000084   01B08BE2           ADD      R11,R11,#+1
+    612              }
+   \                     ??_DrawLineScaled_RLE_4:
+   \   00000088   088087E0           ADD      R8,R7,R8
+   \   0000008C   080059E1           CMP      R9,R8
+   \   00000090   FBFFFF2A           BCS      ??_DrawLineScaled_RLE_5
+    613              /*
+    614               * Draw the pixel
+    615               */
+    616              if ((NumReps == 1) && (NumLines == 1)) {
+   \   00000094   01005BE3           CMP      R11,#+1
+   \   00000098   38009D05           LDREQ    R0,[SP, #+56]
+   \   0000009C   01005003           CMPEQ    R0,#+1
+   \   000000A0   0300001A           BNE      ??_DrawLineScaled_RLE_6
+    617                LCD_DrawPixel(x0, y0);
+   \   000000A4   0510A0E1           MOV      R1,R5
+   \   000000A8   0400A0E1           MOV      R0,R4
+   \   000000AC   ........           BL       LCD_DrawPixel
+   \   000000B0   060000EA           B        ??_DrawLineScaled_RLE_7
+    618              } else {
+    619                LCD_FillRect(x0, y0, x0 + NumReps - 1, y0 + NumLines - 1);
+   \                     ??_DrawLineScaled_RLE_6:
+   \   000000B4   00009DE5           LDR      R0,[SP, #+0]
+   \   000000B8   0510A0E1           MOV      R1,R5
+   \   000000BC   013040E2           SUB      R3,R0,#+1
+   \   000000C0   0B0084E0           ADD      R0,R4,R11
+   \   000000C4   012040E2           SUB      R2,R0,#+1
+   \   000000C8   0400A0E1           MOV      R0,R4
+   \   000000CC   ........           BL       LCD_FillRect
+    620              }
+    621              x0 += NumReps;
+   \                     ??_DrawLineScaled_RLE_7:
+   \   000000D0   04408BE0           ADD      R4,R11,R4
+    622            } while (--xSize);
+   \   000000D4   01A05AE2           SUBS     R10,R10,#+1
+   \   000000D8   D5FFFF1A           BNE      ??_DrawLineScaled_RLE_0
+   \   000000DC   DDFFFFEA           B        ??_DrawLineScaled_RLE_3
+    623            return 0;
+    624          }
+    625          
+    626          /*********************************************************************
+    627          *
+    628          *       _DrawBitmapScaled_RLE
+    629          */
+
+   \                                 In section .text, align 4, keep-with-next
+    630          static int _DrawBitmapScaled_RLE(GUI_BMP_CONTEXT * pContext, int x0, int y0, int XSize, int YSize, int Compression, int Num, int Denom) {
+   \                     _DrawBitmapScaled_RLE:
+   \   00000000   FE4F2DE9           PUSH     {R1-R11,LR}
+   \   00000004   38D04DE2           SUB      SP,SP,#+56
+   \   00000008   0040A0E1           MOV      R4,R0
+   \   0000000C   68009DE5           LDR      R0,[SP, #+104]
+   \   00000010   6C109DE5           LDR      R1,[SP, #+108]
+   \   00000014   70509DE5           LDR      R5,[SP, #+112]
+   \   00000018   74609DE5           LDR      R6,[SP, #+116]
+    631            CONTEXT_DECOMP_BMP ContextBmp = {0};
+   \   0000001C   18208DE2           ADD      R2,SP,#+24
+   \   00000020   0030A0E3           MOV      R3,#+0
+   \   00000024   00C0A0E3           MOV      R12,#+0
+   \   00000028   00E0A0E3           MOV      LR,#+0
+   \   0000002C   0070A0E3           MOV      R7,#+0
+   \   00000030   8850A2E8           STM      R2!,{R3,R7,R12,LR}
+   \   00000034   0850A2E8           STM      R2!,{R3,R12,LR}
+    632            int y, Step, SkipCnt, NumReps;
+    633            unsigned Compare, Current;
+    634            ContextBmp.xSize = XSize;
+    635            ContextBmp.Compression = Compression;
+   \   00000038   2C108DE5           STR      R1,[SP, #+44]
+   \   0000003C   40309DE5           LDR      R3,[SP, #+64]
+    636            Current = Denom / 2;
+   \   00000040   A61F86E0           ADD      R1,R6,R6, LSR #+31
+   \   00000044   C180A0E1           ASR      R8,R1,#+1
+    637            Compare = Denom;
+    638            Step = _GetStep(&YSize, &y, Num, Denom);
+   \   00000048   950000E0           MUL      R0,R5,R0
+   \   0000004C   24308DE5           STR      R3,[SP, #+36]
+   \   00000050   0610A0E1           MOV      R1,R6
+   \   00000054   ........           BL       __aeabi_idiv
+   \   00000058   0670A0E1           MOV      R7,R6
+   \   0000005C   10008DE5           STR      R0,[SP, #+16]
+   \   00000060   010050E3           CMP      R0,#+1
+   \   00000064   080000AA           BGE      ??_DrawBitmapScaled_RLE_0
+   \   00000068   000050E3           CMP      R0,#+0
+    639            if (!Step) {
+    640              return 1;
+   \   0000006C   0100A053           MOVPL    R0,#+1
+   \   00000070   3D00005A           BPL      ??_DrawBitmapScaled_RLE_1
+   \   00000074   0010A0E1           MOV      R1,R0
+   \   00000078   001061E2           RSB      R1,R1,#+0
+   \   0000007C   10108DE5           STR      R1,[SP, #+16]
+   \   00000080   0090A0E3           MOV      R9,#+0
+   \   00000084   0110A0E3           MOV      R1,#+1
+   \   00000088   010000EA           B        ??_DrawBitmapScaled_RLE_2
+    641            }
+   \                     ??_DrawBitmapScaled_RLE_0:
+   \   0000008C   019040E2           SUB      R9,R0,#+1
+   \   00000090   0010E0E3           MVN      R1,#+0
+   \                     ??_DrawBitmapScaled_RLE_2:
+   \   00000094   14108DE5           STR      R1,[SP, #+20]
+    642            /*
+    643             * Iterate over the original pixels
+    644             */
+    645            do {
+    646              SkipCnt = 0;
+   \                     ??_DrawBitmapScaled_RLE_3:
+   \   00000098   00A0A0E3           MOV      R10,#+0
+   \   0000009C   000000EA           B        ??_DrawBitmapScaled_RLE_4
+    647              /*
+    648               * Find out how many source lines can be skipped
+    649               */
+    650              while (Current += Num, Current < Compare) {
+    651                SkipCnt++;
+   \                     ??_DrawBitmapScaled_RLE_5:
+   \   000000A0   01A08AE2           ADD      R10,R10,#+1
+    652              }
+   \                     ??_DrawBitmapScaled_RLE_4:
+   \   000000A4   088085E0           ADD      R8,R5,R8
+   \   000000A8   070058E1           CMP      R8,R7
+   \   000000AC   FBFFFF3A           BCC      ??_DrawBitmapScaled_RLE_5
+   \   000000B0   01005AE3           CMP      R10,#+1
+   \   000000B4   060000BA           BLT      ??_DrawBitmapScaled_RLE_6
+    653              /*
+    654               * Skip the number of lines that are irrelevant
+    655               */
+    656              while (SkipCnt-- > 0) {
+    657                /* Read one line of pixel data */
+    658                if (_SkipLine_RLE(pContext, &ContextBmp) < 0) {
+   \                     ??_DrawBitmapScaled_RLE_7:
+   \   000000B8   24009DE5           LDR      R0,[SP, #+36]
+   \   000000BC   01A04AE2           SUB      R10,R10,#+1
+   \   000000C0   00B0A0E3           MOV      R11,#+0
+   \   000000C4   010050E3           CMP      R0,#+1
+   \   000000C8   030000AA           BGE      ??_DrawBitmapScaled_RLE_8
+   \                     ??_DrawBitmapScaled_RLE_9:
+   \   000000CC   01005AE3           CMP      R10,#+1
+   \   000000D0   F8FFFFAA           BGE      ??_DrawBitmapScaled_RLE_7
+    659                  return 1; /* Error */
+    660                }
+    661              }
+    662              /*
+    663               * Find out how many times this line needs to be repeated
+    664               */
+    665              NumReps = 1;
+   \                     ??_DrawBitmapScaled_RLE_6:
+   \   000000D4   01A0A0E3           MOV      R10,#+1
+   \   000000D8   090000EA           B        ??_DrawBitmapScaled_RLE_10
+   \                     ??_DrawBitmapScaled_RLE_8:
+   \   000000DC   18208DE2           ADD      R2,SP,#+24
+   \   000000E0   0010A0E3           MOV      R1,#+0
+   \   000000E4   0400A0E1           MOV      R0,R4
+   \   000000E8   ........           BL       _GetColorIndex_RLE
+   \   000000EC   24009DE5           LDR      R0,[SP, #+36]
+   \   000000F0   01B08BE2           ADD      R11,R11,#+1
+   \   000000F4   00005BE1           CMP      R11,R0
+   \   000000F8   F7FFFFBA           BLT      ??_DrawBitmapScaled_RLE_8
+   \   000000FC   F2FFFFEA           B        ??_DrawBitmapScaled_RLE_9
+    666              while (Compare += Denom, Current >= Compare) {
+    667                NumReps++;
+   \                     ??_DrawBitmapScaled_RLE_11:
+   \   00000100   01A08AE2           ADD      R10,R10,#+1
+    668              }
+   \                     ??_DrawBitmapScaled_RLE_10:
+   \   00000104   077086E0           ADD      R7,R6,R7
+   \   00000108   070058E1           CMP      R8,R7
+   \   0000010C   FBFFFF2A           BCS      ??_DrawBitmapScaled_RLE_11
+    669              /*
+    670               * Draw the line
+    671               */
+    672              _DrawLineScaled_RLE(pContext, x0, (Step < 0) ? y0 + y - NumReps + 1 : y0 + y, XSize, Num, Denom, NumReps, &ContextBmp);
+   \   00000110   3C009DE5           LDR      R0,[SP, #+60]
+   \   00000114   08A08DE5           STR      R10,[SP, #+8]
+   \   00000118   002089E0           ADD      R2,R9,R0
+   \   0000011C   14009DE5           LDR      R0,[SP, #+20]
+   \   00000120   04608DE5           STR      R6,[SP, #+4]
+   \   00000124   000050E3           CMP      R0,#+0
+   \   00000128   0A004240           SUBMI    R0,R2,R10
+   \   0000012C   01208042           ADDMI    R2,R0,#+1
+   \   00000130   18008DE2           ADD      R0,SP,#+24
+   \   00000134   0C008DE5           STR      R0,[SP, #+12]
+   \   00000138   00508DE5           STR      R5,[SP, #+0]
+   \   0000013C   40309DE5           LDR      R3,[SP, #+64]
+   \   00000140   38109DE5           LDR      R1,[SP, #+56]
+   \   00000144   0400A0E1           MOV      R0,R4
+   \   00000148   ........           BL       _DrawLineScaled_RLE
+    673              y += Step * NumReps;
+   \   0000014C   14009DE5           LDR      R0,[SP, #+20]
+   \   00000150   9A9029E0           MLA      R9,R10,R0,R9
+    674            } while ((y < YSize) && (y >= 0));
+   \   00000154   10009DE5           LDR      R0,[SP, #+16]
+   \   00000158   000059E1           CMP      R9,R0
+   \   0000015C   010000AA           BGE      ??_DrawBitmapScaled_RLE_12
+   \   00000160   000059E3           CMP      R9,#+0
+   \   00000164   CBFFFF5A           BPL      ??_DrawBitmapScaled_RLE_3
+    675            return 0;
+   \                     ??_DrawBitmapScaled_RLE_12:
+   \   00000168   0000A0E3           MOV      R0,#+0
+   \                     ??_DrawBitmapScaled_RLE_1:
+   \   0000016C   44D08DE2           ADD      SP,SP,#+68       ;; stack cleaning
+   \   00000170   F08FBDE8           POP      {R4-R11,PC}      ;; return
+    676          }
+    677          
+    678          /*********************************************************************
+    679          *
+    680          *       _Draw
+    681          */
+
+   \                                 In section .text, align 4, keep-with-next
+    682          static int _Draw(int x0, int y0, GUI_BMP_CONTEXT * pContext, int Num, int Denom) {
+   \                     _Draw:
+   \   00000000   F0472DE9           PUSH     {R4-R10,LR}
+   \   00000004   38D04DE2           SUB      SP,SP,#+56
+   \   00000008   0040A0E1           MOV      R4,R0
+    683            #if (GUI_WINSUPPORT)
+    684              GUI_RECT r;
+    685            #endif
+    686            int Ret = 0;
+    687            I32 Width, Height;
+    688            U16 BitCount;
+    689            int NumColors;
+    690            int Compression;
+    691            /* Initialize */
+    692            if (GUI_BMP__Init(pContext, &Width, &Height, &BitCount, &NumColors, &Compression)) {
+   \   0000000C   24008DE2           ADD      R0,SP,#+36
+   \   00000010   04008DE5           STR      R0,[SP, #+4]
+   \   00000014   28008DE2           ADD      R0,SP,#+40
+   \   00000018   0150A0E1           MOV      R5,R1
+   \   0000001C   0260A0E1           MOV      R6,R2
+   \   00000020   0370A0E1           MOV      R7,R3
+   \   00000024   00008DE5           STR      R0,[SP, #+0]
+   \   00000028   58809DE5           LDR      R8,[SP, #+88]
+   \   0000002C   0090A0E3           MOV      R9,#+0
+   \   00000030   18308DE2           ADD      R3,SP,#+24
+   \   00000034   1C208DE2           ADD      R2,SP,#+28
+   \   00000038   20108DE2           ADD      R1,SP,#+32
+   \   0000003C   0600A0E1           MOV      R0,R6
+   \   00000040   ........           BL       GUI_BMP__Init
+   \   00000044   000050E3           CMP      R0,#+0
+    693              return 1;
+   \   00000048   0100A013           MOVNE    R0,#+1
+   \   0000004C   9800001A           BNE      ??_Draw_1
+    694            }
+    695            /* Start output */
+    696            GUI_LOCK();
+   \   00000050   ........           BL       GUI_Lock
+    697            #if (GUI_WINSUPPORT)
+    698              WM_ADDORG(x0,y0);
+   \   00000054   ........           LDR      R0,??DataTable6_2
+   \   00000058   401090E5           LDR      R1,[R0, #+64]
+   \   0000005C   440090E5           LDR      R0,[R0, #+68]
+   \   00000060   044081E0           ADD      R4,R1,R4
+   \   00000064   055080E0           ADD      R5,R0,R5
+    699              r.x1 = (r.x0 = x0) + Width  * (U32)Num / Denom - 1;
+   \   00000068   20009DE5           LDR      R0,[SP, #+32]
+   \   0000006C   0810A0E1           MOV      R1,R8
+   \   00000070   970000E0           MUL      R0,R7,R0
+   \   00000074   ........           BL       __aeabi_uidiv
+   \   00000078   BC42CDE1           STRH     R4,[SP, #+44]
+   \   0000007C   FCA2DDE1           LDRSH    R10,[SP, #+44]
+    700              r.y1 = (r.y0 = y0) + Height * (U32)Num / Denom - 1;
+   \   00000080   0810A0E1           MOV      R1,R8
+   \   00000084   BE52CDE1           STRH     R5,[SP, #+46]
+   \   00000088   0A0080E0           ADD      R0,R0,R10
+   \   0000008C   010040E2           SUB      R0,R0,#+1
+   \   00000090   B003CDE1           STRH     R0,[SP, #+48]
+   \   00000094   1C009DE5           LDR      R0,[SP, #+28]
+   \   00000098   FEA2DDE1           LDRSH    R10,[SP, #+46]
+   \   0000009C   970000E0           MUL      R0,R7,R0
+   \   000000A0   ........           BL       __aeabi_uidiv
+   \   000000A4   0A0080E0           ADD      R0,R0,R10
+   \   000000A8   010040E2           SUB      R0,R0,#+1
+   \   000000AC   B203CDE1           STRH     R0,[SP, #+50]
+    701              WM_ITERATE_START(&r) {
+   \   000000B0   2C008DE2           ADD      R0,SP,#+44
+   \   000000B4   ........           BL       WM__InitIVRSearch
+   \   000000B8   000050E3           CMP      R0,#+0
+   \   000000BC   7A00000A           BEQ      ??_Draw_2
+    702            #endif
+    703            /* Show bitmap */
+    704            switch (Compression) {
+   \                     ??_Draw_3:
+   \   000000C0   24009DE5           LDR      R0,[SP, #+36]
+   \   000000C4   000050E3           CMP      R0,#+0
+   \   000000C8   0300000A           BEQ      ??_Draw_4
+   \   000000CC   020050E3           CMP      R0,#+2
+   \   000000D0   6300000A           BEQ      ??_Draw_5
+   \   000000D4   6200003A           BCC      ??_Draw_5
+   \   000000D8   700000EA           B        ??_Draw_6
+    705            case BI_RGB:
+    706              switch (BitCount) {
+   \                     ??_Draw_4:
+   \   000000DC   B801DDE1           LDRH     R0,[SP, #+24]
+   \   000000E0   010040E2           SUB      R0,R0,#+1
+   \   000000E4   1F0050E3           CMP      R0,#+31
+   \   000000E8   00F18F90           ADDLS    PC,PC,R0, LSL #+2
+   \                     ??_Draw_0:
+   \   000000EC   6B00008A           BHI      ??_Draw_6
+   \   000000F0   1E0000EA           B        ??_Draw_7
+   \   000000F4   690000EA           B        ??_Draw_6
+   \   000000F8   680000EA           B        ??_Draw_6
+   \   000000FC   1B0000EA           B        ??_Draw_7
+   \   00000100   660000EA           B        ??_Draw_6
+   \   00000104   650000EA           B        ??_Draw_6
+   \   00000108   640000EA           B        ??_Draw_6
+   \   0000010C   170000EA           B        ??_Draw_7
+   \   00000110   620000EA           B        ??_Draw_6
+   \   00000114   610000EA           B        ??_Draw_6
+   \   00000118   600000EA           B        ??_Draw_6
+   \   0000011C   5F0000EA           B        ??_Draw_6
+   \   00000120   5E0000EA           B        ??_Draw_6
+   \   00000124   5D0000EA           B        ??_Draw_6
+   \   00000128   5C0000EA           B        ??_Draw_6
+   \   0000012C   220000EA           B        ??_Draw_8
+   \   00000130   5A0000EA           B        ??_Draw_6
+   \   00000134   590000EA           B        ??_Draw_6
+   \   00000138   580000EA           B        ??_Draw_6
+   \   0000013C   570000EA           B        ??_Draw_6
+   \   00000140   560000EA           B        ??_Draw_6
+   \   00000144   550000EA           B        ??_Draw_6
+   \   00000148   540000EA           B        ??_Draw_6
+   \   0000014C   270000EA           B        ??_Draw_9
+   \   00000150   520000EA           B        ??_Draw_6
+   \   00000154   510000EA           B        ??_Draw_6
+   \   00000158   500000EA           B        ??_Draw_6
+   \   0000015C   4F0000EA           B        ??_Draw_6
+   \   00000160   4E0000EA           B        ??_Draw_6
+   \   00000164   4D0000EA           B        ??_Draw_6
+   \   00000168   4C0000EA           B        ??_Draw_6
+   \   0000016C   2F0000EA           B        ??_Draw_10
+    707              case 1:
+    708              case 4:
+    709              case 8:
+    710                GUI_BMP__ReadPalette(pContext, NumColors);
+   \                     ??_Draw_7:
+   \   00000170   28109DE5           LDR      R1,[SP, #+40]
+   \   00000174   0600A0E1           MOV      R0,R6
+   \   00000178   ........           BL       GUI_BMP__ReadPalette
+    711                Ret = _DrawBitmapScaled(pContext, x0, y0, Width, Height, Num, Denom, 1, BitCount, _DrawLineScaled_Pal);
+   \   0000017C   ........           LDR      R0,??DataTable6_3
+   \   00000180   08808DE5           STR      R8,[SP, #+8]
+   \   00000184   14008DE5           STR      R0,[SP, #+20]
+   \   00000188   B801DDE1           LDRH     R0,[SP, #+24]
+   \   0000018C   04708DE5           STR      R7,[SP, #+4]
+   \   00000190   20309DE5           LDR      R3,[SP, #+32]
+   \   00000194   10008DE5           STR      R0,[SP, #+16]
+   \   00000198   0100A0E3           MOV      R0,#+1
+   \   0000019C   0C008DE5           STR      R0,[SP, #+12]
+   \   000001A0   1C009DE5           LDR      R0,[SP, #+28]
+   \   000001A4   0520A0E1           MOV      R2,R5
+   \   000001A8   00008DE5           STR      R0,[SP, #+0]
+   \                     ??_Draw_11:
+   \   000001AC   0410A0E1           MOV      R1,R4
+   \   000001B0   0600A0E1           MOV      R0,R6
+   \   000001B4   ........           BL       _DrawBitmapScaled
+   \   000001B8   370000EA           B        ??_Draw_12
+    712                break;
+    713              case 16:
+    714                Ret = _DrawBitmapScaled(pContext, x0, y0, Width, Height, Num, Denom, 2, BitCount, _DrawLineScaled_16bpp);
+   \                     ??_Draw_8:
+   \   000001BC   ........           LDR      R0,??DataTable6_4
+   \   000001C0   08808DE5           STR      R8,[SP, #+8]
+   \   000001C4   14008DE5           STR      R0,[SP, #+20]
+   \   000001C8   1000A0E3           MOV      R0,#+16
+   \   000001CC   10008DE5           STR      R0,[SP, #+16]
+   \   000001D0   0200A0E3           MOV      R0,#+2
+   \   000001D4   0C008DE5           STR      R0,[SP, #+12]
+   \   000001D8   1C009DE5           LDR      R0,[SP, #+28]
+   \   000001DC   04708DE5           STR      R7,[SP, #+4]
+   \   000001E0   00008DE5           STR      R0,[SP, #+0]
+   \   000001E4   20309DE5           LDR      R3,[SP, #+32]
+   \   000001E8   0520A0E1           MOV      R2,R5
+   \   000001EC   EEFFFFEA           B        ??_Draw_11
+    715                break;
+    716              case 24:
+    717                Ret = _DrawBitmapScaled(pContext, x0, y0, Width, Height, Num, Denom, 3, BitCount, _DrawLineScaled_RGB);
+   \                     ??_Draw_9:
+   \   000001F0   ........           LDR      R0,??DataTable6_5
+   \   000001F4   08808DE5           STR      R8,[SP, #+8]
+   \   000001F8   14008DE5           STR      R0,[SP, #+20]
+   \   000001FC   1800A0E3           MOV      R0,#+24
+   \   00000200   10008DE5           STR      R0,[SP, #+16]
+   \   00000204   0300A0E3           MOV      R0,#+3
+   \   00000208   0C008DE5           STR      R0,[SP, #+12]
+   \   0000020C   1C009DE5           LDR      R0,[SP, #+28]
+   \   00000210   04708DE5           STR      R7,[SP, #+4]
+   \   00000214   00008DE5           STR      R0,[SP, #+0]
+   \   00000218   20309DE5           LDR      R3,[SP, #+32]
+   \   0000021C   0520A0E1           MOV      R2,R5
+   \   00000220   0410A0E1           MOV      R1,R4
+   \   00000224   0600A0E1           MOV      R0,R6
+   \   00000228   ........           BL       _DrawBitmapScaled
+   \   0000022C   1A0000EA           B        ??_Draw_12
+    718                break;
+    719              case 32:
+    720                Ret = _DrawBitmapScaled(pContext, x0, y0, Width, Height, Num, Denom, 4, BitCount, _DrawLineScaled_RGB);
+   \                     ??_Draw_10:
+   \   00000230   ........           LDR      R0,??DataTable6_5
+   \   00000234   08808DE5           STR      R8,[SP, #+8]
+   \   00000238   14008DE5           STR      R0,[SP, #+20]
+   \   0000023C   2000A0E3           MOV      R0,#+32
+   \   00000240   10008DE5           STR      R0,[SP, #+16]
+   \   00000244   0400A0E3           MOV      R0,#+4
+   \   00000248   0C008DE5           STR      R0,[SP, #+12]
+   \   0000024C   1C009DE5           LDR      R0,[SP, #+28]
+   \   00000250   04708DE5           STR      R7,[SP, #+4]
+   \   00000254   00008DE5           STR      R0,[SP, #+0]
+   \   00000258   20309DE5           LDR      R3,[SP, #+32]
+   \   0000025C   0520A0E1           MOV      R2,R5
+   \   00000260   D1FFFFEA           B        ??_Draw_11
+    721                break;
+    722              }
+    723              break;
+    724            case BI_RLE4:
+    725            case BI_RLE8:
+    726              GUI_BMP__ReadPalette(pContext, NumColors);
+   \                     ??_Draw_5:
+   \   00000264   28109DE5           LDR      R1,[SP, #+40]
+   \   00000268   0600A0E1           MOV      R0,R6
+   \   0000026C   ........           BL       GUI_BMP__ReadPalette
+    727              Ret = _DrawBitmapScaled_RLE(pContext, x0, y0, Width, Height, Compression, Num, Denom);
+   \   00000270   24009DE5           LDR      R0,[SP, #+36]
+   \   00000274   0C808DE5           STR      R8,[SP, #+12]
+   \   00000278   04008DE5           STR      R0,[SP, #+4]
+   \   0000027C   1C009DE5           LDR      R0,[SP, #+28]
+   \   00000280   08708DE5           STR      R7,[SP, #+8]
+   \   00000284   00008DE5           STR      R0,[SP, #+0]
+   \   00000288   20309DE5           LDR      R3,[SP, #+32]
+   \   0000028C   0520A0E1           MOV      R2,R5
+   \   00000290   0410A0E1           MOV      R1,R4
+   \   00000294   0600A0E1           MOV      R0,R6
+   \   00000298   ........           BL       _DrawBitmapScaled_RLE
+   \                     ??_Draw_12:
+   \   0000029C   0090A0E1           MOV      R9,R0
+    728              break;
+    729            }
+    730            #if (GUI_WINSUPPORT)
+    731              } WM_ITERATE_END();
+   \                     ??_Draw_6:
+   \   000002A0   ........           BL       WM__GetNextIVR
+   \   000002A4   000050E3           CMP      R0,#+0
+   \   000002A8   84FFFF1A           BNE      ??_Draw_3
+    732            #endif
+    733            GUI_UNLOCK();
+   \                     ??_Draw_2:
+   \   000002AC   ........           BL       GUI_Unlock
+    734            return Ret;
+   \   000002B0   0900A0E1           MOV      R0,R9
+   \                     ??_Draw_1:
+   \   000002B4   38D08DE2           ADD      SP,SP,#+56       ;; stack cleaning
+   \   000002B8   F087BDE8           POP      {R4-R10,PC}      ;; return
+    735          }
+    736          
+    737          /*********************************************************************
+    738          *
+    739          *       Public code
+    740          *
+    741          **********************************************************************
+    742          */
+    743          /*********************************************************************
+    744          *
+    745          *       GUI_BMP_DrawScaledEx
+    746          */
+
+   \                                 In section .text, align 4, keep-with-next
+    747          int  GUI_BMP_DrawScaledEx(GUI_GET_DATA_FUNC * pfGetData, void * p, int x0, int y0, int Num, int Denom) {
+   \                     GUI_BMP_DrawScaledEx:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+    748            GUI_BMP_CONTEXT Context;
+    749            int r;
+    750            int ColorIndex;
+    751            ColorIndex = LCD__GetColorIndex();
+   \   00000004   ........           LDR      R4,??DataTable6_1
+   \   00000008   00E0A0E1           MOV      LR,R0
+   \   0000000C   14D04DE2           SUB      SP,SP,#+20
+   \   00000010   0200A0E1           MOV      R0,R2
+   \   00000014   005094E5           LDR      R5,[R4, #+0]
+   \   00000018   24209DE5           LDR      R2,[SP, #+36]
+   \   0000001C   01C0A0E1           MOV      R12,R1
+   \   00000020   005095E5           LDR      R5,[R5, #+0]
+   \   00000024   0310A0E1           MOV      R1,R3
+    752            Context.pParam = p;
+    753            Context.pfGetData = pfGetData;
+    754            r = _Draw(x0, y0, &Context, Num, Denom);
+   \   00000028   00208DE5           STR      R2,[SP, #+0]
+   \   0000002C   20309DE5           LDR      R3,[SP, #+32]
+   \   00000030   0CC08DE5           STR      R12,[SP, #+12]
+   \   00000034   04E08DE5           STR      LR,[SP, #+4]
+   \   00000038   04208DE2           ADD      R2,SP,#+4
+   \   0000003C   ........           BL       _Draw
+    755            LCD__SetColorIndex(ColorIndex);
+   \   00000040   001094E5           LDR      R1,[R4, #+0]
+    756            return r;
+   \   00000044   14D08DE2           ADD      SP,SP,#+20
+   \   00000048   005081E5           STR      R5,[R1, #+0]
+   \   0000004C   3080BDE8           POP      {R4,R5,PC}       ;; return
+    757          }
+    758          
+    759          /*********************************************************************
+    760          *
+    761          *       GUI_BMP_DrawScaled
+    762          */
+
+   \                                 In section .text, align 4, keep-with-next
+    763          int  GUI_BMP_DrawScaled(const void * pFileData, int x0, int y0, int Num, int Denom) {
+   \                     GUI_BMP_DrawScaled:
+   \   00000000   30402DE9           PUSH     {R4,R5,LR}
+   \   00000004   14D04DE2           SUB      SP,SP,#+20
+   \   00000008   00C0A0E1           MOV      R12,R0
+    764            GUI_BMP_PARAM Param;
+    765            Param.pFileData = (const U8 *)pFileData;
+    766            return GUI_BMP_DrawScaledEx(GUI_BMP__GetData, &Param, x0, y0, Num, Denom);
+   \   0000000C   ........           LDR      R4,??DataTable6_1
+   \   00000010   04C08DE5           STR      R12,[SP, #+4]
+   \   00000014   00C094E5           LDR      R12,[R4, #+0]
+   \   00000018   0100A0E1           MOV      R0,R1
+   \   0000001C   0210A0E1           MOV      R1,R2
+   \   00000020   00509CE5           LDR      R5,[R12, #+0]
+   \   00000024   04E08DE2           ADD      LR,SP,#+4
+   \   00000028   20209DE5           LDR      R2,[SP, #+32]
+   \   0000002C   10E08DE5           STR      LR,[SP, #+16]
+   \   00000030   ........           LDR      LR,??DataTable6_6
+   \   00000034   00208DE5           STR      R2,[SP, #+0]
+   \   00000038   08E08DE5           STR      LR,[SP, #+8]
+   \   0000003C   08208DE2           ADD      R2,SP,#+8
+   \   00000040   ........           BL       _Draw
+   \   00000044   001094E5           LDR      R1,[R4, #+0]
+   \   00000048   14D08DE2           ADD      SP,SP,#+20
+   \   0000004C   005081E5           STR      R5,[R1, #+0]
+   \   00000050   3080BDE8           POP      {R4,R5,PC}       ;; return
+    767          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6:
+   \   00000000   ........           DC32     LCD__aConvTable
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_1:
+   \   00000000   ........           DC32     LCD_pColorIndex
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_2:
+   \   00000000   ........           DC32     GUI_Context
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_3:
+   \   00000000   ........           DC32     _DrawLineScaled_Pal
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_4:
+   \   00000000   ........           DC32     _DrawLineScaled_16bpp
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_5:
+   \   00000000   ........           DC32     _DrawLineScaled_RGB
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable6_6:
+   \   00000000   ........           DC32     GUI_BMP__GetData
+
+   \                                 In section .rodata, align 4, keep-with-next
+   \                     `?<Constant {0}>`:
+   \   00000000                      ; Initializer data, 28 bytes
+   \   00000000   00000000           DC32 0
+   \   00000004   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              00000000    
+   \   0000000E   000000000000       DC8 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   \              00000000    
+   \   00000018   00000000           DC8 0, 0, 0, 0
+    768          
+    769          /*************************** End of file ****************************/
+
+   Maximum stack usage in bytes:
+
+     Function              .cstack
+     --------              -------
+     GUI_BMP_DrawScaled        32
+     GUI_BMP_DrawScaledEx      32
+     _Draw                     88
+     _DrawBitmapScaled         80
+     _DrawBitmapScaled_RLE    104
+     _DrawLineScaled_16bpp     48
+     _DrawLineScaled_Pal       48
+     _DrawLineScaled_RGB       40
+     _DrawLineScaled_RLE       48
+     _GetColor                 24
+     _GetColorIndex_RLE        40
+
+
+   Section sizes:
+
+     Function/Label        Bytes
+     --------------        -----
+     _GetColor              220
+     _DrawLineScaled_Pal    232
+     _DrawLineScaled_RGB    244
+     _DrawLineScaled_16bpp  236
+     _DrawBitmapScaled      536
+     _GetColorIndex_RLE     928
+     _DrawLineScaled_RLE    224
+     _DrawBitmapScaled_RLE  372
+     _Draw                  700
+     GUI_BMP_DrawScaledEx    80
+     GUI_BMP_DrawScaled      84
+     ??DataTable6             4
+     ??DataTable6_1           4
+     ??DataTable6_2           4
+     ??DataTable6_3           4
+     ??DataTable6_4           4
+     ??DataTable6_5           4
+     ??DataTable6_6           4
+     ?<Constant {0}>         28
+
+ 
+    28 bytes in section .rodata
+ 3 884 bytes in section .text
+ 
+ 3 884 bytes of CODE  memory
+    28 bytes of CONST memory
+
+Errors: none
+Warnings: none
